@@ -1,0 +1,251 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) YEAR THE PACKAGE'S COPYRIGHT HOLDER
+# This file is distributed under the same license as the PACKAGE package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, YEAR.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: PACKAGE VERSION\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2025-03-12 02:32+0000\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: LANGUAGE <LL@li.org>\n"
+"Language: \n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+#: Chat/models.py:120
+#, python-brace-format
+msgid "Group Chat ({num})"
+msgstr "群聊({num})"
+
+#: Chat/params.py:30
+msgid "duplicated guests"
+msgstr "重复的群成员"
+
+#: Chat/params.py:32
+#, fuzzy
+#| msgid "Cannot create an empty group chat"
+msgid "not a group chat"
+msgstr "无法创建空的群聊"
+
+#: Chat/validators.py:8
+msgid "Cannot create an empty group chat"
+msgstr "无法创建空的群聊"
+
+#: Chat/validators.py:9
+msgid "Group chat should have at least 3 members"
+msgstr "群聊至少需要3个成员"
+
+#: Chat/validators.py:10
+msgid "All members of a group chat should have the same host"
+msgstr "群成员应属于同一主用户"
+
+#: Chat/validators.py:11
+#, python-brace-format
+msgid "Guest {guest} is not a member of the group chat {chat}"
+msgstr "成员{guest}不在群聊{chat}中"
+
+#: Chat/validators.py:12
+#, fuzzy, python-brace-format
+msgid "Chat {chat} does not exist"
+msgstr "聊天室{chat}不存在"
+
+#: Message/params.py:22
+msgid "limit should be greater than 5"
+msgstr "获取消息条数需大于5"
+
+#: Message/params.py:23
+msgid "limit should be less than 100"
+msgstr "获取消息条数需小于100"
+
+#: Message/validators.py:9 User/auth.py:127 User/auth.py:131 User/auth.py:135
+msgid "You are not a member of this chat"
+msgstr "你不是此聊天室的成员"
+
+#: Message/validators.py:10
+#, fuzzy
+msgid "Message does not exist"
+msgstr "信息不存在"
+
+#: User/auth.py:21
+msgid "Token expired"
+msgstr "令牌已过期"
+
+#: User/auth.py:22
+msgid "Incorrect format"
+msgstr "令牌格式错误"
+
+#: User/auth.py:49
+#, fuzzy
+msgid "Invalid JWT expire"
+msgstr "不合法的令牌有效期"
+
+#: User/auth.py:50
+#, fuzzy
+#| msgid "Invalid choice"
+msgid "Invalid JWT time"
+msgstr "不合法的令牌时间"
+
+#: User/auth.py:62
+msgid "Missing authorization header"
+msgstr "缺少授权头"
+
+#: User/auth.py:69
+#, fuzzy
+#| msgid "Invalid choice"
+msgid "Invalid user role"
+msgstr "不合法的类别"
+
+#: User/auth.py:123
+#, fuzzy
+#| msgid "You are not a member of this chat"
+msgid "You are not the owner of this chat"
+msgstr "你不是此聊天室的成员"
+
+#: User/auth.py:139
+#, fuzzy
+#| msgid "You are not a member of this chat"
+msgid "You are not the owner of this message"
+msgstr "你不是此聊天室的成员"
+
+#: User/models.py:59
+msgid "user id"
+msgstr "用户ID"
+
+#: User/models.py:140
+msgid "name"
+msgstr "用户名"
+
+#: User/validators.py:8
+#, fuzzy, python-brace-format
+#| msgid "User does not exist"
+msgid "User ({attr}={value}) does not exist"
+msgstr "用户不存在"
+
+#: User/validators.py:9
+msgid "User already exists"
+msgstr "用户已存在"
+
+#: User/validators.py:10
+msgid "Name cannot be empty"
+msgstr "用户名不能为空"
+
+#: User/validators.py:11
+#, fuzzy, python-brace-format
+msgid "Interval should be greater than {offline_interval} minutes"
+msgstr "间隔需超过{offline_interval}分钟"
+
+#: User/validators.py:12
+#, python-brace-format
+msgid "Password should be at least {password_length} characters long"
+msgstr "密码长度至少为{password_length}个字符"
+
+#: User/validators.py:13
+msgid "Password error"
+msgstr "密码错误"
+
+#: User/validators.py:14
+#, fuzzy
+#| msgid "Name cannot be empty"
+msgid "Name cannot contain spaces"
+msgstr "用户名不能为空"
+
+#: utils/analyse.py:24
+msgid "Cannot find request"
+msgstr "无法获取请求"
+
+#: utils/processor.py:15
+#, fuzzy
+#| msgid "Invalid choice"
+msgid "Invalid integer"
+msgstr "不合法的类别"
+
+#: utils/processor.py:16
+#, fuzzy
+#| msgid "Invalid choice"
+msgid "Invalid string"
+msgstr "不合法的令牌时间"
+
+#: utils/validation/validator.py:15
+msgid "No default value"
+msgstr "没有默认值"
+
+#: utils/validation/validator.py:16
+msgid "Null is not allowed"
+msgstr "不允许空值"
+
+#: utils/validation/validator.py:17
+#, python-brace-format
+msgid "Not valid: {message}"
+msgstr "不合法的值：{message}"
+
+#: utils/validation/validator.py:18
+msgid "Validator crushed"
+msgstr "验证模块错误"
+
+#: utils/validation/validator.py:19
+msgid "Processor crushed"
+msgstr "处理模块错误"
+
+#: utils/validation/validator.py:20
+msgid "Not a list"
+msgstr "不是一个列表"
+
+#: utils/validation/validator.py:21
+msgid "List length mismatch"
+msgstr "列表长度不匹配"
+
+#: utils/validation/validator.py:22
+msgid "Not a dict"
+msgstr "不是一个字典"
+
+#: utils/validation/validator.py:23
+#, python-brace-format
+msgid "{key} is an invalid key"
+msgstr "{key}不是一个合法的值"
+
+#: utils/validation/validator.py:24
+#, fuzzy, python-brace-format
+msgid "Param key {key} already exists"
+msgstr "参数键{key}已存在"
+
+#: utils/validation/validator.py:52
+#, python-brace-format
+msgid "Target key: {key}"
+msgstr "目标键：{key}"
+
+#: utils/validation/validator.py:144
+msgid "Invalid choice"
+msgstr "不合法的类别"
+
+#: utils/validation/validator.py:150
+msgid "Not a string"
+msgstr "不是一个字符串"
+
+#: utils/validation/validator.py:151
+msgid "Too long"
+msgstr "字符串太长"
+
+#: utils/validation/validator.py:153
+msgid "Not an integer"
+msgstr "不是一个整数"
+
+#: utils/validation/validator.py:155
+msgid "Not a float"
+msgstr "不是一个浮点数"
+
+#: utils/validation/validator.py:157
+msgid "Not a boolean"
+msgstr "不是一个布尔值"
+
+#: utils/validation/validator.py:159
+msgid "Not a date"
+msgstr "不是一个日期"
+
+#: utils/validation/validator.py:161
+msgid "Not a datetime"
+msgstr "不是一个日期时间"
