@@ -1,5 +1,3 @@
-from datetime import datetime
-
 from django.db import models
 from django.utils import timezone
 from django.utils.translation import gettext as _
@@ -8,7 +6,6 @@ from User.validators import BaseUserValidator, UserErrors
 from utils import function
 from utils.choice import Choice
 from utils.jsonify import Jsonify
-from utils.validation.validator import ValidatorErrors
 
 
 class UserNotificationChoice(Choice):
