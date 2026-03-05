@@ -2,17 +2,14 @@ from django.utils.translation import gettext as _
 
 from Chat.models import BaseChat, SingleChat, GroupChat
 from User.models import GuestUser
-from utils import processor
-from utils.validation.list_validator import ListValidator
-from utils.validation.params import Params
-from utils.validation.validator import Validator
+from smartdjango import Validator, ListValidator, Params
 
 
 class BaseChatParams(metaclass=Params):
     model_class = BaseChat
 
     chat_id = Validator('chat_id', final_name='chat') \
-        .to(processor.int) \
+        .to(int) \
         .to(BaseChat.index)
 
 
@@ -25,6 +22,16 @@ class GroupChatParams(BaseChatParams):
 
     name: Validator
 
+    guests = ListValidator('guests') \
+        .element(Validator().to(GuestUser.index)) \
+        .bool(lambda x: len(set(x)) == len(x), message=_('duplicated guests')) \
+        .bool(lambda x: len(x) < 2, message=_('group chat should have at least 3 members'))
+    # TODO: check whether it is < 2 or >= 2
+
+    chat_id = BaseChatParams.chat_id.copy().bool(lambda x: x.group, message=_('not a group chat'))
+
+
+class GroupChatMemberParams(BaseChatParams):
     guests = ListValidator('guests') \
         .element(Validator().to(GuestUser.index)) \
         .bool(lambda x: len(set(x)) == len(x), message=_('duplicated guests'))

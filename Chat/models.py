@@ -1,12 +1,13 @@
 from typing import List
 
+from diq import Dictify
 from django.db import models
+from django.utils import timezone
 from django.utils.translation import gettext as _
+from smartdjango import Choice
 
 from Chat.validators import ChatErrors
 from User.models import HostUser, GuestUser, BaseUser
-from utils.choice import Choice
-from utils.jsonify import Jsonify
 
 
 class ChatSchemeChoice(Choice):
@@ -14,7 +15,7 @@ class ChatSchemeChoice(Choice):
     GROUP = 1
 
 
-class BaseChat(models.Model, Jsonify):
+class BaseChat(models.Model, Dictify):
     host = models.ForeignKey(HostUser, on_delete=models.CASCADE)
     scheme = models.IntegerField(choices=ChatSchemeChoice.to_choices())
 
@@ -36,14 +37,21 @@ class BaseChat(models.Model, Jsonify):
             return cls.get_class(chat.scheme).index(chat_id)
         return chat
 
-    def _jsonify_created_at(self):
+    def _dictify_created_at(self):
         return self.created_at.timestamp()
 
-    def _jsonify_last_chat_at(self):
+    def _dictify_last_chat_at(self):
         return self.last_chat_at.timestamp()
 
-    def _jsonify_host(self):
-        return self.host.tiny_json()
+    def _dictify_last_message(self):
+        from Message.models import Message
+        messages = Message.objects.filter(chat=self, is_deleted=False).order_by('-created_at')
+        if messages.exists():
+            return messages.first().jsonl()
+        return None
+
+    def _dictify_host(self):
+        return self.host.json()
 
     def json(self):
         raise NotImplementedError
@@ -67,9 +75,14 @@ class BaseChat(models.Model, Jsonify):
         self.is_deleted = True
         self.save()
 
+    def specify(self):
+        if type(self) is BaseChat:
+            return self.get_class(self.scheme).index(self.id)
+        return self
+
 
 class SingleChat(BaseChat):
-    guest = models.ForeignKey(GuestUser, on_delete=models.CASCADE, unique=True, db_index=True)
+    guest = models.OneToOneField(GuestUser, on_delete=models.CASCADE)
 
     @classmethod
     def get_or_create(cls, guest: GuestUser):
@@ -78,14 +91,11 @@ class SingleChat(BaseChat):
             return chats.first()
         return cls.objects.create(guest=guest, host=guest.host, scheme=ChatSchemeChoice.SINGLE)
 
-    def _jsonify_guest(self):
-        return self.guest.tiny_json()
-
-    def _jsonify_group(self):
-        return False
+    def _dictify_guest(self):
+        return self.guest.json()
 
     def json(self):
-        return self.jsonify('host', 'guest', 'created_at', 'last_chat_at', 'group', 'id->chat_id')
+        return self.dictify('host', 'guest', 'created_at', 'last_chat_at', 'group', 'id->chat_id', 'last_message')
 
     def jsonl(self):
         return self.json()
@@ -107,14 +117,11 @@ class GroupChat(BaseChat):
 
     @classmethod
     def create(cls, host: HostUser, guests: List[GuestUser]):
-        if len(guests) == 0:
-            raise ChatErrors.GROUP_CHAT_EMPTY
-        if len(guests) == 1:
-            raise ChatErrors.GROUP_CHAT_TOO_SMALL
-
         for guest in guests:
             if guest.host != host:
                 raise ChatErrors.UNALIGNED_HOST
+            if guest.is_deleted:
+                raise ChatErrors.GUEST_DELETED(guest=guest.name)
 
         num = len(guests) + 1
         name = _('Group Chat ({num})').format(num=num)
@@ -130,6 +137,8 @@ class GroupChat(BaseChat):
     def add_guest(self, guest: GuestUser):
         if guest.host != self.host:
             raise ChatErrors.UNALIGNED_HOST
+        if guest.is_deleted:
+            raise ChatErrors.GUEST_DELETED(guest=guest.name)
         self.guests.add(guest)
 
     def remove_guest(self, guest: GuestUser):
@@ -138,14 +147,11 @@ class GroupChat(BaseChat):
 
         self.guests.remove(guest)
 
-    def _jsonify_guests(self):
-        return [guest.tiny_json() for guest in self.guests.all()]
-
-    def _jsonify_group(self):
-        return True
+    def _dictify_guests(self):
+        return [guest.json() for guest in self.guests.all()]
 
     def json(self):
-        return self.jsonify('host', 'guests', 'name', 'created_at', 'last_chat_at', 'group', 'id->chat_id')
+        return self.dictify('host', 'guests', 'name', 'created_at', 'last_chat_at', 'group', 'id->chat_id', 'last_message')
 
     def jsonl(self):
         return self.json()
@@ -159,3 +165,33 @@ class GroupChat(BaseChat):
     def get_guest_chats(cls, guest: GuestUser):
         chats = cls.objects.filter(guests=guest, is_deleted=False)
         return [chat.jsonl() for chat in chats]
+
+
+class ChatReadState(models.Model):
+    chat = models.ForeignKey(BaseChat, on_delete=models.CASCADE, db_index=True)
+    user = models.ForeignKey(BaseUser, on_delete=models.CASCADE, db_index=True)
+    last_read_at = models.DateTimeField(null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ('chat', 'user')
+
+    @classmethod
+    def mark_read(cls, chat: BaseChat, user: BaseUser):
+        state, _created = cls.objects.get_or_create(chat=chat, user=user)
+        state.last_read_at = timezone.now()
+        state.save(update_fields=['last_read_at'])
+        return state
+
+    @classmethod
+    def get_last_read_at(cls, chat: BaseChat, user: BaseUser):
+        state = cls.objects.filter(chat=chat, user=user).first()
+        return state.last_read_at if state else None
+
+    @classmethod
+    def unread_count(cls, chat: BaseChat, user: BaseUser):
+        from Message.models import Message
+        last_read_at = cls.get_last_read_at(chat, user)
+        if last_read_at is None:
+            return Message.objects.filter(chat=chat, is_deleted=False).count()
+        return Message.objects.filter(chat=chat, is_deleted=False, created_at__gt=last_read_at).count()

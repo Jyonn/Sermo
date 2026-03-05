@@ -8,13 +8,21 @@ Below is a list of all available API endpoints with their HTTP methods and a bri
 
 - **User Authentication & Status**
   - POST /users/host – **Host Login/Register.** Authenticate a host user (or create a new host account if it doesn’t exist) using a name and password.
-  - POST /users/guest – **Guest Login/Register.** Authenticate a guest user (or create a new guest account) under a given host using name, password, and host ID.
+  - POST /users/guest – **Guest Login/Register.** Authenticate a guest user (or create a new guest account) under a given host using name and password, with host resolved by subdomain header.
+  - DELETE /users/guest/delete – **Delete Guest.** (Host only) Soft-delete a guest, delete single chat, optionally purge group messages.
+  - GET /users/guest/nickname – **Check Guest Nickname.** Check whether a guest nickname is available under a host.
+  - GET /users/host/guests – **List Host Guests.** List guests for the authenticated host (with filters).
+  - GET /users/host/subdomain – **Check Subdomain Availability.** Check whether a subdomain is available.
+  - POST /users/host/subdomain – **Set Subdomain.** Update the authenticated host's subdomain.
   - GET /users/heartbeat – **User Heartbeat.** Keeps the authenticated user marked as online (updates last active timestamp).
 - **Chat Management**
   - GET /chats/ – **List Chats.** Retrieve all chats (both single and group chats) that the authenticated user is involved in.
   - POST /chats/group – **Create Group Chat.** (Host only) Create a new group chat with multiple guests.
   - DELETE /chats/group – **Delete Group Chat.** (Host only) Delete an existing group chat (the host must be the owner of that chat).
   - POST /chats/group/name – **Rename Group Chat.** (Host only) Change the name of an existing group chat.
+  - POST /chats/group/members – **Add Group Members.** (Host only) Add guests to a group chat.
+  - DELETE /chats/group/members – **Remove Group Members.** (Host only) Remove guests from a group chat.
+  - POST /chats/read – **Mark Chat Read.** Updates last-read time for unread counts.
 - **Messaging**
   - GET /messages/ – **List Messages.** Retrieve messages in a specified chat, with optional pagination parameters (before/after a certain message).
   - POST /messages/ – **Send Message.** Post a new message to a specified chat.
@@ -22,7 +30,7 @@ Below is a list of all available API endpoints with their HTTP methods and a bri
 
 ## Views and Endpoint Details
 
-Below are details of each API view (endpoint), including functionality, required inputs, and outputs. All endpoints (except login) require an Authorization header with a valid JWT token obtained from the login endpoints.
+Below are details of each API view (endpoint), including functionality, required inputs, and outputs. Most endpoints require an Authorization header with a valid JWT token obtained from the login endpoints, except public checks like subdomain or nickname availability.
 
 ### HostLoginView – POST /users/host
 
@@ -71,7 +79,16 @@ Below are details of each API view (endpoint), including functionality, required
 
 - `name` (string): Guest name (required).
 - `password` (string): Guest password (optional).
-- `host_id` (int): Host ID under which the guest should be registered (required).
+
+**Headers:**
+
+- `X-Sermo-Subdomain`: Host subdomain (required).
+
+**Nickname rules:**
+
+- Within the same host, guest names are unique (case-insensitive).
+- If a nickname already exists and has a password, the password is required to log in.
+- If a nickname exists without a password, login is allowed without a password; providing a password will set it for future logins.
 
 **Response:** Returns a JWT token and the guest user’s details. The format is the same as for host login, with guest flag set to `true`.
 
@@ -97,6 +114,136 @@ Below are details of each API view (endpoint), including functionality, required
 ```
 
 **Note:** The auth token from either login endpoint should be included in the Authorization header (as a Bearer token) for all subsequent API requests.
+
+### HostView – GET /users/host
+
+**Functionality:** Retrieves host info by subdomain.
+
+**Headers:**
+
+- `X-Sermo-Subdomain`: Host subdomain (required).
+
+### GuestNicknameView – GET /users/guest/nickname
+
+**Functionality:** Checks whether a guest nickname is available within a host.
+
+**Headers:**
+
+- `X-Sermo-Subdomain`: Host subdomain (required).
+
+**Request:** Query parameter:
+
+- `name` (string): Guest nickname to check (required).
+
+**Response:** Returns availability and a reason if not available.
+
+```json
+{
+  "code": 200,
+  "message": "OK",
+  "body": {
+    "available": false,
+    "reason": "password_required"
+  },
+  "details": [],
+  "user_message": "OK",
+  "identifier": "OK"
+}
+```
+
+**Possible reasons:** `taken`, `password_required`, `deleted`
+
+### GuestDeleteView – DELETE /users/guest/delete
+
+**Functionality:** Soft-deletes a guest, removes their single chat, and optionally purges their group messages.
+
+**Request:** Query parameters:
+
+- `guest_id` (int): Guest user ID (required).
+- `purge_group_messages` (int): `1` to delete this guest's group messages, `0` otherwise (optional, default `0`).
+
+**Response:** Returns `OK` on success.
+
+### HostGuestListView – GET /users/host/guests
+
+**Functionality:** Lists guests for the authenticated host.
+
+**Request:** Query parameters (all optional):
+
+- `q` (string): Keyword to match guest names (case-insensitive).
+- `online` (int): `1` for online only, `0` for offline only.
+- `limit` (int): Default 50, max 200.
+- `offset` (int): Default 0.
+
+**Response:** Returns a list of guest user objects.
+
+### GroupChatMemberView – POST /chats/group/members
+
+**Functionality:** Adds guests to a group chat.
+
+**Request:** Query parameters:
+
+- `chat_id` (int): Group chat ID (required).
+
+**JSON Body:**
+
+- `guests` (list of int): Guest user IDs to add (required).
+
+### GroupChatMemberView – DELETE /chats/group/members
+
+**Functionality:** Removes guests from a group chat.
+
+**Request:** Query parameters:
+
+- `chat_id` (int): Group chat ID (required).
+
+**JSON Body:**
+
+- `guests` (list of int): Guest user IDs to remove (required).
+
+### ChatReadView – POST /chats/read
+
+**Functionality:** Marks a chat as read for the current user.
+
+**Request:** Query parameters:
+
+- `chat_id` (int): Chat ID (required).
+
+### SubdomainView – GET /users/host/subdomain
+
+**Functionality:** Checks whether a subdomain is available.
+
+**Request:** Query parameter:
+
+- `subdomain` (string): The subdomain to check (required).
+
+**Response:** Returns availability and reason if not available.
+
+```json
+{
+  "code": 200,
+  "message": "OK",
+  "body": {
+    "available": false,
+    "reason": "taken"
+  },
+  "details": [],
+  "user_message": "OK",
+  "identifier": "OK"
+}
+```
+
+**Possible reasons:** `taken`, `reserved`
+
+### SubdomainView – POST /users/host/subdomain
+
+**Functionality:** Updates the authenticated host's subdomain.
+
+**Request:** JSON body:
+
+- `subdomain` (string): New subdomain (required).
+
+**Response:** Returns updated host info.
 
 ### HeartbeatView – GET /users/heartbeat
 
@@ -135,6 +282,8 @@ Below are details of each API view (endpoint), including functionality, required
 - `created_at` (float): Timestamp (Unix epoch in seconds) when the chat was created.
 - `last_chat_at` (float): Timestamp of the last message sent in the chat.
 - `group` (bool): A flag indicating if the chat is a group chat (`true`) or a one-on-one chat (`false`).
+- `unread_count` (int): Number of unread messages for the current user.
+- `last_read_at` (float|null): Timestamp of the last time the user opened the chat (or `null` if never).
 
 **Example Response:** (a host user with one one-on-one chat and one group chat)
 
