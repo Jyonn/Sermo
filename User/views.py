@@ -4,7 +4,16 @@ from smartdjango import analyse, OK
 from Chat.models import SingleChat, GroupChat
 from User import auth
 from User.auth import Request
-from User.models import HostUser, GuestUser
+from User.models import (
+    HostUser,
+    GuestUser,
+    NotificationPreference,
+    Space,
+    FriendRequest,
+    Friendship,
+    EmailVerificationCode,
+    UserNotificationChoice,
+)
 from Message.models import Message
 from User.validators import UserErrors, is_reserved_subdomain
 from User.params import (
@@ -14,7 +23,13 @@ from User.params import (
     SubdomainParams,
     GuestListParams,
     GuestDeleteParams,
+    NotificationPreferenceParams,
+    SpaceParams,
+    SpaceJoinParams,
+    FriendParams,
+    EmailVerificationParams,
 )
+from User.notificator_client import send as send_notification
 
 
 class HostView(View):
@@ -145,3 +160,225 @@ class GuestDeleteView(View):
             chat.guests.remove(guest)
 
         return OK
+
+
+class NotificationPreferenceView(View):
+    @auth.require_user
+    def get(self, request: Request):
+        prefs = NotificationPreference.ensure_defaults(request.user)
+        return [pref.json() for pref in prefs]
+
+    @auth.require_user
+    @analyse.json(
+        NotificationPreferenceParams.channel,
+        NotificationPreferenceParams.enabled,
+        NotificationPreferenceParams.offline_threshold_minutes,
+    )
+    def post(self, request: Request):
+        enabled = request.json.enabled
+        pref = NotificationPreference.set_preference(
+            user=request.user,
+            channel=request.json.channel,
+            enabled=None if enabled is None else bool(enabled),
+            offline_threshold_minutes=request.json.offline_threshold_minutes,
+        )
+        return pref.json()
+
+
+class EmailVerificationCodeRequestView(View):
+    @auth.require_user
+    @analyse.json(EmailVerificationParams.email)
+    def post(self, request: Request):
+        email = request.json.email.strip().lower()
+        verify_code = EmailVerificationCode.issue(request.user, email)
+        title = 'Sermo verification code'
+        body = f'Your verification code is {verify_code.code}. It expires in 10 minutes.'
+        ok, detail = send_notification(
+            channel=UserNotificationChoice.EMAIL,
+            target=email,
+            title=title,
+            body=body,
+            recipient_name=request.user.specify().name,
+        )
+        if not ok:
+            raise UserErrors.EMAIL_SEND_FAILED(details=detail)
+        return dict(expires_in=EmailVerificationCode.EXPIRE_SECONDS)
+
+
+class EmailVerificationConfirmView(View):
+    @auth.require_guest_user
+    @analyse.json(
+        EmailVerificationParams.email,
+        EmailVerificationParams.code,
+        EmailVerificationParams.password,
+    )
+    def post(self, request: Request):
+        email = request.json.email.strip().lower()
+        EmailVerificationCode.verify(
+            user=request.user,
+            email=email,
+            code=request.json.code,
+        )
+        guest: GuestUser = request.user
+        guest.verify_email_and_upgrade(
+            email=email,
+            password=request.json.password,
+        )
+        NotificationPreference.set_preference(
+            user=guest,
+            channel=UserNotificationChoice.EMAIL,
+            enabled=True,
+        )
+        return guest.json()
+
+
+class SpaceView(View):
+    @analyse.json(
+        SpaceParams.name,
+        SpaceParams.slug,
+        SpaceParams.official_name,
+        SpaceParams.password,
+    )
+    def post(self, request: Request):
+        official_name = request.json.official_name
+        if official_name is None:
+            official_name = request.json.slug
+        space = Space.create(
+            name=request.json.name.strip(),
+            slug=request.json.slug.strip(),
+            official_name=official_name.strip(),
+            password=request.json.password,
+        )
+        return dict(
+            space=space.json(),
+            auth=auth.get_login_token(space.official_user),
+        )
+
+
+class SpaceJoinView(View):
+    @analyse.json(
+        SpaceJoinParams.slug,
+        SpaceJoinParams.name,
+        SpaceJoinParams.password,
+    )
+    def post(self, request: Request):
+        space = Space.get_by_slug(request.json.slug.strip().lower())
+        guest = GuestUser.login(
+            name=request.json.name,
+            password=request.json.password,
+            host=space.official_user,
+        )
+        SingleChat.get_or_create(guest)
+        return dict(
+            space=space.json(),
+            auth=auth.get_login_token(guest),
+        )
+
+
+class SpaceMeView(View):
+    @auth.require_user
+    def get(self, request: Request):
+        return request.user.space.json()
+
+
+class SpaceUserListView(View):
+    @auth.require_user
+    @analyse.query(
+        GuestListParams.q,
+        GuestListParams.online,
+        GuestListParams.limit,
+        GuestListParams.offset,
+    )
+    def get(self, request: Request):
+        space = request.user.space
+        host = space.official_user
+        guests = list(GuestUser.objects.filter(host=host, is_deleted=False))
+        users = [host] + guests
+
+        if request.query.q:
+            keyword = request.query.q.lower()
+            users = [user for user in users if keyword in user.name.lower()]
+        if request.query.online is not None:
+            users = [user for user in users if user.is_alive == bool(request.query.online)]
+
+        users.sort(key=lambda x: (x.id != host.id, -x.last_heartbeat.timestamp(), x.id))
+        offset = request.query.offset
+        limit = request.query.limit
+
+        data = []
+        for user in users[offset:offset + limit]:
+            item = user.json()
+            item['official'] = user.id == host.id
+            data.append(item)
+        return data
+
+
+class SpaceOnlineUserListView(View):
+    @auth.require_user
+    @analyse.query(
+        GuestListParams.q,
+        GuestListParams.limit,
+        GuestListParams.offset,
+    )
+    def get(self, request: Request):
+        space = request.user.space
+        host = space.official_user
+        guests = list(GuestUser.objects.filter(host=host, is_deleted=False))
+        users = [host] + guests
+
+        if request.query.q:
+            keyword = request.query.q.lower()
+            users = [user for user in users if keyword in user.name.lower()]
+        users = [user for user in users if user.is_alive]
+        users.sort(key=lambda x: (x.id != host.id, -x.last_heartbeat.timestamp(), x.id))
+
+        offset = request.query.offset
+        limit = request.query.limit
+
+        data = []
+        for user in users[offset:offset + limit]:
+            item = user.json()
+            item['official'] = user.id == host.id
+            data.append(item)
+        return data
+
+
+class FriendListView(View):
+    @auth.require_user
+    def get(self, request: Request):
+        friends = Friendship.friends_of(request.user)
+        return [friend.json() for friend in friends]
+
+
+class FriendRequestView(View):
+    @auth.require_user
+    @analyse.json(FriendParams.to_user_id)
+    def post(self, request: Request):
+        request_obj = FriendRequest.create_request(
+            from_user=request.user,
+            to_user=request.json.to_user,
+        )
+        return request_obj.json()
+
+    @auth.require_user
+    def get(self, request: Request):
+        user = request.user.specify()
+        incoming = FriendRequest.objects.filter(to_user=user).order_by('-created_at')[:100]
+        outgoing = FriendRequest.objects.filter(from_user=user).order_by('-created_at')[:100]
+        return dict(
+            incoming=[obj.json() for obj in incoming],
+            outgoing=[obj.json() for obj in outgoing],
+        )
+
+
+class FriendRequestRespondView(View):
+    @auth.require_user
+    @analyse.query(FriendParams.request_id)
+    @analyse.json(FriendParams.accept)
+    def post(self, request: Request):
+        request_obj = request.query.friend_request
+        if request.json.accept:
+            request_obj.accept(request.user)
+        else:
+            request_obj.reject(request.user)
+        return request_obj.json()

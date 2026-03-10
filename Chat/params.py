@@ -25,8 +25,7 @@ class GroupChatParams(BaseChatParams):
     guests = ListValidator('guests') \
         .element(Validator().to(GuestUser.index)) \
         .bool(lambda x: len(set(x)) == len(x), message=_('duplicated guests')) \
-        .bool(lambda x: len(x) < 2, message=_('group chat should have at least 3 members'))
-    # TODO: check whether it is < 2 or >= 2
+        .bool(lambda x: len(x) >= 1, message=_('group chat should have at least 2 members'))
 
     chat_id = BaseChatParams.chat_id.copy().bool(lambda x: x.group, message=_('not a group chat'))
 
@@ -37,3 +36,9 @@ class GroupChatMemberParams(BaseChatParams):
         .bool(lambda x: len(set(x)) == len(x), message=_('duplicated guests'))
 
     chat_id = BaseChatParams.chat_id.copy().bool(lambda x: x.group, message=_('not a group chat'))
+
+
+class GroupChatInviteParams(metaclass=Params):
+    accept = Validator('accept') \
+        .to(int) \
+        .bool(lambda x: x in (0, 1), message=_('accept should be 0 or 1'))

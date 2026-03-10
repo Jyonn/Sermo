@@ -2,7 +2,7 @@ from django.views import View
 from smartdjango import analyse, OK
 
 from Chat.models import SingleChat, GroupChat, ChatReadState
-from Chat.params import GroupChatParams, BaseChatParams, GroupChatMemberParams
+from Chat.params import GroupChatParams, BaseChatParams, GroupChatMemberParams, GroupChatInviteParams
 from User import auth
 from User.models import GuestUser, HostUser
 
@@ -42,16 +42,15 @@ class ChatListView(View):
 
 
 class GroupChatView(View):
-    @auth.require_host_user
+    @auth.require_user
     @analyse.json(GroupChatParams.guests)
     def post(self, request):
-        host = request.user
         guests = request.json.guests
 
-        chat = GroupChat.create(host, guests)
+        chat = GroupChat.create(request.user, guests)
         return chat.json()
 
-    @auth.require_host_user
+    @auth.require_user
     @analyse.query(GroupChatParams.chat_id)
     @auth.require_chat_owner()
     def delete(self, request):
@@ -61,7 +60,7 @@ class GroupChatView(View):
 
 
 class GroupChatNameView(View):
-    @auth.require_host_user
+    @auth.require_user
     @analyse.query(BaseChatParams.chat_id)
     @analyse.json(GroupChatParams.name)
     @auth.require_chat_owner()
@@ -72,17 +71,17 @@ class GroupChatNameView(View):
 
 
 class GroupChatMemberView(View):
-    @auth.require_host_user
+    @auth.require_user
     @analyse.query(GroupChatMemberParams.chat_id)
     @analyse.json(GroupChatMemberParams.guests)
     @auth.require_chat_owner()
     def post(self, request):
         chat: GroupChat = request.query.chat
         for guest in request.json.guests:
-            chat.add_guest(guest)
+            chat.invite_guest(request.user, guest)
         return chat.json()
 
-    @auth.require_host_user
+    @auth.require_user
     @analyse.query(GroupChatMemberParams.chat_id)
     @analyse.json(GroupChatMemberParams.guests)
     @auth.require_chat_owner()
@@ -90,6 +89,16 @@ class GroupChatMemberView(View):
         chat: GroupChat = request.query.chat
         for guest in request.json.guests:
             chat.remove_guest(guest)
+        return chat.json()
+
+
+class GroupChatInviteRespondView(View):
+    @auth.require_guest_user
+    @analyse.query(GroupChatParams.chat_id)
+    @analyse.json(GroupChatInviteParams.accept)
+    def post(self, request):
+        chat: GroupChat = request.query.chat
+        chat.respond_invite(request.user, bool(request.json.accept))
         return chat.json()
 
 

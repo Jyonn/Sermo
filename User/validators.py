@@ -22,6 +22,23 @@ class UserErrors:
     SUBDOMAIN_RESERVED = Error(message=_('Subdomain is reserved'), code=Code.BadRequest)
     GUEST_DELETED = Error(message=_('Guest has been deleted'), code=Code.BadRequest)
     GUEST_FORBIDDEN = Error(message=_('Guest does not belong to this host'), code=Code.Forbidden)
+    SPACE_FORBIDDEN = Error(message=_('Users are not in the same space'), code=Code.Forbidden)
+    FRIEND_INVALID = Error(message=_('Invalid friend target'), code=Code.BadRequest)
+    FRIEND_ALREADY = Error(message=_('You are already friends'), code=Code.BadRequest)
+    FRIEND_REQUEST_FORBIDDEN = Error(message=_('You are not allowed to perform this friend request action'), code=Code.Forbidden)
+    FRIEND_REQUEST_EXISTS = Error(message=_('A pending friend request already exists'), code=Code.BadRequest)
+    FRIEND_REQUEST_CLOSED = Error(message=_('This friend request is not pending'), code=Code.BadRequest)
+    EMAIL_CODE_INVALID = Error(message=_('Invalid email verification code'), code=Code.BadRequest)
+    EMAIL_CODE_EXPIRED = Error(message=_('Email verification code expired'), code=Code.BadRequest)
+    EMAIL_SEND_FAILED = Error(message=_('Failed to send verification email'), code=Code.InternalServerError)
+
+
+@Error.register
+class ConfigErrors:
+    CREATE = Error(message=_('Failed to update config'), code=Code.InternalServerError)
+    NOT_FOUND = Error(message=_('Config not found'), code=Code.NotFound)
+    KEY_TOO_LONG = Error(message=_('Config key too long, max length is {key_length}'), code=Code.BadRequest)
+    VALUE_TOO_LONG = Error(message=_('Config value too long, max length is {value_length}'), code=Code.BadRequest)
 
 
 RESERVED_SUBDOMAINS = {
@@ -69,3 +86,18 @@ class BaseUserValidator:
         allow_string = string.ascii_lowercase + string.digits
         if not all(c in allow_string for c in value):
             raise UserErrors.SUBDOMAIN_INVALID
+
+
+class ConfigValidator:
+    MAX_KEY_LENGTH = 255
+    MAX_VALUE_LENGTH = 255
+
+    @classmethod
+    def key(cls, value):
+        if len(value) > cls.MAX_KEY_LENGTH:
+            raise ConfigErrors.KEY_TOO_LONG(key_length=cls.MAX_KEY_LENGTH)
+
+    @classmethod
+    def value(cls, value):
+        if len(value) > cls.MAX_VALUE_LENGTH:
+            raise ConfigErrors.VALUE_TOO_LONG(value_length=cls.MAX_VALUE_LENGTH)

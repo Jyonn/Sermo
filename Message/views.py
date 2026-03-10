@@ -1,3 +1,4 @@
+from django.db import transaction
 from django.views import View
 from smartdjango import analyse, OK
 
@@ -5,6 +6,7 @@ from Message.models import Message
 from Message.params import MessageParams
 from User import auth
 from User.auth import Request
+from User.models import NotificationEvent
 
 
 class MessageView(View):
@@ -17,7 +19,6 @@ class MessageView(View):
     )
     @auth.require_chat_member()
     def get(self, request: Request):
-        print('hello')
         before = request.query.before
         after = request.query.after
 
@@ -35,11 +36,13 @@ class MessageView(View):
         MessageParams.type,
     )
     def post(self, request: Request):
-        message = Message.create(
-            chat=request.query.chat,
-            user=request.user,
-            message_type=request.json.type,
-            content=request.json.content)
+        with transaction.atomic():
+            message = Message.create(
+                chat=request.query.chat,
+                user=request.user,
+                message_type=request.json.type,
+                content=request.json.content)
+            NotificationEvent.emit_message_notifications(message, actor=request.user)
         return message.jsonl()
 
     @auth.require_user

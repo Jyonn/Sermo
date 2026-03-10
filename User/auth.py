@@ -191,6 +191,14 @@ def _is_chat_host(request):
     return request.user == request.data.chat.host
 
 
+def _is_groupchat_owner(request):
+    chat = request.data.chat.specify()
+    if not isinstance(chat, GroupChat):
+        return False
+    owner = chat.owner if chat.owner_id else chat.host
+    return request.user == owner
+
+
 def _is_singlechat_guest(request):
     chat = request.data.chat.specify()
     return request.user == chat.guest
@@ -221,7 +229,10 @@ def _is_message_owner(request):
 
 
 def require_chat_owner():
-    return analyse.request(_is_chat_host, message=_("You are not the owner of this chat"))
+    return analyse.request(
+        lambda request: _is_chat_host(request) or _is_groupchat_owner(request),
+        message=_("You are not the owner of this chat")
+    )
 
 
 def require_singlechat_member():
