@@ -1,17 +1,15 @@
 from django.utils.translation import gettext as _
 from smartdjango import Params, Validator
 
-from Chat.models import BaseChat
+from Chat.models import Chat
 from Message.models import Message
-from User.models import BaseUser
 
 
 class MessageParams(metaclass=Params):
     model_class = Message
 
     message_id = Validator('message_id', final_name='message').to(int).to(Message.index)
-    chat_id = Validator('chat_id', final_name='chat').to(int).to(BaseChat.index)
-    user_id = Validator('user_id', final_name='user').to(int).to(BaseUser.index)
+    chat_id = Validator('chat_id', final_name='chat').to(int).to(Chat.index)
 
     content: Validator
     type: Validator

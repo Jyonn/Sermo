@@ -1,10 +1,8 @@
-from diq import Dictify
-from django.db import models
-from smartdjango import Choice
+from smartdjango import models, Choice
 
-from Chat.models import BaseChat, GroupChat, SingleChat
+from Chat.models import Chat
 from Message.validators import MessageErrors, MessageValidator
-from User.models import BaseUser
+from User.models import User
 
 
 class MessageTypeChoice(Choice):
@@ -14,11 +12,11 @@ class MessageTypeChoice(Choice):
     SYSTEM = 3
 
 
-class Message(models.Model, Dictify):
+class Message(models.Model):
     vldt = MessageValidator
 
-    chat = models.ForeignKey(BaseChat, on_delete=models.CASCADE, db_index=True)
-    user = models.ForeignKey(BaseUser, on_delete=models.CASCADE)
+    chat = models.ForeignKey(Chat, on_delete=models.CASCADE, db_index=True)
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
 
     type = models.IntegerField(choices=MessageTypeChoice.to_choices())
     content = models.CharField(max_length=vldt.MAX_CONTENT_LENGTH)
@@ -30,17 +28,13 @@ class Message(models.Model, Dictify):
         ordering = ["-created_at"]
 
     @classmethod
-    def create(cls, chat: BaseChat, user: BaseUser, message_type, content):
-        if user == chat.host:
-            return cls.objects.create(chat=chat, user=user, type=message_type, content=content)
-        if isinstance(chat, GroupChat) and user in chat.guests.all():
-            return cls.objects.create(chat=chat, user=user, type=message_type, content=content)
-        if isinstance(chat, SingleChat) and user == chat.guest:
+    def create(cls, chat: Chat, user: User, message_type, content):
+        if chat.has_active_member(user):
             return cls.objects.create(chat=chat, user=user, type=message_type, content=content)
         raise MessageErrors.NOT_A_MEMBER
 
     def _dictify_user(self):
-        return self.user.specify().tiny_json()
+        return self.user.tiny_json()
 
     def _dictify_created_at(self):
         return self.created_at.timestamp()
@@ -50,26 +44,26 @@ class Message(models.Model, Dictify):
 
     @classmethod
     def index(cls, message_id):
-        messages = cls.objects.filter(id=message_id, is_deleted=False)
-        if not messages.exists():
+        try:
+            return cls.objects.get(id=message_id, is_deleted=False)
+        except cls.DoesNotExist:
             raise MessageErrors.NOT_EXISTS
-        return messages.first()
 
     @classmethod
-    def latest(cls, chat: BaseChat, limit: int):
+    def latest(cls, chat: Chat, limit: int):
         messages = cls.objects.filter(chat=chat, is_deleted=False).order_by('-created_at')[:limit]
         return [message.jsonl() for message in messages]
 
     @classmethod
-    def older(cls, chat: BaseChat, message_id, limit: int):
+    def older(cls, chat: Chat, message_id, limit: int):
         messages = cls.objects.filter(chat=chat, id__lt=message_id, is_deleted=False).order_by('-created_at')[:limit]
         return [message.jsonl() for message in messages]
 
     @classmethod
-    def newer(cls, chat: BaseChat, message_id, limit: int):
+    def newer(cls, chat: Chat, message_id, limit: int):
         messages = cls.objects.filter(chat=chat, id__gt=message_id, is_deleted=False).order_by('created_at')[:limit]
         return [message.jsonl() for message in messages]
 
     def remove(self):
         self.is_deleted = True
-        self.save()
+        self.save(update_fields=['is_deleted'])

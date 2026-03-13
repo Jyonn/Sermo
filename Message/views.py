@@ -4,8 +4,8 @@ from smartdjango import analyse, OK
 
 from Message.models import Message
 from Message.params import MessageParams
-from User import auth
-from User.auth import Request
+from utils import auth
+from utils.auth import Request
 from User.models import NotificationEvent
 
 
