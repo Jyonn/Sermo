@@ -4,7 +4,7 @@ This project can send notification deliveries through `notificator-sdk`.
 
 ## 1. Config Model Keys
 
-Notificator config is loaded from `Config` model (`User.models.Config`).
+Notificator config is loaded from `Config` model (`Config.models.Config`).
 
 Required keys:
 
@@ -20,11 +20,10 @@ Optional keys:
 Example setup:
 
 ```python
-from User.models import Config, CI
+from Config.models import Config, CI
 
 Config.update_value(CI.NOTIFICATOR_NAME, "your_account_name")
 Config.update_value(CI.NOTIFICATOR_TOKEN, "your_account_token")
-Config.update_value(CI.NOTIFICATOR_SDK_PATH, "~/Projects/Apps/Notificator/notificator-sdk")
 Config.update_value(CI.NOTIFICATOR_HOST, "https://notice.6-79.cn")
 Config.update_value(CI.NOTIFICATOR_TIMEOUT, "15")
 ```

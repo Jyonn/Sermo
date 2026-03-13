@@ -27,6 +27,7 @@ SECRET_KEY = open(os.path.join(BASE_DIR, '.auth')).read()
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
+PROJ_INIT = True
 
 ALLOWED_HOSTS = ['api.sermo.com', 'localhost', '127.0.0.1']
 
@@ -40,7 +41,10 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'corsheaders',
+    'Config',
+    'Space',
     'User',
+    'Friendship',
     'Chat',
     'Message',
 ]
@@ -71,7 +75,6 @@ CORS_ALLOW_HEADERS = [
     'user-agent',
     'x-csrftoken',
     'x-requested-with',
-    'x-sermo-subdomain',
 ]
 
 ROOT_URLCONF = 'Sermo.urls'

@@ -5,7 +5,6 @@ from django.utils import timezone
 from notificator import NotificatorAPIError
 from smartdjango import analyse
 
-from Space import auth as space_auth
 from Space.models import Space
 from Space.models import SpaceEmailVerificationCode, SpaceEmailCodePurposeChoice
 from Space.params import (
@@ -73,7 +72,7 @@ class SpaceView(View):
         )
         return dict(
             space=space.json(),
-            auth=space_auth.get_login_token(space),
+            auth=auth.get_space_login_token(space),
         )
 
 
@@ -91,7 +90,7 @@ class SpaceLoginView(View):
         )
         return dict(
             space=space.json(),
-            auth=space_auth.get_login_token(space),
+            auth=auth.get_space_login_token(space),
         )
 
 
