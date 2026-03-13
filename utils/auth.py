@@ -1,5 +1,5 @@
 import datetime
-from typing import Optional
+from typing import Optional, Callable
 
 import jwt
 
@@ -10,9 +10,9 @@ from oba import Obj
 from smartdjango import Error, Code, Validator, DictValidator, analyse
 from smartdjango.analyse import get_request, Request as BaseRequest
 
-from Chat.models import BaseChat, SingleChat, GroupChat
+from Chat.models import Chat
 from Sermo.settings import SECRET_KEY
-from User.models import BaseUser, UserRoleChoice, RefreshToken
+from User.models import User, RefreshToken
 
 
 class Request(BaseRequest):
@@ -20,7 +20,7 @@ class Request(BaseRequest):
     query: Obj
     argument: Obj
     data: Obj
-    user: BaseUser
+    user: User
 
 
 @Error.register
@@ -42,6 +42,7 @@ class Symbols:
 
 ACCESS_EXPIRE_SECONDS = 15 * 60
 REFRESH_EXPIRE_SECONDS = 30 * 24 * 60 * 60
+SPACE_ACCESS_EXPIRE_SECONDS = 24 * 60 * 60
 
 
 def _encode_token(data: dict, expire_second: int, token_type: str, jti: Optional[str] = None):
@@ -57,7 +58,7 @@ def _encode_token(data: dict, expire_second: int, token_type: str, jti: Optional
     return token, payload
 
 
-def decrypt(data_str: str, expected_type: Optional[str] = None, allow_legacy_access: bool = False):
+def decrypt(data_str: str, expected_type: Optional[str] = None):
     try:
         data = jwt.decode(data_str, key=SECRET_KEY, algorithms=Symbols.ALGORITHM)
     except jwt.DecodeError as err:
@@ -70,27 +71,9 @@ def decrypt(data_str: str, expected_type: Optional[str] = None, allow_legacy_acc
         raise AuthErrors.EXPIRED
     if expected_type is not None:
         token_type = data.get(Symbols.TYPE)
-        if token_type is None and allow_legacy_access and expected_type == Symbols.ACCESS:
-            return data
         if token_type != expected_type:
             raise AuthErrors.FORMAT(details=_('Invalid token type'))
     return data
-
-
-def _require_user(func, user_role: Optional[int]):
-    def wrapper(*args, **kwargs):
-        request = get_request(*args)
-        token = _get_authorization_token(request)
-        data = decrypt(token, expected_type=Symbols.ACCESS, allow_legacy_access=True)
-
-        user = BaseUser.jwt_login(data)
-        request.user = user
-
-        if user_role is not None and user.role != user_role:
-            raise AuthErrors.FORMAT(details=_('Invalid user role'))
-
-        return func(*args, **kwargs)
-    return wrapper
 
 
 def _get_authorization_token(request):
@@ -105,30 +88,27 @@ def _get_authorization_token(request):
     return token
 
 
-SUBDOMAIN_HEADER = 'X-Sermo-Subdomain'
+def _require_user(func, checker: Optional[Callable[[User], bool]] = None):
+    def wrapper(*args, **kwargs):
+        request = get_request(*args)
+        token = _get_authorization_token(request)
+        data = decrypt(token, expected_type=Symbols.ACCESS)
 
+        user = User.jwt_login(data['user_id'])
+        request.user = user
 
-def get_request_subdomain(request):
-    subdomain = request.headers.get(SUBDOMAIN_HEADER) or request.headers.get(SUBDOMAIN_HEADER.lower())
-    if not subdomain:
-        return None
-    subdomain = subdomain.strip().lower()
-    return subdomain or None
+        if checker is not None and not checker(user):
+            raise AuthErrors.FORMAT(details=_('Invalid user role'))
 
-
-def require_host_user(func):
-    return _require_user(func, user_role=UserRoleChoice.HOST)
-
-
-def require_guest_user(func):
-    return _require_user(func, user_role=UserRoleChoice.GUEST)
+        return func(*args, **kwargs)
+    return wrapper
 
 
 def require_user(func):
-    return _require_user(func, user_role=None)
+    return _require_user(func)
 
 
-def get_login_token(user: BaseUser):
+def get_login_token(user: User):
     access_token, access_payload = _encode_token(
         user.jwt_json(),
         expire_second=ACCESS_EXPIRE_SECONDS,
@@ -142,7 +122,23 @@ def get_login_token(user: BaseUser):
     )
 
 
-def _issue_refresh_token(user: BaseUser):
+def get_space_login_token(space):
+    access_token, access_payload = _encode_token(
+        dict(
+            space_id=space.id,
+            slug=space.slug,
+            email=space.email,
+        ),
+        expire_second=SPACE_ACCESS_EXPIRE_SECONDS,
+        token_type='space_access',
+    )
+    return dict(
+        auth=access_token,
+        data=access_payload,
+    )
+
+
+def _issue_refresh_token(user: User):
     jti = get_random_string(32)
     refresh_token, _payload = _encode_token(
         {'user_id': user.id},
@@ -172,7 +168,7 @@ def refresh_login_token(refresh_token: str):
         token.revoke()
         raise AuthErrors.EXPIRED
     token.revoke()
-    user = BaseUser.index(data['user_id'])
+    user = User.index(data['user_id'])
     return get_login_token(user)
 
 
@@ -187,60 +183,25 @@ def revoke_refresh_token(refresh_token: str):
     token.revoke()
 
 
-def _is_chat_host(request):
-    return request.user == request.data.chat.host
-
-
 def _is_groupchat_owner(request):
-    chat = request.data.chat.specify()
-    if not isinstance(chat, GroupChat):
-        return False
-    owner = chat.owner if chat.owner_id else chat.host
-    return request.user == owner
-
-
-def _is_singlechat_guest(request):
-    chat = request.data.chat.specify()
-    return request.user == chat.guest
-
-
-def _is_groupchat_guest(request):
-    chat = request.data.chat.specify()
-    return request.user in chat.guests.all()
-
-
-def _is_singlechat_member(request):
-    return _is_chat_host(request) or _is_singlechat_guest(request)
-
-
-def _is_groupchat_member(request):
-    return _is_chat_host(request) or _is_groupchat_guest(request)
+    chat: Chat = request.data.chat
+    return chat.group and chat.is_owner(request.user)
 
 
 def _is_chat_member(request):
-    chat = request.data.chat.specify()
-    return _is_chat_host(request) \
-        or (isinstance(chat, SingleChat) and _is_singlechat_guest(request)) \
-        or (isinstance(chat, GroupChat) and _is_groupchat_guest(request))
+    chat: Chat = request.data.chat
+    return chat.has_active_member(request.user)
 
 
 def _is_message_owner(request):
-    return request.user == request.data.message.user or request.user == request.data.message.chat.host
+    return request.user.id == request.data.message.user_id
 
 
 def require_chat_owner():
     return analyse.request(
-        lambda request: _is_chat_host(request) or _is_groupchat_owner(request),
+        _is_groupchat_owner,
         message=_("You are not the owner of this chat")
     )
-
-
-def require_singlechat_member():
-    return analyse.request(_is_singlechat_member, message=_("You are not a member of this chat"))
-
-
-def require_groupchat_member():
-    return analyse.request(_is_groupchat_member, message=_("You are not a member of this chat"))
 
 
 def require_chat_member():
