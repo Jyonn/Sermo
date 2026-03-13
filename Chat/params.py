@@ -1,44 +1,38 @@
 from django.utils.translation import gettext as _
+from smartdjango import Params, Validator, ListValidator
 
-from Chat.models import BaseChat, SingleChat, GroupChat
-from User.models import GuestUser
-from smartdjango import Validator, ListValidator, Params
+from Chat.models import Chat, ChatMember
+from User.models import User
 
 
-class BaseChatParams(metaclass=Params):
-    model_class = BaseChat
+class ChatParams(metaclass=Params):
+    model_class = Chat
 
     chat_id = Validator('chat_id', final_name='chat') \
         .to(int) \
-        .to(BaseChat.index)
+        .to(Chat.index)
+
+    peer_user_id = Validator('peer_user_id', final_name='peer_user') \
+        .to(int) \
+        .to(User.index)
+
+    users = ListValidator('users') \
+        .element(Validator().to(User.index)) \
+        .bool(lambda x: len({item.id for item in x}) == len(x), message=_('duplicated users')) \
+        .bool(lambda x: len(x) >= 1, message=_('group chat should have at least 1 invited member'))
+
+    title: Validator
 
 
-class SingleChatParams(BaseChatParams):
-    model_class = SingleChat
+class ChatMemberParams(metaclass=Params):
+    model_class = ChatMember
 
+    chat_id = ChatParams.chat_id
 
-class GroupChatParams(BaseChatParams):
-    model_class = GroupChat
+    users = ListValidator('users') \
+        .element(Validator().to(User.index)) \
+        .bool(lambda x: len({item.id for item in x}) == len(x), message=_('duplicated users'))
 
-    name: Validator
-
-    guests = ListValidator('guests') \
-        .element(Validator().to(GuestUser.index)) \
-        .bool(lambda x: len(set(x)) == len(x), message=_('duplicated guests')) \
-        .bool(lambda x: len(x) >= 1, message=_('group chat should have at least 2 members'))
-
-    chat_id = BaseChatParams.chat_id.copy().bool(lambda x: x.group, message=_('not a group chat'))
-
-
-class GroupChatMemberParams(BaseChatParams):
-    guests = ListValidator('guests') \
-        .element(Validator().to(GuestUser.index)) \
-        .bool(lambda x: len(set(x)) == len(x), message=_('duplicated guests'))
-
-    chat_id = BaseChatParams.chat_id.copy().bool(lambda x: x.group, message=_('not a group chat'))
-
-
-class GroupChatInviteParams(metaclass=Params):
     accept = Validator('accept') \
         .to(int) \
         .bool(lambda x: x in (0, 1), message=_('accept should be 0 or 1'))

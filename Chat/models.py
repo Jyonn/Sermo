@@ -1,41 +1,58 @@
 from typing import List
 
-from diq import Dictify
-from django.db import models, transaction
+from django.db import transaction
 from django.utils import timezone
 from django.utils.translation import gettext as _
-from smartdjango import Choice
+from smartdjango import models, Choice
 
-from Chat.validators import ChatErrors
-from User.models import HostUser, GuestUser, BaseUser
+from Chat.validators import ChatErrors, ChatMemberErrors, ChatValidator, ChatMemberValidator
+from User.models import User
 
 
-class ChatSchemeChoice(Choice):
-    SINGLE = 0
+class ChatTypeChoice(Choice):
+    DIRECT = 0
     GROUP = 1
 
 
-class BaseChat(models.Model, Dictify):
-    host = models.ForeignKey(HostUser, on_delete=models.CASCADE)
-    scheme = models.IntegerField(choices=ChatSchemeChoice.to_choices())
+class ChatMemberRoleChoice(Choice):
+    MEMBER = 0
+    OWNER = 1
+
+
+class ChatMemberStatusChoice(Choice):
+    PENDING = 0
+    ACTIVE = 1
+    LEFT = 2
+    REJECTED = 3
+    KICKED = 4
+
+
+class Chat(models.Model):
+    vldt = ChatValidator
+
+    space = models.ForeignKey('Space.Space', on_delete=models.CASCADE, related_name='chats', db_index=True)
+    chat_type = models.IntegerField(choices=ChatTypeChoice.to_choices(), db_index=True)
+    title = models.CharField(max_length=vldt.TITLE_MAX_LENGTH, null=True, blank=True)
+    created_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='created_chats')
 
     created_at = models.DateTimeField(auto_now_add=True)
     last_chat_at = models.DateTimeField(auto_now=True)
-    is_deleted = models.BooleanField(default=False)
-
-    @classmethod
-    def get_class(cls, scheme):
-        return SingleChat if scheme == ChatSchemeChoice.SINGLE else GroupChat
+    is_deleted = models.BooleanField(default=False, db_index=True)
 
     @classmethod
     def index(cls, chat_id):
-        chats = cls.objects.filter(id=chat_id, is_deleted=False)
-        if not chats.exists():
+        try:
+            return cls.objects.get(id=chat_id, is_deleted=False)
+        except cls.DoesNotExist:
             raise ChatErrors.NOT_EXISTS(chat=chat_id)
-        chat = chats.first()
-        if type(chat) is BaseChat:
-            return cls.get_class(chat.scheme).index(chat_id)
-        return chat
+
+    @property
+    def group(self):
+        return self.chat_type == ChatTypeChoice.GROUP
+
+    @property
+    def direct(self):
+        return self.chat_type == ChatTypeChoice.DIRECT
 
     def _dictify_created_at(self):
         return self.created_at.timestamp()
@@ -45,199 +62,344 @@ class BaseChat(models.Model, Dictify):
 
     def _dictify_last_message(self):
         from Message.models import Message
-        messages = Message.objects.filter(chat=self, is_deleted=False).order_by('-created_at')
-        if messages.exists():
-            return messages.first().jsonl()
+        message = Message.objects.filter(chat=self, is_deleted=False).order_by('-created_at').first()
+        if message is not None:
+            return message.jsonl()
         return None
 
-    def _dictify_host(self):
-        return self.host.json()
-
-    def json(self):
-        raise NotImplementedError
-
-    def jsonl(self):
-        raise NotImplementedError
-
-    @classmethod
-    def get_host_chats(cls, host: HostUser):
-        raise NotImplementedError
-
-    @classmethod
-    def get_guest_chats(cls, guest: GuestUser):
-        raise NotImplementedError
-
-    @property
-    def group(self):
-        return self.scheme == ChatSchemeChoice.GROUP
-
-    def remove(self):
-        self.is_deleted = True
-        self.save()
-
-    def specify(self):
-        if type(self) is BaseChat:
-            return self.get_class(self.scheme).index(self.id)
-        return self
-
-
-class SingleChat(BaseChat):
-    guest = models.OneToOneField(GuestUser, on_delete=models.CASCADE)
-
-    @classmethod
-    def get_or_create(cls, guest: GuestUser):
-        chats = cls.objects.filter(guest=guest, is_deleted=False)
-        if chats.exists():
-            return chats.first()
-        return cls.objects.create(guest=guest, host=guest.host, scheme=ChatSchemeChoice.SINGLE)
-
-    def _dictify_guest(self):
-        return self.guest.json()
-
-    def json(self):
-        return self.dictify('host', 'guest', 'created_at', 'last_chat_at', 'group', 'id->chat_id', 'last_message')
-
-    def jsonl(self):
-        return self.json()
-
-    @classmethod
-    def get_host_chats(cls, host: HostUser):
-        chats = cls.objects.filter(host=host, is_deleted=False)
-        return [chat.jsonl() for chat in chats]
-
-    @classmethod
-    def get_guest_chats(cls, guest: GuestUser):
-        chats = cls.objects.filter(guest=guest, is_deleted=False)
-        return [chat.jsonl() for chat in chats]
-
-
-class GroupChat(BaseChat):
-    guests = models.ManyToManyField(GuestUser)
-    name = models.CharField(max_length=20)
-    owner = models.ForeignKey(
-        BaseUser,
-        on_delete=models.CASCADE,
-        related_name='owned_group_chats',
-        null=True,
-        blank=True,
-    )
-
-    @classmethod
-    def create(cls, creator: BaseUser, guests: List[GuestUser]):
-        creator = creator.specify()
-        host = creator if isinstance(creator, HostUser) else creator.host
-        for guest in guests:
-            if guest.host != host:
-                raise ChatErrors.UNALIGNED_HOST
-            if guest.is_deleted:
-                raise ChatErrors.GUEST_DELETED(guest=guest.name)
-
-        normalized_guests = {guest.id: guest for guest in guests}
-        if isinstance(creator, GuestUser):
-            normalized_guests[creator.id] = creator
-
-        num = len(normalized_guests) + 1
-        name = _('Group Chat ({num})').format(num=num)
-        chat = cls.objects.create(
-            name=name,
-            host=host,
-            owner=creator,
-            scheme=ChatSchemeChoice.GROUP,
-        )
-
-        if isinstance(creator, HostUser):
-            chat.guests.add(*normalized_guests.values())
-        else:
-            chat.guests.add(creator)
-            for guest in normalized_guests.values():
-                if guest.id == creator.id:
-                    continue
-                GroupChatInvite.invite(chat=chat, guest=guest, invited_by=creator, auto_accept=False)
-        return chat
-
-    def rename(self, name: str):
-        self.name = name
-        self.save()
-
-    def add_guest(self, guest: GuestUser):
-        if guest.host != self.host:
-            raise ChatErrors.UNALIGNED_HOST
-        if guest.is_deleted:
-            raise ChatErrors.GUEST_DELETED(guest=guest.name)
-        self.guests.add(guest)
-
-    def remove_guest(self, guest: GuestUser):
-        if guest not in self.guests.all():
-            raise ChatErrors.NOT_MEMBER(guest=guest.name, chat=self.name)
-
-        self.guests.remove(guest)
-        GroupChatInvite.objects.filter(chat=self, guest=guest, status=GroupChatInviteStatusChoice.PENDING).update(
-            status=GroupChatInviteStatusChoice.REJECTED
-        )
-
-    def _can_manage(self, user: BaseUser):
-        user = user.specify()
-        owner_id = self.owner_id or self.host_id
-        return user.id == owner_id or user.id == self.host_id
-
-    def invite_guest(self, inviter: BaseUser, guest: GuestUser):
-        if not self._can_manage(inviter):
-            raise ChatErrors.FORBIDDEN
-        if guest.host_id != self.host_id:
-            raise ChatErrors.UNALIGNED_HOST
-        if guest.is_deleted:
-            raise ChatErrors.GUEST_DELETED(guest=guest.name)
-        auto_accept = inviter.id == self.host_id
-        return GroupChatInvite.invite(
-            chat=self,
-            guest=guest,
-            invited_by=inviter,
-            auto_accept=auto_accept,
-        )
-
-    def respond_invite(self, guest: GuestUser, accept: bool):
-        if guest.host_id != self.host_id:
-            raise ChatErrors.UNALIGNED_HOST
-        return GroupChatInvite.respond(chat=self, guest=guest, accept=accept)
-
-    def _dictify_guests(self):
-        return [guest.json() for guest in self.guests.all()]
+    def _dictify_members(self):
+        members = ChatMember.objects.filter(chat=self, status=ChatMemberStatusChoice.ACTIVE).select_related('user')
+        return [item.user.json() for item in members]
 
     def _dictify_owner(self):
-        if self.owner_id:
-            return self.owner.specify().tiny_json()
-        return self.host.tiny_json()
+        owner = ChatMember.objects.filter(
+            chat=self,
+            role=ChatMemberRoleChoice.OWNER,
+            status=ChatMemberStatusChoice.ACTIVE,
+        ).select_related('user').first()
+        return owner.user.tiny_json() if owner else None
 
     def json(self):
         return self.dictify(
-            'host',
+            'id->chat_id',
+            'chat_type',
+            'title',
             'owner',
-            'guests',
-            'name',
+            'members',
+            'group',
             'created_at',
             'last_chat_at',
-            'group',
-            'id->chat_id',
-            'last_message'
+            'last_message',
         )
 
     def jsonl(self):
         return self.json()
 
-    @classmethod
-    def get_host_chats(cls, host: HostUser):
-        chats = cls.objects.filter(host=host, is_deleted=False)
-        return [chat.jsonl() for chat in chats]
+    def remove(self):
+        self.is_deleted = True
+        self.save(update_fields=['is_deleted'])
+
+    def has_active_member(self, user: User):
+        return ChatMember.objects.filter(
+            chat=self,
+            user=user,
+            status=ChatMemberStatusChoice.ACTIVE,
+        ).exists()
+
+    def is_owner(self, user: User):
+        return ChatMember.objects.filter(
+            chat=self,
+            user=user,
+            role=ChatMemberRoleChoice.OWNER,
+            status=ChatMemberStatusChoice.ACTIVE,
+        ).exists()
 
     @classmethod
-    def get_guest_chats(cls, guest: GuestUser):
-        chats = cls.objects.filter(guests=guest, is_deleted=False)
-        return [chat.jsonl() for chat in chats]
+    def get_user_chats(cls, user: User):
+        return list(
+            cls.objects.filter(
+                is_deleted=False,
+                chat_members__user=user,
+                chat_members__status=ChatMemberStatusChoice.ACTIVE,
+            ).distinct()
+        )
+
+    @classmethod
+    def _pair(cls, self_user: User, peer_user: User):
+        if self_user.id == peer_user.id:
+            raise ChatErrors.FORBIDDEN
+        if self_user.space_id != peer_user.space_id:
+            raise ChatErrors.UNALIGNED_SPACE
+        if self_user.id < peer_user.id:
+            return self_user, peer_user
+        return peer_user, self_user
+
+    @classmethod
+    def get_or_create_direct(cls, self_user: User, peer_user: User):
+        user_low, user_high = cls._pair(self_user, peer_user)
+        direct_chats = cls.objects.filter(
+            space_id=user_low.space_id,
+            chat_type=ChatTypeChoice.DIRECT,
+            is_deleted=False,
+        )
+        for chat in direct_chats:
+            active_member_ids = list(
+                ChatMember.objects.filter(chat=chat, status=ChatMemberStatusChoice.ACTIVE)
+                .values_list('user_id', flat=True)
+            )
+            if len(active_member_ids) == 2 and set(active_member_ids) == {user_low.id, user_high.id}:
+                return chat
+
+        with transaction.atomic():
+            chat = cls.objects.create(
+                space_id=user_low.space_id,
+                chat_type=ChatTypeChoice.DIRECT,
+                title=None,
+                created_by=self_user,
+            )
+            ChatMember.objects.create(
+                chat=chat,
+                user=user_low,
+                role=ChatMemberRoleChoice.MEMBER,
+                status=ChatMemberStatusChoice.ACTIVE,
+                invited_by=self_user,
+                joined_at=timezone.now(),
+            )
+            ChatMember.objects.create(
+                chat=chat,
+                user=user_high,
+                role=ChatMemberRoleChoice.MEMBER,
+                status=ChatMemberStatusChoice.ACTIVE,
+                invited_by=self_user,
+                joined_at=timezone.now(),
+            )
+            return chat
+
+    @classmethod
+    def create_group(cls, creator: User, users: List[User], title: str = None):
+        normalized = {creator.id: creator}
+        for user in users:
+            if user.space_id != creator.space_id:
+                raise ChatErrors.UNALIGNED_SPACE
+            if user.is_deleted:
+                raise ChatErrors.USER_DELETED(user=user.name)
+            normalized[user.id] = user
+
+        final_title = (title or '').strip()
+        if not final_title:
+            final_title = _('Group Chat ({num})').format(num=len(normalized))
+
+        with transaction.atomic():
+            chat = cls.objects.create(
+                space=creator.space,
+                chat_type=ChatTypeChoice.GROUP,
+                title=final_title,
+                created_by=creator,
+            )
+            ChatMember.objects.create(
+                chat=chat,
+                user=creator,
+                role=ChatMemberRoleChoice.OWNER,
+                status=ChatMemberStatusChoice.ACTIVE,
+                invited_by=creator,
+                joined_at=timezone.now(),
+            )
+            for user in normalized.values():
+                if user.id == creator.id:
+                    continue
+                ChatMember.invite(chat=chat, user=user, invited_by=creator)
+            return chat
+
+    def rename(self, title: str):
+        if not self.group:
+            raise ChatErrors.NOT_GROUP_CHAT(chat=self.id)
+        self.title = (title or '').strip() or self.title
+        self.save(update_fields=['title'])
+
+    def invite_member(self, inviter: User, user: User):
+        if not self.group:
+            raise ChatErrors.NOT_GROUP_CHAT(chat=self.id)
+        if not self.is_owner(inviter):
+            raise ChatErrors.FORBIDDEN
+        if user.space_id != self.space_id:
+            raise ChatErrors.UNALIGNED_SPACE
+        if user.is_deleted:
+            raise ChatErrors.USER_DELETED(user=user.name)
+        return ChatMember.invite(chat=self, user=user, invited_by=inviter)
+
+    def respond_invite(self, user: User, accept: bool):
+        if not self.group:
+            raise ChatErrors.NOT_GROUP_CHAT(chat=self.id)
+        return ChatMember.respond(chat=self, user=user, accept=accept)
+
+    def remove_member(self, operator: User, user: User):
+        if not self.group:
+            raise ChatErrors.NOT_GROUP_CHAT(chat=self.id)
+        if not self.is_owner(operator):
+            raise ChatErrors.FORBIDDEN
+        return ChatMember.kick(chat=self, user=user)
+
+    def leave(self, user: User):
+        member = ChatMember.objects.filter(
+            chat=self,
+            user=user,
+            status=ChatMemberStatusChoice.ACTIVE,
+        ).first()
+        if member is None:
+            raise ChatMemberErrors.NOT_MEMBER(user=user.name, chat=self.id)
+        if self.group and member.role == ChatMemberRoleChoice.OWNER:
+            raise ChatMemberErrors.OWNER_LEAVE_FORBIDDEN
+        member.status = ChatMemberStatusChoice.LEFT
+        member.left_at = timezone.now()
+        member.save(update_fields=['status', 'left_at', 'updated_at'])
+        return member
+
+
+class ChatMember(models.Model):
+    vldt = ChatMemberValidator
+
+    chat = models.ForeignKey(Chat, on_delete=models.CASCADE, related_name='chat_members')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='chat_memberships')
+    role = models.IntegerField(
+        choices=ChatMemberRoleChoice.to_choices(),
+        default=ChatMemberRoleChoice.MEMBER,
+    )
+    status = models.IntegerField(
+        choices=ChatMemberStatusChoice.to_choices(),
+        default=ChatMemberStatusChoice.PENDING,
+        db_index=True,
+    )
+    invited_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='sent_chat_invites',
+    )
+    joined_at = models.DateTimeField(null=True, blank=True)
+    left_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['chat', 'user'], name='unique_chat_member'),
+        ]
+
+    def _dictify_created_at(self):
+        return self.created_at.timestamp()
+
+    def _dictify_updated_at(self):
+        return self.updated_at.timestamp()
+
+    def _dictify_user(self):
+        return self.user.tiny_json()
+
+    def _dictify_invited_by(self):
+        return self.invited_by.tiny_json() if self.invited_by_id else None
+
+    def json(self):
+        return self.dictify('user', 'invited_by', 'role', 'status', 'created_at', 'updated_at')
+
+    @classmethod
+    def index(cls, member_id):
+        try:
+            return cls.objects.get(id=member_id)
+        except cls.DoesNotExist:
+            raise ChatMemberErrors.NOT_EXISTS(chat=member_id)
+
+    @classmethod
+    def invite(cls, chat: Chat, user: User, invited_by: User):
+        member = cls.objects.filter(chat=chat, user=user).first()
+        if member is None:
+            member = cls.objects.create(
+                chat=chat,
+                user=user,
+                role=ChatMemberRoleChoice.MEMBER,
+                status=ChatMemberStatusChoice.PENDING,
+                invited_by=invited_by,
+            )
+            from User.models import NotificationEvent
+            NotificationEvent.emit_system_event(
+                user=user,
+                actor=invited_by,
+                payload=dict(kind='group_invite', chat_id=chat.id, chat_name=chat.title),
+            )
+            return member
+
+        if member.status == ChatMemberStatusChoice.ACTIVE:
+            raise ChatMemberErrors.ALREADY_MEMBER(user=user.name, chat=chat.id)
+        if member.status == ChatMemberStatusChoice.PENDING:
+            raise ChatMemberErrors.INVITE_PENDING(user=user.name, chat=chat.id)
+
+        member.role = ChatMemberRoleChoice.MEMBER
+        member.status = ChatMemberStatusChoice.PENDING
+        member.invited_by = invited_by
+        member.left_at = None
+        member.save(update_fields=['role', 'status', 'invited_by', 'left_at', 'updated_at'])
+        from User.models import NotificationEvent
+        NotificationEvent.emit_system_event(
+            user=user,
+            actor=invited_by,
+            payload=dict(kind='group_invite', chat_id=chat.id, chat_name=chat.title),
+        )
+        return member
+
+    @classmethod
+    def respond(cls, chat: Chat, user: User, accept: bool):
+        member = cls.objects.filter(chat=chat, user=user).first()
+        if member is None:
+            raise ChatMemberErrors.INVITE_NOT_FOUND
+        if member.status != ChatMemberStatusChoice.PENDING:
+            raise ChatMemberErrors.INVITE_CLOSED
+
+        if accept:
+            member.status = ChatMemberStatusChoice.ACTIVE
+            member.joined_at = timezone.now()
+            member.left_at = None
+            member.save(update_fields=['status', 'joined_at', 'left_at', 'updated_at'])
+        else:
+            member.status = ChatMemberStatusChoice.REJECTED
+            member.left_at = timezone.now()
+            member.save(update_fields=['status', 'left_at', 'updated_at'])
+
+        from User.models import NotificationEvent
+        if member.invited_by_id:
+            NotificationEvent.emit_system_event(
+                user=member.invited_by,
+                actor=user,
+                payload=dict(
+                    kind='group_invite_response',
+                    chat_id=chat.id,
+                    accepted=bool(accept),
+                    user=user.tiny_json(),
+                ),
+            )
+        return member
+
+    @classmethod
+    def kick(cls, chat: Chat, user: User):
+        member = cls.objects.filter(chat=chat, user=user).first()
+        if member is None:
+            raise ChatMemberErrors.INVITE_NOT_FOUND
+        member.status = ChatMemberStatusChoice.KICKED
+        member.left_at = timezone.now()
+        member.save(update_fields=['status', 'left_at', 'updated_at'])
+        return member
+
+    @classmethod
+    def pending_for_user(cls, user: User, limit: int = 100):
+        rows = cls.objects.filter(
+            user=user,
+            status=ChatMemberStatusChoice.PENDING,
+            chat__is_deleted=False,
+        ).select_related('chat', 'invited_by').order_by('-created_at')[:limit]
+        return [row.json() for row in rows]
 
 
 class ChatReadState(models.Model):
-    chat = models.ForeignKey(BaseChat, on_delete=models.CASCADE, db_index=True)
-    user = models.ForeignKey(BaseUser, on_delete=models.CASCADE, db_index=True)
+    chat = models.ForeignKey(Chat, on_delete=models.CASCADE, db_index=True)
+    user = models.ForeignKey(User, on_delete=models.CASCADE, db_index=True)
     last_read_at = models.DateTimeField(null=True, blank=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -245,118 +407,21 @@ class ChatReadState(models.Model):
         unique_together = ('chat', 'user')
 
     @classmethod
-    def mark_read(cls, chat: BaseChat, user: BaseUser):
+    def mark_read(cls, chat: Chat, user: User):
         state, _created = cls.objects.get_or_create(chat=chat, user=user)
         state.last_read_at = timezone.now()
-        state.save(update_fields=['last_read_at'])
+        state.save(update_fields=['last_read_at', 'updated_at'])
         return state
 
     @classmethod
-    def get_last_read_at(cls, chat: BaseChat, user: BaseUser):
+    def get_last_read_at(cls, chat: Chat, user: User):
         state = cls.objects.filter(chat=chat, user=user).first()
         return state.last_read_at if state else None
 
     @classmethod
-    def unread_count(cls, chat: BaseChat, user: BaseUser):
+    def unread_count(cls, chat: Chat, user: User):
         from Message.models import Message
         last_read_at = cls.get_last_read_at(chat, user)
         if last_read_at is None:
             return Message.objects.filter(chat=chat, is_deleted=False).count()
         return Message.objects.filter(chat=chat, is_deleted=False, created_at__gt=last_read_at).count()
-
-
-class GroupChatInviteStatusChoice(Choice):
-    PENDING = 0
-    ACCEPTED = 1
-    REJECTED = 2
-
-
-class GroupChatInvite(models.Model, Dictify):
-    chat = models.ForeignKey(GroupChat, on_delete=models.CASCADE, related_name='invites')
-    guest = models.ForeignKey(GuestUser, on_delete=models.CASCADE, related_name='group_invites')
-    invited_by = models.ForeignKey(BaseUser, on_delete=models.CASCADE, related_name='sent_group_invites')
-    status = models.IntegerField(
-        choices=GroupChatInviteStatusChoice.to_choices(),
-        default=GroupChatInviteStatusChoice.PENDING,
-        db_index=True,
-    )
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        unique_together = ('chat', 'guest')
-
-    @classmethod
-    def invite(cls, chat: GroupChat, guest: GuestUser, invited_by: BaseUser, auto_accept: bool = False):
-        if chat.guests.filter(id=guest.id).exists():
-            invite, _created = cls.objects.get_or_create(
-                chat=chat,
-                guest=guest,
-                defaults=dict(
-                    invited_by=invited_by,
-                    status=GroupChatInviteStatusChoice.ACCEPTED,
-                ),
-            )
-            if invite.status != GroupChatInviteStatusChoice.ACCEPTED:
-                invite.status = GroupChatInviteStatusChoice.ACCEPTED
-                invite.invited_by = invited_by
-                invite.save(update_fields=['status', 'invited_by'])
-            return invite
-
-        invite, created = cls.objects.get_or_create(
-            chat=chat,
-            guest=guest,
-            defaults=dict(
-                invited_by=invited_by,
-                status=GroupChatInviteStatusChoice.ACCEPTED if auto_accept else GroupChatInviteStatusChoice.PENDING,
-            ),
-        )
-        if not created:
-            if invite.status == GroupChatInviteStatusChoice.PENDING and not auto_accept:
-                raise ChatErrors.INVITE_PENDING(guest=guest.name)
-            invite.invited_by = invited_by
-            invite.status = GroupChatInviteStatusChoice.ACCEPTED if auto_accept else GroupChatInviteStatusChoice.PENDING
-            invite.save(update_fields=['invited_by', 'status'])
-
-        if auto_accept:
-            chat.add_guest(guest)
-            return invite
-
-        from User.models import NotificationEvent
-        NotificationEvent.emit_system_event(
-            user=guest,
-            actor=invited_by,
-            payload=dict(
-                kind='group_invite',
-                chat_id=chat.id,
-                chat_name=chat.name,
-            ),
-        )
-        return invite
-
-    @classmethod
-    def respond(cls, chat: GroupChat, guest: GuestUser, accept: bool):
-        invite = cls.objects.filter(chat=chat, guest=guest).first()
-        if invite is None:
-            raise ChatErrors.INVITE_NOT_FOUND
-        if invite.status != GroupChatInviteStatusChoice.PENDING:
-            raise ChatErrors.INVITE_CLOSED
-
-        with transaction.atomic():
-            invite.status = GroupChatInviteStatusChoice.ACCEPTED if accept else GroupChatInviteStatusChoice.REJECTED
-            invite.save(update_fields=['status'])
-            if accept:
-                chat.add_guest(guest)
-
-        from User.models import NotificationEvent
-        NotificationEvent.emit_system_event(
-            user=invite.invited_by,
-            actor=guest,
-            payload=dict(
-                kind='group_invite_response',
-                chat_id=chat.id,
-                accepted=bool(accept),
-                guest=guest.tiny_json(),
-            ),
-        )
-        return invite
