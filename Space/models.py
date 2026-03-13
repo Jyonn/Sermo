@@ -1,0 +1,165 @@
+import datetime
+
+from django.utils import timezone
+from django.utils.crypto import get_random_string
+
+import smartdjango.models as models
+from smartdjango import Choice
+
+from Space.validators import SpaceValidator, SpaceErrors
+
+
+class Space(models.Model):
+    vldt = SpaceValidator
+
+    name = models.CharField(max_length=vldt.NAME_MAX_LENGTH)
+    slug = models.CharField(
+        max_length=vldt.SLUG_MAX_LENGTH,
+        unique=True,
+        db_index=True,
+        validators=[vldt.slug],
+    )
+    email = models.EmailField(unique=True, db_index=True)
+    email_verified_at = models.DateTimeField(null=True, blank=True)
+    group_square_enabled = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    @classmethod
+    def get_by_slug(cls, slug):
+        slug = (slug or '').strip().lower()
+        try:
+            return cls.objects.get(slug=slug)
+        except cls.DoesNotExist:
+            raise SpaceErrors.NOT_EXISTS(attr='slug', value=slug)
+
+    @classmethod
+    def create(cls, name, slug, email, code):
+        slug = (slug or '').strip().lower()
+        email = (email or '').strip().lower()
+        cls.vldt.slug(slug)
+        if cls.vldt.reserved_slug(slug):
+            raise SpaceErrors.SLUG_RESERVED
+        if cls.objects.filter(slug=slug).exists():
+            raise SpaceErrors.SLUG_TAKEN
+        if cls.objects.filter(email=email).exists():
+            raise SpaceErrors.EMAIL_TAKEN
+
+        SpaceEmailVerificationCode.verify(
+            email=email,
+            code=code,
+            purpose=SpaceEmailCodePurposeChoice.REGISTER,
+            space=None,
+        )
+        return cls.objects.create(
+            name=(name or '').strip(),
+            slug=slug,
+            email=email,
+            email_verified_at=timezone.now(),
+        )
+
+    @classmethod
+    def login_by_email_code(cls, slug, email, code):
+        space = cls.get_by_slug(slug)
+        email = (email or '').strip().lower()
+        if space.email != email:
+            raise SpaceErrors.EMAIL_MISMATCH
+        SpaceEmailVerificationCode.verify(
+            email=email,
+            code=code,
+            purpose=SpaceEmailCodePurposeChoice.LOGIN,
+            space=space,
+        )
+        return space
+
+    def _dictify_created_at(self):
+        return self.created_at.timestamp()
+
+    def _dictify_email_verified_at(self):
+        if self.email_verified_at is None:
+            return None
+        return self.email_verified_at.timestamp()
+
+    def json(self):
+        return self.dictify(
+            'id->space_id',
+            'name',
+            'slug',
+            'email',
+            'email_verified_at',
+            'group_square_enabled',
+            'created_at',
+        )
+
+
+class SpaceEmailCodePurposeChoice(Choice):
+    REGISTER = 1
+    LOGIN = 2
+
+
+class SpaceEmailVerificationCode(models.Model):
+    CODE_LENGTH = 6
+    EXPIRE_SECONDS = 10 * 60
+
+    space = models.ForeignKey(
+        Space,
+        on_delete=models.CASCADE,
+        related_name='email_codes',
+        null=True,
+        blank=True,
+    )
+    email = models.EmailField(db_index=True)
+    purpose = models.IntegerField(
+        choices=SpaceEmailCodePurposeChoice.to_choices(),
+        db_index=True,
+    )
+    code = models.CharField(max_length=CODE_LENGTH, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField(db_index=True)
+    used_at = models.DateTimeField(null=True, blank=True)
+
+    @classmethod
+    def issue(cls, email: str, purpose: int, space: Space = None):
+        email = (email or '').strip().lower()
+        now = timezone.now()
+        query = cls.objects.filter(
+            email=email,
+            purpose=purpose,
+            used_at__isnull=True,
+        )
+        if space is None:
+            query = query.filter(space__isnull=True)
+        else:
+            query = query.filter(space=space)
+        query.update(used_at=now)
+
+        code = get_random_string(cls.CODE_LENGTH, allowed_chars='0123456789')
+        return cls.objects.create(
+            space=space,
+            email=email,
+            purpose=purpose,
+            code=code,
+            expires_at=now + datetime.timedelta(seconds=cls.EXPIRE_SECONDS),
+        )
+
+    @classmethod
+    def verify(cls, email: str, code: str, purpose: int, space: Space = None):
+        email = (email or '').strip().lower()
+        code = (code or '').strip()
+        query = cls.objects.filter(
+            email=email,
+            purpose=purpose,
+            code=code,
+            used_at__isnull=True,
+        ).order_by('-created_at')
+        if space is None:
+            query = query.filter(space__isnull=True)
+        else:
+            query = query.filter(space=space)
+        item = query.first()
+        if item is None:
+            raise SpaceErrors.EMAIL_CODE_INVALID
+        if item.expires_at <= timezone.now():
+            raise SpaceErrors.EMAIL_CODE_EXPIRED
+        item.used_at = timezone.now()
+        item.save(update_fields=['used_at'])
+        return item
