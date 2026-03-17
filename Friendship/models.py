@@ -159,9 +159,15 @@ class Friendship(models.Model):
         requester = self.requested_by
         if requester is None or requester.is_deleted:
             return None
-        if responder.is_deleted:
+        return self.send_welcome_message(sender=responder, receiver=requester)
+
+    @classmethod
+    def send_welcome_message(cls, sender: User, receiver: User):
+        if sender is None or receiver is None:
             return None
-        welcome_message = (responder.welcome_message or '').strip()
+        if sender.is_deleted or receiver.is_deleted:
+            return None
+        welcome_message = (sender.welcome_message or '').strip()
         if not welcome_message:
             return None
 
@@ -169,14 +175,14 @@ class Friendship(models.Model):
         from Message.models import Message, MessageTypeChoice
         from User.models import NotificationEvent
 
-        chat = Chat.get_or_create_direct(responder, requester)
+        chat = Chat.get_or_create_direct(sender, receiver)
         message = Message.create(
             chat=chat,
-            user=responder,
+            user=sender,
             message_type=MessageTypeChoice.TEXT,
             content=welcome_message,
         )
-        NotificationEvent.emit_message_notifications(message, actor=responder)
+        NotificationEvent.emit_message_notifications(message, actor=sender)
         return message
 
     def reject(self, user: User):

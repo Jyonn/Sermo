@@ -61,6 +61,7 @@ class SpaceView(View):
         SpaceParams.name,
         SpaceParams.slug,
         SpaceParams.email,
+        SpaceParams.language,
         SpaceEmailVerificationCodeParams.code,
     )
     def post(self, request: Request):
@@ -68,10 +69,11 @@ class SpaceView(View):
             name=request.json.name,
             slug=request.json.slug,
             email=request.json.email,
+            language=request.json.language,
             code=request.json.code,
         )
         return dict(
-            space=space.json(),
+            space=space.json_private(),
             auth=auth.get_space_login_token(space),
         )
 
@@ -89,7 +91,7 @@ class SpaceLoginView(View):
             code=request.json.code,
         )
         return dict(
-            space=space.json(),
+            space=space.json_private(),
             auth=auth.get_space_login_token(space),
         )
 
@@ -150,4 +152,4 @@ class SpaceUserListView(View):
         offset = request.query.offset
         limit = request.query.limit
         rows = users.order_by('-last_heartbeat', 'id')[offset:offset + limit]
-        return [user.json() for user in rows]
+        return [user.jsonl() for user in rows]

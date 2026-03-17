@@ -42,7 +42,7 @@ class Space(models.Model):
             raise SpaceErrors.NOT_EXISTS(attr='slug', value=slug)
 
     @classmethod
-    def create(cls, name, slug, email, code):
+    def create(cls, name, slug, email, code, language):
         slug = (slug or '').strip().lower()
         email = (email or '').strip().lower()
         cls.vldt.slug(slug)
@@ -65,7 +65,7 @@ class Space(models.Model):
             email=email,
             email_verified_at=timezone.now(),
         )
-        space.ensure_official_user()
+        space.ensure_official_user(language=language)
         return space
 
     @classmethod
@@ -112,7 +112,7 @@ class Space(models.Model):
                 return candidate
             suffix += 1
 
-    def ensure_official_user(self):
+    def ensure_official_user(self, language='zh-CN'):
         from User.models import User, UserRoleChoice
 
         if self.official_user:
@@ -123,7 +123,7 @@ class Space(models.Model):
             name=self._build_official_name(self),
             password=get_random_string(32),
             role=UserRoleChoice.OFFICIAL,
-            language='zh-CN',
+            language=language,
             email=self.email,
             verified=True,
         )
@@ -133,6 +133,19 @@ class Space(models.Model):
         return official_user
 
     def json(self):
+        return self.jsonl()
+
+    def jsonl(self):
+        return self.dictify(
+            'id->space_id',
+            'name',
+            'slug',
+            'official_user',
+            'group_square_enabled',
+            'created_at',
+        )
+
+    def json_private(self):
         return self.dictify(
             'id->space_id',
             'name',

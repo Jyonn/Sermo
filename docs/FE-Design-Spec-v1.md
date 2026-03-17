@@ -299,23 +299,27 @@ CSS 建议：
 
 2. `POST /spaces`
 - 作用：创建 Space
-- JSON：`name, slug, email, code`
+- JSON：`name, slug, email, language(必填: en/zh-CN), code`
 - 返回：`{ space, auth }`（auth 为 Space token）
+  - `space` 为私有结构（包含 `email, email_verified_at`）
 
 3. `POST /spaces/login`
 - 作用：Space 邮箱验证码登录
 - JSON：`slug, email, code`
 - 返回：`{ space, auth }`（auth 为 Space token）
+  - `space` 为私有结构（包含 `email, email_verified_at`）
 
 4. `POST /spaces/join`
 - 作用：用户加入/登录 Space
 - JSON：`slug, name, password(可空), language(必填: en/zh-CN)`
 - 返回：`{ space, auth }`
   - 此处 `auth` 为用户登录信息：`{ auth, refresh, data }`
+  - `space` 为公开结构（不包含 `email`）
 
 5. `GET /spaces/me`
 - 作用：获取当前用户所属 Space
 - 鉴权：User token
+ - 返回：公开结构（不包含 `email`）
 
 6. `GET /spaces/users`
 - 作用：Space 用户列表
@@ -338,6 +342,8 @@ CSS 建议：
 9. `POST /users/me/bind-contact` JSON: `channel, target, code`
 10. `GET /users/me/welcome-message`
 11. `POST /users/me/welcome-message` JSON: `welcome_message`
+12. `POST /users/me/avatar/preset` JSON: `avatar_preset_id(1-80)`
+ - 返回：`{ avatar_type, avatar_uri }`
 
 ## 7.4 Friendship 相关
 
@@ -352,13 +358,16 @@ CSS 建议：
 1. `GET /chats/`：会话列表（含 `unread_count`, `last_read_at`）
 2. `POST /chats/direct` JSON: `peer_user_id`
 3. `POST /chats/group` JSON: `users, title`
+ - 约束：发起人必须 `verified`；被拉用户必须是发起人的已接受好友
 4. `DELETE /chats/group?chat_id=`
 5. `POST /chats/group/name?chat_id=` JSON: `title`
 6. `POST /chats/group/members?chat_id=` JSON: `users`
+ - 约束：群主必须 `verified`；被拉用户必须是群主的已接受好友
 7. `DELETE /chats/group/members?chat_id=` JSON: `users`
 8. `GET /chats/group/invites`
 9. `POST /chats/group/invite/respond?chat_id=` JSON: `accept(0|1)`
-10. `POST /chats/read?chat_id=`
+10. `POST /chats/group/leave?chat_id=`
+11. `POST /chats/read?chat_id=`
 
 ## 7.6 Message 相关
 
@@ -424,24 +433,41 @@ export enum MessageType {
   SYSTEM = 3,
 }
 
+export type AvatarType = 'preset' | 'custom';
+
 export interface SpaceDTO {
   space_id: number;
   name: string;
   slug: string;
-  email: string;
-  email_verified_at: number | null;
+  official_user: UserTinyDTO | null;
   group_square_enabled: boolean;
   created_at: number;
+}
+
+export interface SpacePrivateDTO extends SpaceDTO {
+  email: string;
+  email_verified_at: number | null;
 }
 
 export interface UserTinyDTO {
   user_id: number;
   name: string;
+  official: boolean;
+  avatar_type: AvatarType;
+  avatar_uri: string;
 }
 
-export interface UserDTO extends UserTinyDTO {
+export interface UserListDTO extends UserTinyDTO {
   is_alive: boolean;
   verified: boolean;
+}
+
+export interface UserMeDTO extends UserListDTO {
+  language: string;
+  welcome_message: string;
+  email: string | null;
+  phone: string | null;
+  bark: string | null;
   last_heartbeat: number;
   email_verified_at: number | null;
   phone_verified_at: number | null;
@@ -471,7 +497,7 @@ export interface ChatDTO {
   chat_type: ChatType;
   title: string | null;
   owner: UserTinyDTO | null;
-  members: UserDTO[];
+  members: UserListDTO[];
   group: boolean;
   created_at: number;
   last_chat_at: number;

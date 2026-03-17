@@ -106,7 +106,7 @@ class EmailVerificationConfirmView(View):
             channel=UserNotificationChoice.EMAIL,
             enabled=True,
         )
-        return request.user.json()
+        return request.user.json_me()
 
 
 class ContactVerificationCodeRequestView(View):
@@ -174,7 +174,7 @@ class ContactBindingConfirmView(View):
                 channel=UserNotificationChoice.EMAIL,
                 enabled=True,
             )
-        return request.user.json()
+        return request.user.json_me()
 
 
 class WelcomeMessageView(View):
@@ -187,3 +187,14 @@ class WelcomeMessageView(View):
     def post(self, request: Request):
         request.user.set_welcome_message(request.json.welcome_message)
         return dict(welcome_message=request.user.welcome_message)
+
+
+class AvatarPresetView(View):
+    @auth.require_user
+    @analyse.json(UserParams.avatar_preset_id)
+    def post(self, request: Request):
+        request.user.set_preset_avatar(request.json.avatar_preset_id)
+        return dict(
+            avatar_type=request.user.avatar_type,
+            avatar_uri=request.user.avatar_uri,
+        )

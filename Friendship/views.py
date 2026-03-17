@@ -11,7 +11,7 @@ class FriendshipListView(View):
     @auth.require_user
     def get(self, request: Request):
         friends = Friendship.friends_of(request.user)
-        return [friend.json() for friend in friends]
+        return [friend.jsonl() for friend in friends]
 
 
 class FriendshipRequestView(View):

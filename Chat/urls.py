@@ -8,6 +8,7 @@ from Chat.views import (
     GroupChatMemberView,
     GroupChatInviteRespondView,
     GroupChatInviteListView,
+    GroupChatLeaveView,
     ChatReadView,
 )
 
@@ -19,5 +20,6 @@ urlpatterns = [
     path('group/members', GroupChatMemberView.as_view(), name='group_chat_members'),
     path('group/invites', GroupChatInviteListView.as_view(), name='group_chat_invites'),
     path('group/invite/respond', GroupChatInviteRespondView.as_view(), name='group_chat_invite_respond'),
+    path('group/leave', GroupChatLeaveView.as_view(), name='group_chat_leave'),
     path('read', ChatReadView.as_view(), name='chat_read'),
 ]

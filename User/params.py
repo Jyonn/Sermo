@@ -20,6 +20,9 @@ class UserParams(metaclass=Params):
     lower_name: Validator
     password: Validator
     welcome_message: Validator
+    avatar_preset_id = Validator('avatar_preset_id') \
+        .to(int) \
+        .to(UserValidator.avatar_preset_id)
     language = Validator('language') \
         .to(str) \
         .null().default(None) \

@@ -10,6 +10,7 @@ from User.views import (
     ContactVerificationCodeRequestView,
     ContactBindingConfirmView,
     WelcomeMessageView,
+    AvatarPresetView,
 )
 
 urlpatterns = [
@@ -22,4 +23,5 @@ urlpatterns = [
     path('me/contact-code', ContactVerificationCodeRequestView.as_view(), name='contact verification code'),
     path('me/bind-contact', ContactBindingConfirmView.as_view(), name='contact bind confirm'),
     path('me/welcome-message', WelcomeMessageView.as_view(), name='welcome message'),
+    path('me/avatar/preset', AvatarPresetView.as_view(), name='avatar preset'),
 ]

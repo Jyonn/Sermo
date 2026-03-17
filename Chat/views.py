@@ -98,6 +98,18 @@ class GroupChatInviteListView(View):
         return ChatMember.pending_for_user(request.user, limit=100)
 
 
+class GroupChatLeaveView(View):
+    @auth.require_user
+    @analyse.query(ChatParams.chat_id)
+    @auth.require_chat_member()
+    def post(self, request):
+        chat: Chat = request.query.chat
+        if not chat.group:
+            raise ChatErrors.NOT_GROUP_CHAT(chat=chat.id)
+        chat.leave(request.user)
+        return OK
+
+
 class ChatReadView(View):
     @auth.require_user
     @analyse.query(ChatParams.chat_id)

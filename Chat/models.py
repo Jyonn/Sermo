@@ -69,7 +69,7 @@ class Chat(models.Model):
 
     def _dictify_members(self):
         members = ChatMember.objects.filter(chat=self, status=ChatMemberStatusChoice.ACTIVE).select_related('user')
-        return [item.user.json() for item in members]
+        return [item.user.jsonl() for item in members]
 
     def _dictify_owner(self):
         owner = ChatMember.objects.filter(
@@ -156,6 +156,17 @@ class Chat(models.Model):
         if not cls._has_friendship(user_low, user_high):
             raise ChatErrors.NOT_FRIENDS
 
+    @classmethod
+    def _require_verified_group_operator(cls, operator: User):
+        if not operator.verified:
+            raise ChatErrors.CREATOR_NOT_VERIFIED
+
+    @classmethod
+    def _require_friend_of(cls, owner: User, target: User):
+        user_low, user_high = cls._pair(owner, target)
+        if not cls._has_friendship(user_low, user_high):
+            raise ChatErrors.TARGET_NOT_FRIEND(user=target.name)
+
     def _direct_friendship_valid(self):
         if not self.direct:
             return True
@@ -220,12 +231,15 @@ class Chat(models.Model):
 
     @classmethod
     def create_group(cls, creator: User, users: List[User], title: str = None):
+        cls._require_verified_group_operator(creator)
         normalized = {creator.id: creator}
         for user in users:
             if user.space_id != creator.space_id:
                 raise ChatErrors.UNALIGNED_SPACE
             if user.is_deleted:
                 raise ChatErrors.USER_DELETED(user=user.name)
+            if user.id != creator.id:
+                cls._require_friend_of(creator, user)
             normalized[user.id] = user
 
         final_title = (title or '').strip()
@@ -264,10 +278,13 @@ class Chat(models.Model):
             raise ChatErrors.NOT_GROUP_CHAT(chat=self.id)
         if not self.is_owner(inviter):
             raise ChatErrors.FORBIDDEN
+        self._require_verified_group_operator(inviter)
         if user.space_id != self.space_id:
             raise ChatErrors.UNALIGNED_SPACE
         if user.is_deleted:
             raise ChatErrors.USER_DELETED(user=user.name)
+        if user.id != inviter.id:
+            self._require_friend_of(inviter, user)
         return ChatMember.invite(chat=self, user=user, invited_by=inviter)
 
     def respond_invite(self, user: User, accept: bool):

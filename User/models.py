@@ -28,12 +28,18 @@ class UserRoleChoice(Choice):
     MEMBER = 1
 
 
+class UserAvatarTypeChoice(Choice):
+    PRESET = 'preset'
+    CUSTOM = 'custom'
+
+
 class User(models.Model):
     vldt = UserValidator
     MEMBER_WELCOME_MESSAGE_ZH = '我已同意你的好友申请，快来和我聊天吧～'
     MEMBER_WELCOME_MESSAGE_EN = 'I accepted your friend request. Come chat with me!'
     OFFICIAL_WELCOME_MESSAGE_ZH = '欢迎加入{space}！'
     OFFICIAL_WELCOME_MESSAGE_EN = 'Welcome to {space}!'
+    AVATAR_PRESET_BASE_URI = 'https://image.6-79.cn/sermo/assets/avatars'
 
     space = models.ForeignKey('Space.Space', on_delete=models.CASCADE, related_name='users', db_index=True)
 
@@ -84,6 +90,15 @@ class User(models.Model):
         default='',
         validators=[vldt.welcome_message],
     )
+    avatar_type = models.CharField(
+        max_length=16,
+        choices=UserAvatarTypeChoice.to_choices(),
+        default=UserAvatarTypeChoice.PRESET,
+    )
+    avatar_uri = models.CharField(
+        max_length=255,
+        default='',
+    )
 
     created_at = models.DateTimeField(auto_now_add=True)
     salt = models.CharField(max_length=vldt.SALT_MAX_LENGTH)
@@ -127,6 +142,16 @@ class User(models.Model):
         return normalized_email
 
     @classmethod
+    def build_preset_avatar_uri(cls, preset_id: int):
+        validated = cls.vldt.avatar_preset_id(preset_id)
+        return f'{cls.AVATAR_PRESET_BASE_URI}/{validated:02d}.svg'
+
+    @classmethod
+    def _default_avatar_preset_id(cls, salt: str):
+        span = cls.vldt.AVATAR_PRESET_MAX_ID - cls.vldt.AVATAR_PRESET_MIN_ID + 1
+        return (sum(ord(c) for c in (salt or '')) % span) + cls.vldt.AVATAR_PRESET_MIN_ID
+
+    @classmethod
     def create(
             cls,
             space,
@@ -150,6 +175,7 @@ class User(models.Model):
             role=role,
             language=normalized_language,
         )
+        default_avatar_preset_id = cls._default_avatar_preset_id(salt)
         normalized_email = cls._assert_email_available(space, email) or None
         email_verified_at = timezone.now() if verified and normalized_email else None
         user = cls.objects.create(
@@ -163,6 +189,8 @@ class User(models.Model):
             email=normalized_email,
             email_verified_at=email_verified_at,
             account_level=UserAccountLevelChoice.VERIFIED if verified else UserAccountLevelChoice.BASIC,
+            avatar_type=UserAvatarTypeChoice.PRESET,
+            avatar_uri=cls.build_preset_avatar_uri(default_avatar_preset_id),
         )
         if password:
             user.set_password(password)
@@ -205,9 +233,15 @@ class User(models.Model):
     def _ensure_official_friendship(cls, user):
         if user.role == UserRoleChoice.OFFICIAL:
             return
-        official = user.space.official_user
-        from Friendship.models import Friendship
+        official = user.space.official_user or user.space.ensure_official_user()
+        from Friendship.models import Friendship, FriendshipStatusChoice
+
+        relation = Friendship.between(user, official)
+        should_send_welcome = relation is None or relation.status != FriendshipStatusChoice.ACCEPTED
+
         Friendship.ensure_locked_friendship(user, official)
+        if should_send_welcome:
+            Friendship.send_welcome_message(sender=official, receiver=user)
 
     def set_password(self, password, save=True):
         if not password:
@@ -286,6 +320,13 @@ class User(models.Model):
             return self
         raise UserErrors.CONTACT_CHANNEL_INVALID
 
+    def set_preset_avatar(self, preset_id: int, save=True):
+        self.avatar_type = UserAvatarTypeChoice.PRESET
+        self.avatar_uri = self.build_preset_avatar_uri(preset_id)
+        if save:
+            self.save(update_fields=['avatar_type', 'avatar_uri'])
+        return self
+
     @property
     def verified(self):
         return self.account_level == UserAccountLevelChoice.VERIFIED
@@ -328,12 +369,26 @@ class User(models.Model):
         return self.is_official
 
     def tiny_json(self):
-        return self.dictify('name', 'user_id', 'official')
+        return self.dictify('name', 'user_id', 'official', 'avatar_type', 'avatar_uri')
+
+    def jsonl(self):
+        return self.dictify(
+            'name',
+            'user_id',
+            'official',
+            'verified',
+            'is_alive',
+            'avatar_type',
+            'avatar_uri',
+        )
 
     def jwt_json(self):
         return self.dictify('name', 'user_id', 'space_id', 'language')
 
     def json(self):
+        return self.jsonl()
+
+    def json_me(self):
         return self.dictify(
             'name',
             'user_id',
@@ -342,6 +397,11 @@ class User(models.Model):
             'welcome_message',
             'is_alive',
             'verified',
+            'avatar_type',
+            'avatar_uri',
+            'email',
+            'phone',
+            'bark',
             'last_heartbeat',
             'email_verified_at',
             'phone_verified_at',

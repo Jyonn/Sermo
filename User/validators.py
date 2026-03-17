@@ -34,6 +34,7 @@ class UserErrors:
     CONTACT_CHANNEL_INVALID = Error(message=_('Invalid contact channel'), code=Code.BadRequest)
     CONTACT_SEND_FAILED = Error(message=_('Failed to send contact verification message'), code=Code.InternalServerError)
     EMAIL_SEND_FAILED = Error(message=_('Failed to send verification email'), code=Code.InternalServerError)
+    AVATAR_PRESET_INVALID = Error(message=_('Invalid avatar preset id'), code=Code.BadRequest)
 
 
 RESERVED_SPACE_SLUGS = {
@@ -67,6 +68,8 @@ class UserValidator:
         'zh-cn': 'zh-CN',
         'zh_cn': 'zh-CN',
     }
+    AVATAR_PRESET_MIN_ID = 1
+    AVATAR_PRESET_MAX_ID = 80
 
     @staticmethod
     def name(value):
@@ -118,3 +121,10 @@ class UserValidator:
         if len(message) > cls.WELCOME_MESSAGE_MAX_LENGTH:
             raise UserErrors.WELCOME_MESSAGE_TOO_LONG
         return message
+
+    @classmethod
+    def avatar_preset_id(cls, value):
+        preset_id = int(value)
+        if not (cls.AVATAR_PRESET_MIN_ID <= preset_id <= cls.AVATAR_PRESET_MAX_ID):
+            raise UserErrors.AVATAR_PRESET_INVALID
+        return preset_id
