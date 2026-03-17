@@ -13,6 +13,7 @@ from User.models import (
 )
 from User.params import (
     AuthParams,
+    UserParams,
     NotificationPreferenceParams,
     EmailVerificationCodeParams,
     UserContactVerificationCodeParams,
@@ -174,3 +175,15 @@ class ContactBindingConfirmView(View):
                 enabled=True,
             )
         return request.user.json()
+
+
+class WelcomeMessageView(View):
+    @auth.require_user
+    def get(self, request: Request):
+        return dict(welcome_message=request.user.welcome_message)
+
+    @auth.require_user
+    @analyse.json(UserParams.welcome_message)
+    def post(self, request: Request):
+        request.user.set_welcome_message(request.json.welcome_message)
+        return dict(welcome_message=request.user.welcome_message)

@@ -12,6 +12,7 @@ class SpaceParams(metaclass=Params):
     name: Validator
     email: Validator
     password = UserParams.password.copy().null().default(None)
+    language = UserParams.language.copy()
 
 
 class SpaceEmailVerificationCodeParams(metaclass=Params):

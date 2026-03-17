@@ -19,6 +19,12 @@ class UserParams(metaclass=Params):
     name: Validator
     lower_name: Validator
     password: Validator
+    welcome_message: Validator
+    language = Validator('language') \
+        .to(str) \
+        .null().default(None) \
+        .bool(lambda x: x is not None, message=_('language is required')) \
+        .to(UserValidator.language)
 
 
 class AuthParams(metaclass=Params):

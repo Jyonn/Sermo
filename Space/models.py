@@ -123,6 +123,7 @@ class Space(models.Model):
             name=self._build_official_name(self),
             password=get_random_string(32),
             role=UserRoleChoice.OFFICIAL,
+            language='zh-CN',
             email=self.email,
             verified=True,
         )

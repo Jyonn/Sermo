@@ -24,6 +24,9 @@ class UserErrors:
     USER_FORBIDDEN = Error(message=_('User does not belong to this space'), code=Code.Forbidden)
     SPACE_FORBIDDEN = Error(message=_('Users are not in the same space'), code=Code.Forbidden)
     EMAIL_TAKEN = Error(message=_('Email is already taken in this space'), code=Code.BadRequest)
+    LANGUAGE_INVALID = Error(message=_('Unsupported language'), code=Code.BadRequest)
+    WELCOME_MESSAGE_EMPTY = Error(message=_('Welcome message cannot be empty'), code=Code.BadRequest)
+    WELCOME_MESSAGE_TOO_LONG = Error(message=_('Welcome message is too long'), code=Code.BadRequest)
     EMAIL_CODE_INVALID = Error(message=_('Invalid email verification code'), code=Code.BadRequest)
     EMAIL_CODE_EXPIRED = Error(message=_('Email verification code expired'), code=Code.BadRequest)
     CONTACT_CODE_INVALID = Error(message=_('Invalid contact verification code'), code=Code.BadRequest)
@@ -53,6 +56,17 @@ class UserValidator:
     SPACE_SLUG_MAX_LENGTH = 15
     SPACE_SLUG_MIN_LENGTH = 3
     SPACE_SLUG_RANDOM_LENGTH = 5
+    WELCOME_MESSAGE_MAX_LENGTH = 500
+    LANGUAGE_MAX_LENGTH = 16
+    DEFAULT_LANGUAGE = 'en'
+    SUPPORTED_LANGUAGES = {'en', 'zh-CN'}
+    LANGUAGE_ALIASES = {
+        'en': 'en',
+        'en-us': 'en',
+        'en_us': 'en',
+        'zh-cn': 'zh-CN',
+        'zh_cn': 'zh-CN',
+    }
 
     @staticmethod
     def name(value):
@@ -78,3 +92,29 @@ class UserValidator:
         allow_string = string.ascii_lowercase + string.digits + '-'
         if not all(c in allow_string for c in value):
             raise UserErrors.SPACE_SLUG_INVALID
+
+    @classmethod
+    def normalize_language(cls, value):
+        raw = (value or cls.DEFAULT_LANGUAGE).strip()
+        if not raw:
+            return cls.DEFAULT_LANGUAGE
+        lower = raw.lower().replace('_', '-')
+        if lower in cls.LANGUAGE_ALIASES:
+            return cls.LANGUAGE_ALIASES[lower]
+        return raw
+
+    @classmethod
+    def language(cls, value):
+        normalized = cls.normalize_language(value)
+        if normalized not in cls.SUPPORTED_LANGUAGES:
+            raise UserErrors.LANGUAGE_INVALID
+        return normalized
+
+    @classmethod
+    def welcome_message(cls, value):
+        message = (value or '').strip()
+        if not message:
+            raise UserErrors.WELCOME_MESSAGE_EMPTY
+        if len(message) > cls.WELCOME_MESSAGE_MAX_LENGTH:
+            raise UserErrors.WELCOME_MESSAGE_TOO_LONG
+        return message

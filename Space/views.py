@@ -99,6 +99,7 @@ class SpaceJoinView(View):
         SpaceParams.slug,
         SpaceParams.name,
         SpaceParams.password,
+        SpaceParams.language,
     )
     def post(self, request: Request):
         space = Space.get_by_slug(request.json.slug)
@@ -106,6 +107,7 @@ class SpaceJoinView(View):
             space=space,
             name=request.json.name,
             password=request.json.password,
+            language=request.json.language,
         )
         return dict(
             space=space.json(),

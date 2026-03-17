@@ -30,6 +30,10 @@ class UserRoleChoice(Choice):
 
 class User(models.Model):
     vldt = UserValidator
+    MEMBER_WELCOME_MESSAGE_ZH = '我已同意你的好友申请，快来和我聊天吧～'
+    MEMBER_WELCOME_MESSAGE_EN = 'I accepted your friend request. Come chat with me!'
+    OFFICIAL_WELCOME_MESSAGE_ZH = '欢迎加入{space}！'
+    OFFICIAL_WELCOME_MESSAGE_EN = 'Welcome to {space}!'
 
     space = models.ForeignKey('Space.Space', on_delete=models.CASCADE, related_name='users', db_index=True)
 
@@ -51,6 +55,11 @@ class User(models.Model):
         default=UserRoleChoice.MEMBER,
         db_index=True,
     )
+    language = models.CharField(
+        max_length=vldt.LANGUAGE_MAX_LENGTH,
+        default=vldt.DEFAULT_LANGUAGE,
+        validators=[vldt.language],
+    )
 
     offline_notification_interval = models.PositiveIntegerField(
         default=vldt.OFFLINE_MIN_INTERVAL,
@@ -70,6 +79,11 @@ class User(models.Model):
     phone_verified_at = models.DateTimeField(null=True, blank=True)
     bark = models.CharField(max_length=100, null=True, blank=True)
     bark_verified_at = models.DateTimeField(null=True, blank=True)
+    welcome_message = models.CharField(
+        max_length=vldt.WELCOME_MESSAGE_MAX_LENGTH,
+        default='',
+        validators=[vldt.welcome_message],
+    )
 
     created_at = models.DateTimeField(auto_now_add=True)
     salt = models.CharField(max_length=vldt.SALT_MAX_LENGTH)
@@ -121,6 +135,7 @@ class User(models.Model):
             role: int = UserRoleChoice.MEMBER,
             email: str = None,
             verified: bool = False,
+            language: str = None,
     ):
         name = name.strip()
         cls.vldt.name(name)
@@ -129,6 +144,12 @@ class User(models.Model):
         salt = function.get_salt(length=cls.vldt.SALT_MAX_LENGTH)
         if role == UserRoleChoice.OFFICIAL:
             verified = True
+        normalized_language = cls.vldt.language(language)
+        welcome_message = cls.default_welcome_message(
+            space=space,
+            role=role,
+            language=normalized_language,
+        )
         normalized_email = cls._assert_email_available(space, email) or None
         email_verified_at = timezone.now() if verified and normalized_email else None
         user = cls.objects.create(
@@ -137,6 +158,8 @@ class User(models.Model):
             lower_name=name.lower(),
             salt=salt,
             role=role,
+            language=normalized_language,
+            welcome_message=welcome_message,
             email=normalized_email,
             email_verified_at=email_verified_at,
             account_level=UserAccountLevelChoice.VERIFIED if verified else UserAccountLevelChoice.BASIC,
@@ -147,11 +170,17 @@ class User(models.Model):
         return user
 
     @classmethod
-    def login(cls, space, name, password):
+    def login(cls, space, name, password, language=None):
         name = (name or '').strip()
+        normalized_language = cls.vldt.language(language)
         user = cls.objects.filter(space=space, lower_name=name.lower()).first()
         if user is None:
-            return cls.create(space=space, name=name, password=password)
+            return cls.create(
+                space=space,
+                name=name,
+                password=password,
+                language=normalized_language,
+            )
 
         if user.is_deleted:
             raise UserErrors.USER_DELETED
@@ -160,11 +189,15 @@ class User(models.Model):
                 raise UserErrors.PASSWORD_REQUIRED
             if not function.verify_password(password, user.salt, user.password):
                 raise UserErrors.PASSWORD_ERROR
+            user.set_language(normalized_language)
+            user.ensure_welcome_message(language=normalized_language)
             cls._ensure_official_friendship(user)
             return user
 
         if password:
             user.set_password(password)
+        user.set_language(normalized_language)
+        user.ensure_welcome_message(language=normalized_language)
         cls._ensure_official_friendship(user)
         return user
 
@@ -182,6 +215,45 @@ class User(models.Model):
         self.password = function.hash_password(password, self.salt)
         if save:
             self.save(update_fields=['password'])
+        return self
+
+    def set_language(self, language, save=True):
+        normalized = self.vldt.language(language)
+        if self.language == normalized:
+            return self
+        self.language = normalized
+        if save:
+            self.save(update_fields=['language'])
+        return self
+
+    @classmethod
+    def default_welcome_message(cls, space, role, language):
+        normalized_language = cls.vldt.normalize_language(language)
+        if role == UserRoleChoice.OFFICIAL:
+            if normalized_language == 'en':
+                return cls.OFFICIAL_WELCOME_MESSAGE_EN.format(space=space.name)
+            return cls.OFFICIAL_WELCOME_MESSAGE_ZH.format(space=space.name)
+        if normalized_language == 'en':
+            return cls.MEMBER_WELCOME_MESSAGE_EN
+        return cls.MEMBER_WELCOME_MESSAGE_ZH
+
+    def ensure_welcome_message(self, language=None, save=True):
+        if (self.welcome_message or '').strip():
+            return self
+        self.welcome_message = self.default_welcome_message(
+            space=self.space,
+            role=self.role,
+            language=language or self.language,
+        )
+        if save:
+            self.save(update_fields=['welcome_message'])
+        return self
+
+    def set_welcome_message(self, welcome_message, save=True):
+        normalized = self.vldt.welcome_message(welcome_message)
+        self.welcome_message = normalized
+        if save:
+            self.save(update_fields=['welcome_message'])
         return self
 
     def verify_email_and_upgrade(self, email, password):
@@ -259,13 +331,15 @@ class User(models.Model):
         return self.dictify('name', 'user_id', 'official')
 
     def jwt_json(self):
-        return self.dictify('name', 'user_id', 'space_id')
+        return self.dictify('name', 'user_id', 'space_id', 'language')
 
     def json(self):
         return self.dictify(
             'name',
             'user_id',
             'official',
+            'language',
+            'welcome_message',
             'is_alive',
             'verified',
             'last_heartbeat',

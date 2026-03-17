@@ -9,6 +9,7 @@ from User.views import (
     EmailVerificationConfirmView,
     ContactVerificationCodeRequestView,
     ContactBindingConfirmView,
+    WelcomeMessageView,
 )
 
 urlpatterns = [
@@ -20,4 +21,5 @@ urlpatterns = [
     path('me/verify-email', EmailVerificationConfirmView.as_view(), name='email verification confirm'),
     path('me/contact-code', ContactVerificationCodeRequestView.as_view(), name='contact verification code'),
     path('me/bind-contact', ContactBindingConfirmView.as_view(), name='contact bind confirm'),
+    path('me/welcome-message', WelcomeMessageView.as_view(), name='welcome message'),
 ]

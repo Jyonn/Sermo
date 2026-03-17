@@ -152,7 +152,32 @@ class Friendship(models.Model):
                         by_user=user.tiny_json(),
                     ),
                 )
+            self._send_accept_welcome_message(responder=user)
         return self
+
+    def _send_accept_welcome_message(self, responder: User):
+        requester = self.requested_by
+        if requester is None or requester.is_deleted:
+            return None
+        if responder.is_deleted:
+            return None
+        welcome_message = (responder.welcome_message or '').strip()
+        if not welcome_message:
+            return None
+
+        from Chat.models import Chat
+        from Message.models import Message, MessageTypeChoice
+        from User.models import NotificationEvent
+
+        chat = Chat.get_or_create_direct(responder, requester)
+        message = Message.create(
+            chat=chat,
+            user=responder,
+            message_type=MessageTypeChoice.TEXT,
+            content=welcome_message,
+        )
+        NotificationEvent.emit_message_notifications(message, actor=responder)
+        return message
 
     def reject(self, user: User):
         if not self._is_participant(user):
