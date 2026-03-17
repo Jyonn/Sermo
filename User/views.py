@@ -72,7 +72,7 @@ class EmailVerificationCodeRequestView(View):
         body = f'Your verification code is {verify_code.code}. It expires in 10 minutes.'
         try:
             notificator.mail(
-                target=verify_code.email,
+                mail=verify_code.email,
                 title=title,
                 body=body,
                 recipient_name=request.user.name,
@@ -126,7 +126,7 @@ class ContactVerificationCodeRequestView(View):
         try:
             if channel == UserNotificationChoice.EMAIL:
                 notificator.mail(
-                    target=code_obj.target,
+                    mail=code_obj.target,
                     title=title,
                     body=body,
                     recipient_name=request.user.name,

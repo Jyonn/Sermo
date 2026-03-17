@@ -46,7 +46,7 @@ class SpaceEmailCodeRequestView(View):
         body = f'Your verification code is {verify_code.code}. It expires in {SpaceEmailVerificationCode.EXPIRE_SECONDS // 60} minutes.'
         try:
             notificator.mail(
-                target=verify_code.email,
+                mail=verify_code.email,
                 title=title,
                 body=body,
                 recipient_name='Space Admin',

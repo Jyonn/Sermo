@@ -23,6 +23,11 @@ class UserAccountLevelChoice(Choice):
     VERIFIED = 1
 
 
+class UserRoleChoice(Choice):
+    OFFICIAL = 0
+    MEMBER = 1
+
+
 class User(models.Model):
     vldt = UserValidator
 
@@ -40,6 +45,11 @@ class User(models.Model):
     account_level = models.IntegerField(
         choices=UserAccountLevelChoice.to_choices(),
         default=UserAccountLevelChoice.BASIC,
+    )
+    role = models.IntegerField(
+        choices=UserRoleChoice.to_choices(),
+        default=UserRoleChoice.MEMBER,
+        db_index=True,
     )
 
     offline_notification_interval = models.PositiveIntegerField(
@@ -87,21 +97,53 @@ class User(models.Model):
             raise UserErrors.EXISTS
 
     @classmethod
-    def create(cls, space, name, password=None):
+    def _normalize_email(cls, email: str):
+        return (email or '').strip().lower()
+
+    @classmethod
+    def _assert_email_available(cls, space, email: str, exclude_user_id=None):
+        normalized_email = cls._normalize_email(email)
+        if not normalized_email:
+            return normalized_email
+        query = cls.objects.filter(space=space, email=normalized_email)
+        if exclude_user_id is not None:
+            query = query.exclude(id=exclude_user_id)
+        if query.exists():
+            raise UserErrors.EMAIL_TAKEN
+        return normalized_email
+
+    @classmethod
+    def create(
+            cls,
+            space,
+            name,
+            password=None,
+            role: int = UserRoleChoice.MEMBER,
+            email: str = None,
+            verified: bool = False,
+    ):
         name = name.strip()
         cls.vldt.name(name)
         cls._assert_name_available(space, name)
 
         salt = function.get_salt(length=cls.vldt.SALT_MAX_LENGTH)
+        if role == UserRoleChoice.OFFICIAL:
+            verified = True
+        normalized_email = cls._assert_email_available(space, email) or None
+        email_verified_at = timezone.now() if verified and normalized_email else None
         user = cls.objects.create(
             space=space,
             name=name,
             lower_name=name.lower(),
             salt=salt,
-            account_level=UserAccountLevelChoice.BASIC,
+            role=role,
+            email=normalized_email,
+            email_verified_at=email_verified_at,
+            account_level=UserAccountLevelChoice.VERIFIED if verified else UserAccountLevelChoice.BASIC,
         )
         if password:
             user.set_password(password)
+        cls._ensure_official_friendship(user)
         return user
 
     @classmethod
@@ -118,11 +160,21 @@ class User(models.Model):
                 raise UserErrors.PASSWORD_REQUIRED
             if not function.verify_password(password, user.salt, user.password):
                 raise UserErrors.PASSWORD_ERROR
+            cls._ensure_official_friendship(user)
             return user
 
         if password:
             user.set_password(password)
+        cls._ensure_official_friendship(user)
         return user
+
+    @classmethod
+    def _ensure_official_friendship(cls, user):
+        if user.role == UserRoleChoice.OFFICIAL:
+            return
+        official = user.space.official_user
+        from Friendship.models import Friendship
+        Friendship.ensure_locked_friendship(user, official)
 
     def set_password(self, password, save=True):
         if not password:
@@ -134,7 +186,7 @@ class User(models.Model):
 
     def verify_email_and_upgrade(self, email, password):
         self.set_password(password, save=False)
-        self.email = (email or '').strip().lower()
+        self.email = self._assert_email_available(self.space, email, exclude_user_id=self.id)
         self.email_verified_at = timezone.now()
         self.account_level = UserAccountLevelChoice.VERIFIED
         self.save(update_fields=['password', 'email', 'email_verified_at', 'account_level'])
@@ -145,7 +197,7 @@ class User(models.Model):
         now = timezone.now()
 
         if channel == UserNotificationChoice.EMAIL:
-            self.email = target.lower()
+            self.email = self._assert_email_available(self.space, target, exclude_user_id=self.id)
             self.email_verified_at = now
             self.account_level = UserAccountLevelChoice.VERIFIED
             self.save(update_fields=['email', 'email_verified_at', 'account_level'])
@@ -165,6 +217,10 @@ class User(models.Model):
     @property
     def verified(self):
         return self.account_level == UserAccountLevelChoice.VERIFIED
+
+    @property
+    def is_official(self):
+        return self.role == UserRoleChoice.OFFICIAL
 
     def heartbeat(self):
         self.last_heartbeat = timezone.now()
@@ -196,8 +252,11 @@ class User(models.Model):
             return None
         return self.bark_verified_at.timestamp()
 
+    def _dictify_official(self):
+        return self.is_official
+
     def tiny_json(self):
-        return self.dictify('name', 'user_id')
+        return self.dictify('name', 'user_id', 'official')
 
     def jwt_json(self):
         return self.dictify('name', 'user_id', 'space_id')
@@ -206,6 +265,7 @@ class User(models.Model):
         return self.dictify(
             'name',
             'user_id',
+            'official',
             'is_alive',
             'verified',
             'last_heartbeat',
@@ -245,7 +305,7 @@ class EmailVerificationCode(models.Model):
 
     @classmethod
     def issue(cls, user: User, email: str):
-        email = (email or '').strip().lower()
+        email = User._assert_email_available(user.space, email, exclude_user_id=user.id)
         now = timezone.now()
         cls.objects.filter(user=user, used_at__isnull=True).update(used_at=now)
         code = get_random_string(cls.CODE_LENGTH, allowed_chars='0123456789')
@@ -297,6 +357,12 @@ class UserContactVerificationCode(models.Model):
     @classmethod
     def issue(cls, user: User, channel: int, target: str):
         normalized_target = cls._normalize_target(channel, target)
+        if channel == UserNotificationChoice.EMAIL:
+            normalized_target = User._assert_email_available(
+                user.space,
+                normalized_target,
+                exclude_user_id=user.id,
+            )
         now = timezone.now()
         cls.objects.filter(
             user=user,

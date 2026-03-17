@@ -52,3 +52,18 @@ class MessageView(View):
         message: Message = request.query.message
         message.remove()
         return OK
+
+
+class MessageSyncView(View):
+    @auth.require_user
+    @analyse.query(
+        MessageParams.after,
+        MessageParams.limit,
+    )
+    def get(self, request: Request):
+        after = request.query.after or 0
+        return Message.sync_for_user(
+            user=request.user,
+            after=after,
+            limit=request.query.limit,
+        )

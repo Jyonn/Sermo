@@ -1,4 +1,4 @@
-from django.utils.translation import gettext as _
+from django.utils.translation import gettext_lazy as _
 from smartdjango import Params, Validator
 
 from Space.models import Space, SpaceEmailVerificationCode
@@ -11,7 +11,7 @@ class SpaceParams(metaclass=Params):
     slug: Validator
     name: Validator
     email: Validator
-    password = UserParams.password.copy()
+    password = UserParams.password.copy().null().default(None)
 
 
 class SpaceEmailVerificationCodeParams(metaclass=Params):

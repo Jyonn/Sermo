@@ -12,6 +12,8 @@ from Space.validators import SpaceValidator, SpaceErrors
 class Space(models.Model):
     vldt = SpaceValidator
 
+    OFFICIAL_NAME = 'Official'
+
     name = models.CharField(max_length=vldt.NAME_MAX_LENGTH)
     slug = models.CharField(
         max_length=vldt.SLUG_MAX_LENGTH,
@@ -21,6 +23,13 @@ class Space(models.Model):
     )
     email = models.EmailField(unique=True, db_index=True)
     email_verified_at = models.DateTimeField(null=True, blank=True)
+    official_user = models.OneToOneField(
+        'User.User',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='official_space',
+    )
     group_square_enabled = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -50,12 +59,14 @@ class Space(models.Model):
             purpose=SpaceEmailCodePurposeChoice.REGISTER,
             space=None,
         )
-        return cls.objects.create(
+        space = cls.objects.create(
             name=(name or '').strip(),
             slug=slug,
             email=email,
             email_verified_at=timezone.now(),
         )
+        space.ensure_official_user()
+        return space
 
     @classmethod
     def login_by_email_code(cls, slug, email, code):
@@ -79,6 +90,47 @@ class Space(models.Model):
             return None
         return self.email_verified_at.timestamp()
 
+    def _dictify_official_user(self):
+        if self.official_user_id is None:
+            return None
+        return self.official_user.tiny_json()
+
+    @classmethod
+    def _build_official_name(cls, space):
+        from User.models import User
+
+        base = cls.OFFICIAL_NAME
+        if not User.objects.filter(space=space, lower_name=base.lower()).exists():
+            return base
+
+        suffix = 2
+        while True:
+            suffix_str = str(suffix)
+            room = max(1, User.vldt.NAME_MAX_LENGTH - len(suffix_str))
+            candidate = f'{base[:room]}{suffix_str}'
+            if not User.objects.filter(space=space, lower_name=candidate.lower()).exists():
+                return candidate
+            suffix += 1
+
+    def ensure_official_user(self):
+        from User.models import User, UserRoleChoice
+
+        if self.official_user:
+            return self.official_user
+
+        official_user = User.create(
+            space=self,
+            name=self._build_official_name(self),
+            password=get_random_string(32),
+            role=UserRoleChoice.OFFICIAL,
+            email=self.email,
+            verified=True,
+        )
+
+        self.official_user = official_user
+        self.save(update_fields=['official_user'])
+        return official_user
+
     def json(self):
         return self.dictify(
             'id->space_id',
@@ -86,6 +138,7 @@ class Space(models.Model):
             'slug',
             'email',
             'email_verified_at',
+            'official_user',
             'group_square_enabled',
             'created_at',
         )

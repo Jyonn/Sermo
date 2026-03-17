@@ -25,6 +25,7 @@ Below is a list of all available API endpoints with their HTTP methods and a bri
   - POST /chats/read – **Mark Chat Read.** Updates last-read time for unread counts.
 - **Messaging**
   - GET /messages/ – **List Messages.** Retrieve messages in a specified chat, with optional pagination parameters (before/after a certain message).
+  - GET /messages/sync – **Sync New Messages.** Retrieve incremental new messages across all chats visible to the current user by global message cursor.
   - POST /messages/ – **Send Message.** Post a new message to a specified chat.
   - DELETE /messages/ – **Delete Message.** Remove a specific message (only the message sender or the chat’s host can delete it).
 
@@ -473,7 +474,7 @@ JSON body with the following field:
 ```
 _(In this example, the group chat 15 has been renamed to “Project Team Chat”.)_
 
-### MessageListView – GET /messages/, POST /messages/, DELETE /messages/
+### MessageListView – GET /messages/, GET /messages/sync, POST /messages/, DELETE /messages/
 
 This view handles retrieving, sending, and deleting messages within chats. The user (host or guest) must be a participant in the chat to interact with its messages. All responses for message actions will include message data in a standardized format.
 
@@ -539,6 +540,50 @@ Messages are returned according to the specified filter: for example, if before 
 ```
 
 _(In this example, two text messages are returned: message 45 sent by Bob (a guest) and message 46 by Alice (the host).)_
+
+#### GET /messages/sync – Sync New Messages Across Chats
+
+**Functionality:** Retrieves incremental new messages across all chats that the current user can access, using a global `message_id` cursor.
+
+**Request:** Query parameters:
+
+- `after` (int): Global message cursor. Return messages with `message_id > after`. Recommended initial value: `0`.
+- `limit` (int): Maximum number of messages to return in one batch. Must be between 5 and 100.
+
+**Response:** Returns an object:
+
+- `items` (list): Message list ordered by `message_id` ascending. Each item includes standard message fields plus `chat_id`.
+- `has_more` (bool): Whether there are more messages after this batch.
+- `next_after` (int): Cursor for the next sync request.
+
+**Example Response:**
+
+```json
+{
+  "code": 200,
+  "message": "OK",
+  "body": {
+    "items": [
+      {
+        "message_id": 1201,
+        "chat_id": 15,
+        "user": {
+          "name": "Alice",
+          "user_id": 1
+        },
+        "type": 0,
+        "content": "hello",
+        "created_at": 1680003000
+      }
+    ],
+    "has_more": false,
+    "next_after": 1201
+  },
+  "details": [],
+  "user_message": "OK",
+  "identifier": "OK"
+}
+```
 
 #### POST /messages/ – Send a New Message
 

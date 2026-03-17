@@ -77,7 +77,7 @@ class Friendship(models.Model):
     @classmethod
     def ensure_locked_friendship(cls, user_a: User, user_b: User):
         space, user_low, user_high = cls._pair(user_a, user_b)
-        item, _created = cls.objects.get_or_create(
+        item, _ = cls.objects.get_or_create(
             space=space,
             user_low=user_low,
             user_high=user_high,
@@ -88,15 +88,10 @@ class Friendship(models.Model):
                 responded_at=timezone.now(),
             ),
         )
-        if item.status != FriendshipStatusChoice.ACCEPTED or not item.is_system_locked:
-            item.status = FriendshipStatusChoice.ACCEPTED
-            item.is_system_locked = True
-            item.responded_at = timezone.now()
-            item.save(update_fields=['status', 'is_system_locked', 'responded_at', 'updated_at'])
         return item
 
     @classmethod
-    def create_request(cls, from_user: User, to_user: User):
+    def create(cls, from_user: User, to_user: User):
         if not from_user.verified:
             raise FriendshipErrors.REQUEST_FORBIDDEN
 

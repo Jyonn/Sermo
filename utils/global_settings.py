@@ -9,7 +9,7 @@ class Globals:
         NOTIFICATOR_NAME = Config.get_value_by_key(CI.NOTIFICATOR_NAME)
         NOTIFICATOR_TOKEN = Config.get_value_by_key(CI.NOTIFICATOR_TOKEN)
         NOTIFICATOR_HOST = Config.get_value_by_key(CI.NOTIFICATOR_HOST)
-        NOTIFICATOR_TIMEOUT = Config.get_value_by_key(CI.NOTIFICATOR_TIMEOUT)
+        NOTIFICATOR_TIMEOUT = Config.get_value_by_key(CI.NOTIFICATOR_TIMEOUT, to=int)
     except Exception as e:
         if not PROJ_INIT:
             raise e

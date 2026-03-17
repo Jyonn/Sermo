@@ -100,11 +100,16 @@ class Chat(models.Model):
         self.save(update_fields=['is_deleted'])
 
     def has_active_member(self, user: User):
-        return ChatMember.objects.filter(
+        member_exists = ChatMember.objects.filter(
             chat=self,
             user=user,
             status=ChatMemberStatusChoice.ACTIVE,
         ).exists()
+        if not member_exists:
+            return False
+        if not self.direct:
+            return True
+        return self._direct_friendship_valid()
 
     def is_owner(self, user: User):
         return ChatMember.objects.filter(
@@ -116,13 +121,14 @@ class Chat(models.Model):
 
     @classmethod
     def get_user_chats(cls, user: User):
-        return list(
+        chats = list(
             cls.objects.filter(
                 is_deleted=False,
                 chat_members__user=user,
                 chat_members__status=ChatMemberStatusChoice.ACTIVE,
             ).distinct()
         )
+        return [chat for chat in chats if chat.has_active_member(user)]
 
     @classmethod
     def _pair(cls, self_user: User, peer_user: User):
@@ -135,8 +141,45 @@ class Chat(models.Model):
         return peer_user, self_user
 
     @classmethod
+    def _has_friendship(cls, user_low: User, user_high: User):
+        from Friendship.models import Friendship, FriendshipStatusChoice
+
+        return Friendship.objects.filter(
+            space=user_low.space,
+            user_low=user_low,
+            user_high=user_high,
+            status=FriendshipStatusChoice.ACCEPTED,
+        ).exists()
+
+    @classmethod
+    def _require_friendship(cls, user_low: User, user_high: User):
+        if not cls._has_friendship(user_low, user_high):
+            raise ChatErrors.NOT_FRIENDS
+
+    def _direct_friendship_valid(self):
+        if not self.direct:
+            return True
+        active_member_ids = list(
+            ChatMember.objects.filter(
+                chat=self,
+                status=ChatMemberStatusChoice.ACTIVE,
+            ).values_list('user_id', flat=True)
+        )
+        if len(active_member_ids) != 2:
+            return False
+        user_low_id, user_high_id = sorted(active_member_ids)
+        from Friendship.models import Friendship, FriendshipStatusChoice
+        return Friendship.objects.filter(
+            space_id=self.space_id,
+            user_low_id=user_low_id,
+            user_high_id=user_high_id,
+            status=FriendshipStatusChoice.ACCEPTED,
+        ).exists()
+
+    @classmethod
     def get_or_create_direct(cls, self_user: User, peer_user: User):
         user_low, user_high = cls._pair(self_user, peer_user)
+        cls._require_friendship(user_low, user_high)
         direct_chats = cls.objects.filter(
             space_id=user_low.space_id,
             chat_type=ChatTypeChoice.DIRECT,

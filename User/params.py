@@ -1,4 +1,5 @@
-from django.utils.translation import gettext as _
+from django.utils.text import format_lazy
+from django.utils.translation import gettext_lazy as _
 from smartdjango import Params, Validator
 
 from User.models import (
@@ -61,9 +62,10 @@ class EmailVerificationCodeParams(metaclass=Params):
         .to(str) \
         .bool(
             lambda x: UserValidator.PASSWORD_MIN_LENGTH <= len(x) <= UserValidator.PASSWORD_MAX_LENGTH,
-            message=_('Password should be at least {password_length} characters long').format(
-                password_length=UserValidator.PASSWORD_MIN_LENGTH
-            )
+            message=format_lazy(
+                _('Password should be at least {password_length} characters long'),
+                password_length=UserValidator.PASSWORD_MIN_LENGTH,
+            ),
         )
 
 

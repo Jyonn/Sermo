@@ -29,7 +29,8 @@ SECRET_KEY = open(os.path.join(BASE_DIR, '.auth')).read()
 DEBUG = True
 PROJ_INIT = True
 
-ALLOWED_HOSTS = ['api.sermo.com', 'localhost', '127.0.0.1']
+ALLOWED_HOSTS = ['api.sermo.com', 'localhost', '127.0.0.1', '*']
+
 
 
 # Application definition
@@ -59,7 +60,7 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
-    'smartdjango.middleware.APIPacker',
+    'utils.middleware.APIPacker',
 ]
 
 CORS_ALLOW_ALL_ORIGINS = True

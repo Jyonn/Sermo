@@ -1,6 +1,6 @@
 import string
 
-from django.utils.translation import gettext as _
+from django.utils.translation import gettext_lazy as _
 
 from smartdjango import Error, Code
 
@@ -15,7 +15,7 @@ class UserErrors:
     PASSWORD_ERROR = Error(message=_('Password error'), code=Code.BadRequest)
     SPACE_IN_NAME = Error(message=_('Name cannot contain spaces'), code=Code.BadRequest)
     SPACE_SLUG_TOO_SHORT = Error(message=_('Space slug should be at least {min_length} characters long'), code=Code.BadRequest)
-    SPACE_SLUG_INVALID = Error(message=_('Space slug can only contain lowercase letters and numbers'), code=Code.BadRequest)
+    SPACE_SLUG_INVALID = Error(message=_('Space slug can only contain lowercase letters, numbers and hyphens'), code=Code.BadRequest)
     PASSWORD_REQUIRED = Error(message=_('Nickname is already taken, password required'), code=Code.BadRequest)
     SPACE_SLUG_REQUIRED = Error(message=_('Space slug is required'), code=Code.BadRequest)
     SPACE_SLUG_TAKEN = Error(message=_('Space slug is already taken'), code=Code.BadRequest)
@@ -23,6 +23,7 @@ class UserErrors:
     USER_DELETED = Error(message=_('User has been deleted'), code=Code.BadRequest)
     USER_FORBIDDEN = Error(message=_('User does not belong to this space'), code=Code.Forbidden)
     SPACE_FORBIDDEN = Error(message=_('Users are not in the same space'), code=Code.Forbidden)
+    EMAIL_TAKEN = Error(message=_('Email is already taken in this space'), code=Code.BadRequest)
     EMAIL_CODE_INVALID = Error(message=_('Invalid email verification code'), code=Code.BadRequest)
     EMAIL_CODE_EXPIRED = Error(message=_('Email verification code expired'), code=Code.BadRequest)
     CONTACT_CODE_INVALID = Error(message=_('Invalid contact verification code'), code=Code.BadRequest)
@@ -74,6 +75,6 @@ class UserValidator:
     def space_slug(cls, value):
         if len(value) < cls.SPACE_SLUG_MIN_LENGTH:
             raise UserErrors.SPACE_SLUG_TOO_SHORT(min_length=cls.SPACE_SLUG_MIN_LENGTH)
-        allow_string = string.ascii_lowercase + string.digits
+        allow_string = string.ascii_lowercase + string.digits + '-'
         if not all(c in allow_string for c in value):
             raise UserErrors.SPACE_SLUG_INVALID

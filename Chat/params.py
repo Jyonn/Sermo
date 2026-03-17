@@ -1,4 +1,4 @@
-from django.utils.translation import gettext as _
+from django.utils.translation import gettext_lazy as _
 from smartdjango import Params, Validator, ListValidator
 
 from Chat.models import Chat, ChatMember

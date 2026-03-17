@@ -1,4 +1,4 @@
-from django.utils.translation import gettext as _
+from django.utils.translation import gettext_lazy as _
 
 from smartdjango import Error
 
@@ -10,6 +10,7 @@ class ChatErrors:
     USER_DELETED = Error(_('User {user} has been deleted'))
     FORBIDDEN = Error(_('You are not allowed to operate this chat'))
     NOT_GROUP_CHAT = Error(_('Chat {chat} is not a group chat'))
+    NOT_FRIENDS = Error(_('Users are not friends'))
 
 
 @Error.register

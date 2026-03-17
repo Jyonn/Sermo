@@ -18,7 +18,7 @@ class FriendshipRequestView(View):
     @auth.require_user
     @analyse.json(FriendshipParams.to_user_id)
     def post(self, request: Request):
-        item = Friendship.create_request(
+        item = Friendship.create(
             from_user=request.user,
             to_user=request.json.to_user,
         )

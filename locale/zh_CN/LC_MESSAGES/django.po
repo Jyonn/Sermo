@@ -1,233 +1,439 @@
-# SOME DESCRIPTIVE TITLE.
-# Copyright (C) YEAR THE PACKAGE'S COPYRIGHT HOLDER
-# This file is distributed under the same license as the PACKAGE package.
-# FIRST AUTHOR <EMAIL@ADDRESS>, YEAR.
-#
-#, fuzzy
+# Simplified Chinese translations for Sermo backend.
 msgid ""
 msgstr ""
-"Project-Id-Version: PACKAGE VERSION\n"
+"Project-Id-Version: Sermo Backend\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2025-03-16 01:42+0800\n"
-"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
-"Language-Team: LANGUAGE <LL@li.org>\n"
-"Language: \n"
+"POT-Creation-Date: 2026-03-16 00:25+0800\n"
+"PO-Revision-Date: 2026-03-16 00:25+0800\n"
+"Last-Translator: Codex\n"
+"Language-Team: zh_CN\n"
+"Language: zh_CN\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=1; plural=0;\n"
 
-#: Chat/models.py:119
+#: Chat/models.py:233
 #, python-brace-format
 msgid "Group Chat ({num})"
-msgstr "群聊({num})"
+msgstr "群聊（{num}）"
 
-#: Chat/params.py:27
-msgid "duplicated guests"
-msgstr "重复的群成员"
+#: Chat/params.py:21 Chat/params.py:34
+msgid "duplicated users"
+msgstr "重复的用户"
 
-#: Chat/params.py:28
-#, fuzzy
-#| msgid "Group chat should have at least 3 members"
-msgid "group chat should have at least 3 members"
-msgstr "群聊至少需要3个成员"
+#: Chat/params.py:22
+msgid "group chat should have at least 1 invited member"
+msgstr "群聊至少需要 1 个被邀请成员"
 
-#: Chat/params.py:30
-#, fuzzy
-#| msgid "Cannot create an empty group chat"
-msgid "not a group chat"
-msgstr "不是一个群聊"
+#: Chat/params.py:38 Friendship/params.py:21
+msgid "accept should be 0 or 1"
+msgstr "accept 必须为 0 或 1"
 
 #: Chat/validators.py:8
-msgid "All members of a group chat should have the same host"
-msgstr "群成员应属于同一主用户"
-
-#: Chat/validators.py:9
 #, python-brace-format
-msgid "Guest {guest} is not a member of the group chat {chat}"
-msgstr "成员{guest}不在群聊{chat}中"
+msgid "Chat {chat} does not exist"
+msgstr "聊天室 {chat} 不存在"
+
+#: Chat/validators.py:9 Friendship/validators.py:9 User/validators.py:25
+msgid "Users are not in the same space"
+msgstr "用户不在同一个空间中"
 
 #: Chat/validators.py:10
-#, fuzzy, python-brace-format
-msgid "Chat {chat} does not exist"
-msgstr "聊天室{chat}不存在"
+#, python-brace-format
+msgid "User {user} has been deleted"
+msgstr "用户 {user} 已被删除"
 
-#: Message/params.py:20
+#: Chat/validators.py:11
+msgid "You are not allowed to operate this chat"
+msgstr "你无权操作此聊天室"
+
+#: Chat/validators.py:12
+#, python-brace-format
+msgid "Chat {chat} is not a group chat"
+msgstr "聊天室 {chat} 不是群聊"
+
+#: Chat/validators.py:13 Friendship/validators.py:14
+msgid "Users are not friends"
+msgstr "用户不是好友关系"
+
+#: Chat/validators.py:18
+#, python-brace-format
+msgid "User {user} is not an active member of chat {chat}"
+msgstr "用户 {user} 不是聊天室 {chat} 的活跃成员"
+
+#: Chat/validators.py:19
+#, python-brace-format
+msgid "User {user} is already a member of chat {chat}"
+msgstr "用户 {user} 已经是聊天室 {chat} 的成员"
+
+#: Chat/validators.py:20
+#, python-brace-format
+msgid "User {user} already has a pending invite in chat {chat}"
+msgstr "用户 {user} 在聊天室 {chat} 中已有待处理邀请"
+
+#: Chat/validators.py:21
+#, python-brace-format
+msgid "Chat member {chat} does not exist"
+msgstr "聊天室成员 {chat} 不存在"
+
+#: Chat/validators.py:22
+msgid "Invite not found for this chat"
+msgstr "未找到此聊天室的邀请"
+
+#: Chat/validators.py:23
+msgid "Invite is not pending"
+msgstr "邀请不是待处理状态"
+
+#: Chat/validators.py:24
+msgid "Owner cannot leave group chat directly"
+msgstr "群主不能直接退出群聊"
+
+#: Config/validators.py:7
+msgid "Failed to update config"
+msgstr "更新配置失败"
+
+#: Config/validators.py:8
+msgid "Config not found"
+msgstr "未找到配置"
+
+#: Config/validators.py:9
+#, python-brace-format
+msgid "Config key too long, max length is {key_length}"
+msgstr "配置键过长，最大长度为 {key_length}"
+
+#: Config/validators.py:10
+#, python-brace-format
+msgid "Config value too long, max length is {value_length}"
+msgstr "配置值过长，最大长度为 {value_length}"
+
+#: Friendship/validators.py:7
+#, python-brace-format
+msgid "Friendship ({attr}={value}) does not exist"
+msgstr "好友关系（{attr}={value}）不存在"
+
+#: Friendship/validators.py:8
+msgid "Invalid friendship target"
+msgstr "无效的好友关系目标"
+
+#: Friendship/validators.py:10
+msgid "You are not allowed to request friendship"
+msgstr "你无权发起好友请求"
+
+#: Friendship/validators.py:11
+msgid "A pending friendship request already exists"
+msgstr "已存在待处理的好友请求"
+
+#: Friendship/validators.py:12
+msgid "This friendship request is not pending"
+msgstr "该好友请求不是待处理状态"
+
+#: Friendship/validators.py:13
+msgid "Users are already friends"
+msgstr "用户已经是好友"
+
+#: Friendship/validators.py:15
+msgid "This friendship is locked and cannot be removed"
+msgstr "该好友关系已锁定，无法删除"
+
+#: Message/params.py:18
 msgid "limit should be greater than 5"
-msgstr "获取消息条数需大于5"
+msgstr "limit 必须大于 5"
 
-#: Message/params.py:21
+#: Message/params.py:19
 msgid "limit should be less than 100"
-msgstr "获取消息条数需小于100"
+msgstr "limit 必须小于 100"
 
-#: Message/validators.py:8 User/auth.py:132 User/auth.py:136 User/auth.py:140
+#: Message/validators.py:8 utils/auth.py:208
 msgid "You are not a member of this chat"
 msgstr "你不是此聊天室的成员"
 
 #: Message/validators.py:9
-#, fuzzy
 msgid "Message does not exist"
-msgstr "信息不存在"
+msgstr "消息不存在"
 
-#: User/auth.py:26
-msgid "Token expired"
-msgstr "令牌已过期"
+#: Space/params.py:30
+msgid "online should be 0 or 1"
+msgstr "online 必须为 0 或 1"
 
-#: User/auth.py:27
-msgid "Incorrect format"
-msgstr "令牌格式错误"
+#: Space/params.py:34
+msgid "limit should be between 1 and 200"
+msgstr "limit 必须在 1 到 200 之间"
 
-#: User/auth.py:54
-#, fuzzy
-msgid "Invalid JWT expire"
-msgstr "不合法的令牌有效期"
+#: Space/params.py:38
+msgid "offset should be greater than or equal to 0"
+msgstr "offset 必须大于或等于 0"
 
-#: User/auth.py:55
-#, fuzzy
-#| msgid "Invalid choice"
-msgid "Invalid JWT time"
-msgstr "不合法的令牌时间"
+#: Space/validators.py:14
+#, python-brace-format
+msgid "Space ({attr}={value}) does not exist"
+msgstr "空间（{attr}={value}）不存在"
 
-#: User/auth.py:67
-msgid "Missing authorization header"
-msgstr "缺少授权头"
+#: Space/validators.py:15 User/validators.py:17
+#, python-brace-format
+msgid "Space slug should be at least {min_length} characters long"
+msgstr "空间 slug 长度至少为 {min_length} 个字符"
 
-#: User/auth.py:74
-#, fuzzy
-#| msgid "Invalid choice"
-msgid "Invalid user role"
-msgstr "不合法的类别"
+#: Space/validators.py:16 User/validators.py:18
+msgid "Space slug can only contain lowercase letters, numbers and hyphens"
+msgstr "空间 slug 只能包含小写字母、数字和连字符"
 
-#: User/auth.py:128
-#, fuzzy
-#| msgid "You are not a member of this chat"
-msgid "You are not the owner of this chat"
-msgstr "你不是此聊天室的成员"
+#: Space/validators.py:17 User/validators.py:21
+msgid "Space slug is already taken"
+msgstr "空间 slug 已被占用"
 
-#: User/auth.py:144
-#, fuzzy
-#| msgid "You are not a member of this chat"
-msgid "You are not the owner of this message"
-msgstr "你不是此聊天室的成员"
+#: Space/validators.py:18 User/validators.py:22
+msgid "Space slug is reserved"
+msgstr "空间 slug 是保留字段"
 
-#: User/models.py:57
+#: Space/validators.py:19
+msgid "Space email is already taken"
+msgstr "空间邮箱已被占用"
+
+#: Space/validators.py:20
+msgid "Invalid space email verification code"
+msgstr "无效的空间邮箱验证码"
+
+#: Space/validators.py:21
+msgid "Space email verification code expired"
+msgstr "空间邮箱验证码已过期"
+
+#: Space/validators.py:22
+msgid "Failed to send space verification email"
+msgstr "发送空间验证邮件失败"
+
+#: Space/validators.py:23
+msgid "Space email does not match"
+msgstr "空间邮箱不匹配"
+
+#: Space/validators.py:24
+msgid "Failed to send notification"
+msgstr "发送通知失败"
+
+#: User/models.py:87
 msgid "user id"
-msgstr "用户ID"
+msgstr "用户 ID"
 
-#: User/models.py:141
-msgid "name"
-msgstr "用户名"
+#: User/models.py:492
+msgid "New direct message"
+msgstr "新私聊消息"
 
-#: User/validators.py:8
-#, fuzzy, python-brace-format
-#| msgid "User does not exist"
+#: User/models.py:493
+msgid "You have received a new direct message."
+msgstr "你收到了一条新的私聊消息。"
+
+#: User/models.py:495
+#, python-brace-format
+msgid "New message from {name}"
+msgstr "来自 {name} 的新消息"
+
+#: User/models.py:499
+msgid "New group message"
+msgstr "新群聊消息"
+
+#: User/models.py:500
+msgid "You have received a new group message."
+msgstr "你收到了一条新的群聊消息。"
+
+#: User/models.py:502
+#, python-brace-format
+msgid "New group message from {name}"
+msgstr "来自 {name} 的新群聊消息"
+
+#: User/models.py:507
+msgid "New friend request"
+msgstr "新的好友请求"
+
+#: User/models.py:508
+msgid "You have received a new friend request."
+msgstr "你收到了一条新的好友请求。"
+
+#: User/models.py:510
+#, python-brace-format
+msgid "{name} sent you a friend request."
+msgstr "{name} 向你发送了好友请求。"
+
+#: User/models.py:513
+msgid "Friend request accepted"
+msgstr "好友请求已通过"
+
+#: User/models.py:514
+msgid "Your friend request has been accepted."
+msgstr "你的好友请求已被接受。"
+
+#: User/models.py:516
+#, python-brace-format
+msgid "{name} accepted your friend request."
+msgstr "{name} 接受了你的好友请求。"
+
+#: User/models.py:519
+msgid "Group invite"
+msgstr "群聊邀请"
+
+#: User/models.py:520
+msgid "a group"
+msgstr "一个群聊"
+
+#: User/models.py:521
+#, python-brace-format
+msgid "You are invited to join {group}."
+msgstr "你被邀请加入 {group}。"
+
+#: User/models.py:524
+msgid "Group invite response"
+msgstr "群聊邀请回复"
+
+#: User/models.py:526
+msgid "A user responded to your invite."
+msgstr "有用户回复了你的邀请。"
+
+#: User/models.py:528
+msgid "A user accepted your group invite."
+msgstr "有用户接受了你的群聊邀请。"
+
+#: User/models.py:530
+msgid "A user rejected your group invite."
+msgstr "有用户拒绝了你的群聊邀请。"
+
+#: User/models.py:533
+msgid "System notification"
+msgstr "系统通知"
+
+#: User/models.py:533
+msgid "You have a new notification."
+msgstr "你有一条新通知。"
+
+#: User/params.py:27
+msgid "Empty refresh token"
+msgstr "refresh token 为空"
+
+#: User/params.py:41
+msgid "Invalid notification channel"
+msgstr "无效的通知渠道"
+
+#: User/params.py:46
+msgid "enabled should be 0 or 1"
+msgstr "enabled 必须为 0 或 1"
+
+#: User/params.py:52
+msgid "offline_threshold_minutes should be between 1 and 10080"
+msgstr "offline_threshold_minutes 必须在 1 到 10080 之间"
+
+#: User/params.py:66 User/validators.py:14
+#, python-brace-format
+msgid "Password should be at least {password_length} characters long"
+msgstr "密码长度至少为 {password_length} 个字符"
+
+#: User/validators.py:10
+#, python-brace-format
 msgid "User ({attr}={value}) does not exist"
-msgstr "用户不存在"
+msgstr "用户（{attr}={value}）不存在"
 
-#: User/validators.py:9
+#: User/validators.py:11
 msgid "User already exists"
 msgstr "用户已存在"
 
-#: User/validators.py:10
-msgid "Name cannot be empty"
-msgstr "用户名不能为空"
-
-#: User/validators.py:11
-#, fuzzy, python-brace-format
-msgid "Interval should be greater than {offline_interval} minutes"
-msgstr "间隔需超过{offline_interval}分钟"
-
 #: User/validators.py:12
-#, python-brace-format
-msgid "Password should be at least {password_length} characters long"
-msgstr "密码长度至少为{password_length}个字符"
+msgid "Name cannot be empty"
+msgstr "名称不能为空"
 
 #: User/validators.py:13
+#, python-brace-format
+msgid "Interval should be greater than {offline_interval} minutes"
+msgstr "间隔必须大于 {offline_interval} 分钟"
+
+#: User/validators.py:15
 msgid "Password error"
 msgstr "密码错误"
 
-#: User/validators.py:14
-#, fuzzy
-#| msgid "Name cannot be empty"
+#: User/validators.py:16
 msgid "Name cannot contain spaces"
-msgstr "用户名不能为空"
+msgstr "名称不能包含空格"
 
-#~ msgid "Cannot create an empty group chat"
-#~ msgstr "无法创建空的群聊"
+#: User/validators.py:19
+msgid "Nickname is already taken, password required"
+msgstr "昵称已被占用，需要提供密码"
 
-#~ msgid "Group chat should have at least 3 members"
-#~ msgstr "群聊至少需要3个成员"
+#: User/validators.py:20
+msgid "Space slug is required"
+msgstr "必须提供空间 slug"
 
-#~ msgid "Cannot find request"
-#~ msgstr "无法获取请求"
+#: User/validators.py:23
+msgid "User has been deleted"
+msgstr "用户已被删除"
 
-#, fuzzy
-#~| msgid "Invalid choice"
-#~ msgid "Invalid integer"
-#~ msgstr "不合法的类别"
+#: User/validators.py:24
+msgid "User does not belong to this space"
+msgstr "用户不属于此空间"
 
-#, fuzzy
-#~| msgid "Invalid choice"
-#~ msgid "Invalid string"
-#~ msgstr "不合法的令牌时间"
+#: User/validators.py:26
+msgid "Invalid email verification code"
+msgstr "无效的邮箱验证码"
 
-#~ msgid "No default value"
-#~ msgstr "没有默认值"
+#: User/validators.py:27
+msgid "Email verification code expired"
+msgstr "邮箱验证码已过期"
 
-#~ msgid "Null is not allowed"
-#~ msgstr "不允许空值"
+#: User/validators.py:28
+msgid "Invalid contact verification code"
+msgstr "无效的联系方式验证码"
 
-#, python-brace-format
-#~ msgid "Not valid: {message}"
-#~ msgstr "不合法的值：{message}"
+#: User/validators.py:29
+msgid "Contact verification code expired"
+msgstr "联系方式验证码已过期"
 
-#~ msgid "Validator crushed"
-#~ msgstr "验证模块错误"
+#: User/validators.py:30
+msgid "Invalid contact channel"
+msgstr "无效的联系方式渠道"
 
-#~ msgid "Processor crushed"
-#~ msgstr "处理模块错误"
+#: User/validators.py:31
+msgid "Failed to send contact verification message"
+msgstr "发送联系方式验证消息失败"
 
-#~ msgid "Not a list"
-#~ msgstr "不是一个列表"
+#: User/validators.py:32
+msgid "Failed to send verification email"
+msgstr "发送验证邮件失败"
 
-#~ msgid "List length mismatch"
-#~ msgstr "列表长度不匹配"
+#: utils/auth.py:28
+msgid "Token expired"
+msgstr "令牌已过期"
 
-#~ msgid "Not a dict"
-#~ msgstr "不是一个字典"
+#: utils/auth.py:29
+msgid "Incorrect format"
+msgstr "格式错误"
 
-#, python-brace-format
-#~ msgid "{key} is an invalid key"
-#~ msgstr "{key}不是一个合法的值"
+#: utils/auth.py:30
+msgid "Token revoked"
+msgstr "令牌已被撤销"
 
-#, fuzzy, python-brace-format
-#~ msgid "Param key {key} already exists"
-#~ msgstr "参数键{key}已存在"
+#: utils/auth.py:67
+msgid "Invalid JWT expire"
+msgstr "无效的 JWT 过期时间"
 
-#, python-brace-format
-#~ msgid "Target key: {key}"
-#~ msgstr "目标键：{key}"
+#: utils/auth.py:68
+msgid "Invalid JWT time"
+msgstr "无效的 JWT 时间"
 
-#~ msgid "Invalid choice"
-#~ msgstr "不合法的类别"
+#: utils/auth.py:75
+msgid "Invalid token type"
+msgstr "无效的令牌类型"
 
-#~ msgid "Not a string"
-#~ msgstr "不是一个字符串"
+#: utils/auth.py:82 utils/auth.py:87
+msgid "Missing authorization header"
+msgstr "缺少授权头"
 
-#~ msgid "Too long"
-#~ msgstr "字符串太长"
+#: utils/auth.py:101
+msgid "Invalid user role"
+msgstr "无效的用户角色"
 
-#~ msgid "Not an integer"
-#~ msgstr "不是一个整数"
+#: utils/auth.py:161
+msgid "Missing refresh token id"
+msgstr "缺少 refresh token ID"
 
-#~ msgid "Not a float"
-#~ msgstr "不是一个浮点数"
+#: utils/auth.py:203
+msgid "You are not the owner of this chat"
+msgstr "你不是此聊天室的所有者"
 
-#~ msgid "Not a boolean"
-#~ msgstr "不是一个布尔值"
-
-#~ msgid "Not a date"
-#~ msgstr "不是一个日期"
-
-#~ msgid "Not a datetime"
-#~ msgstr "不是一个日期时间"
+#: utils/auth.py:212
+msgid "You are not the owner of this message"
+msgstr "你不是此消息的所有者"

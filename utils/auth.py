@@ -5,7 +5,7 @@ import jwt
 
 from django.utils import timezone
 from django.utils.crypto import get_random_string
-from django.utils.translation import gettext as _
+from django.utils.translation import gettext_lazy as _
 from oba import Obj
 from smartdjango import Error, Code, Validator, DictValidator, analyse
 from smartdjango.analyse import get_request, Request as BaseRequest

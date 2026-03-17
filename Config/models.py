@@ -25,9 +25,12 @@ class Config(models.Model):
             raise ConfigErrors.NOT_FOUND(details=err)
 
     @classmethod
-    def get_value_by_key(cls, key, default=None):
+    def get_value_by_key(cls, key, default=None, to=None):
         try:
-            return cls.get_config_by_key(key).value
+            value = cls.get_config_by_key(key).value
+            if callable(to):
+                value = to(value)
+            return value
         except Error as err:
             if err == ConfigErrors.NOT_FOUND:
                 return default
