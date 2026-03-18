@@ -1,3 +1,6 @@
+import time
+
+import jwt
 from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
@@ -5,6 +8,7 @@ from smartdjango import models, Choice
 
 from Friendship.validators import FriendshipValidator, FriendshipErrors
 from User.models import User
+from utils.global_settings import Globals
 
 
 class FriendshipStatusChoice(Choice):
@@ -16,6 +20,8 @@ class FriendshipStatusChoice(Choice):
 
 class Friendship(models.Model):
     vldt = FriendshipValidator
+    INVITE_TOKEN_EXPIRE_SECONDS = 7 * 24 * 60 * 60
+    INVITE_TOKEN_ALGORITHM = 'HS256'
 
     space = models.ForeignKey('Space.Space', on_delete=models.CASCADE, related_name='friendships', db_index=True)
     user_low = models.ForeignKey(User, on_delete=models.CASCADE, related_name='friendships_as_low')
@@ -63,6 +69,66 @@ class Friendship(models.Model):
     def between(cls, user_a: User, user_b: User):
         space, user_low, user_high = cls._pair(user_a, user_b)
         return cls.objects.filter(space=space, user_low=user_low, user_high=user_high).first()
+
+    @classmethod
+    def _invite_secret_key(cls):
+        key = getattr(Globals, 'SECRET_KEY', None)
+        key = (str(key).strip() if key is not None else '')
+        if not key:
+            raise FriendshipErrors.INVITE_TOKEN_SECRET_MISSING
+        return key
+
+    @classmethod
+    def issue_invite_token(cls, inviter: User):
+        now = int(time.time())
+        payload = dict(
+            space=inviter.space_id,
+            user=inviter.id,
+            expire=now + cls.INVITE_TOKEN_EXPIRE_SECONDS,
+        )
+        token = jwt.encode(
+            payload,
+            key=cls._invite_secret_key(),
+            algorithm=cls.INVITE_TOKEN_ALGORITHM,
+        )
+        if isinstance(token, bytes):
+            token = token.decode()
+        return dict(token=token, expire=payload['expire'])
+
+    @classmethod
+    def _decode_invite_token(cls, token: str):
+        token = (token or '').strip()
+        if not token:
+            raise FriendshipErrors.INVITE_TOKEN_INVALID
+        try:
+            payload = jwt.decode(
+                token,
+                key=cls._invite_secret_key(),
+                algorithms=[cls.INVITE_TOKEN_ALGORITHM],
+                options={'verify_exp': False},
+            )
+        except jwt.PyJWTError:
+            raise FriendshipErrors.INVITE_TOKEN_INVALID
+
+        try:
+            space_id = int(payload.get('space'))
+            inviter_id = int(payload.get('user'))
+            expire = int(payload.get('expire'))
+        except (TypeError, ValueError):
+            raise FriendshipErrors.INVITE_TOKEN_INVALID
+
+        if expire < int(time.time()):
+            raise FriendshipErrors.INVITE_TOKEN_EXPIRED
+
+        return dict(space=space_id, user=inviter_id, expire=expire)
+
+    @classmethod
+    def redeem_invite_token(cls, token: str, requester: User):
+        payload = cls._decode_invite_token(token)
+        if payload['space'] != requester.space_id:
+            raise FriendshipErrors.INVITE_TOKEN_SPACE_MISMATCH
+        inviter = User.index(payload['user'])
+        return cls.create(from_user=requester, to_user=inviter)
 
     def _is_participant(self, user: User):
         return user.id in (self.user_low_id, self.user_high_id)
@@ -203,6 +269,13 @@ class Friendship(models.Model):
             raise FriendshipErrors.REQUEST_FORBIDDEN
         if self.is_system_locked:
             raise FriendshipErrors.LOCKED_FORBIDDEN
+        if self.status == FriendshipStatusChoice.PENDING:
+            if self.requested_by_id != user.id:
+                raise FriendshipErrors.REQUEST_FORBIDDEN
+            self.status = FriendshipStatusChoice.DELETED
+            self.responded_at = timezone.now()
+            self.save(update_fields=['status', 'responded_at', 'updated_at'])
+            return self
         if self.status != FriendshipStatusChoice.ACCEPTED:
             raise FriendshipErrors.NOT_FRIENDS
 

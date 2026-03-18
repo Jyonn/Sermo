@@ -1,9 +1,12 @@
 import datetime
+import ipaddress
+import re
 
 from notificator import NotificatorAPIError
 from django.utils import timezone
 from django.utils.crypto import get_random_string
 from django.utils.translation import gettext as _
+from pypinyin import lazy_pinyin
 from smartdjango import models, Choice
 
 from utils.global_settings import notificator
@@ -40,11 +43,13 @@ class User(models.Model):
     OFFICIAL_WELCOME_MESSAGE_ZH = '欢迎加入{space}！'
     OFFICIAL_WELCOME_MESSAGE_EN = 'Welcome to {space}!'
     AVATAR_PRESET_BASE_URI = 'https://image.6-79.cn/sermo/assets/avatars'
+    HANZI_PATTERN = re.compile(r'[\u4e00-\u9fff]')
 
     space = models.ForeignKey('Space.Space', on_delete=models.CASCADE, related_name='users', db_index=True)
 
     name = models.CharField(max_length=vldt.NAME_MAX_LENGTH, validators=[vldt.name])
     lower_name = models.CharField(max_length=vldt.NAME_MAX_LENGTH, db_index=True)
+    name_pinyin = models.CharField(max_length=255, default='', db_index=True)
 
     password = models.CharField(
         max_length=vldt.PASSWORD_MAX_LENGTH,
@@ -126,6 +131,39 @@ class User(models.Model):
             raise UserErrors.EXISTS
 
     @classmethod
+    def _is_hanzi(cls, char: str):
+        return bool(char and cls.HANZI_PATTERN.fullmatch(char))
+
+    @staticmethod
+    def _is_letter(char: str):
+        if not char:
+            return False
+        lower = char.lower()
+        return 'a' <= lower <= 'z'
+
+    @classmethod
+    def build_name_pinyin(cls, name: str):
+        normalized = (name or '').strip()
+        if not normalized:
+            return ''
+
+        first = normalized[0]
+        if not (cls._is_hanzi(first) or cls._is_letter(first)):
+            return ''
+
+        filtered = [char for char in normalized if cls._is_hanzi(char) or cls._is_letter(char)]
+        if not filtered:
+            return ''
+
+        result = []
+        for char in filtered:
+            if cls._is_letter(char):
+                result.append(char.lower())
+            else:
+                result.extend(lazy_pinyin(char))
+        return ''.join(result).lower()
+
+    @classmethod
     def _normalize_email(cls, email: str):
         return (email or '').strip().lower()
 
@@ -182,6 +220,7 @@ class User(models.Model):
             space=space,
             name=name,
             lower_name=name.lower(),
+            name_pinyin=cls.build_name_pinyin(name),
             salt=salt,
             role=role,
             language=normalized_language,
@@ -339,6 +378,9 @@ class User(models.Model):
         self.last_heartbeat = timezone.now()
         self.save(update_fields=['last_heartbeat'])
 
+    def log_login(self, ip: str = None):
+        return UserLoginLog.create_for_user(self, ip=ip)
+
     @property
     def is_alive(self):
         current_time = timezone.now()
@@ -380,6 +422,18 @@ class User(models.Model):
             'is_alive',
             'avatar_type',
             'avatar_uri',
+        )
+
+    def json_friend(self):
+        return self.dictify(
+            'name',
+            'user_id',
+            'official',
+            'verified',
+            'is_alive',
+            'avatar_type',
+            'avatar_uri',
+            'last_heartbeat',
         )
 
     def jwt_json(self):
@@ -424,6 +478,31 @@ class RefreshToken(models.Model):
         if self.revoked_at is None:
             self.revoked_at = timezone.now()
             self.save(update_fields=['revoked_at'])
+
+
+class UserLoginLog(models.Model):
+    space = models.ForeignKey('Space.Space', on_delete=models.CASCADE, related_name='login_logs', db_index=True)
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='login_logs', db_index=True)
+    ip = models.GenericIPAddressField(null=True, blank=True)
+    logged_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    @classmethod
+    def _normalize_ip(cls, ip):
+        raw = (ip or '').strip()
+        if not raw:
+            return None
+        try:
+            return str(ipaddress.ip_address(raw))
+        except ValueError:
+            return None
+
+    @classmethod
+    def create_for_user(cls, user: User, ip: str = None):
+        return cls.objects.create(
+            space_id=user.space_id,
+            user=user,
+            ip=cls._normalize_ip(ip),
+        )
 
 
 class EmailVerificationCode(models.Model):

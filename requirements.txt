@@ -2,3 +2,5 @@ nestify
 django
 smartdjango
 requests
+pypinyin
+p

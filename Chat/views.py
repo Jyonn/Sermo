@@ -33,7 +33,7 @@ class DirectChatView(View):
 
 class GroupChatView(View):
     @auth.require_user
-    @analyse.json(ChatParams.users, ChatParams.title)
+    @analyse.json(ChatParams.users, ChatParams.title.copy().null().default(None))
     def post(self, request):
         chat = Chat.create_group(request.user, request.json.users, request.json.title)
         return chat.json()
@@ -53,7 +53,7 @@ class GroupChatNameView(View):
     @auth.require_user
     @analyse.query(ChatParams.chat_id)
     @analyse.json(ChatParams.title)
-    @auth.require_chat_owner()
+    @auth.require_chat_member()
     def post(self, request):
         chat: Chat = request.query.chat
         chat.rename(request.json.title)
@@ -64,7 +64,7 @@ class GroupChatMemberView(View):
     @auth.require_user
     @analyse.query(ChatMemberParams.chat_id)
     @analyse.json(ChatMemberParams.users)
-    @auth.require_chat_owner()
+    @auth.require_chat_member()
     def post(self, request):
         chat: Chat = request.query.chat
         for user in request.json.users:

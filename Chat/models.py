@@ -62,7 +62,7 @@ class Chat(models.Model):
 
     def _dictify_last_message(self):
         from Message.models import Message
-        message = Message.objects.filter(chat=self, is_deleted=False).order_by('-created_at').first()
+        message = Message.visible_in_chat(self).order_by('-created_at').first()
         if message is not None:
             return message.jsonl()
         return None
@@ -244,7 +244,7 @@ class Chat(models.Model):
 
         final_title = (title or '').strip()
         if not final_title:
-            final_title = _('Group Chat ({num})').format(num=len(normalized))
+            final_title = _('Group Chat')
 
         with transaction.atomic():
             chat = cls.objects.create(
@@ -276,8 +276,6 @@ class Chat(models.Model):
     def invite_member(self, inviter: User, user: User):
         if not self.group:
             raise ChatErrors.NOT_GROUP_CHAT(chat=self.id)
-        if not self.is_owner(inviter):
-            raise ChatErrors.FORBIDDEN
         self._require_verified_group_operator(inviter)
         if user.space_id != self.space_id:
             raise ChatErrors.UNALIGNED_SPACE
@@ -376,8 +374,9 @@ class ChatMember(models.Model):
                 chat=chat,
                 user=user,
                 role=ChatMemberRoleChoice.MEMBER,
-                status=ChatMemberStatusChoice.PENDING,
+                status=ChatMemberStatusChoice.ACTIVE,
                 invited_by=invited_by,
+                joined_at=timezone.now(),
             )
             from User.models import NotificationEvent
             NotificationEvent.emit_system_event(
@@ -389,14 +388,13 @@ class ChatMember(models.Model):
 
         if member.status == ChatMemberStatusChoice.ACTIVE:
             raise ChatMemberErrors.ALREADY_MEMBER(user=user.name, chat=chat.id)
-        if member.status == ChatMemberStatusChoice.PENDING:
-            raise ChatMemberErrors.INVITE_PENDING(user=user.name, chat=chat.id)
 
         member.role = ChatMemberRoleChoice.MEMBER
-        member.status = ChatMemberStatusChoice.PENDING
+        member.status = ChatMemberStatusChoice.ACTIVE
         member.invited_by = invited_by
+        member.joined_at = timezone.now()
         member.left_at = None
-        member.save(update_fields=['role', 'status', 'invited_by', 'left_at', 'updated_at'])
+        member.save(update_fields=['role', 'status', 'invited_by', 'joined_at', 'left_at', 'updated_at'])
         from User.models import NotificationEvent
         NotificationEvent.emit_system_event(
             user=user,
@@ -483,5 +481,5 @@ class ChatReadState(models.Model):
         from Message.models import Message
         last_read_at = cls.get_last_read_at(chat, user)
         if last_read_at is None:
-            return Message.objects.filter(chat=chat, is_deleted=False).count()
-        return Message.objects.filter(chat=chat, is_deleted=False, created_at__gt=last_read_at).count()
+            return Message.visible_in_chat(chat).count()
+        return Message.visible_in_chat(chat).filter(created_at__gt=last_read_at).count()

@@ -348,24 +348,37 @@ CSS 建议：
 ## 7.4 Friendship 相关
 
 1. `GET /friends/`：好友列表（返回用户数组）
+- 返回字段相比普通用户列表额外包含：`last_heartbeat`
 2. `POST /friends/requests` JSON: `to_user_id`
 3. `GET /friends/requests`：返回 `{ incoming, outgoing }`
 4. `POST /friends/requests/respond?request_id=` JSON: `accept(0|1)`
 5. `DELETE /friends/requests/remove?request_id=`
+- 行为：已是好友时删除好友；若是自己发出的 `PENDING` 申请则撤回申请
+6. `POST /friends/invites/token`
+- 作用：生成好友邀请 token（有效期 7 天）
+- 返回：`{ token, expire }`
+ - token 负载：`{ space, user, expire }`，使用 `Globals.SECRET_KEY` 签名
+7. `POST /friends/invites/redeem` JSON: `token`
+- 作用：使用邀请 token 发起好友申请（from=当前用户, to=token中的user）
+- 校验：签名有效、未过期、与当前用户同 Space
 
 ## 7.5 Chat 相关
 
 1. `GET /chats/`：会话列表（含 `unread_count`, `last_read_at`）
 2. `POST /chats/direct` JSON: `peer_user_id`
 3. `POST /chats/group` JSON: `users, title`
- - 约束：发起人必须 `verified`；被拉用户必须是发起人的已接受好友
+- 约束：发起人必须 `verified`；被拉用户必须是发起人的已接受好友
+ - 行为：被拉用户直接入群（`ACTIVE`），不走待确认
 4. `DELETE /chats/group?chat_id=`
 5. `POST /chats/group/name?chat_id=` JSON: `title`
+ - 权限：任意群成员可修改
 6. `POST /chats/group/members?chat_id=` JSON: `users`
- - 约束：群主必须 `verified`；被拉用户必须是群主的已接受好友
+ - 约束：发起拉人的用户必须是该群成员且 `verified`；被拉用户必须是“发起拉人的用户”的已接受好友（群主与被拉用户不要求好友）
+ - 行为：被拉用户直接入群（`ACTIVE`），不走待确认
 7. `DELETE /chats/group/members?chat_id=` JSON: `users`
 8. `GET /chats/group/invites`
 9. `POST /chats/group/invite/respond?chat_id=` JSON: `accept(0|1)`
+ - 说明：当前群成员拉人已直接入群，这两个接口仅保留兼容；通常返回空列表/关闭态
 10. `POST /chats/group/leave?chat_id=`
 11. `POST /chats/read?chat_id=`
 
@@ -374,12 +387,14 @@ CSS 建议：
 1. `GET /messages?chat_id=&limit=&before=&after=`
 - `limit` 当前实现为必填，建议统一传 `30`
 - `before/after` 二选一或都不传
+- 返回中仅包含 `is_deleted=false` 的消息（软删除消息不会返回）
 
 2. `GET /messages/sync?after=&limit=`
 - 作用：获取当前用户所有可见会话的全局新消息增量
 - 说明：`after` 是全局 `message_id` 游标，建议首次传 `0`
 - 返回：`{ items, has_more, next_after }`
   - `items` 中每条消息额外包含 `chat_id`
+  - 仅同步 `is_deleted=false` 的消息
 
 3. `POST /messages?chat_id=` JSON: `content, type`
 
@@ -462,6 +477,10 @@ export interface UserListDTO extends UserTinyDTO {
   verified: boolean;
 }
 
+export interface UserFriendDTO extends UserListDTO {
+  last_heartbeat: number;
+}
+
 export interface UserMeDTO extends UserListDTO {
   language: string;
   welcome_message: string;
@@ -504,6 +523,11 @@ export interface ChatDTO {
   last_message: MessageDTO | null;
   unread_count?: number;
   last_read_at?: number | null;
+}
+
+export interface FriendInviteTokenDTO {
+  token: string;
+  expire: number;
 }
 ```
 
@@ -562,9 +586,9 @@ export interface ChatDTO {
 
 ## 12. 当前 API 缺口与前端处理建议
 
-1. `GET /chats/group/invites` 当前返回 `ChatMember.json()`，缺少 `chat_id/chat_title`。
-- 影响：前端无法在邀请列表中正确展示“来自哪个群”，也无法直接发起 `respond`。
-- 建议后端补充：`chat_id`, `chat_title`。
+1. 群邀请确认流当前为兼容接口（拉人已默认直接入群）。
+- 影响：前端无需再构建“待确认邀请中心”主流程。
+- 建议：前端将群邀请入口降级为可选能力或隐藏。
 
 2. 消息实时能力当前仅轮询，无 WebSocket。
 - 影响：高频会话下体验一般。

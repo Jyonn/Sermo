@@ -11,7 +11,7 @@ class FriendshipListView(View):
     @auth.require_user
     def get(self, request: Request):
         friends = Friendship.friends_of(request.user)
-        return [friend.jsonl() for friend in friends]
+        return [friend.json_friend() for friend in friends]
 
 
 class FriendshipRequestView(View):
@@ -54,3 +54,20 @@ class FriendshipRemoveView(View):
         item = request.query.friendship
         item.remove(request.user)
         return OK
+
+
+class FriendshipInviteTokenView(View):
+    @auth.require_user
+    def post(self, request: Request):
+        return Friendship.issue_invite_token(request.user)
+
+
+class FriendshipInviteRedeemView(View):
+    @auth.require_user
+    @analyse.json(FriendshipParams.token)
+    def post(self, request: Request):
+        item = Friendship.redeem_invite_token(
+            token=request.json.token,
+            requester=request.user,
+        )
+        return item.json()

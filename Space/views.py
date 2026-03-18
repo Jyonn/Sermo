@@ -19,6 +19,22 @@ from User.models import User
 from utils.global_settings import notificator
 
 
+def _extract_client_ip(request: Request):
+    x_forwarded_for = request.headers.get('X-Forwarded-For', '')
+    if x_forwarded_for:
+        first_ip = x_forwarded_for.split(',')[0].strip()
+        if first_ip:
+            return first_ip
+
+    x_real_ip = request.headers.get('X-Real-IP', '').strip()
+    if x_real_ip:
+        return x_real_ip
+
+    meta = getattr(request, 'META', {}) or {}
+    remote_addr = (meta.get('REMOTE_ADDR') or '').strip()
+    return remote_addr or None
+
+
 class SpaceEmailCodeRequestView(View):
     @analyse.json(
         SpaceEmailVerificationCodeParams.slug,
@@ -111,6 +127,7 @@ class SpaceJoinView(View):
             password=request.json.password,
             language=request.json.language,
         )
+        user.log_login(ip=_extract_client_ip(request))
         return dict(
             space=space.json(),
             auth=auth.get_login_token(user),

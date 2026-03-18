@@ -18,7 +18,7 @@ class ChatParams(metaclass=Params):
 
     users = ListValidator('users') \
         .element(Validator().to(User.index)) \
-        .bool(lambda x: len({item.id for item in x}) == len(x), message=_('duplicated users')) \
+        .bool(lambda x: len({item for item in x}) == len(x), message=_('duplicated users')) \
         .bool(lambda x: len(x) >= 1, message=_('group chat should have at least 1 invited member'))
 
     title: Validator
@@ -31,7 +31,7 @@ class ChatMemberParams(metaclass=Params):
 
     users = ListValidator('users') \
         .element(Validator().to(User.index)) \
-        .bool(lambda x: len({item.id for item in x}) == len(x), message=_('duplicated users'))
+        .bool(lambda x: len({item for item in x}) == len(x), message=_('duplicated users'))
 
     accept = Validator('accept') \
         .to(int) \

@@ -28,6 +28,14 @@ class Message(models.Model):
         ordering = ["-created_at"]
 
     @classmethod
+    def visible_queryset(cls):
+        return cls.objects.filter(is_deleted=False)
+
+    @classmethod
+    def visible_in_chat(cls, chat: Chat):
+        return cls.visible_queryset().filter(chat=chat)
+
+    @classmethod
     def create(cls, chat: Chat, user: User, message_type, content):
         if chat.has_active_member(user):
             return cls.objects.create(chat=chat, user=user, type=message_type, content=content)
@@ -51,17 +59,17 @@ class Message(models.Model):
 
     @classmethod
     def latest(cls, chat: Chat, limit: int):
-        messages = cls.objects.filter(chat=chat, is_deleted=False).order_by('-created_at')[:limit]
+        messages = cls.visible_in_chat(chat).order_by('-created_at')[:limit]
         return [message.jsonl() for message in messages]
 
     @classmethod
     def older(cls, chat: Chat, message_id, limit: int):
-        messages = cls.objects.filter(chat=chat, id__lt=message_id, is_deleted=False).order_by('-created_at')[:limit]
+        messages = cls.visible_in_chat(chat).filter(id__lt=message_id).order_by('-created_at')[:limit]
         return [message.jsonl() for message in messages]
 
     @classmethod
     def newer(cls, chat: Chat, message_id, limit: int):
-        messages = cls.objects.filter(chat=chat, id__gt=message_id, is_deleted=False).order_by('created_at')[:limit]
+        messages = cls.visible_in_chat(chat).filter(id__gt=message_id).order_by('created_at')[:limit]
         return [message.jsonl() for message in messages]
 
     @classmethod
@@ -74,11 +82,9 @@ class Message(models.Model):
             return dict(items=[], has_more=False, next_after=after)
 
         rows = list(
-            cls.objects.filter(
-                chat_id__in=chat_ids,
-                id__gt=after,
-                is_deleted=False,
-            ).order_by('id')[:limit + 1]
+            cls.visible_queryset()
+            .filter(chat_id__in=chat_ids, id__gt=after)
+            .order_by('id')[:limit + 1]
         )
         has_more = len(rows) > limit
         rows = rows[:limit]

@@ -19,3 +19,7 @@ class FriendshipParams(metaclass=Params):
     accept = Validator('accept') \
         .to(int) \
         .bool(lambda x: x in (0, 1), message=_('accept should be 0 or 1'))
+
+    token = Validator('token') \
+        .to(str) \
+        .bool(lambda x: len(x.strip()) > 0, message=_('token is required'))
