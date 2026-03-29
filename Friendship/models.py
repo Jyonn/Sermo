@@ -80,6 +80,9 @@ class Friendship(models.Model):
 
     @classmethod
     def issue_invite_token(cls, inviter: User):
+        if not inviter.verified:
+            raise FriendshipErrors.REQUEST_FORBIDDEN
+
         now = int(time.time())
         payload = dict(
             space=inviter.space_id,
