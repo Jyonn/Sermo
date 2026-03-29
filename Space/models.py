@@ -31,6 +31,7 @@ class Space(models.Model):
         related_name='official_space',
     )
     group_square_enabled = models.BooleanField(default=False)
+    member_limit = models.PositiveIntegerField(null=True, blank=True, default=None)
     created_at = models.DateTimeField(auto_now_add=True)
 
     @classmethod
@@ -42,9 +43,17 @@ class Space(models.Model):
             raise SpaceErrors.NOT_EXISTS(attr='slug', value=slug)
 
     @classmethod
+    def index(cls, space_id):
+        try:
+            return cls.objects.get(id=space_id)
+        except cls.DoesNotExist:
+            raise SpaceErrors.NOT_EXISTS(attr='space_id', value=space_id)
+
+    @classmethod
     def create(cls, name, slug, email, code, language):
         slug = (slug or '').strip().lower()
         email = (email or '').strip().lower()
+        name = cls.vldt.name(name)
         cls.vldt.slug(slug)
         if cls.vldt.reserved_slug(slug):
             raise SpaceErrors.SLUG_RESERVED
@@ -60,7 +69,7 @@ class Space(models.Model):
             space=None,
         )
         space = cls.objects.create(
-            name=(name or '').strip(),
+            name=name,
             slug=slug,
             email=email,
             email_verified_at=timezone.now(),
@@ -71,7 +80,7 @@ class Space(models.Model):
     @classmethod
     def login_by_email_code(cls, slug, email, code):
         space = cls.get_by_slug(slug)
-        email = (email or '').strip().lower()
+        email = (email or space.email or '').strip().lower()
         if space.email != email:
             raise SpaceErrors.EMAIL_MISMATCH
         SpaceEmailVerificationCode.verify(
@@ -132,6 +141,35 @@ class Space(models.Model):
         self.save(update_fields=['official_user'])
         return official_user
 
+    def active_member_count(self):
+        from User.models import User, UserRoleChoice
+
+        return User.objects.filter(
+            space=self,
+            is_deleted=False,
+            role=UserRoleChoice.MEMBER,
+        ).count()
+
+    def ensure_member_limit_available(self):
+        if self.member_limit is None:
+            return self
+        if self.active_member_count() >= self.member_limit:
+            raise SpaceErrors.MEMBER_LIMIT_REACHED
+        return self
+
+    def set_admin_settings(self, name, group_square_enabled, member_limit):
+        normalized_name = self.vldt.name(name)
+        normalized_member_limit = self.vldt.member_limit(member_limit)
+        current_member_count = self.active_member_count()
+        if normalized_member_limit is not None and normalized_member_limit < current_member_count:
+            raise SpaceErrors.MEMBER_LIMIT_TOO_LOW
+
+        self.name = normalized_name
+        self.group_square_enabled = bool(group_square_enabled)
+        self.member_limit = normalized_member_limit
+        self.save(update_fields=['name', 'group_square_enabled', 'member_limit'])
+        return self
+
     def json(self):
         return self.jsonl()
 
@@ -142,6 +180,7 @@ class Space(models.Model):
             'slug',
             'official_user',
             'group_square_enabled',
+            'member_limit',
             'created_at',
         )
 
@@ -154,6 +193,7 @@ class Space(models.Model):
             'email_verified_at',
             'official_user',
             'group_square_enabled',
+            'member_limit',
             'created_at',
         )
 

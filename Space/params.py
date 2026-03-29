@@ -11,14 +11,22 @@ class SpaceParams(metaclass=Params):
     slug: Validator
     name: Validator
     email: Validator
+    member_limit = Validator('member_limit') \
+        .to(int) \
+        .null().default(None) \
+        .to(Space.vldt.member_limit)
     password = UserParams.password.copy().null().default(None)
     language = UserParams.language.copy()
+    group_square_enabled = Validator('group_square_enabled') \
+        .to(int) \
+        .null().default(None) \
+        .bool(lambda x: x is None or x in (0, 1), message=_('group_square_enabled should be 0 or 1'))
 
 
 class SpaceEmailVerificationCodeParams(metaclass=Params):
     model_class = SpaceEmailVerificationCode
 
-    email: Validator
+    email = SpaceParams.email.copy().null().default(None)
     code: Validator
     slug = SpaceParams.slug.copy().null().default(None)
 
@@ -41,3 +49,7 @@ class SpaceUserListParams(metaclass=Params):
 
 class SpaceLookupParams(metaclass=Params):
     slug = SpaceParams.slug.copy()
+
+
+class SpaceOfficialLoginTicketParams(metaclass=Params):
+    token = Validator('token').to(str)

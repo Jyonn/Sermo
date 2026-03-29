@@ -231,6 +231,7 @@ class User(models.Model):
         normalized_language = cls.vldt.language(language)
         user = cls.objects.filter(space=space, lower_name=name.lower()).first()
         if user is None:
+            space.ensure_member_limit_available()
             return cls.create(
                 space=space,
                 name=name,
@@ -286,6 +287,21 @@ class User(models.Model):
         self.language = normalized
         if save:
             self.save(update_fields=['language'])
+        return self
+
+    def set_name(self, name, save=True):
+        normalized = (name or '').strip()
+        self.vldt.name(normalized)
+        lower_name = normalized.lower()
+        if lower_name != self.lower_name:
+            if User.objects.filter(space=self.space, lower_name=lower_name, is_deleted=False).exclude(id=self.id).exists():
+                raise UserErrors.EXISTS
+
+        self.name = normalized
+        self.lower_name = lower_name
+        self.name_pinyin = self.build_name_pinyin(normalized)
+        if save:
+            self.save(update_fields=['name', 'lower_name', 'name_pinyin'])
         return self
 
     @classmethod
@@ -384,6 +400,13 @@ class User(models.Model):
     def heartbeat(self):
         self.last_heartbeat = timezone.now()
         self.save(update_fields=['last_heartbeat'])
+
+    def remove(self):
+        if self.role == UserRoleChoice.OFFICIAL:
+            raise UserErrors.USER_OFFICIAL_REMOVE_FORBIDDEN
+        self.is_deleted = True
+        self.save(update_fields=['is_deleted'])
+        return self
 
     def log_login(self, ip: str = None):
         return UserLoginLog.create_for_user(self, ip=ip)
@@ -498,6 +521,51 @@ class RefreshToken(models.Model):
         if self.revoked_at is None:
             self.revoked_at = timezone.now()
             self.save(update_fields=['revoked_at'])
+
+
+class OfficialLoginTicket(models.Model):
+    TOKEN_LENGTH = 48
+    EXPIRE_SECONDS = 60
+
+    space = models.ForeignKey('Space.Space', on_delete=models.CASCADE, related_name='official_login_tickets', db_index=True)
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='official_login_tickets', db_index=True)
+    token = models.CharField(max_length=96, unique=True, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField(db_index=True)
+    used_at = models.DateTimeField(null=True, blank=True)
+
+    @classmethod
+    def issue(cls, space):
+        official_user = space.official_user or space.ensure_official_user()
+        now = timezone.now()
+        cls.objects.filter(
+            space=space,
+            user=official_user,
+            used_at__isnull=True,
+        ).update(used_at=now)
+        return cls.objects.create(
+            space=space,
+            user=official_user,
+            token=get_random_string(cls.TOKEN_LENGTH),
+            expires_at=now + datetime.timedelta(seconds=cls.EXPIRE_SECONDS),
+        )
+
+    @classmethod
+    def exchange(cls, token: str):
+        token = (token or '').strip()
+        item = cls.objects.filter(
+            token=token,
+            used_at__isnull=True,
+        ).select_related('user', 'space').order_by('-created_at').first()
+        if item is None:
+            raise UserErrors.OFFICIAL_LOGIN_TICKET_INVALID
+        if item.expires_at <= timezone.now():
+            item.used_at = timezone.now()
+            item.save(update_fields=['used_at'])
+            raise UserErrors.OFFICIAL_LOGIN_TICKET_EXPIRED
+        item.used_at = timezone.now()
+        item.save(update_fields=['used_at'])
+        return item.user
 
 
 class UserLoginLog(models.Model):

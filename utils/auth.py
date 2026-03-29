@@ -11,6 +11,7 @@ from smartdjango import Error, Code, Validator, DictValidator, analyse
 from smartdjango.analyse import get_request, Request as BaseRequest
 
 from Chat.models import Chat
+from Space.models import Space
 from Sermo.settings import SECRET_KEY
 from User.models import User, RefreshToken
 
@@ -21,6 +22,7 @@ class Request(BaseRequest):
     argument: Obj
     data: Obj
     user: User
+    space: Space
 
 
 @Error.register
@@ -106,6 +108,17 @@ def _require_user(func, checker: Optional[Callable[[User], bool]] = None):
 
 def require_user(func):
     return _require_user(func)
+
+
+def require_space(func):
+    def wrapper(*args, **kwargs):
+        request = get_request(*args)
+        token = _get_authorization_token(request)
+        data = decrypt(token, expected_type='space_access')
+        request.space = Space.index(data['space_id'])
+        return func(*args, **kwargs)
+
+    return wrapper
 
 
 def get_login_token(user: User):

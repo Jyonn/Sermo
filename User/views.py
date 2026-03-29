@@ -181,6 +181,14 @@ class WelcomeMessageView(View):
         return dict(welcome_message=request.user.welcome_message)
 
 
+class UserNameView(View):
+    @auth.require_user
+    @analyse.json(UserParams.name)
+    def post(self, request: Request):
+        request.user.set_name(request.json.name)
+        return request.user.json_me()
+
+
 class AvatarPresetView(View):
     @auth.require_user
     @analyse.json(UserParams.avatar_preset_id)
