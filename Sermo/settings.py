@@ -29,7 +29,7 @@ SECRET_KEY = open(os.path.join(BASE_DIR, '.auth')).read()
 DEBUG = True
 PROJ_INIT = True
 
-ALLOWED_HOSTS = ['api.sermo.com', 'localhost', '127.0.0.1', '*']
+ALLOWED_HOSTS = ['*.jyonn.space']
 
 
 
