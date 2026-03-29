@@ -68,7 +68,10 @@ class Chat(models.Model):
         return None
 
     def _dictify_members(self):
-        members = ChatMember.objects.filter(chat=self, status=ChatMemberStatusChoice.ACTIVE).select_related('user')
+        members = ChatMember.objects.filter(
+            chat=self,
+            status=ChatMemberStatusChoice.ACTIVE,
+        ).select_related('user').order_by('user__name_pinyin', 'user__lower_name', 'user_id')
         return [item.user.jsonl() for item in members]
 
     def _dictify_owner(self):

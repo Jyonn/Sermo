@@ -17,4 +17,6 @@ def hash_password(password, salt: str):
 
 
 def verify_password(password, salt, key):
-    return key == hash_password(password, salt) if password else True
+    if not password:
+        return False
+    return key == hash_password(password, salt)

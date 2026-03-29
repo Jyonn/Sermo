@@ -123,7 +123,7 @@
 ### 5.2 用户中心
 
 1. 昵称加入。
-2. 邮箱验证与密码设置。
+2. 联系方式绑定与验证（邮箱为认证入口）。
 3. 通知渠道管理（邮箱、SMS 预留）。
 4. 心跳上报与在线状态维护。
 
@@ -219,11 +219,11 @@
 ### 7.1 用户账号状态
 
 1. `BASIC`：仅昵称，不能主动加好友，不接收邮箱通知。
-2. `VERIFIED`：邮箱已验证且有密码，可主动加好友，可接收邮箱通知。
+2. `VERIFIED`：已绑定并验证邮箱，可主动加好友，可接收邮箱通知。
 
 迁移规则：
 
-1. BASIC -> VERIFIED：完成邮箱验证 + 设置密码。
+1. BASIC -> VERIFIED：通过 `bind-contact(channel=email)` 完成邮箱绑定验证。
 2. VERIFIED -> BASIC：不支持（默认不可逆，避免权限与审计混乱）。
 
 ### 7.2 好友申请状态
@@ -239,8 +239,8 @@
 
 1. `POST /spaces`：创建空间（含官方账号）。
 2. `POST /spaces/{slug}/join`：昵称加入空间。
-3. `POST /users/me/verify-email`：发起邮箱验证。
-4. `POST /users/me/set-password`：设置密码并升级账号。
+3. `POST /users/me/contact-code`：发送联系方式验证码（支持 `channel=email/sms/bark`）。
+4. `POST /users/me/bind-contact`：提交验证码并绑定联系方式（`channel=email` 会升级为 VERIFIED）。
 5. `GET /users`：空间用户列表（全量可见）。
 6. `GET /users/online`：在线用户列表。
 7. `POST /friends/requests`：发起好友申请（Verified only）。
@@ -293,4 +293,3 @@
 1. 全量可见策略在大空间下的分页与隐私边界需持续评估。
 2. 官方免同意拉群需要配套反骚扰策略（频控、黑名单、静音）。
 3. 通知渠道扩展（SMS）涉及成本与地区合规，需单独方案。
-

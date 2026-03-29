@@ -1,8 +1,9 @@
 from django.views import View
 from smartdjango import analyse, OK
 
-from Friendship.models import Friendship
+from Friendship.models import Friendship, FriendshipStatusChoice
 from Friendship.params import FriendshipParams
+from Friendship.validators import FriendshipErrors
 from utils import auth
 from utils.auth import Request
 
@@ -10,8 +11,26 @@ from utils.auth import Request
 class FriendshipListView(View):
     @auth.require_user
     def get(self, request: Request):
-        friends = Friendship.friends_of(request.user)
-        return [friend.json_friend() for friend in friends]
+        rows = Friendship.friend_relations_of(request.user)
+        result = []
+        for friend, relation in rows:
+            payload = friend.json_friend()
+            payload['responded_at'] = relation.responded_at.timestamp() if relation.responded_at else None
+            result.append(payload)
+        return result
+
+
+class FriendshipStatusView(View):
+    @auth.require_user
+    @analyse.query(FriendshipParams.user_id)
+    def get(self, request: Request):
+        item = Friendship.between(request.user, request.query.target_user)
+        if item is None or item.status != FriendshipStatusChoice.ACCEPTED:
+            return dict(is_friend=False)
+        return dict(
+            is_friend=True,
+            friendship=item.json(),
+        )
 
 
 class FriendshipRequestView(View):
@@ -36,10 +55,12 @@ class FriendshipRequestView(View):
 
 class FriendshipRequestRespondView(View):
     @auth.require_user
-    @analyse.query(FriendshipParams.request_id)
+    @analyse.query(FriendshipParams.user_id)
     @analyse.json(FriendshipParams.accept)
     def post(self, request: Request):
-        item = request.query.friendship
+        item = Friendship.between(request.user, request.query.target_user)
+        if item is None:
+            raise FriendshipErrors.NOT_FRIENDS
         if request.json.accept:
             item.accept(request.user)
         else:
@@ -49,9 +70,11 @@ class FriendshipRequestRespondView(View):
 
 class FriendshipRemoveView(View):
     @auth.require_user
-    @analyse.query(FriendshipParams.request_id)
+    @analyse.query(FriendshipParams.user_id)
     def delete(self, request: Request):
-        item = request.query.friendship
+        item = Friendship.between(request.user, request.query.target_user)
+        if item is None:
+            raise FriendshipErrors.NOT_FRIENDS
         item.remove(request.user)
         return OK
 

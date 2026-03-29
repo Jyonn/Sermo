@@ -10,6 +10,7 @@ from pypinyin import lazy_pinyin
 from smartdjango import models, Choice
 
 from utils.global_settings import notificator
+from utils.qiniu import sign_private_download_url, delete_avatar_by_uri
 from User.validators import UserValidator, UserErrors
 from utils import function
 
@@ -168,18 +169,6 @@ class User(models.Model):
         return (email or '').strip().lower()
 
     @classmethod
-    def _assert_email_available(cls, space, email: str, exclude_user_id=None):
-        normalized_email = cls._normalize_email(email)
-        if not normalized_email:
-            return normalized_email
-        query = cls.objects.filter(space=space, email=normalized_email)
-        if exclude_user_id is not None:
-            query = query.exclude(id=exclude_user_id)
-        if query.exists():
-            raise UserErrors.EMAIL_TAKEN
-        return normalized_email
-
-    @classmethod
     def build_preset_avatar_uri(cls, preset_id: int):
         validated = cls.vldt.avatar_preset_id(preset_id)
         return f'{cls.AVATAR_PRESET_BASE_URI}/{validated:02d}.svg'
@@ -214,7 +203,7 @@ class User(models.Model):
             language=normalized_language,
         )
         default_avatar_preset_id = cls._default_avatar_preset_id(salt)
-        normalized_email = cls._assert_email_available(space, email) or None
+        normalized_email = cls._normalize_email(email) or None
         email_verified_at = timezone.now() if verified and normalized_email else None
         user = cls.objects.create(
             space=space,
@@ -329,20 +318,12 @@ class User(models.Model):
             self.save(update_fields=['welcome_message'])
         return self
 
-    def verify_email_and_upgrade(self, email, password):
-        self.set_password(password, save=False)
-        self.email = self._assert_email_available(self.space, email, exclude_user_id=self.id)
-        self.email_verified_at = timezone.now()
-        self.account_level = UserAccountLevelChoice.VERIFIED
-        self.save(update_fields=['password', 'email', 'email_verified_at', 'account_level'])
-        return self
-
     def bind_contact(self, channel: int, target: str):
         target = (target or '').strip()
         now = timezone.now()
 
         if channel == UserNotificationChoice.EMAIL:
-            self.email = self._assert_email_available(self.space, target, exclude_user_id=self.id)
+            self.email = self._normalize_email(target)
             self.email_verified_at = now
             self.account_level = UserAccountLevelChoice.VERIFIED
             self.save(update_fields=['email', 'email_verified_at', 'account_level'])
@@ -360,11 +341,33 @@ class User(models.Model):
         raise UserErrors.CONTACT_CHANNEL_INVALID
 
     def set_preset_avatar(self, preset_id: int, save=True):
+        previous_avatar_type = self.avatar_type
+        previous_avatar_uri = self.avatar_uri
         self.avatar_type = UserAvatarTypeChoice.PRESET
         self.avatar_uri = self.build_preset_avatar_uri(preset_id)
         if save:
             self.save(update_fields=['avatar_type', 'avatar_uri'])
+            self._delete_previous_custom_avatar(previous_avatar_type, previous_avatar_uri, self.avatar_uri)
         return self
+
+    def set_custom_avatar(self, avatar_uri: str, save=True):
+        previous_avatar_type = self.avatar_type
+        previous_avatar_uri = self.avatar_uri
+        self.avatar_type = UserAvatarTypeChoice.CUSTOM
+        self.avatar_uri = (avatar_uri or '').strip()
+        if save:
+            self.save(update_fields=['avatar_type', 'avatar_uri'])
+            self._delete_previous_custom_avatar(previous_avatar_type, previous_avatar_uri, self.avatar_uri)
+        return self
+
+    @staticmethod
+    def _delete_previous_custom_avatar(previous_avatar_type, previous_avatar_uri, current_avatar_uri):
+        old_uri = (previous_avatar_uri or '').strip()
+        if previous_avatar_type != UserAvatarTypeChoice.CUSTOM or not old_uri:
+            return None
+        if old_uri == (current_avatar_uri or '').strip():
+            return None
+        return delete_avatar_by_uri(old_uri)
 
     @property
     def verified(self):
@@ -373,6 +376,10 @@ class User(models.Model):
     @property
     def is_official(self):
         return self.role == UserRoleChoice.OFFICIAL
+
+    @property
+    def has_password(self):
+        return bool((self.password or '').strip())
 
     def heartbeat(self):
         self.last_heartbeat = timezone.now()
@@ -407,8 +414,19 @@ class User(models.Model):
             return None
         return self.bark_verified_at.timestamp()
 
+    def _dictify_avatar_uri(self):
+        avatar_uri = (self.avatar_uri or '').strip()
+        if not avatar_uri:
+            return avatar_uri
+        if self.avatar_type == UserAvatarTypeChoice.CUSTOM:
+            return sign_private_download_url(avatar_uri)
+        return avatar_uri
+
     def _dictify_official(self):
         return self.is_official
+
+    def _dictify_has_password(self):
+        return self.has_password
 
     def tiny_json(self):
         return self.dictify('name', 'user_id', 'official', 'avatar_type', 'avatar_uri')
@@ -427,6 +445,7 @@ class User(models.Model):
     def json_friend(self):
         return self.dictify(
             'name',
+            'name_pinyin',
             'user_id',
             'official',
             'verified',
@@ -437,7 +456,7 @@ class User(models.Model):
         )
 
     def jwt_json(self):
-        return self.dictify('name', 'user_id', 'space_id', 'language')
+        return self.dictify('name', 'user_id', 'space_id', 'language', 'verified')
 
     def json(self):
         return self.jsonl()
@@ -447,6 +466,7 @@ class User(models.Model):
             'name',
             'user_id',
             'official',
+            'has_password',
             'language',
             'welcome_message',
             'is_alive',
@@ -505,49 +525,6 @@ class UserLoginLog(models.Model):
         )
 
 
-class EmailVerificationCode(models.Model):
-    CODE_LENGTH = 6
-    EXPIRE_SECONDS = 10 * 60
-
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='email_verification_codes')
-    email = models.EmailField()
-    code = models.CharField(max_length=CODE_LENGTH, db_index=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-    expires_at = models.DateTimeField(db_index=True)
-    used_at = models.DateTimeField(null=True, blank=True)
-
-    @classmethod
-    def issue(cls, user: User, email: str):
-        email = User._assert_email_available(user.space, email, exclude_user_id=user.id)
-        now = timezone.now()
-        cls.objects.filter(user=user, used_at__isnull=True).update(used_at=now)
-        code = get_random_string(cls.CODE_LENGTH, allowed_chars='0123456789')
-        return cls.objects.create(
-            user=user,
-            email=email,
-            code=code,
-            expires_at=now + datetime.timedelta(seconds=cls.EXPIRE_SECONDS),
-        )
-
-    @classmethod
-    def verify(cls, user: User, email: str, code: str):
-        email = (email or '').strip().lower()
-        code = (code or '').strip()
-        item = cls.objects.filter(
-            user=user,
-            email=email,
-            code=code,
-            used_at__isnull=True,
-        ).order_by('-created_at').first()
-        if item is None:
-            raise UserErrors.EMAIL_CODE_INVALID
-        if item.expires_at <= timezone.now():
-            raise UserErrors.EMAIL_CODE_EXPIRED
-        item.used_at = timezone.now()
-        item.save(update_fields=['used_at'])
-        return item
-
-
 class UserContactVerificationCode(models.Model):
     CODE_LENGTH = 6
     EXPIRE_SECONDS = 10 * 60
@@ -570,12 +547,6 @@ class UserContactVerificationCode(models.Model):
     @classmethod
     def issue(cls, user: User, channel: int, target: str):
         normalized_target = cls._normalize_target(channel, target)
-        if channel == UserNotificationChoice.EMAIL:
-            normalized_target = User._assert_email_available(
-                user.space,
-                normalized_target,
-                exclude_user_id=user.id,
-            )
         now = timezone.now()
         cls.objects.filter(
             user=user,
@@ -792,7 +763,7 @@ class NotificationEvent(models.Model):
             chat_id=message.chat_id,
             message_id=message.id,
             message_type=message.type,
-            content=message.content,
+            content=message.preview_text(),
         )
         created_events = []
         for user in cls._message_recipients(message.chat, actor):
@@ -871,20 +842,20 @@ class NotificationDelivery(models.Model):
         try:
             if self.channel == UserNotificationChoice.EMAIL:
                 notificator.mail(
-                    target=target,
+                    target,
                     title=title,
                     body=body,
                     recipient_name=self.event.user.name,
                 )
             elif self.channel == UserNotificationChoice.SMS:
                 notificator.sms(
-                    target=target,
+                    target,
                     title=title,
                     body=body,
                 )
             elif self.channel == UserNotificationChoice.BARK:
                 notificator.bark(
-                    target=target,
+                    target,
                     title=title,
                     body=body,
                 )

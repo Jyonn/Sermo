@@ -4,6 +4,7 @@ from smartdjango import analyse, OK
 
 from Message.models import Message
 from Message.params import MessageParams
+from utils.qiniu import issue_message_upload
 from utils import auth
 from utils.auth import Request
 from User.models import NotificationEvent
@@ -52,6 +53,21 @@ class MessageView(View):
         message: Message = request.query.message
         message.remove()
         return OK
+
+
+class MessageUploadView(View):
+    @auth.require_user
+    @analyse.json(
+        MessageParams.kind,
+        MessageParams.file_name,
+        MessageParams.content_type,
+    )
+    def post(self, request: Request):
+        return issue_message_upload(
+            kind=request.json.kind,
+            file_name=request.json.file_name,
+            content_type=request.json.content_type,
+        )
 
 
 class MessageSyncView(View):

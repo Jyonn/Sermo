@@ -295,7 +295,38 @@ class Friendship(models.Model):
             friend = relation.user_high if relation.user_low_id == user.id else relation.user_low
             if not friend.is_deleted:
                 friends.append(friend)
+        friends.sort(
+            key=lambda x: (
+                1 if not (x.name_pinyin or '').strip() else 0,
+                (x.name_pinyin or '').strip(),
+                x.lower_name,
+                x.id,
+            )
+        )
         return friends
+
+    @classmethod
+    def friend_relations_of(cls, user: User):
+        relations = cls.objects.filter(
+            space=user.space,
+            status=FriendshipStatusChoice.ACCEPTED,
+        ).filter(Q(user_low=user) | Q(user_high=user))
+
+        rows = []
+        for relation in relations.select_related('user_low', 'user_high'):
+            friend = relation.user_high if relation.user_low_id == user.id else relation.user_low
+            if not friend.is_deleted:
+                rows.append((friend, relation))
+
+        rows.sort(
+            key=lambda item: (
+                1 if not (item[0].name_pinyin or '').strip() else 0,
+                (item[0].name_pinyin or '').strip(),
+                item[0].lower_name,
+                item[0].id,
+            )
+        )
+        return rows
 
     @classmethod
     def pending_incoming(cls, user: User):

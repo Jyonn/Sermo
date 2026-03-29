@@ -168,5 +168,5 @@ class SpaceUserListView(View):
 
         offset = request.query.offset
         limit = request.query.limit
-        rows = users.order_by('-last_heartbeat', 'id')[offset:offset + limit]
+        rows = users.order_by('name_pinyin', 'lower_name', 'id')[offset:offset + limit]
         return [user.jsonl() for user in rows]

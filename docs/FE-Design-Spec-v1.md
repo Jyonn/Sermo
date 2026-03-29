@@ -331,15 +331,20 @@ CSS 建议：
 
 ## 7.3 User 相关
 
-1. `GET /users/heartbeat`
-2. `POST /users/refresh` JSON: `refresh`
-3. `POST /users/logout` JSON: `refresh`
-4. `GET /users/me/notification-prefs`
-5. `POST /users/me/notification-prefs` JSON: `channel, enabled?, offline_threshold_minutes?`
-6. `POST /users/me/email-code` JSON: `email`
-7. `POST /users/me/verify-email` JSON: `email, code, password`
+1. `GET /users/me`
+ - 返回：完整 `json_me()` 结构（包含 `email/phone/bark` 及其验证时间戳，以及 `has_password`）
+2. `GET /users/heartbeat`
+3. `POST /users/refresh` JSON: `refresh`
+4. `POST /users/logout` JSON: `refresh`
+5. `POST /users/me/password` JSON: `old_password?, new_password`
+ - 说明：若当前已设置密码，则 `old_password` 必填且需校验；若未设置，则可直接设置 `new_password`。
+6. `GET /users/me/notification-prefs`
+7. `POST /users/me/notification-prefs` JSON: `channel, enabled?, offline_threshold_minutes?`
 8. `POST /users/me/contact-code` JSON: `channel, target`
+ - 说明：当 `channel=email` 时，这就是用户邮箱认证验证码入口。
 9. `POST /users/me/bind-contact` JSON: `channel, target, code`
+ - 说明：当 `channel=email` 绑定成功后，用户会升级为 `VERIFIED`。
+ - 约束：未设置密码的用户不可使用通知绑定相关接口（`notification-prefs/contact-code/bind-contact`）。
 10. `GET /users/me/welcome-message`
 11. `POST /users/me/welcome-message` JSON: `welcome_message`
 12. `POST /users/me/avatar/preset` JSON: `avatar_preset_id(1-80)`
@@ -348,17 +353,20 @@ CSS 建议：
 ## 7.4 Friendship 相关
 
 1. `GET /friends/`：好友列表（返回用户数组）
-- 返回字段相比普通用户列表额外包含：`last_heartbeat`
-2. `POST /friends/requests` JSON: `to_user_id`
-3. `GET /friends/requests`：返回 `{ incoming, outgoing }`
-4. `POST /friends/requests/respond?request_id=` JSON: `accept(0|1)`
-5. `DELETE /friends/requests/remove?request_id=`
+- 返回字段相比普通用户列表额外包含：`last_heartbeat`, `responded_at`
+ - `responded_at` 表示成为好友（申请被同意）的时间戳
+2. `GET /friends/status?user_id=`
+ - 返回：`{ is_friend }`；若为好友，则额外返回 `friendship`
+3. `POST /friends/requests` JSON: `to_user_id`
+4. `GET /friends/requests`：返回 `{ incoming, outgoing }`
+5. `POST /friends/requests/respond?user_id=` JSON: `accept(0|1)`
+6. `DELETE /friends/requests/remove?user_id=`
 - 行为：已是好友时删除好友；若是自己发出的 `PENDING` 申请则撤回申请
-6. `POST /friends/invites/token`
+7. `POST /friends/invites/token`
 - 作用：生成好友邀请 token（有效期 7 天）
 - 返回：`{ token, expire }`
  - token 负载：`{ space, user, expire }`，使用 `Globals.SECRET_KEY` 签名
-7. `POST /friends/invites/redeem` JSON: `token`
+8. `POST /friends/invites/redeem` JSON: `token`
 - 作用：使用邀请 token 发起好友申请（from=当前用户, to=token中的user）
 - 校验：签名有效、未过期、与当前用户同 Space
 

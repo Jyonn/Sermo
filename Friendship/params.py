@@ -8,9 +8,9 @@ from User.models import User
 class FriendshipParams(metaclass=Params):
     model_class = Friendship
 
-    request_id = Validator('request_id', final_name='friendship') \
+    user_id = Validator('user_id', final_name='target_user') \
         .to(int) \
-        .to(Friendship.index)
+        .to(User.index)
 
     to_user_id = Validator('to_user_id', final_name='to_user') \
         .to(int) \
