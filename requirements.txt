@@ -3,4 +3,7 @@ django
 smartdjango
 requests
 pypinyin
-p
+django-cors-headers
+pymysql
+notificator
+pyjwt
