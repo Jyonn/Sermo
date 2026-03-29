@@ -5,6 +5,7 @@ from Space.views import (
     SpaceView,
     SpaceLoginView,
     SpaceJoinView,
+    SpaceLookupView,
     SpaceMeView,
     SpaceUserListView,
 )
@@ -12,6 +13,7 @@ from Space.views import (
 urlpatterns = [
     path('email-code', SpaceEmailCodeRequestView.as_view(), name='space email verification code'),
     path('', SpaceView.as_view(), name='space create'),
+    path('lookup', SpaceLookupView.as_view(), name='space lookup'),
     path('login', SpaceLoginView.as_view(), name='space email login'),
     path('join', SpaceJoinView.as_view(), name='space join'),
     path('me', SpaceMeView.as_view(), name='space me'),

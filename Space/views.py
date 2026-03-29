@@ -10,6 +10,7 @@ from Space.models import SpaceEmailVerificationCode, SpaceEmailCodePurposeChoice
 from Space.params import (
     SpaceParams,
     SpaceEmailVerificationCodeParams,
+    SpaceLookupParams,
     SpaceUserListParams,
 )
 from Space.validators import SpaceErrors
@@ -138,6 +139,15 @@ class SpaceMeView(View):
     @auth.require_user
     def get(self, request: Request):
         return request.user.space.json()
+
+
+class SpaceLookupView(View):
+    @analyse.query(
+        SpaceLookupParams.slug,
+    )
+    def get(self, request: Request):
+        space = Space.get_by_slug(request.query.slug)
+        return space.json()
 
 
 class SpaceUserListView(View):

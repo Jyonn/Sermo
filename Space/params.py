@@ -37,3 +37,7 @@ class SpaceUserListParams(metaclass=Params):
         .to(int) \
         .null().default(0) \
         .bool(lambda x: x >= 0, message=_('offset should be greater than or equal to 0'))
+
+
+class SpaceLookupParams(metaclass=Params):
+    slug = SpaceParams.slug.copy()
