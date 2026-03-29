@@ -79,7 +79,7 @@ class Friendship(models.Model):
         return key
 
     @classmethod
-    def issue_invite_token(cls, inviter: User):
+    def issue_invite_token(cls, inviter: User, permanent: bool = False):
         if not inviter.verified:
             raise FriendshipErrors.REQUEST_FORBIDDEN
 
@@ -87,8 +87,10 @@ class Friendship(models.Model):
         payload = dict(
             space=inviter.space_id,
             user=inviter.id,
-            expire=now + cls.INVITE_TOKEN_EXPIRE_SECONDS,
+            permanent=1 if permanent else 0,
         )
+        if not permanent:
+            payload['expire'] = now + cls.INVITE_TOKEN_EXPIRE_SECONDS
         token = jwt.encode(
             payload,
             key=cls._invite_secret_key(),
@@ -96,7 +98,7 @@ class Friendship(models.Model):
         )
         if isinstance(token, bytes):
             token = token.decode()
-        return dict(token=token, expire=payload['expire'])
+        return dict(token=token, expire=payload.get('expire'), permanent=bool(payload['permanent']))
 
     @classmethod
     def _decode_invite_token(cls, token: str):
@@ -116,14 +118,23 @@ class Friendship(models.Model):
         try:
             space_id = int(payload.get('space'))
             inviter_id = int(payload.get('user'))
-            expire = int(payload.get('expire'))
+            permanent = 1 if int(payload.get('permanent') or 0) else 0
         except (TypeError, ValueError):
             raise FriendshipErrors.INVITE_TOKEN_INVALID
 
-        if expire < int(time.time()):
-            raise FriendshipErrors.INVITE_TOKEN_EXPIRED
+        expire = payload.get('expire')
+        if permanent:
+            expire = None
+        else:
+            try:
+                expire = int(expire)
+            except (TypeError, ValueError):
+                raise FriendshipErrors.INVITE_TOKEN_INVALID
 
-        return dict(space=space_id, user=inviter_id, expire=expire)
+            if expire < int(time.time()):
+                raise FriendshipErrors.INVITE_TOKEN_EXPIRED
+
+        return dict(space=space_id, user=inviter_id, expire=expire, permanent=bool(permanent))
 
     @classmethod
     def preview_invite_token(cls, token: str):
@@ -135,6 +146,7 @@ class Friendship(models.Model):
             inviter=inviter,
             space=inviter.space,
             expire=payload['expire'],
+            permanent=payload['permanent'],
         )
 
     @classmethod

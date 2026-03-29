@@ -23,3 +23,8 @@ class FriendshipParams(metaclass=Params):
     token = Validator('token') \
         .to(str) \
         .bool(lambda x: len(x.strip()) > 0, message=_('token is required'))
+
+    permanent = Validator('permanent') \
+        .to(int) \
+        .null().default(0) \
+        .bool(lambda x: x in (0, 1), message=_('permanent should be 0 or 1'))

@@ -81,8 +81,9 @@ class FriendshipRemoveView(View):
 
 class FriendshipInviteTokenView(View):
     @auth.require_user
+    @analyse.json(FriendshipParams.permanent)
     def post(self, request: Request):
-        return Friendship.issue_invite_token(request.user)
+        return Friendship.issue_invite_token(request.user, permanent=bool(request.json.permanent))
 
 
 class FriendshipInvitePreviewView(View):
@@ -93,6 +94,7 @@ class FriendshipInvitePreviewView(View):
             inviter=payload['inviter'].tiny_json(),
             space=payload['space'].json(),
             expire=payload['expire'],
+            permanent=payload['permanent'],
         )
 
 
