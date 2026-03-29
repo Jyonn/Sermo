@@ -85,6 +85,17 @@ class FriendshipInviteTokenView(View):
         return Friendship.issue_invite_token(request.user)
 
 
+class FriendshipInvitePreviewView(View):
+    @analyse.query(FriendshipParams.token)
+    def get(self, request: Request):
+        payload = Friendship.preview_invite_token(request.query.token)
+        return dict(
+            inviter=payload['inviter'].tiny_json(),
+            space=payload['space'].json(),
+            expire=payload['expire'],
+        )
+
+
 class FriendshipInviteRedeemView(View):
     @auth.require_user
     @analyse.json(FriendshipParams.token)

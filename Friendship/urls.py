@@ -7,6 +7,7 @@ from Friendship.views import (
     FriendshipRequestRespondView,
     FriendshipRemoveView,
     FriendshipInviteTokenView,
+    FriendshipInvitePreviewView,
     FriendshipInviteRedeemView,
 )
 
@@ -17,5 +18,6 @@ urlpatterns = [
     path('requests/respond', FriendshipRequestRespondView.as_view(), name='friend request respond'),
     path('requests/remove', FriendshipRemoveView.as_view(), name='friend remove'),
     path('invites/token', FriendshipInviteTokenView.as_view(), name='friend invite token'),
+    path('invites/preview', FriendshipInvitePreviewView.as_view(), name='friend invite preview'),
     path('invites/redeem', FriendshipInviteRedeemView.as_view(), name='friend invite redeem'),
 ]

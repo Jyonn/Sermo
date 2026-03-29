@@ -123,12 +123,24 @@ class Friendship(models.Model):
         return dict(space=space_id, user=inviter_id, expire=expire)
 
     @classmethod
-    def redeem_invite_token(cls, token: str, requester: User):
+    def preview_invite_token(cls, token: str):
         payload = cls._decode_invite_token(token)
-        if payload['space'] != requester.space_id:
-            raise FriendshipErrors.INVITE_TOKEN_SPACE_MISMATCH
         inviter = User.index(payload['user'])
-        return cls.create(from_user=requester, to_user=inviter)
+        if inviter.space_id != payload['space']:
+            raise FriendshipErrors.INVITE_TOKEN_SPACE_MISMATCH
+        return dict(
+            inviter=inviter,
+            space=inviter.space,
+            expire=payload['expire'],
+        )
+
+    @classmethod
+    def redeem_invite_token(cls, token: str, requester: User):
+        payload = cls.preview_invite_token(token)
+        if payload['space'].id != requester.space_id:
+            raise FriendshipErrors.INVITE_TOKEN_SPACE_MISMATCH
+        inviter = payload['inviter']
+        return cls.create(from_user=requester, to_user=inviter, allow_unverified=True)
 
     def _is_participant(self, user: User):
         return user.id in (self.user_low_id, self.user_high_id)
@@ -157,8 +169,8 @@ class Friendship(models.Model):
         return item
 
     @classmethod
-    def create(cls, from_user: User, to_user: User):
-        if not from_user.verified:
+    def create(cls, from_user: User, to_user: User, allow_unverified: bool = False):
+        if not allow_unverified and not from_user.verified:
             raise FriendshipErrors.REQUEST_FORBIDDEN
 
         space, user_low, user_high = cls._pair(from_user, to_user)
