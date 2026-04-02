@@ -102,6 +102,11 @@ def build_message_image_thumbnail_uri(uri: str, width: int = 120):
     return sign_private_processed_url(uri, f'imageView2/2/w/{normalized_width}/q/70')
 
 
+def build_avatar_display_uri(uri: str, size: int = 400):
+    normalized_size = max(96, min(int(size), 1024))
+    return sign_private_processed_url(uri, f'imageView2/1/w/{normalized_size}/h/{normalized_size}/q/85')
+
+
 def _guess_extension(file_name: str, content_type: str = None):
     extension = os.path.splitext((file_name or '').strip())[1].lower()
     if extension in ALLOWED_IMAGE_EXTENSIONS:

@@ -10,7 +10,7 @@ from pypinyin import lazy_pinyin
 from smartdjango import models, Choice
 
 from utils.global_settings import notificator
-from utils.qiniu import sign_private_download_url, delete_avatar_by_uri
+from utils.qiniu import sign_private_download_url, delete_avatar_by_uri, build_avatar_display_uri
 from User.validators import UserValidator, UserErrors
 from utils import function
 
@@ -442,7 +442,7 @@ class User(models.Model):
         if not avatar_uri:
             return avatar_uri
         if self.avatar_type == UserAvatarTypeChoice.CUSTOM:
-            return sign_private_download_url(avatar_uri)
+            return build_avatar_display_uri(avatar_uri)
         return avatar_uri
 
     def _dictify_official(self):
