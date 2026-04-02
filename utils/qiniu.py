@@ -88,6 +88,20 @@ def sign_private_download_url(url: str, expire_seconds: int = AVATAR_DOWNLOAD_EX
     return f'{download_url}&token={token}'
 
 
+def sign_private_processed_url(url: str, fops: str, expire_seconds: int = AVATAR_DOWNLOAD_EXPIRE_SECONDS):
+    normalized_url = (url or '').strip()
+    normalized_fops = (fops or '').strip().lstrip('?')
+    if not normalized_url or not normalized_fops:
+        return ''
+    separator = '&' if '?' in normalized_url else '?'
+    return sign_private_download_url(f'{normalized_url}{separator}{normalized_fops}', expire_seconds=expire_seconds)
+
+
+def build_message_image_thumbnail_uri(uri: str, width: int = 120):
+    normalized_width = max(48, min(int(width), 480))
+    return sign_private_processed_url(uri, f'imageView2/2/w/{normalized_width}/q/70')
+
+
 def _guess_extension(file_name: str, content_type: str = None):
     extension = os.path.splitext((file_name or '').strip())[1].lower()
     if extension in ALLOWED_IMAGE_EXTENSIONS:
