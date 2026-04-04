@@ -3,6 +3,8 @@ import ipaddress
 import re
 
 from notificator import NotificatorAPIError
+from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 from django.utils.crypto import get_random_string
 from django.utils.translation import gettext as _
@@ -128,7 +130,7 @@ class User(models.Model):
     @classmethod
     def _assert_name_available(cls, space, name):
         lower_name = name.lower()
-        if cls.objects.filter(space=space, lower_name=lower_name).exists():
+        if cls.objects.filter(space=space, lower_name=lower_name, is_deleted=False).exists():
             raise UserErrors.EXISTS
 
     @classmethod
@@ -167,6 +169,11 @@ class User(models.Model):
     @classmethod
     def _normalize_email(cls, email: str):
         return (email or '').strip().lower()
+
+    @classmethod
+    def _deleted_lower_name(cls, user_id: int):
+        value = f'd{int(user_id)}'
+        return value[-cls.vldt.NAME_MAX_LENGTH:]
 
     @classmethod
     def build_preset_avatar_uri(cls, preset_id: int):
@@ -228,9 +235,13 @@ class User(models.Model):
     @classmethod
     def login(cls, space, name, password, language=None):
         name = (name or '').strip()
+        lower_name = name.lower()
         normalized_language = cls.vldt.language(language)
-        user = cls.objects.filter(space=space, lower_name=name.lower()).first()
+        user = cls.objects.filter(space=space, lower_name=lower_name, is_deleted=False).first()
         if user is None:
+            deleted_user = cls.objects.filter(space=space, lower_name=lower_name, is_deleted=True).first()
+            if deleted_user is not None:
+                deleted_user.release_deleted_identity()
             space.ensure_member_limit_available()
             return cls.create(
                 space=space,
@@ -401,11 +412,61 @@ class User(models.Model):
         self.last_heartbeat = timezone.now()
         self.save(update_fields=['last_heartbeat'])
 
+    def release_deleted_identity(self, save=True):
+        if not self.is_deleted:
+            return self
+        released_lower_name = self._deleted_lower_name(self.id)
+        if self.lower_name == released_lower_name:
+            return self
+        self.lower_name = released_lower_name
+        if save:
+            self.save(update_fields=['lower_name'])
+        return self
+
+    def _cleanup_relations_for_removal(self):
+        from Friendship.models import Friendship, FriendshipStatusChoice
+        from Chat.models import ChatMember, ChatMemberStatusChoice
+
+        current_time = timezone.now()
+
+        Friendship.objects.filter(
+            space=self.space,
+        ).filter(
+            Q(user_low=self) | Q(user_high=self),
+        ).exclude(
+            status=FriendshipStatusChoice.DELETED,
+        ).update(
+            status=FriendshipStatusChoice.DELETED,
+            responded_at=current_time,
+            updated_at=current_time,
+        )
+
+        ChatMember.objects.filter(
+            user=self,
+            status=ChatMemberStatusChoice.ACTIVE,
+        ).update(
+            status=ChatMemberStatusChoice.LEFT,
+            left_at=current_time,
+            updated_at=current_time,
+        )
+
+        ChatMember.objects.filter(
+            user=self,
+            status=ChatMemberStatusChoice.PENDING,
+        ).update(
+            status=ChatMemberStatusChoice.REJECTED,
+            left_at=current_time,
+            updated_at=current_time,
+        )
+
     def remove(self):
         if self.role == UserRoleChoice.OFFICIAL:
             raise UserErrors.USER_OFFICIAL_REMOVE_FORBIDDEN
-        self.is_deleted = True
-        self.save(update_fields=['is_deleted'])
+        with transaction.atomic():
+            self._cleanup_relations_for_removal()
+            self.is_deleted = True
+            self.lower_name = self._deleted_lower_name(self.id)
+            self.save(update_fields=['is_deleted', 'lower_name'])
         return self
 
     def log_login(self, ip: str = None):

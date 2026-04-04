@@ -71,6 +71,7 @@ class Chat(models.Model):
         members = ChatMember.objects.filter(
             chat=self,
             status=ChatMemberStatusChoice.ACTIVE,
+            user__is_deleted=False,
         ).select_related('user').order_by('user__name_pinyin', 'user__lower_name', 'user_id')
         return [item.user.jsonl() for item in members]
 
@@ -79,6 +80,7 @@ class Chat(models.Model):
             chat=self,
             role=ChatMemberRoleChoice.OWNER,
             status=ChatMemberStatusChoice.ACTIVE,
+            user__is_deleted=False,
         ).select_related('user').first()
         return owner.user.tiny_json() if owner else None
 
