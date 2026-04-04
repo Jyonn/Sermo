@@ -19,6 +19,7 @@ class FriendshipStatusChoice(Choice):
 
 
 class Friendship(models.Model):
+    validators = FriendshipValidator
     vldt = FriendshipValidator
     INVITE_TOKEN_EXPIRE_SECONDS = 7 * 24 * 60 * 60
     INVITE_TOKEN_ALGORITHM = 'HS256'

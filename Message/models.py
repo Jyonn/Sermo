@@ -18,6 +18,7 @@ class MessageTypeChoice(Choice):
 
 
 class Message(models.Model):
+    validators = MessageValidator
     vldt = MessageValidator
     MEDIA_KIND_BY_TYPE = {
         MessageTypeChoice.IMAGE: 'image',

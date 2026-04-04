@@ -7,7 +7,6 @@ from User.models import (
     NotificationPreference,
     UserContactVerificationCode,
 )
-from User.validators import UserValidator
 
 
 class UserParams(metaclass=Params):
@@ -20,7 +19,7 @@ class UserParams(metaclass=Params):
     welcome_message: Validator
     avatar_preset_id = Validator('avatar_preset_id') \
         .to(int) \
-        .to(UserValidator.avatar_preset_id)
+        .to(User.validators.avatar_preset_id)
     avatar_key = Validator('key') \
         .to(str)
     avatar_file_name = Validator('file_name') \
@@ -32,7 +31,8 @@ class UserParams(metaclass=Params):
         .to(str) \
         .null().default(None) \
         .bool(lambda x: x is not None, message=_('language is required')) \
-        .to(UserValidator.language)
+        .to(User.normalizers.language) \
+        .exception(User.validators.language)
 
 
 class AuthParams(metaclass=Params):

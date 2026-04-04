@@ -5,6 +5,7 @@ from Config.validators import ConfigValidator, ConfigErrors
 
 
 class Config(models.Model):
+    validators = ConfigValidator
     vldt = ConfigValidator
 
     key = models.CharField(

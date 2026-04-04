@@ -9,7 +9,23 @@ from smartdjango import Choice
 from Space.validators import SpaceValidator, SpaceErrors
 
 
+class SpaceNormalizers:
+    @staticmethod
+    def name(value):
+        return (value or '').strip()
+
+    @staticmethod
+    def slug(value):
+        return (value or '').strip().lower()
+
+    @staticmethod
+    def email(value):
+        return (value or '').strip().lower()
+
+
 class Space(models.Model):
+    normalizers = SpaceNormalizers
+    validators = SpaceValidator
     vldt = SpaceValidator
 
     OFFICIAL_NAME = 'Official'

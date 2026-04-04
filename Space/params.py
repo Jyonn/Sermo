@@ -11,10 +11,7 @@ class SpaceParams(metaclass=Params):
     slug: Validator
     name: Validator
     email: Validator
-    member_limit = Validator('member_limit') \
-        .to(int) \
-        .null().default(None) \
-        .to(Space.vldt.member_limit)
+    member_limit: Validator
     password = UserParams.password.copy().null().default(None)
     language = UserParams.language.copy()
     group_square_enabled = Validator('group_square_enabled') \

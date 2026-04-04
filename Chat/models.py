@@ -28,6 +28,7 @@ class ChatMemberStatusChoice(Choice):
 
 
 class Chat(models.Model):
+    validators = ChatValidator
     vldt = ChatValidator
 
     space = models.ForeignKey('Space.Space', on_delete=models.CASCADE, related_name='chats', db_index=True)
@@ -319,6 +320,7 @@ class Chat(models.Model):
 
 
 class ChatMember(models.Model):
+    validators = ChatMemberValidator
     vldt = ChatMemberValidator
 
     chat = models.ForeignKey(Chat, on_delete=models.CASCADE, related_name='chat_members')

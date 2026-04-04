@@ -39,7 +39,27 @@ class UserAvatarTypeChoice(Choice):
     CUSTOM = 'custom'
 
 
+class UserNormalizers:
+    @staticmethod
+    def name(value):
+        return (value or '').strip()
+
+    @staticmethod
+    def lower_name(value):
+        return UserNormalizers.name(value).lower()
+
+    @staticmethod
+    def language(value):
+        return UserValidator.normalize_language(value)
+
+    @staticmethod
+    def welcome_message(value):
+        return (value or '').strip()
+
+
 class User(models.Model):
+    normalizers = UserNormalizers
+    validators = UserValidator
     vldt = UserValidator
     MEMBER_WELCOME_MESSAGE_ZH = '我已同意你的好友申请，快来和我聊天吧～'
     MEMBER_WELCOME_MESSAGE_EN = 'I accepted your friend request. Come chat with me!'
