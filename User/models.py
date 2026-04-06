@@ -144,6 +144,13 @@ class User(models.Model):
             raise UserErrors.NOT_EXISTS(attr=_('user id'), value=user_id)
 
     @classmethod
+    def index_any(cls, user_id):
+        try:
+            return cls.objects.get(id=user_id)
+        except cls.DoesNotExist:
+            raise UserErrors.NOT_EXISTS(attr=_('user id'), value=user_id)
+
+    @classmethod
     def jwt_login(cls, user_id):
         return cls.index(user_id)
 
@@ -479,6 +486,24 @@ class User(models.Model):
             updated_at=current_time,
         )
 
+    def has_removal_residue(self):
+        from Friendship.models import Friendship, FriendshipStatusChoice
+        from Chat.models import ChatMember, ChatMemberStatusChoice
+
+        if Friendship.objects.filter(
+            space=self.space,
+        ).filter(
+            Q(user_low=self) | Q(user_high=self),
+        ).exclude(
+            status=FriendshipStatusChoice.DELETED,
+        ).exists():
+            return True
+
+        return ChatMember.objects.filter(
+            user=self,
+            status__in=(ChatMemberStatusChoice.ACTIVE, ChatMemberStatusChoice.PENDING),
+        ).exists()
+
     def remove(self):
         if self.role == UserRoleChoice.OFFICIAL:
             raise UserErrors.USER_OFFICIAL_REMOVE_FORBIDDEN
@@ -564,6 +589,12 @@ class User(models.Model):
 
     def json(self):
         return self.jsonl()
+
+    def json_admin(self):
+        data = self.jsonl()
+        data['is_deleted'] = bool(self.is_deleted)
+        data['has_removal_residue'] = self.has_removal_residue() if self.is_deleted else False
+        return data
 
     def json_me(self):
         return self.dictify(

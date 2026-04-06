@@ -2,6 +2,7 @@ import datetime
 
 from django.views import View
 from django.utils import timezone
+from django.db.models import Q
 from notificator import NotificatorAPIError
 from smartdjango import analyse
 
@@ -265,14 +266,18 @@ class SpaceAdminUserListView(SpaceUserListView):
         SpaceUserListParams.offset,
     )
     def get(self, request: Request):
-        users = User.objects.filter(
+        active_users = User.objects.filter(
             space=request.space,
             is_deleted=False,
             role=UserRoleChoice.MEMBER,
         )
 
         if request.query.q:
-            users = users.filter(lower_name__contains=request.query.q.lower())
+            keyword = request.query.q.strip()
+            active_users = active_users.filter(
+                Q(name__icontains=keyword) |
+                Q(lower_name__contains=keyword.lower())
+            )
 
         online = request.query.online
         if self.force_online is not None:
@@ -280,20 +285,35 @@ class SpaceAdminUserListView(SpaceUserListView):
         if online is not None:
             threshold = timezone.now() - datetime.timedelta(minutes=User.vldt.OFFLINE_MIN_INTERVAL)
             if bool(online):
-                users = users.filter(last_heartbeat__gt=threshold)
+                active_users = active_users.filter(last_heartbeat__gt=threshold)
             else:
-                users = users.filter(last_heartbeat__lte=threshold)
+                active_users = active_users.filter(last_heartbeat__lte=threshold)
 
         offset = request.query.offset
         limit = request.query.limit
-        rows = users.order_by('name_pinyin', 'lower_name', 'id')[offset:offset + limit]
-        return [user.jsonl() for user in rows]
+        active_rows = list(active_users.order_by('name_pinyin', 'lower_name', 'id'))
+
+        deleted_rows = []
+        if online is None or not bool(online):
+            deleted_users = User.objects.filter(
+                space=request.space,
+                is_deleted=True,
+                role=UserRoleChoice.MEMBER,
+            ).order_by('name_pinyin', 'name', 'id')
+            if request.query.q:
+                keyword = request.query.q.strip()
+                deleted_users = deleted_users.filter(name__icontains=keyword)
+            deleted_rows = [user for user in deleted_users if user.has_removal_residue()]
+
+        rows = active_rows + deleted_rows
+        paged_rows = rows[offset:offset + limit]
+        return [user.json_admin() for user in paged_rows]
 
 
 class SpaceAdminUserRemoveView(View):
     @auth.require_space
     @analyse.query(
-        UserParams.user_id,
+        UserParams.admin_user_id,
     )
     def delete(self, request: Request):
         user = request.query.user

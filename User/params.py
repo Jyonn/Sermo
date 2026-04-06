@@ -13,6 +13,7 @@ class UserParams(metaclass=Params):
     model_class = User
 
     user_id = Validator('user_id', final_name='user').to(int).to(User.index)
+    admin_user_id = Validator('user_id', final_name='user').to(int).to(User.index_any)
     name: Validator
     lower_name: Validator
     password: Validator
