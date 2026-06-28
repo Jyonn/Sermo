@@ -789,6 +789,7 @@ class NotificationPreference(models.Model):
     channel = models.IntegerField(choices=UserNotificationChoice.to_choices())
     enabled = models.BooleanField(default=False)
     offline_threshold_minutes = models.PositiveIntegerField(default=30)
+    hide_message_content = models.BooleanField(default=False)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
@@ -828,13 +829,14 @@ class NotificationPreference(models.Model):
         return sorted(prefs, key=lambda x: x.channel)
 
     @classmethod
-    def set_preference(cls, user: User, channel: int, enabled=None, offline_threshold_minutes=None):
+    def set_preference(cls, user: User, channel: int, enabled=None, offline_threshold_minutes=None, hide_message_content=None):
         pref, _created = cls.objects.get_or_create(
             user=user,
             channel=channel,
             defaults=dict(
                 enabled=cls._default_enabled(user, channel),
                 offline_threshold_minutes=cls._default_threshold(channel),
+                hide_message_content=False,
             ),
         )
         updates = []
@@ -844,12 +846,15 @@ class NotificationPreference(models.Model):
         if offline_threshold_minutes is not None:
             pref.offline_threshold_minutes = offline_threshold_minutes
             updates.append('offline_threshold_minutes')
+        if hide_message_content is not None:
+            pref.hide_message_content = bool(hide_message_content)
+            updates.append('hide_message_content')
         if updates:
             pref.save(update_fields=updates)
         return pref
 
     def json(self):
-        return self.dictify('channel', 'enabled', 'offline_threshold_minutes')
+        return self.dictify('channel', 'enabled', 'offline_threshold_minutes', 'hide_message_content')
 
 
 class NotificationEvent(models.Model):
@@ -870,11 +875,13 @@ class NotificationEvent(models.Model):
     def _dictify_created_at(self):
         return self.created_at.timestamp()
 
-    def render_delivery_message(self):
+    def render_delivery_message(self, hide_message_content=False):
         payload = self.payload or {}
         actor_name = self.actor.name if self.actor_id else None
 
         if self.event_type == NotificationEventTypeChoice.DIRECT_MESSAGE:
+            if hide_message_content:
+                return str(_('New direct message')), str(_('You received a new direct message.'))
             title = _('New direct message')
             body = payload.get('content') or _('You have received a new direct message.')
             if actor_name:
@@ -882,6 +889,8 @@ class NotificationEvent(models.Model):
             return str(title), str(body)
 
         if self.event_type == NotificationEventTypeChoice.GROUP_MESSAGE:
+            if hide_message_content:
+                return str(_('New group message')), str(_('You received a new group message.'))
             title = _('New group message')
             body = payload.get('content') or _('You have received a new group message.')
             if actor_name:
@@ -1018,7 +1027,11 @@ class NotificationDelivery(models.Model):
             self.save(update_fields=['status', 'detail', 'attempted_at'])
             return self
 
-        title, body = self.event.render_delivery_message()
+        hide_message_content = bool(pref.hide_message_content) and self.channel in (
+            UserNotificationChoice.EMAIL,
+            UserNotificationChoice.BARK,
+        )
+        title, body = self.event.render_delivery_message(hide_message_content=hide_message_content)
         try:
             if self.channel == UserNotificationChoice.EMAIL:
                 notificator.mail(

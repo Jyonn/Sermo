@@ -74,6 +74,10 @@ class NotificationPreferenceParams(metaclass=Params):
             lambda x: x is None or 1 <= x <= 10080,
             message=_('offline_threshold_minutes should be between 1 and 10080')
         )
+    hide_message_content = Validator('hide_message_content') \
+        .to(int) \
+        .null().default(None) \
+        .bool(lambda x: x is None or x in (0, 1), message=_('hide_message_content should be 0 or 1'))
 
 
 class UserContactVerificationCodeParams(metaclass=Params):
