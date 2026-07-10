@@ -790,6 +790,8 @@ class NotificationPreference(models.Model):
     enabled = models.BooleanField(default=False)
     offline_threshold_minutes = models.PositiveIntegerField(default=30)
     hide_message_content = models.BooleanField(default=False)
+    hidden_direct_message_text = models.CharField(max_length=255, blank=True, default='')
+    hidden_group_message_text = models.CharField(max_length=255, blank=True, default='')
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
@@ -829,7 +831,16 @@ class NotificationPreference(models.Model):
         return sorted(prefs, key=lambda x: x.channel)
 
     @classmethod
-    def set_preference(cls, user: User, channel: int, enabled=None, offline_threshold_minutes=None, hide_message_content=None):
+    def set_preference(
+        cls,
+        user: User,
+        channel: int,
+        enabled=None,
+        offline_threshold_minutes=None,
+        hide_message_content=None,
+        hidden_direct_message_text=None,
+        hidden_group_message_text=None,
+    ):
         pref, _created = cls.objects.get_or_create(
             user=user,
             channel=channel,
@@ -837,6 +848,8 @@ class NotificationPreference(models.Model):
                 enabled=cls._default_enabled(user, channel),
                 offline_threshold_minutes=cls._default_threshold(channel),
                 hide_message_content=False,
+                hidden_direct_message_text='',
+                hidden_group_message_text='',
             ),
         )
         updates = []
@@ -849,12 +862,25 @@ class NotificationPreference(models.Model):
         if hide_message_content is not None:
             pref.hide_message_content = bool(hide_message_content)
             updates.append('hide_message_content')
+        if hidden_direct_message_text is not None:
+            pref.hidden_direct_message_text = hidden_direct_message_text.strip()
+            updates.append('hidden_direct_message_text')
+        if hidden_group_message_text is not None:
+            pref.hidden_group_message_text = hidden_group_message_text.strip()
+            updates.append('hidden_group_message_text')
         if updates:
             pref.save(update_fields=updates)
         return pref
 
     def json(self):
-        return self.dictify('channel', 'enabled', 'offline_threshold_minutes', 'hide_message_content')
+        return self.dictify(
+            'channel',
+            'enabled',
+            'offline_threshold_minutes',
+            'hide_message_content',
+            'hidden_direct_message_text',
+            'hidden_group_message_text',
+        )
 
 
 class NotificationEvent(models.Model):
@@ -875,13 +901,20 @@ class NotificationEvent(models.Model):
     def _dictify_created_at(self):
         return self.created_at.timestamp()
 
-    def render_delivery_message(self, hide_message_content=False):
+    def render_delivery_message(
+        self,
+        hide_message_content=False,
+        hidden_direct_message_text='',
+        hidden_group_message_text='',
+    ):
         payload = self.payload or {}
         actor_name = self.actor.name if self.actor_id else None
 
         if self.event_type == NotificationEventTypeChoice.DIRECT_MESSAGE:
             if hide_message_content:
-                return str(_('New direct message')), str(_('You received a new direct message.'))
+                return str(_('New direct message')), str(
+                    hidden_direct_message_text.strip() or _('You received a new direct message.')
+                )
             title = _('New direct message')
             body = payload.get('content') or _('You have received a new direct message.')
             if actor_name:
@@ -890,7 +923,9 @@ class NotificationEvent(models.Model):
 
         if self.event_type == NotificationEventTypeChoice.GROUP_MESSAGE:
             if hide_message_content:
-                return str(_('New group message')), str(_('You received a new group message.'))
+                return str(_('New group message')), str(
+                    hidden_group_message_text.strip() or _('You received a new group message.')
+                )
             title = _('New group message')
             body = payload.get('content') or _('You have received a new group message.')
             if actor_name:
@@ -1031,7 +1066,11 @@ class NotificationDelivery(models.Model):
             UserNotificationChoice.EMAIL,
             UserNotificationChoice.BARK,
         )
-        title, body = self.event.render_delivery_message(hide_message_content=hide_message_content)
+        title, body = self.event.render_delivery_message(
+            hide_message_content=hide_message_content,
+            hidden_direct_message_text=pref.hidden_direct_message_text,
+            hidden_group_message_text=pref.hidden_group_message_text,
+        )
         try:
             if self.channel == UserNotificationChoice.EMAIL:
                 notificator.mail(

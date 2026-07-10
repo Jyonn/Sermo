@@ -65,6 +65,8 @@ class NotificationPreferenceView(View):
         NotificationPreferenceParams.enabled,
         NotificationPreferenceParams.offline_threshold_minutes,
         NotificationPreferenceParams.hide_message_content,
+        NotificationPreferenceParams.hidden_direct_message_text,
+        NotificationPreferenceParams.hidden_group_message_text,
     )
     def post(self, request: Request):
         _require_password_enabled(request.user)
@@ -76,6 +78,8 @@ class NotificationPreferenceView(View):
             enabled=None if enabled is None else bool(enabled),
             offline_threshold_minutes=request.json.offline_threshold_minutes,
             hide_message_content=None if hide_message_content is None else bool(hide_message_content),
+            hidden_direct_message_text=request.json.hidden_direct_message_text,
+            hidden_group_message_text=request.json.hidden_group_message_text,
         )
         return pref.json()
 
