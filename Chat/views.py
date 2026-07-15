@@ -4,13 +4,17 @@ from smartdjango import analyse, OK
 from Chat.models import Chat, ChatMember, ChatReadState
 from Chat.params import ChatParams, ChatMemberParams
 from Chat.validators import ChatErrors
+from Message.models import Message
 from utils import auth
 
 
 class ChatListView(View):
     @staticmethod
-    def build_chat_payload(chat, user):
+    def build_chat_payload(chat, user, request):
         data = chat.jsonl()
+        last_message = Message.visible_in_chat(chat).order_by('-created_at').first()
+        if last_message is not None:
+            data['last_message'] = last_message.jsonl(request=request)
         data['unread_count'] = ChatReadState.unread_count(chat, user)
         last_read_at = ChatReadState.get_last_read_at(chat, user)
         data['last_read_at'] = last_read_at.timestamp() if last_read_at else None
@@ -20,7 +24,7 @@ class ChatListView(View):
     def get(self, request):
         chats = Chat.get_user_chats(request.user)
         chats.sort(key=lambda x: x.last_chat_at, reverse=True)
-        return [self.build_chat_payload(chat, request.user) for chat in chats]
+        return [self.build_chat_payload(chat, request.user, request) for chat in chats]
 
 
 class DirectChatView(View):

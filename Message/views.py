@@ -1,10 +1,12 @@
 from django.db import transaction
+from django.http import HttpResponseRedirect
 from django.views import View
 from smartdjango import analyse, OK
 
-from Message.models import Message
+from Message.models import Message, MessageTypeChoice
 from Message.params import MessageParams
-from utils.qiniu import issue_message_upload
+from Message.validators import MessageErrors
+from utils.qiniu import issue_message_upload, build_message_image_thumbnail_uri, sign_private_download_url
 from utils import auth
 from utils.auth import Request
 from User.models import NotificationEvent
@@ -24,10 +26,10 @@ class MessageView(View):
         after = request.query.after
 
         if before is not None:
-            return Message.older(request.query.chat, before, request.query.limit)
+            return Message.older(request.query.chat, before, request.query.limit, request=request)
         if after is not None:
-            return Message.newer(request.query.chat, after, request.query.limit)
-        return Message.latest(request.query.chat, request.query.limit)
+            return Message.newer(request.query.chat, after, request.query.limit, request=request)
+        return Message.latest(request.query.chat, request.query.limit, request=request)
 
     @auth.require_user
     @analyse.query(MessageParams.chat_id)
@@ -44,7 +46,7 @@ class MessageView(View):
                 message_type=request.json.type,
                 content=request.json.content)
             NotificationEvent.emit_message_notifications(message, actor=request.user)
-        return message.jsonl()
+        return message.jsonl(request=request)
 
     @auth.require_user
     @analyse.query(MessageParams.message_id)
@@ -82,4 +84,33 @@ class MessageSyncView(View):
             user=request.user,
             after=after,
             limit=request.query.limit,
+            request=request,
         )
+
+
+class MessageBlobView(View):
+    @staticmethod
+    def _redirect(url: str):
+        response = HttpResponseRedirect(url)
+        response['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+        response['Pragma'] = 'no-cache'
+        response['Expires'] = '0'
+        return response
+
+    def get(self, request: Request, blob_slug: str):
+        message = Message.index_by_blob_slug(blob_slug)
+        source_uri = message.source_media_uri()
+        if not source_uri:
+            raise MessageErrors.NOT_EXISTS
+        return self._redirect(sign_private_download_url(source_uri))
+
+
+class MessageBlobThumbnailView(View):
+    def get(self, request: Request, blob_slug: str):
+        message = Message.index_by_blob_slug(blob_slug)
+        if message.type != MessageTypeChoice.IMAGE:
+            raise MessageErrors.NOT_EXISTS
+        source_uri = message.source_media_uri()
+        if not source_uri:
+            raise MessageErrors.NOT_EXISTS
+        return MessageBlobView._redirect(build_message_image_thumbnail_uri(source_uri))

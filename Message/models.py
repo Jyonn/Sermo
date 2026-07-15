@@ -1,4 +1,8 @@
 import json
+import uuid
+
+from django.http import HttpRequest
+from django.urls import reverse
 
 from smartdjango import models, Choice
 
@@ -37,6 +41,7 @@ class Message(models.Model):
 
     type = models.IntegerField(choices=MessageTypeChoice.to_choices())
     content = models.CharField(max_length=vldt.MAX_CONTENT_LENGTH)
+    blob_slug = models.CharField(max_length=32, null=True, blank=True, unique=True, db_index=True)
 
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
     is_deleted = models.BooleanField(default=False, db_index=True)
@@ -56,7 +61,10 @@ class Message(models.Model):
     def create(cls, chat: Chat, user: User, message_type, content):
         if chat.has_active_member(user):
             normalized_content = cls.normalize_content(message_type, content)
-            return cls.objects.create(chat=chat, user=user, type=message_type, content=normalized_content)
+            message = cls.objects.create(chat=chat, user=user, type=message_type, content=normalized_content)
+            if message.type in cls.MEDIA_KIND_BY_TYPE:
+                message.ensure_blob_slug(save=True)
+            return message
         raise MessageErrors.NOT_A_MEMBER
 
     @classmethod
@@ -113,25 +121,61 @@ class Message(models.Model):
         raise MessageErrors.TYPE_INVALID
 
     @classmethod
-    def _payload_for_type(cls, message_type, content):
-        if message_type == MessageTypeChoice.TEXT:
-            return dict(kind='text', text=content)
-        if message_type == MessageTypeChoice.SYSTEM:
-            return dict(kind='system', text=content)
-        if message_type == MessageTypeChoice.FILE:
-            return dict(kind='file', text=content)
-        if message_type in cls.MEDIA_KIND_BY_TYPE:
-            payload = cls._parse_payload(content)
+    def _generate_blob_slug(cls):
+        return uuid.uuid4().hex
+
+    def ensure_blob_slug(self, save: bool = False):
+        if self.type not in self.MEDIA_KIND_BY_TYPE:
+            return None
+        if self.blob_slug:
+            return self.blob_slug
+
+        blob_slug = self._generate_blob_slug()
+        while Message.objects.filter(blob_slug=blob_slug).exists():
+            blob_slug = self._generate_blob_slug()
+        self.blob_slug = blob_slug
+        if save:
+            self.save(update_fields=['blob_slug'])
+        return self.blob_slug
+
+    def _blob_path(self, thumbnail: bool = False):
+        self.ensure_blob_slug(save=False)
+        if not self.blob_slug:
+            return ''
+        route_name = 'message blob thumbnail' if thumbnail else 'message blob'
+        return reverse(route_name, kwargs={'blob_slug': self.blob_slug})
+
+    def media_blob_uri(self, request: HttpRequest = None, thumbnail: bool = False):
+        path = self._blob_path(thumbnail=thumbnail)
+        if not path:
+            return ''
+        if request is None:
+            return path
+        return request.build_absolute_uri(path)
+
+    def _payload_for_type(self, request: HttpRequest = None):
+        if self.type == MessageTypeChoice.TEXT:
+            return dict(kind='text', text=self.content)
+        if self.type == MessageTypeChoice.SYSTEM:
+            return dict(kind='system', text=self.content)
+        if self.type == MessageTypeChoice.FILE:
+            return dict(kind='file', text=self.content)
+        if self.type in self.MEDIA_KIND_BY_TYPE:
+            payload = self._parse_payload(self.content)
             uri = (payload.get('uri') or '').strip()
-            response = dict(kind=payload.get('kind') or cls.MEDIA_KIND_BY_TYPE[message_type])
-            if uri:
+            response = dict(kind=payload.get('kind') or self.MEDIA_KIND_BY_TYPE[self.type])
+            if self.blob_slug:
+                response['uri'] = self.media_blob_uri(request=request)
+                if self.type == MessageTypeChoice.IMAGE:
+                    response['thumbnail_uri'] = self.media_blob_uri(request=request, thumbnail=True)
+            elif uri:
                 response['uri'] = sign_private_download_url(uri)
-                if message_type == MessageTypeChoice.IMAGE:
+                if self.type == MessageTypeChoice.IMAGE:
                     response['thumbnail_uri'] = build_message_image_thumbnail_uri(uri)
             mime_type = (str(payload.get('mime_type') or '').strip())[:100]
             if mime_type:
                 response['mime_type'] = mime_type
-            if message_type == MessageTypeChoice.AUDIO and 'duration_seconds' in payload:
+            if self.type == MessageTypeChoice.AUDIO and 'duration_seconds' in payload:
                 response['duration_seconds'] = payload.get('duration_seconds')
             return response
         return None
@@ -148,11 +192,21 @@ class Message(models.Model):
     def _dictify_content(self):
         return self.preview_text()
 
-    def _dictify_payload(self):
-        return self._payload_for_type(self.type, self.content)
+    def source_media_uri(self):
+        if self.type not in self.MEDIA_KIND_BY_TYPE:
+            return ''
+        payload = self._parse_payload(self.content)
+        return (payload.get('uri') or '').strip()
 
-    def jsonl(self):
-        return self.dictify('id->message_id', 'user', 'type', 'content', 'payload', 'created_at')
+    def jsonl(self, request: HttpRequest = None):
+        return dict(
+            message_id=self.id,
+            user=self.user.tiny_json(),
+            type=self.type,
+            content=self.preview_text(),
+            payload=self._payload_for_type(request=request),
+            created_at=self.created_at.timestamp(),
+        )
 
     @classmethod
     def index(cls, message_id):
@@ -162,22 +216,30 @@ class Message(models.Model):
             raise MessageErrors.NOT_EXISTS
 
     @classmethod
-    def latest(cls, chat: Chat, limit: int):
+    def index_by_blob_slug(cls, blob_slug):
+        normalized = (blob_slug or '').strip().lower()
+        try:
+            return cls.objects.get(blob_slug=normalized, is_deleted=False)
+        except cls.DoesNotExist:
+            raise MessageErrors.NOT_EXISTS
+
+    @classmethod
+    def latest(cls, chat: Chat, limit: int, request: HttpRequest = None):
         messages = cls.visible_in_chat(chat).order_by('-created_at')[:limit]
-        return [message.jsonl() for message in messages]
+        return [message.jsonl(request=request) for message in messages]
 
     @classmethod
-    def older(cls, chat: Chat, message_id, limit: int):
+    def older(cls, chat: Chat, message_id, limit: int, request: HttpRequest = None):
         messages = cls.visible_in_chat(chat).filter(id__lt=message_id).order_by('-created_at')[:limit]
-        return [message.jsonl() for message in messages]
+        return [message.jsonl(request=request) for message in messages]
 
     @classmethod
-    def newer(cls, chat: Chat, message_id, limit: int):
+    def newer(cls, chat: Chat, message_id, limit: int, request: HttpRequest = None):
         messages = cls.visible_in_chat(chat).filter(id__gt=message_id).order_by('created_at')[:limit]
-        return [message.jsonl() for message in messages]
+        return [message.jsonl(request=request) for message in messages]
 
     @classmethod
-    def sync_for_user(cls, user: User, after: int, limit: int):
+    def sync_for_user(cls, user: User, after: int, limit: int, request: HttpRequest = None):
         from Chat.models import Chat
 
         chats = Chat.get_user_chats(user)
@@ -195,7 +257,7 @@ class Message(models.Model):
 
         items = []
         for message in rows:
-            payload = message.jsonl()
+            payload = message.jsonl(request=request)
             payload['chat_id'] = message.chat_id
             items.append(payload)
 
