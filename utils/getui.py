@@ -39,14 +39,21 @@ def _base_url():
 def is_configured():
     return all(
         (getattr(Globals, key, None) or '').strip()
-        for key in ('GETUI_APP_ID', 'GETUI_APP_KEY', 'GETUI_APP_SECRET')
+        for key in ('GETUI_APP_ID', 'GETUI_APP_KEY')
+    ) and bool(_server_secret())
+
+
+def _server_secret():
+    return (
+        (getattr(Globals, 'GETUI_MASTER_SECRET', None) or '').strip()
+        or (getattr(Globals, 'GETUI_APP_SECRET', None) or '').strip()
     )
 
 
 def _auth_sign(timestamp_ms: str):
     app_key = _required(getattr(Globals, 'GETUI_APP_KEY', None), 'GETUI_APP_KEY')
-    app_secret = _required(getattr(Globals, 'GETUI_APP_SECRET', None), 'GETUI_APP_SECRET')
-    return hashlib.sha256(f'{app_key}{timestamp_ms}{app_secret}'.encode()).hexdigest()
+    master_secret = _required(_server_secret(), 'GETUI_MASTER_SECRET')
+    return hashlib.sha256(f'{app_key}{timestamp_ms}{master_secret}'.encode()).hexdigest()
 
 
 def _get_auth_token(force_refresh=False):
@@ -73,6 +80,8 @@ def _get_auth_token(force_refresh=False):
         raise GetuiAPIError(f'auth invalid json: {response.text[:120]}') from err
 
     if response.status_code != 200 or int(payload.get('code', -1)) != 0:
+        if int(payload.get('code', -1)) == 20001:
+            raise GetuiAPIError('auth failed: sign is invalid, check GETUI_MASTER_SECRET')
         raise GetuiAPIError(f'auth failed: {payload}')
 
     data = payload.get('data') or {}
