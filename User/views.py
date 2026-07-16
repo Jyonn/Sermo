@@ -8,6 +8,7 @@ from utils.qiniu import issue_avatar_upload, validate_avatar_key, avatar_uri_for
 from utils.global_settings import notificator
 from User.models import (
     NotificationPreference,
+    PushDevice,
     UserContactVerificationCode,
     UserNotificationChoice,
 )
@@ -16,6 +17,7 @@ from User.params import (
     UserParams,
     UserPasswordParams,
     NotificationPreferenceParams,
+    PushDeviceParams,
     UserContactVerificationCodeParams,
 )
 from User.validators import UserErrors
@@ -82,6 +84,27 @@ class NotificationPreferenceView(View):
             hidden_group_message_text=request.json.hidden_group_message_text,
         )
         return pref.json()
+
+
+class PushDeviceView(View):
+    @auth.require_user
+    @analyse.json(
+        PushDeviceParams.provider,
+        PushDeviceParams.client_id,
+        PushDeviceParams.platform,
+        PushDeviceParams.device_id,
+        PushDeviceParams.app_version,
+    )
+    def post(self, request: Request):
+        device = PushDevice.register(
+            user=request.user,
+            provider=request.json.provider,
+            client_id=request.json.client_id,
+            platform=request.json.platform,
+            device_id=request.json.device_id,
+            app_version=request.json.app_version,
+        )
+        return device.json()
 
 
 class PasswordView(View):

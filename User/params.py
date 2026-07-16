@@ -6,6 +6,7 @@ from User.models import (
     UserNotificationChoice,
     NotificationPreference,
     UserContactVerificationCode,
+    PushDevice,
 )
 
 
@@ -102,3 +103,32 @@ class UserContactVerificationCodeParams(metaclass=Params):
     channel = NotificationPreferenceParams.channel.copy()
     target: Validator
     code: Validator
+
+
+class PushDeviceParams(metaclass=Params):
+    model_class = PushDevice
+
+    provider = Validator('provider') \
+        .to(str) \
+        .null().default(PushDevice.PROVIDER_GETUI) \
+        .to(lambda x: (x or '').strip().lower()) \
+        .bool(lambda x: x == PushDevice.PROVIDER_GETUI, message=_('Invalid push provider'))
+    client_id = Validator('client_id') \
+        .to(str) \
+        .to(lambda x: (x or '').strip()) \
+        .bool(lambda x: 0 < len(x) <= 128, message=_('Invalid push client id'))
+    platform = Validator('platform') \
+        .to(str) \
+        .null().default(PushDevice.PLATFORM_ANDROID) \
+        .to(lambda x: (x or '').strip().lower()) \
+        .bool(lambda x: 0 < len(x) <= 32, message=_('Invalid push platform'))
+    device_id = Validator('device_id') \
+        .to(str) \
+        .null().default('') \
+        .to(lambda x: (x or '').strip()) \
+        .bool(lambda x: len(x) <= 128, message=_('Invalid device id'))
+    app_version = Validator('app_version') \
+        .to(str) \
+        .null().default('') \
+        .to(lambda x: (x or '').strip()) \
+        .bool(lambda x: len(x) <= 32, message=_('Invalid app version'))

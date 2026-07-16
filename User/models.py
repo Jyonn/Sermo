@@ -778,6 +778,73 @@ class NotificationDeliveryStatusChoice(Choice):
     SKIPPED = 3
 
 
+class PushDevice(models.Model):
+    PROVIDER_GETUI = 'getui'
+    PLATFORM_ANDROID = 'android'
+
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='push_devices', db_index=True)
+    space = models.ForeignKey('Space.Space', on_delete=models.CASCADE, related_name='push_devices', db_index=True)
+    provider = models.CharField(max_length=32, default=PROVIDER_GETUI, db_index=True)
+    client_id = models.CharField(max_length=128, db_index=True)
+    platform = models.CharField(max_length=32, default=PLATFORM_ANDROID)
+    device_id = models.CharField(max_length=128, blank=True, default='')
+    app_version = models.CharField(max_length=32, blank=True, default='')
+    enabled = models.BooleanField(default=True, db_index=True)
+    last_seen_at = models.DateTimeField(auto_now=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('provider', 'client_id')
+
+    @classmethod
+    def register(
+        cls,
+        user: User,
+        provider: str,
+        client_id: str,
+        platform: str = PLATFORM_ANDROID,
+        device_id: str = '',
+        app_version: str = '',
+    ):
+        normalized_provider = (provider or cls.PROVIDER_GETUI).strip().lower()
+        normalized_client_id = (client_id or '').strip()
+        if not normalized_client_id:
+            raise UserErrors.PUSH_DEVICE_INVALID
+        device, _created = cls.objects.update_or_create(
+            provider=normalized_provider,
+            client_id=normalized_client_id,
+            defaults=dict(
+                user=user,
+                space_id=user.space_id,
+                platform=(platform or cls.PLATFORM_ANDROID).strip().lower(),
+                device_id=(device_id or '').strip(),
+                app_version=(app_version or '').strip(),
+                enabled=True,
+            ),
+        )
+        return device
+
+    @classmethod
+    def active_for_user(cls, user: User):
+        return cls.objects.filter(
+            user=user,
+            space_id=user.space_id,
+            provider=cls.PROVIDER_GETUI,
+            enabled=True,
+        )
+
+    def json(self):
+        return self.dictify(
+            'provider',
+            'client_id',
+            'platform',
+            'device_id',
+            'app_version',
+            'enabled',
+            'last_seen_at',
+        )
+
+
 class NotificationPreference(models.Model):
     CHANNEL_DEFAULT_THRESHOLDS = {
         UserNotificationChoice.EMAIL: 30,
@@ -1140,6 +1207,7 @@ class NotificationDelivery(models.Model):
             if status == NotificationDeliveryStatusChoice.PENDING and detail is None:
                 delivery._attempt_send(pref)
             deliveries.append(delivery)
+        deliveries.extend(PushDelivery.enqueue_for_event(event))
         return deliveries
 
     @classmethod
@@ -1179,3 +1247,59 @@ class NotificationDelivery(models.Model):
             delivery.save(update_fields=['detail'])
             delivery._attempt_send(pref)
         return deliveries
+
+
+class PushDelivery(models.Model):
+    event = models.ForeignKey(NotificationEvent, on_delete=models.CASCADE, related_name='push_deliveries', db_index=True)
+    device = models.ForeignKey(PushDevice, on_delete=models.CASCADE, related_name='deliveries', db_index=True)
+    status = models.IntegerField(
+        choices=NotificationDeliveryStatusChoice.to_choices(),
+        default=NotificationDeliveryStatusChoice.PENDING,
+        db_index=True,
+    )
+    detail = models.CharField(max_length=255, null=True, blank=True)
+    attempted_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    @classmethod
+    def enqueue_for_event(cls, event: NotificationEvent):
+        deliveries = []
+        devices = list(PushDevice.active_for_user(event.user))
+        for device in devices:
+            delivery = cls.objects.create(event=event, device=device)
+            delivery._attempt_send()
+            deliveries.append(delivery)
+        return deliveries
+
+    def _payload(self):
+        payload = dict(self.event.payload or {})
+        payload.update(
+            notification_event_id=self.event_id,
+            event_type=self.event.event_type,
+            space_slug=self.event.space.slug,
+        )
+        return payload
+
+    def _attempt_send(self):
+        from utils.getui import GetuiNotConfigured, send_to_cid
+
+        title, body = self.event.render_delivery_message()
+        try:
+            send_to_cid(
+                cid=self.device.client_id,
+                title=title,
+                body=body,
+                payload=self._payload(),
+            )
+            self.status = NotificationDeliveryStatusChoice.SENT
+            self.detail = None
+        except GetuiNotConfigured as err:
+            self.status = NotificationDeliveryStatusChoice.SKIPPED
+            self.detail = str(err)[:255]
+        except Exception as err:
+            self.status = NotificationDeliveryStatusChoice.FAILED
+            self.detail = str(err)[:255]
+
+        self.attempted_at = timezone.now()
+        self.save(update_fields=['status', 'detail', 'attempted_at'])
+        return self

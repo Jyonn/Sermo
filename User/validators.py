@@ -41,6 +41,7 @@ class UserErrors:
     AVATAR_FILE_TYPE_INVALID = Error(message=_('Invalid avatar image type'), code=Code.BadRequest)
     AVATAR_KEY_INVALID = Error(message=_('Invalid avatar key'), code=Code.BadRequest)
     AVATAR_DELETE_FAILED = Error(message=_('Failed to delete previous avatar'), code=Code.InternalServerError)
+    PUSH_DEVICE_INVALID = Error(message=_('Invalid push device'), code=Code.BadRequest)
 
 
 RESERVED_SPACE_SLUGS = {
