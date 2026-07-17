@@ -113,16 +113,20 @@ def send_to_cid(cid: str, title: str, body: str, payload: dict):
         raise GetuiNotConfigured('getui is not configured')
 
     intent = build_intent(payload)
+    payload_text = json.dumps(payload or {}, ensure_ascii=False, separators=(',', ':'))
     request_body = dict(
         request_id=uuid.uuid4().hex,
         audience=dict(cid=[normalized_cid]),
         settings=dict(ttl=24 * 60 * 60 * 1000),
         push_message=dict(
-            notification=dict(
-                title=title,
-                body=body,
-                click_type='intent',
-                intent=intent,
+            transmission=json.dumps(
+                dict(
+                    title=title,
+                    body=body,
+                    payload=payload_text,
+                ),
+                ensure_ascii=False,
+                separators=(',', ':'),
             )
         ),
         push_channel=dict(
@@ -133,6 +137,7 @@ def send_to_cid(cid: str, title: str, body: str, payload: dict):
                         body=body,
                         click_type='intent',
                         intent=intent,
+                        payload=payload_text,
                     )
                 )
             )
