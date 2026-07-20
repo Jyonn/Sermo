@@ -74,7 +74,7 @@ class LinkPreviewHTMLParser(HTMLParser):
 
 
 class LinkPreview(models.Model):
-    URL_RE = re.compile(r'https?://[^\s<>"\']+', re.IGNORECASE)
+    URL_RE = re.compile(r'https?://[^\s<>"\'，。！？、；：）】》]+', re.IGNORECASE)
     HTTP_CHARSET_RE = re.compile(r'charset=["\']?([^;"\']+)', re.IGNORECASE)
     HTML_CHARSET_RE = re.compile(br'<meta[^>]+charset=["\']?\s*([a-zA-Z0-9._-]+)', re.IGNORECASE)
     TRAILING_PUNCTUATION = '.,;:!?)]}，。！？、；：）】》'
