@@ -95,6 +95,10 @@ class NotificationPreferenceParams(metaclass=Params):
             lambda x: x is None or len(x) <= 255,
             message=_('hidden_group_message_text should be at most 255 characters')
         )
+    open_chat_on_tap = Validator('open_chat_on_tap') \
+        .to(int) \
+        .null().default(None) \
+        .bool(lambda x: x is None or x in (0, 1), message=_('open_chat_on_tap should be 0 or 1'))
 
 
 class UserContactVerificationCodeParams(metaclass=Params):

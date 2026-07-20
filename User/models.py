@@ -17,6 +17,9 @@ from User.validators import UserValidator, UserErrors
 from utils import function
 
 
+FRONTEND_SPACE_HOST_SUFFIX = 'sermo.jyonn.space'
+
+
 class UserNotificationChoice(Choice):
     UNSET = 0
     EMAIL = 1
@@ -859,6 +862,7 @@ class NotificationPreference(models.Model):
     hide_message_content = models.BooleanField(default=False)
     hidden_direct_message_text = models.CharField(max_length=255, blank=True, default='')
     hidden_group_message_text = models.CharField(max_length=255, blank=True, default='')
+    open_chat_on_tap = models.BooleanField(default=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
@@ -907,6 +911,7 @@ class NotificationPreference(models.Model):
         hide_message_content=None,
         hidden_direct_message_text=None,
         hidden_group_message_text=None,
+        open_chat_on_tap=None,
     ):
         pref, _created = cls.objects.get_or_create(
             user=user,
@@ -917,6 +922,7 @@ class NotificationPreference(models.Model):
                 hide_message_content=False,
                 hidden_direct_message_text='',
                 hidden_group_message_text='',
+                open_chat_on_tap=True,
             ),
         )
         updates = []
@@ -935,6 +941,9 @@ class NotificationPreference(models.Model):
         if hidden_group_message_text is not None:
             pref.hidden_group_message_text = hidden_group_message_text.strip()
             updates.append('hidden_group_message_text')
+        if open_chat_on_tap is not None:
+            pref.open_chat_on_tap = bool(open_chat_on_tap)
+            updates.append('open_chat_on_tap')
         if updates:
             pref.save(update_fields=updates)
         return pref
@@ -947,6 +956,7 @@ class NotificationPreference(models.Model):
             'hide_message_content',
             'hidden_direct_message_text',
             'hidden_group_message_text',
+            'open_chat_on_tap',
         )
 
 
@@ -1120,6 +1130,22 @@ class NotificationDelivery(models.Model):
         offline_seconds = (timezone.now() - user.last_heartbeat).total_seconds()
         return offline_seconds >= threshold_seconds
 
+    def _bark_chat_url(self, pref: NotificationPreference):
+        if not pref.open_chat_on_tap:
+            return None
+        if self.event.event_type not in (
+            NotificationEventTypeChoice.DIRECT_MESSAGE,
+            NotificationEventTypeChoice.GROUP_MESSAGE,
+        ):
+            return None
+        chat_id = (self.event.payload or {}).get('chat_id')
+        if not chat_id:
+            return None
+        space_slug = getattr(self.event.space, 'slug', None)
+        if not space_slug:
+            return None
+        return f'https://{space_slug}.{FRONTEND_SPACE_HOST_SUFFIX}/app/chats/{chat_id}'
+
     def _attempt_send(self, pref: NotificationPreference):
         target = self._channel_target(self.event.user, self.channel)
         if not target:
@@ -1157,6 +1183,7 @@ class NotificationDelivery(models.Model):
                     target,
                     title=title,
                     body=body,
+                    url=self._bark_chat_url(pref),
                 )
             else:
                 self.status = NotificationDeliveryStatusChoice.FAILED

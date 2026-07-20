@@ -35,6 +35,7 @@ When a `NotificationEvent` is created:
 1. `NotificationDelivery` rows are created per channel preference.
 2. Disabled/unavailable channels are marked `SKIPPED`.
 3. If offline threshold is reached, the system sends immediately via SDK.
-4. If threshold is not reached, delivery stays `PENDING`.
+4. Bark message notifications include `url=https://<space>.sermo.jyonn.space/app/chats/<chat_id>` when `open_chat_on_tap` is enabled.
+5. If threshold is not reached, delivery stays `PENDING`.
 
 Pending deliveries can be retried later with `NotificationDelivery.process_pending()`.
