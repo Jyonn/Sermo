@@ -75,7 +75,10 @@ class LinkPreviewHTMLParser(HTMLParser):
 
 class LinkPreview(models.Model):
     URL_RE = re.compile(r'https?://[^\s<>"\']+', re.IGNORECASE)
+    HTTP_CHARSET_RE = re.compile(r'charset=["\']?([^;"\']+)', re.IGNORECASE)
+    HTML_CHARSET_RE = re.compile(br'<meta[^>]+charset=["\']?\s*([a-zA-Z0-9._-]+)', re.IGNORECASE)
     TRAILING_PUNCTUATION = '.,;:!?)]}，。！？、；：）】》'
+    MOJIBAKE_MARKERS = ('ï¼', 'ï½', 'ã€', 'Ã', 'Â')
     USER_AGENT = 'SermoLinkPreviewBot/1.0'
     MAX_HTML_BYTES = 256 * 1024
     MAX_REDIRECTS = 3
@@ -159,6 +162,36 @@ class LinkPreview(models.Model):
             return ''
 
     @classmethod
+    def _decode_html(cls, raw_html: bytes, response):
+        candidates = []
+        content_type = response.headers.get('Content-Type') or ''
+        header_match = cls.HTTP_CHARSET_RE.search(content_type)
+        if header_match:
+            candidates.append(header_match.group(1).strip())
+
+        meta_match = cls.HTML_CHARSET_RE.search(raw_html[:4096])
+        if meta_match:
+            candidates.append(meta_match.group(1).decode('ascii', errors='ignore'))
+
+        candidates.extend(['utf-8', response.apparent_encoding, response.encoding, 'utf-8'])
+        seen = set()
+        for encoding in candidates:
+            normalized = (encoding or '').strip()
+            if not normalized or normalized.lower() in seen:
+                continue
+            seen.add(normalized.lower())
+            try:
+                return raw_html.decode(normalized)
+            except (LookupError, UnicodeDecodeError):
+                continue
+        return raw_html.decode('utf-8', errors='replace')
+
+    @classmethod
+    def _looks_mojibake(cls, *values):
+        combined = ' '.join(str(value or '') for value in values)
+        return any(marker in combined for marker in cls.MOJIBAKE_MARKERS)
+
+    @classmethod
     def fetch_preview_data(cls, url: str):
         current_url = cls.normalize_public_url(url)
         if not current_url:
@@ -200,8 +233,7 @@ class LinkPreview(models.Model):
                 break
         response.close()
 
-        encoding = response.encoding or response.apparent_encoding or 'utf-8'
-        html = b''.join(chunks).decode(encoding, errors='replace')
+        html = cls._decode_html(b''.join(chunks), response)
         parser = LinkPreviewHTMLParser()
         parser.feed(html)
 
@@ -234,6 +266,15 @@ class LinkPreview(models.Model):
             url_hash=cls.hash_url(url),
             defaults={'url': url, 'status': LinkPreviewStatusChoice.PENDING},
         )
+        if preview.status == LinkPreviewStatusChoice.READY and cls._looks_mojibake(preview.title, preview.description, preview.site_name):
+            preview.status = LinkPreviewStatusChoice.PENDING
+            preview.title = ''
+            preview.description = ''
+            preview.site_name = ''
+            preview.image_url = ''
+            preview.favicon_url = ''
+            preview.error = ''
+            preview.save(update_fields=['status', 'title', 'description', 'site_name', 'image_url', 'favicon_url', 'error', 'updated_at'])
         if created or preview.status == LinkPreviewStatusChoice.PENDING:
             transaction.on_commit(lambda: cls.fetch_async(preview.id))
         return preview
