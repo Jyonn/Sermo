@@ -1,4 +1,5 @@
 import datetime
+import logging
 
 from django.views import View
 from django.utils import timezone
@@ -22,6 +23,9 @@ from User.models import OfficialLoginTicket, User, UserRoleChoice
 from User.params import UserParams
 from User.validators import UserErrors
 from utils.global_settings import notificator
+
+
+logger = logging.getLogger(__name__)
 
 
 def _extract_client_ip(request: Request):
@@ -60,6 +64,11 @@ def _mask_email(email: str) -> str:
     return f'{masked_local}@{masked_domain}{dot}{domain_suffix}' if dot else f'{masked_local}@{masked_domain}'
 
 
+def _is_notificator_timeout(error: Exception):
+    message = str(error).lower()
+    return 'timed out' in message or 'timeout' in message or 'read timed out' in message
+
+
 class SpaceEmailCodeRequestView(View):
     @analyse.json(
         SpaceEmailVerificationCodeParams.slug,
@@ -96,6 +105,13 @@ class SpaceEmailCodeRequestView(View):
                 recipient_name='Space Admin',
             )
         except NotificatorAPIError as e:
+            if _is_notificator_timeout(e):
+                logger.warning('Space email code delivery timed out after code creation: %s', e)
+                return dict(
+                    expires_in=SpaceEmailVerificationCode.EXPIRE_SECONDS,
+                    masked_email=_mask_email(email),
+                    delivery_uncertain=True,
+                )
             raise SpaceErrors.NOTIFICATOR_FAILED(details=e)
         return dict(
             expires_in=SpaceEmailVerificationCode.EXPIRE_SECONDS,
