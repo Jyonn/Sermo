@@ -13,7 +13,8 @@ class Migration(migrations.Migration):
             name='LinkPreview',
             fields=[
                 ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('url', models.URLField(db_index=True, max_length=2048, unique=True)),
+                ('url', models.URLField(max_length=2048)),
+                ('url_hash', models.CharField(db_index=True, max_length=64, unique=True)),
                 ('status', models.IntegerField(choices=[(0, 0), (1, 1), (2, 2)], db_index=True, default=0)),
                 ('title', models.CharField(blank=True, default='', max_length=255)),
                 ('description', models.TextField(blank=True, default='')),

@@ -1,3 +1,4 @@
+import hashlib
 import json
 import ipaddress
 import re
@@ -81,7 +82,8 @@ class LinkPreview(models.Model):
     _FETCHING_IDS = set()
     _FETCHING_LOCK = threading.Lock()
 
-    url = models.URLField(max_length=2048, unique=True, db_index=True)
+    url = models.URLField(max_length=2048)
+    url_hash = models.CharField(max_length=64, unique=True, db_index=True)
     status = models.IntegerField(choices=LinkPreviewStatusChoice.to_choices(), default=LinkPreviewStatusChoice.PENDING, db_index=True)
     title = models.CharField(max_length=255, blank=True, default='')
     description = models.TextField(blank=True, default='')
@@ -92,6 +94,10 @@ class LinkPreview(models.Model):
     fetched_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    @classmethod
+    def hash_url(cls, url: str):
+        return hashlib.sha256(url.encode('utf-8')).hexdigest()
 
     @classmethod
     def extract_first_url(cls, text: str):
@@ -225,8 +231,8 @@ class LinkPreview(models.Model):
             return None
 
         preview, created = cls.objects.get_or_create(
-            url=url,
-            defaults={'status': LinkPreviewStatusChoice.PENDING},
+            url_hash=cls.hash_url(url),
+            defaults={'url': url, 'status': LinkPreviewStatusChoice.PENDING},
         )
         if created or preview.status == LinkPreviewStatusChoice.PENDING:
             transaction.on_commit(lambda: cls.fetch_async(preview.id))
