@@ -1,8 +1,17 @@
 import json
+import ipaddress
+import re
+import socket
+import threading
 import uuid
+from html.parser import HTMLParser
+from urllib.parse import urljoin, urlparse, urlunparse
 
+import requests
+from django.db import close_old_connections, transaction
 from django.http import HttpRequest
 from django.urls import reverse
+from django.utils import timezone
 
 from smartdjango import models, Choice
 
@@ -19,6 +28,272 @@ class MessageTypeChoice(Choice):
     SYSTEM = 3
     VIDEO = 4
     AUDIO = 5
+
+
+class LinkPreviewStatusChoice(Choice):
+    PENDING = 0
+    READY = 1
+    FAILED = 2
+
+
+class LinkPreviewHTMLParser(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.in_title = False
+        self.title_parts = []
+        self.meta = {}
+        self.icons = []
+
+    def handle_starttag(self, tag, attrs):
+        attr_map = {key.lower(): value for key, value in attrs if key and value}
+        if tag.lower() == 'title':
+            self.in_title = True
+        if tag.lower() == 'meta':
+            key = (attr_map.get('property') or attr_map.get('name') or '').strip().lower()
+            content = (attr_map.get('content') or '').strip()
+            if key and content:
+                self.meta[key] = content
+        if tag.lower() == 'link':
+            rel = (attr_map.get('rel') or '').lower()
+            href = (attr_map.get('href') or '').strip()
+            if href and 'icon' in rel:
+                self.icons.append(href)
+
+    def handle_endtag(self, tag):
+        if tag.lower() == 'title':
+            self.in_title = False
+
+    def handle_data(self, data):
+        if self.in_title:
+            self.title_parts.append(data)
+
+    @property
+    def title(self):
+        return ' '.join(''.join(self.title_parts).split())
+
+
+class LinkPreview(models.Model):
+    URL_RE = re.compile(r'https?://[^\s<>"\']+', re.IGNORECASE)
+    TRAILING_PUNCTUATION = '.,;:!?)]}，。！？、；：）】》'
+    USER_AGENT = 'SermoLinkPreviewBot/1.0'
+    MAX_HTML_BYTES = 256 * 1024
+    MAX_REDIRECTS = 3
+    _FETCHING_IDS = set()
+    _FETCHING_LOCK = threading.Lock()
+
+    url = models.URLField(max_length=2048, unique=True, db_index=True)
+    status = models.IntegerField(choices=LinkPreviewStatusChoice.to_choices(), default=LinkPreviewStatusChoice.PENDING, db_index=True)
+    title = models.CharField(max_length=255, blank=True, default='')
+    description = models.TextField(blank=True, default='')
+    image_url = models.URLField(max_length=2048, blank=True, default='')
+    site_name = models.CharField(max_length=120, blank=True, default='')
+    favicon_url = models.URLField(max_length=2048, blank=True, default='')
+    error = models.CharField(max_length=255, blank=True, default='')
+    fetched_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    @classmethod
+    def extract_first_url(cls, text: str):
+        match = cls.URL_RE.search(text or '')
+        if not match:
+            return None
+        raw_url = match.group(0).rstrip(cls.TRAILING_PUNCTUATION)
+        return cls.normalize_public_url(raw_url)
+
+    @classmethod
+    def normalize_public_url(cls, url: str):
+        parsed = urlparse((url or '').strip())
+        if parsed.scheme not in ('http', 'https') or not parsed.netloc:
+            return None
+        if parsed.username or parsed.password:
+            return None
+        hostname = parsed.hostname
+        if not hostname:
+            return None
+        cls._require_public_host(hostname)
+        normalized = parsed._replace(fragment='')
+        return urlunparse(normalized)
+
+    @staticmethod
+    def _require_public_host(hostname: str):
+        normalized = hostname.strip().strip('.').lower()
+        if normalized in ('localhost',):
+            raise ValueError('private host')
+
+        try:
+            infos = socket.getaddrinfo(normalized, None)
+        except socket.gaierror as err:
+            raise ValueError('host not resolved') from err
+
+        for info in infos:
+            address = info[4][0]
+            ip = ipaddress.ip_address(address)
+            if (
+                ip.is_private
+                or ip.is_loopback
+                or ip.is_link_local
+                or ip.is_multicast
+                or ip.is_reserved
+                or ip.is_unspecified
+            ):
+                raise ValueError('private host')
+
+    @classmethod
+    def _clean_text(cls, value: str, limit: int):
+        return ' '.join((value or '').split())[:limit]
+
+    @classmethod
+    def _safe_absolute_url(cls, base_url: str, value: str):
+        if not value:
+            return ''
+        try:
+            return cls.normalize_public_url(urljoin(base_url, value)) or ''
+        except ValueError:
+            return ''
+
+    @classmethod
+    def fetch_preview_data(cls, url: str):
+        current_url = cls.normalize_public_url(url)
+        if not current_url:
+            raise ValueError('invalid url')
+
+        response = None
+        for _ in range(cls.MAX_REDIRECTS + 1):
+            cls.normalize_public_url(current_url)
+            response = requests.get(
+                current_url,
+                headers={'User-Agent': cls.USER_AGENT, 'Accept': 'text/html,application/xhtml+xml'},
+                timeout=(3, 5),
+                allow_redirects=False,
+                stream=True,
+            )
+            if 300 <= response.status_code < 400 and response.headers.get('Location'):
+                current_url = urljoin(current_url, response.headers['Location'])
+                response.close()
+                continue
+            break
+
+        if response is None:
+            raise ValueError('empty response')
+        if response.status_code >= 400:
+            raise ValueError(f'http {response.status_code}')
+
+        content_type = (response.headers.get('Content-Type') or '').lower()
+        if content_type and 'text/html' not in content_type and 'application/xhtml+xml' not in content_type:
+            raise ValueError('unsupported content type')
+
+        chunks = []
+        total = 0
+        for chunk in response.iter_content(chunk_size=8192):
+            if not chunk:
+                continue
+            chunks.append(chunk)
+            total += len(chunk)
+            if total >= cls.MAX_HTML_BYTES:
+                break
+        response.close()
+
+        encoding = response.encoding or response.apparent_encoding or 'utf-8'
+        html = b''.join(chunks).decode(encoding, errors='replace')
+        parser = LinkPreviewHTMLParser()
+        parser.feed(html)
+
+        title = parser.meta.get('og:title') or parser.meta.get('twitter:title') or parser.title
+        description = parser.meta.get('og:description') or parser.meta.get('description') or parser.meta.get('twitter:description')
+        image_url = parser.meta.get('og:image') or parser.meta.get('twitter:image') or ''
+        favicon_url = parser.icons[0] if parser.icons else ''
+        parsed = urlparse(current_url)
+        site_name = parser.meta.get('og:site_name') or parsed.hostname or ''
+
+        return dict(
+            url=current_url,
+            title=cls._clean_text(title or site_name or current_url, 255),
+            description=cls._clean_text(description or '', 500),
+            image_url=cls._safe_absolute_url(current_url, image_url),
+            site_name=cls._clean_text(site_name, 120),
+            favicon_url=cls._safe_absolute_url(current_url, favicon_url),
+        )
+
+    @classmethod
+    def queue_for_text(cls, text: str):
+        try:
+            url = cls.extract_first_url(text)
+        except ValueError:
+            return None
+        if not url:
+            return None
+
+        preview, created = cls.objects.get_or_create(
+            url=url,
+            defaults={'status': LinkPreviewStatusChoice.PENDING},
+        )
+        if created or preview.status == LinkPreviewStatusChoice.PENDING:
+            transaction.on_commit(lambda: cls.fetch_async(preview.id))
+        return preview
+
+    @classmethod
+    def fetch_async(cls, preview_id: int):
+        with cls._FETCHING_LOCK:
+            if preview_id in cls._FETCHING_IDS:
+                return
+            cls._FETCHING_IDS.add(preview_id)
+        thread = threading.Thread(target=cls.fetch_and_update, args=(preview_id,), daemon=True)
+        thread.start()
+
+    @classmethod
+    def fetch_and_update(cls, preview_id: int):
+        close_old_connections()
+        try:
+            preview = cls.objects.get(id=preview_id)
+            if preview.status == LinkPreviewStatusChoice.READY:
+                return
+            data = cls.fetch_preview_data(preview.url)
+            preview.title = data['title']
+            preview.description = data['description']
+            preview.image_url = data['image_url']
+            preview.site_name = data['site_name']
+            preview.favicon_url = data['favicon_url']
+            preview.error = ''
+            preview.status = LinkPreviewStatusChoice.READY
+            preview.fetched_at = timezone.now()
+            preview.save(update_fields=[
+                'title',
+                'description',
+                'image_url',
+                'site_name',
+                'favicon_url',
+                'error',
+                'status',
+                'fetched_at',
+                'updated_at',
+            ])
+        except Exception as err:
+            cls.objects.filter(id=preview_id).update(
+                status=LinkPreviewStatusChoice.FAILED,
+                error=str(err)[:255],
+                fetched_at=timezone.now(),
+            )
+        finally:
+            with cls._FETCHING_LOCK:
+                cls._FETCHING_IDS.discard(preview_id)
+            close_old_connections()
+
+    def jsonl(self):
+        status = {
+            LinkPreviewStatusChoice.PENDING: 'pending',
+            LinkPreviewStatusChoice.READY: 'ready',
+            LinkPreviewStatusChoice.FAILED: 'failed',
+        }.get(self.status, 'failed')
+        return dict(
+            url=self.url,
+            status=status,
+            title=self.title,
+            description=self.description,
+            image_url=self.image_url,
+            site_name=self.site_name,
+            favicon_url=self.favicon_url,
+        )
 
 
 class Message(models.Model):
@@ -64,6 +339,8 @@ class Message(models.Model):
             message = cls.objects.create(chat=chat, user=user, type=message_type, content=normalized_content)
             if message.type in cls.MEDIA_KIND_BY_TYPE:
                 message.ensure_blob_slug(save=True)
+            if message.type == MessageTypeChoice.TEXT:
+                LinkPreview.queue_for_text(message.content)
             return message
         raise MessageErrors.NOT_A_MEMBER
 
@@ -155,7 +432,11 @@ class Message(models.Model):
 
     def _payload_for_type(self, request: HttpRequest = None):
         if self.type == MessageTypeChoice.TEXT:
-            return dict(kind='text', text=self.content)
+            payload = dict(kind='text', text=self.content)
+            link_preview = LinkPreview.queue_for_text(self.content)
+            if link_preview is not None:
+                payload['link_preview'] = link_preview.jsonl()
+            return payload
         if self.type == MessageTypeChoice.SYSTEM:
             return dict(kind='system', text=self.content)
         if self.type == MessageTypeChoice.FILE:

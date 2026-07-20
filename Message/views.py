@@ -3,7 +3,7 @@ from django.http import HttpResponseRedirect
 from django.views import View
 from smartdjango import analyse, OK
 
-from Message.models import Message, MessageTypeChoice
+from Message.models import LinkPreview, Message, MessageTypeChoice
 from Message.params import MessageParams
 from Message.validators import MessageErrors
 from utils.qiniu import issue_message_upload, build_message_image_thumbnail_uri, sign_private_download_url
@@ -86,6 +86,21 @@ class MessageSyncView(View):
             limit=request.query.limit,
             request=request,
         )
+
+
+class MessageLinkPreviewView(View):
+    @auth.require_user
+    @analyse.query(MessageParams.message_id)
+    def get(self, request: Request):
+        message: Message = request.query.message
+        if not message.chat.has_active_member(request.user):
+            raise MessageErrors.NOT_A_MEMBER
+        if message.type != MessageTypeChoice.TEXT:
+            return dict(status='none')
+        link_preview = LinkPreview.queue_for_text(message.content)
+        if link_preview is None:
+            return dict(status='none')
+        return link_preview.jsonl()
 
 
 class MessageBlobView(View):
