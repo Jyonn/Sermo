@@ -79,6 +79,7 @@ class LinkPreview(models.Model):
     HTML_CHARSET_RE = re.compile(br'<meta[^>]+charset=["\']?\s*([a-zA-Z0-9._-]+)', re.IGNORECASE)
     TRAILING_PUNCTUATION = '.,;:!?)]}，。！？、；：）】》'
     MOJIBAKE_MARKERS = ('ï¼', 'ï½', 'ã€', 'Ã', 'Â')
+    RETRYABLE_ERROR_MARKERS = ('already consumed',)
     USER_AGENT = 'SermoLinkPreviewBot/1.0'
     MAX_HTML_BYTES = 256 * 1024
     MAX_REDIRECTS = 3
@@ -173,7 +174,7 @@ class LinkPreview(models.Model):
         if meta_match:
             candidates.append(meta_match.group(1).decode('ascii', errors='ignore'))
 
-        candidates.extend(['utf-8', response.apparent_encoding, response.encoding, 'utf-8'])
+        candidates.extend(['utf-8', response.encoding, 'gb18030', 'gbk', 'big5'])
         seen = set()
         for encoding in candidates:
             normalized = (encoding or '').strip()
@@ -190,6 +191,11 @@ class LinkPreview(models.Model):
     def _looks_mojibake(cls, *values):
         combined = ' '.join(str(value or '') for value in values)
         return any(marker in combined for marker in cls.MOJIBAKE_MARKERS)
+
+    @classmethod
+    def _is_retryable_error(cls, error: str):
+        normalized = (error or '').lower()
+        return any(marker in normalized for marker in cls.RETRYABLE_ERROR_MARKERS)
 
     @classmethod
     def fetch_preview_data(cls, url: str):
@@ -275,6 +281,10 @@ class LinkPreview(models.Model):
             preview.favicon_url = ''
             preview.error = ''
             preview.save(update_fields=['status', 'title', 'description', 'site_name', 'image_url', 'favicon_url', 'error', 'updated_at'])
+        if preview.status == LinkPreviewStatusChoice.FAILED and cls._is_retryable_error(preview.error):
+            preview.status = LinkPreviewStatusChoice.PENDING
+            preview.error = ''
+            preview.save(update_fields=['status', 'error', 'updated_at'])
         if created or preview.status == LinkPreviewStatusChoice.PENDING:
             transaction.on_commit(lambda: cls.fetch_async(preview.id))
         return preview
