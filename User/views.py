@@ -1,4 +1,5 @@
 from django.views import View
+from django.utils import timezone
 from notificator import NotificatorAPIError
 from smartdjango import analyse, OK
 
@@ -9,6 +10,7 @@ from utils.global_settings import notificator
 from User.models import (
     NotificationPreference,
     PushDevice,
+    RefreshToken,
     UserContactVerificationCode,
     UserNotificationChoice,
     UserWebReminderPreference,
@@ -16,6 +18,7 @@ from User.models import (
 from User.params import (
     AuthParams,
     UserParams,
+    UserDeleteParams,
     UserPasswordParams,
     NotificationPreferenceParams,
     UserWebReminderPreferenceParams,
@@ -41,6 +44,30 @@ class UserMeView(View):
     @auth.require_user
     def get(self, request: Request):
         return request.user.json_me()
+
+    @auth.require_user
+    @analyse.json(
+        UserDeleteParams.password,
+        UserDeleteParams.name_confirmation,
+    )
+    def delete(self, request: Request):
+        user = request.user
+        if user.has_password:
+            password = request.json.password
+            if not password:
+                raise UserErrors.ACCOUNT_DELETE_PASSWORD_REQUIRED
+            if not function.verify_password(password, user.salt, user.password):
+                raise UserErrors.PASSWORD_ERROR
+        else:
+            name_confirmation = request.json.name_confirmation
+            if not name_confirmation:
+                raise UserErrors.ACCOUNT_DELETE_NAME_CONFIRMATION_REQUIRED
+            if name_confirmation != user.name:
+                raise UserErrors.ACCOUNT_DELETE_NAME_CONFIRMATION_MISMATCH
+
+        user.remove()
+        RefreshToken.objects.filter(user=user, revoked_at__isnull=True).update(revoked_at=timezone.now())
+        return OK
 
 
 class RefreshView(View):
@@ -231,6 +258,7 @@ class WelcomeMessageView(View):
     @auth.require_user
     @analyse.json(UserParams.welcome_message)
     def post(self, request: Request):
+        _require_password_enabled(request.user)
         request.user.set_welcome_message(request.json.welcome_message)
         return dict(welcome_message=request.user.welcome_message)
 
@@ -239,6 +267,7 @@ class UserNameView(View):
     @auth.require_user
     @analyse.json(UserParams.name)
     def post(self, request: Request):
+        _require_password_enabled(request.user)
         request.user.set_name(request.json.name)
         return request.user.json_me()
 
@@ -258,6 +287,7 @@ class AvatarCustomUploadView(View):
         UserParams.avatar_content_type,
     )
     def post(self, request: Request):
+        _require_password_enabled(request.user)
         return issue_avatar_upload(
             file_name=request.json.file_name,
             content_type=request.json.content_type,
@@ -268,6 +298,7 @@ class AvatarCustomView(View):
     @auth.require_user
     @analyse.json(UserParams.avatar_key)
     def post(self, request: Request):
+        _require_password_enabled(request.user)
         key = validate_avatar_key(request.json.key)
         request.user.set_custom_avatar(avatar_uri_for_key(key))
         return request.user.dictify('avatar_type', 'avatar_uri')

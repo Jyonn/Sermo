@@ -51,6 +51,17 @@ class UserPasswordParams(metaclass=Params):
         .null().default(None)
 
 
+class UserDeleteParams(metaclass=Params):
+    password = Validator('password') \
+        .to(str) \
+        .null().default(None) \
+        .to(lambda x: None if x is None else x.strip())
+    name_confirmation = Validator('name_confirmation') \
+        .to(str) \
+        .null().default(None) \
+        .to(lambda x: None if x is None else x.strip())
+
+
 class NotificationPreferenceParams(metaclass=Params):
     model_class = NotificationPreference
 
