@@ -998,6 +998,59 @@ class UserWebReminderPreference(models.Model):
         )
 
 
+class UserGestureLockPreference(models.Model):
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='gesture_lock_preference')
+    enabled = models.BooleanField(default=False)
+    pattern_hash = models.CharField(max_length=128, blank=True, default='')
+    salt = models.CharField(max_length=64, blank=True, default='')
+    lock_after_minutes = models.PositiveSmallIntegerField(default=User.vldt.GESTURE_LOCK_MIN_MINUTES)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    @classmethod
+    def ensure(cls, user: User):
+        pref, _created = cls.objects.get_or_create(user=user)
+        return pref
+
+    @classmethod
+    def normalize_lock_after_minutes(cls, value):
+        try:
+            minutes = int(value)
+        except (TypeError, ValueError):
+            minutes = User.vldt.GESTURE_LOCK_MIN_MINUTES
+        return min(
+            User.vldt.GESTURE_LOCK_MAX_MINUTES,
+            max(User.vldt.GESTURE_LOCK_MIN_MINUTES, minutes),
+        )
+
+    @classmethod
+    def set_preference(cls, user: User, enabled=None, pattern_hash=None, salt=None, lock_after_minutes=None):
+        pref = cls.ensure(user)
+        updates = []
+        if enabled is not None:
+            pref.enabled = bool(enabled)
+            updates.append('enabled')
+        if pattern_hash is not None:
+            pref.pattern_hash = pattern_hash.strip()
+            updates.append('pattern_hash')
+        if salt is not None:
+            pref.salt = salt.strip()
+            updates.append('salt')
+        if lock_after_minutes is not None:
+            pref.lock_after_minutes = cls.normalize_lock_after_minutes(lock_after_minutes)
+            updates.append('lock_after_minutes')
+        if updates:
+            pref.save(update_fields=updates)
+        return pref
+
+    def json(self):
+        return self.dictify(
+            'enabled',
+            'pattern_hash',
+            'salt',
+            'lock_after_minutes',
+        )
+
+
 class NotificationEvent(models.Model):
     space = models.ForeignKey('Space.Space', on_delete=models.CASCADE, related_name='notification_events', db_index=True)
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notification_events', db_index=True)

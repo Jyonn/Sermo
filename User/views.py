@@ -11,6 +11,7 @@ from User.models import (
     NotificationPreference,
     PushDevice,
     RefreshToken,
+    UserGestureLockPreference,
     UserContactVerificationCode,
     UserNotificationChoice,
     UserWebReminderPreference,
@@ -21,6 +22,7 @@ from User.params import (
     UserDeleteParams,
     UserPasswordParams,
     NotificationPreferenceParams,
+    UserGestureLockPreferenceParams,
     UserWebReminderPreferenceParams,
     PushDeviceParams,
     UserContactVerificationCodeParams,
@@ -133,6 +135,42 @@ class UserWebReminderPreferenceView(View):
             user=request.user,
             sound_enabled=None if request.json.sound_enabled is None else bool(request.json.sound_enabled),
             title_enabled=None if request.json.title_enabled is None else bool(request.json.title_enabled),
+        )
+        return pref.json()
+
+
+class UserGestureLockPreferenceView(View):
+    @auth.require_user
+    def get(self, request: Request):
+        return UserGestureLockPreference.ensure(request.user).json()
+
+    @auth.require_user
+    @analyse.json(
+        UserGestureLockPreferenceParams.enabled,
+        UserGestureLockPreferenceParams.pattern_hash,
+        UserGestureLockPreferenceParams.salt,
+        UserGestureLockPreferenceParams.lock_after_minutes,
+    )
+    def post(self, request: Request):
+        enabled = request.json.enabled
+        pattern_hash = request.json.pattern_hash
+        salt = request.json.salt
+
+        if enabled is not None and bool(enabled):
+            if request.user.email_verified_at is None:
+                raise UserErrors.EMAIL_NOT_VERIFIED
+            if not pattern_hash or not salt:
+                raise UserErrors.GESTURE_LOCK_PAYLOAD_INVALID
+        elif enabled is not None:
+            pattern_hash = ''
+            salt = ''
+
+        pref = UserGestureLockPreference.set_preference(
+            user=request.user,
+            enabled=None if enabled is None else bool(enabled),
+            pattern_hash=pattern_hash,
+            salt=salt,
+            lock_after_minutes=request.json.lock_after_minutes,
         )
         return pref.json()
 

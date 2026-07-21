@@ -45,6 +45,8 @@ class UserErrors:
     AVATAR_KEY_INVALID = Error(message=_('Invalid avatar key'), code=Code.BadRequest)
     AVATAR_DELETE_FAILED = Error(message=_('Failed to delete previous avatar'), code=Code.InternalServerError)
     PUSH_DEVICE_INVALID = Error(message=_('Invalid push device'), code=Code.BadRequest)
+    EMAIL_NOT_VERIFIED = Error(message=_('Email is not verified'), code=Code.Forbidden)
+    GESTURE_LOCK_PAYLOAD_INVALID = Error(message=_('Invalid gesture lock payload'), code=Code.BadRequest)
 
 
 RESERVED_SPACE_SLUGS = {
@@ -80,6 +82,8 @@ class UserValidator:
     }
     AVATAR_PRESET_MIN_ID = 1
     AVATAR_PRESET_MAX_ID = 80
+    GESTURE_LOCK_MIN_MINUTES = 1
+    GESTURE_LOCK_MAX_MINUTES = 30
 
     @staticmethod
     def name(value):

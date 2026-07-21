@@ -5,6 +5,7 @@ from User.models import (
     User,
     UserNotificationChoice,
     NotificationPreference,
+    UserGestureLockPreference,
     UserWebReminderPreference,
     UserContactVerificationCode,
     PushDevice,
@@ -124,6 +125,32 @@ class UserWebReminderPreferenceParams(metaclass=Params):
         .to(int) \
         .null().default(None) \
         .bool(lambda x: x is None or x in (0, 1), message=_('title_enabled should be 0 or 1'))
+
+
+class UserGestureLockPreferenceParams(metaclass=Params):
+    model_class = UserGestureLockPreference
+
+    enabled = Validator('enabled') \
+        .to(int) \
+        .null().default(None) \
+        .bool(lambda x: x is None or x in (0, 1), message=_('enabled should be 0 or 1'))
+    pattern_hash = Validator('pattern_hash') \
+        .to(str) \
+        .null().default(None) \
+        .to(lambda x: None if x is None else x.strip()) \
+        .bool(lambda x: x is None or 0 < len(x) <= 128, message=_('Invalid gesture lock payload'))
+    salt = Validator('salt') \
+        .to(str) \
+        .null().default(None) \
+        .to(lambda x: None if x is None else x.strip()) \
+        .bool(lambda x: x is None or 0 < len(x) <= 64, message=_('Invalid gesture lock payload'))
+    lock_after_minutes = Validator('lock_after_minutes') \
+        .to(int) \
+        .null().default(None) \
+        .bool(
+            lambda x: x is None or User.validators.GESTURE_LOCK_MIN_MINUTES <= x <= User.validators.GESTURE_LOCK_MAX_MINUTES,
+            message=_('lock_after_minutes should be between 1 and 30')
+        )
 
 
 class UserContactVerificationCodeParams(metaclass=Params):
