@@ -10,6 +10,7 @@ class ChatErrors:
     USER_DELETED = Error(_('User {user} has been deleted'))
     FORBIDDEN = Error(_('You are not allowed to operate this chat'))
     NOT_GROUP_CHAT = Error(_('Chat {chat} is not a group chat'))
+    NOT_DIRECT_CHAT = Error(_('Chat {chat} is not a direct chat'))
     NOT_FRIENDS = Error(_('Users are not friends'))
     CREATOR_NOT_VERIFIED = Error(_('Only verified users can create or invite members to group chats'))
     TARGET_NOT_FRIEND = Error(_('User {user} is not your friend'))

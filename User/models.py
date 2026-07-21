@@ -439,8 +439,12 @@ class User(models.Model):
         return bool((self.password or '').strip())
 
     def heartbeat(self):
+        was_alive = self.is_alive
         self.last_heartbeat = timezone.now()
         self.save(update_fields=['last_heartbeat'])
+        if not was_alive:
+            from Chat.models import ChatUserPreference
+            ChatUserPreference.emit_peer_online_events(self)
 
     def release_deleted_identity(self, save=True):
         if not self.is_deleted:
@@ -523,7 +527,7 @@ class User(models.Model):
     @property
     def is_alive(self):
         current_time = timezone.now()
-        return (current_time - self.last_heartbeat).seconds < self.vldt.OFFLINE_MIN_INTERVAL * 60
+        return (current_time - self.last_heartbeat).total_seconds() < self.vldt.OFFLINE_MIN_INTERVAL * 60
 
     def _dictify_user_id(self):
         return self.id
@@ -1151,6 +1155,10 @@ class NotificationEvent(models.Model):
                 body = _('A user accepted your group invite.')
             elif accepted is False:
                 body = _('A user rejected your group invite.')
+            return str(title), str(body)
+        if kind == 'peer_online':
+            title = _('Friend online')
+            body = _('{name} is online now.').format(name=actor_name or _('Your friend'))
             return str(title), str(body)
 
         return str(_('System notification')), str(_('You have a new notification.'))

@@ -1,8 +1,8 @@
 from django.views import View
 from smartdjango import analyse, OK
 
-from Chat.models import Chat, ChatMember, ChatReadState
-from Chat.params import ChatParams, ChatMemberParams
+from Chat.models import Chat, ChatMember, ChatReadState, ChatUserPreference
+from Chat.params import ChatParams, ChatMemberParams, ChatPreferenceParams
 from Chat.validators import ChatErrors
 from Message.models import Message
 from utils import auth
@@ -18,13 +18,17 @@ class ChatListView(View):
         data['unread_count'] = ChatReadState.unread_count(chat, user)
         last_read_at = ChatReadState.get_last_read_at(chat, user)
         data['last_read_at'] = last_read_at.timestamp() if last_read_at else None
+        preference = ChatUserPreference.objects.filter(chat=chat, user=user).first()
+        data['pinned'] = bool(preference and preference.pinned)
+        data['online_reminder_enabled'] = bool(preference and preference.online_reminder_enabled)
         return data
 
     @auth.require_user
     def get(self, request):
         chats = Chat.get_user_chats(request.user)
-        chats.sort(key=lambda x: x.last_chat_at, reverse=True)
-        return [self.build_chat_payload(chat, request.user, request) for chat in chats]
+        payloads = [self.build_chat_payload(chat, request.user, request) for chat in chats]
+        payloads.sort(key=lambda item: (bool(item['pinned']), item['last_chat_at']), reverse=True)
+        return payloads
 
 
 class DirectChatView(View):
@@ -121,3 +125,27 @@ class ChatReadView(View):
     def post(self, request):
         state = ChatReadState.mark_read(request.query.chat, request.user)
         return dict(last_read_at=state.last_read_at.timestamp())
+
+
+class ChatPreferenceView(View):
+    @auth.require_user
+    @analyse.query(ChatParams.chat_id)
+    @auth.require_chat_member()
+    def get(self, request):
+        return ChatUserPreference.ensure(request.query.chat, request.user).json()
+
+    @auth.require_user
+    @analyse.query(ChatParams.chat_id)
+    @analyse.json(
+        ChatPreferenceParams.pinned,
+        ChatPreferenceParams.online_reminder_enabled,
+    )
+    @auth.require_chat_member()
+    def post(self, request):
+        preference = ChatUserPreference.update(
+            request.query.chat,
+            request.user,
+            pinned=request.json.pinned,
+            online_reminder_enabled=request.json.online_reminder_enabled,
+        )
+        return preference.json()

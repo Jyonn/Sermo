@@ -10,6 +10,7 @@ from Chat.views import (
     GroupChatInviteListView,
     GroupChatLeaveView,
     ChatReadView,
+    ChatPreferenceView,
 )
 
 urlpatterns = [
@@ -22,4 +23,5 @@ urlpatterns = [
     path('group/invite/respond', GroupChatInviteRespondView.as_view(), name='group_chat_invite_respond'),
     path('group/leave', GroupChatLeaveView.as_view(), name='group_chat_leave'),
     path('read', ChatReadView.as_view(), name='chat_read'),
+    path('preference', ChatPreferenceView.as_view(), name='chat_preference'),
 ]

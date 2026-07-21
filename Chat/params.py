@@ -36,3 +36,14 @@ class ChatMemberParams(metaclass=Params):
     accept = Validator('accept') \
         .to(int) \
         .bool(lambda x: x in (0, 1), message=_('accept should be 0 or 1'))
+
+
+class ChatPreferenceParams(metaclass=Params):
+    pinned = Validator('pinned') \
+        .to(int) \
+        .null().default(None) \
+        .bool(lambda x: x is None or x in (0, 1), message=_('pinned should be 0 or 1'))
+    online_reminder_enabled = Validator('online_reminder_enabled') \
+        .to(int) \
+        .null().default(None) \
+        .bool(lambda x: x is None or x in (0, 1), message=_('online_reminder_enabled should be 0 or 1'))

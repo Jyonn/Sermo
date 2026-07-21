@@ -469,3 +469,20 @@ msgstr "And {count} more messages."
 
 msgid "Open Sermo to reply."
 msgstr "Open Sermo to reply."
+msgid "Chat {chat} is not a direct chat"
+msgstr "Chat {chat} is not a direct chat"
+
+msgid "pinned should be 0 or 1"
+msgstr "pinned should be 0 or 1"
+
+msgid "online_reminder_enabled should be 0 or 1"
+msgstr "online_reminder_enabled should be 0 or 1"
+
+msgid "Friend online"
+msgstr "Friend online"
+
+msgid "{name} is online now."
+msgstr "{name} is online now."
+
+msgid "Your friend"
+msgstr "Your friend"

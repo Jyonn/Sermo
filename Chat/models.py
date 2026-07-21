@@ -496,3 +496,62 @@ class ChatReadState(models.Model):
         if last_read_at is None:
             return Message.visible_in_chat(chat).count()
         return Message.visible_in_chat(chat).filter(created_at__gt=last_read_at).count()
+
+
+class ChatUserPreference(models.Model):
+    chat = models.ForeignKey(Chat, on_delete=models.CASCADE, related_name='user_preferences', db_index=True)
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='chat_preferences', db_index=True)
+    pinned = models.BooleanField(default=False)
+    online_reminder_enabled = models.BooleanField(default=False)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ('chat', 'user')
+
+    @classmethod
+    def ensure(cls, chat: Chat, user: User):
+        preference, _created = cls.objects.get_or_create(chat=chat, user=user)
+        return preference
+
+    @classmethod
+    def update(cls, chat: Chat, user: User, pinned=None, online_reminder_enabled=None):
+        preference = cls.ensure(chat, user)
+        updates = []
+        if pinned is not None:
+            preference.pinned = bool(pinned)
+            updates.append('pinned')
+        if online_reminder_enabled is not None:
+            if chat.group and bool(online_reminder_enabled):
+                raise ChatErrors.NOT_DIRECT_CHAT(chat=chat.id)
+            preference.online_reminder_enabled = bool(online_reminder_enabled)
+            updates.append('online_reminder_enabled')
+        if updates:
+            preference.save(update_fields=[*updates, 'updated_at'])
+        return preference
+
+    def json(self):
+        return self.dictify('pinned', 'online_reminder_enabled')
+
+    @classmethod
+    def emit_peer_online_events(cls, peer: User):
+        from User.models import NotificationEvent
+
+        preferences = cls.objects.filter(
+            online_reminder_enabled=True,
+            chat__chat_type=ChatTypeChoice.DIRECT,
+            chat__is_deleted=False,
+            chat__chat_members__user=peer,
+            chat__chat_members__status=ChatMemberStatusChoice.ACTIVE,
+            user__is_deleted=False,
+        ).select_related('chat', 'user').distinct()
+        events = []
+        for preference in preferences:
+            if preference.user_id == peer.id or not preference.chat.has_active_member(preference.user):
+                continue
+            event = NotificationEvent.emit_system_event(
+                user=preference.user,
+                actor=peer,
+                payload=dict(kind='peer_online', chat_id=preference.chat_id),
+            )
+            events.append(event)
+        return events

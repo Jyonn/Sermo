@@ -469,3 +469,20 @@ msgstr "还有 {count} 条消息。"
 
 msgid "Open Sermo to reply."
 msgstr "打开 Sermo 回复。"
+msgid "Chat {chat} is not a direct chat"
+msgstr "会话 {chat} 不是私聊"
+
+msgid "pinned should be 0 or 1"
+msgstr "pinned 必须为 0 或 1"
+
+msgid "online_reminder_enabled should be 0 or 1"
+msgstr "online_reminder_enabled 必须为 0 或 1"
+
+msgid "Friend online"
+msgstr "好友上线"
+
+msgid "{name} is online now."
+msgstr "{name} 刚刚上线。"
+
+msgid "Your friend"
+msgstr "你的好友"
