@@ -5,6 +5,7 @@ from User.models import (
     User,
     UserNotificationChoice,
     NotificationPreference,
+    UserWebReminderPreference,
     UserContactVerificationCode,
     PushDevice,
 )
@@ -99,6 +100,19 @@ class NotificationPreferenceParams(metaclass=Params):
         .to(int) \
         .null().default(None) \
         .bool(lambda x: x is None or x in (0, 1), message=_('open_chat_on_tap should be 0 or 1'))
+
+
+class UserWebReminderPreferenceParams(metaclass=Params):
+    model_class = UserWebReminderPreference
+
+    sound_enabled = Validator('sound_enabled') \
+        .to(int) \
+        .null().default(None) \
+        .bool(lambda x: x is None or x in (0, 1), message=_('sound_enabled should be 0 or 1'))
+    title_enabled = Validator('title_enabled') \
+        .to(int) \
+        .null().default(None) \
+        .bool(lambda x: x is None or x in (0, 1), message=_('title_enabled should be 0 or 1'))
 
 
 class UserContactVerificationCodeParams(metaclass=Params):

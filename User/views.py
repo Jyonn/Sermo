@@ -11,12 +11,14 @@ from User.models import (
     PushDevice,
     UserContactVerificationCode,
     UserNotificationChoice,
+    UserWebReminderPreference,
 )
 from User.params import (
     AuthParams,
     UserParams,
     UserPasswordParams,
     NotificationPreferenceParams,
+    UserWebReminderPreferenceParams,
     PushDeviceParams,
     UserContactVerificationCodeParams,
 )
@@ -85,6 +87,25 @@ class NotificationPreferenceView(View):
             hidden_direct_message_text=request.json.hidden_direct_message_text,
             hidden_group_message_text=request.json.hidden_group_message_text,
             open_chat_on_tap=None if open_chat_on_tap is None else bool(open_chat_on_tap),
+        )
+        return pref.json()
+
+
+class UserWebReminderPreferenceView(View):
+    @auth.require_user
+    def get(self, request: Request):
+        return UserWebReminderPreference.ensure(request.user).json()
+
+    @auth.require_user
+    @analyse.json(
+        UserWebReminderPreferenceParams.sound_enabled,
+        UserWebReminderPreferenceParams.title_enabled,
+    )
+    def post(self, request: Request):
+        pref = UserWebReminderPreference.set_preference(
+            user=request.user,
+            sound_enabled=None if request.json.sound_enabled is None else bool(request.json.sound_enabled),
+            title_enabled=None if request.json.title_enabled is None else bool(request.json.title_enabled),
         )
         return pref.json()
 

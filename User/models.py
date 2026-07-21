@@ -960,6 +960,44 @@ class NotificationPreference(models.Model):
         )
 
 
+class UserWebReminderPreference(models.Model):
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='web_reminder_preference')
+    sound_enabled = models.BooleanField(default=True)
+    title_enabled = models.BooleanField(default=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    @classmethod
+    def ensure(cls, user: User):
+        pref, _created = cls.objects.get_or_create(
+            user=user,
+            defaults=dict(
+                sound_enabled=True,
+                title_enabled=True,
+            ),
+        )
+        return pref
+
+    @classmethod
+    def set_preference(cls, user: User, sound_enabled=None, title_enabled=None):
+        pref = cls.ensure(user)
+        updates = []
+        if sound_enabled is not None:
+            pref.sound_enabled = bool(sound_enabled)
+            updates.append('sound_enabled')
+        if title_enabled is not None:
+            pref.title_enabled = bool(title_enabled)
+            updates.append('title_enabled')
+        if updates:
+            pref.save(update_fields=updates)
+        return pref
+
+    def json(self):
+        return self.dictify(
+            'sound_enabled',
+            'title_enabled',
+        )
+
+
 class NotificationEvent(models.Model):
     space = models.ForeignKey('Space.Space', on_delete=models.CASCADE, related_name='notification_events', db_index=True)
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notification_events', db_index=True)
