@@ -1003,6 +1003,9 @@ class UserGestureLockPreference(models.Model):
     enabled = models.BooleanField(default=False)
     pattern_hash = models.CharField(max_length=128, blank=True, default='')
     salt = models.CharField(max_length=64, blank=True, default='')
+    decoy_enabled = models.BooleanField(default=False)
+    decoy_pattern_hash = models.CharField(max_length=128, blank=True, default='')
+    decoy_salt = models.CharField(max_length=64, blank=True, default='')
     lock_after_minutes = models.PositiveSmallIntegerField(default=User.vldt.GESTURE_LOCK_MIN_MINUTES)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -1023,7 +1026,17 @@ class UserGestureLockPreference(models.Model):
         )
 
     @classmethod
-    def set_preference(cls, user: User, enabled=None, pattern_hash=None, salt=None, lock_after_minutes=None):
+    def set_preference(
+            cls,
+            user: User,
+            enabled=None,
+            pattern_hash=None,
+            salt=None,
+            lock_after_minutes=None,
+            decoy_enabled=None,
+            decoy_pattern_hash=None,
+            decoy_salt=None,
+    ):
         pref = cls.ensure(user)
         updates = []
         if enabled is not None:
@@ -1035,6 +1048,15 @@ class UserGestureLockPreference(models.Model):
         if salt is not None:
             pref.salt = salt.strip()
             updates.append('salt')
+        if decoy_enabled is not None:
+            pref.decoy_enabled = bool(decoy_enabled)
+            updates.append('decoy_enabled')
+        if decoy_pattern_hash is not None:
+            pref.decoy_pattern_hash = decoy_pattern_hash.strip()
+            updates.append('decoy_pattern_hash')
+        if decoy_salt is not None:
+            pref.decoy_salt = decoy_salt.strip()
+            updates.append('decoy_salt')
         if lock_after_minutes is not None:
             pref.lock_after_minutes = cls.normalize_lock_after_minutes(lock_after_minutes)
             updates.append('lock_after_minutes')
@@ -1047,6 +1069,9 @@ class UserGestureLockPreference(models.Model):
             'enabled',
             'pattern_hash',
             'salt',
+            'decoy_enabled',
+            'decoy_pattern_hash',
+            'decoy_salt',
             'lock_after_minutes',
         )
 

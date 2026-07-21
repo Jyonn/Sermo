@@ -144,6 +144,20 @@ class UserGestureLockPreferenceParams(metaclass=Params):
         .null().default(None) \
         .to(lambda x: None if x is None else x.strip()) \
         .bool(lambda x: x is None or 0 < len(x) <= 64, message=_('Invalid gesture lock payload'))
+    decoy_enabled = Validator('decoy_enabled') \
+        .to(int) \
+        .null().default(None) \
+        .bool(lambda x: x is None or x in (0, 1), message=_('decoy_enabled should be 0 or 1'))
+    decoy_pattern_hash = Validator('decoy_pattern_hash') \
+        .to(str) \
+        .null().default(None) \
+        .to(lambda x: None if x is None else x.strip()) \
+        .bool(lambda x: x is None or 0 < len(x) <= 128, message=_('Invalid gesture lock payload'))
+    decoy_salt = Validator('decoy_salt') \
+        .to(str) \
+        .null().default(None) \
+        .to(lambda x: None if x is None else x.strip()) \
+        .bool(lambda x: x is None or 0 < len(x) <= 64, message=_('Invalid gesture lock payload'))
     lock_after_minutes = Validator('lock_after_minutes') \
         .to(int) \
         .null().default(None) \
