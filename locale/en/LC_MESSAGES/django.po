@@ -437,3 +437,35 @@ msgstr "You are not the owner of this chat"
 #: utils/auth.py:212
 msgid "You are not the owner of this message"
 msgstr "You are not the owner of this message"
+
+msgid "New messages"
+msgstr "New messages"
+
+#, python-brace-format
+msgid "Messages from {name}"
+msgstr "Messages from {name}"
+
+#, python-brace-format
+msgid "Messages from {first} and {second}"
+msgstr "Messages from {first} and {second}"
+
+#, python-brace-format
+msgid "Messages from {name} and {count} people"
+msgstr "Messages from {name} and {count} people"
+
+msgid "Someone"
+msgstr "Someone"
+
+msgid "You have unread messages:"
+msgstr "You have unread messages:"
+
+#, python-brace-format
+msgid "{name} ({count} messages)"
+msgstr "{name} ({count} messages)"
+
+#, python-brace-format
+msgid "And {count} more messages."
+msgstr "And {count} more messages."
+
+msgid "Open Sermo to reply."
+msgstr "Open Sermo to reply."

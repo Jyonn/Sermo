@@ -1209,6 +1209,13 @@ class NotificationEvent(models.Model):
 
 
 class NotificationDelivery(models.Model):
+    EMAIL_BATCH_MESSAGE_LIMIT = 8
+    EMAIL_BATCH_BODY_LIMIT = 1200
+    MESSAGE_EVENT_TYPES = (
+        NotificationEventTypeChoice.DIRECT_MESSAGE,
+        NotificationEventTypeChoice.GROUP_MESSAGE,
+    )
+
     event = models.ForeignKey(NotificationEvent, on_delete=models.CASCADE, related_name='deliveries', db_index=True)
     channel = models.IntegerField(choices=UserNotificationChoice.to_choices())
     status = models.IntegerField(
@@ -1261,6 +1268,129 @@ class NotificationDelivery(models.Model):
         if not space_slug:
             return None
         return f'https://{space_slug}.{FRONTEND_SPACE_HOST_SUFFIX}/app/chats/{chat_id}'
+
+    @classmethod
+    def _is_message_email_delivery(cls, delivery):
+        return (
+            delivery.channel == UserNotificationChoice.EMAIL
+            and delivery.event.event_type in cls.MESSAGE_EVENT_TYPES
+        )
+
+    @classmethod
+    def _truncate_email_line(cls, value, limit=86):
+        normalized = ' '.join(str(value or '').split())
+        if len(normalized) <= limit:
+            return normalized
+        return normalized[:limit - 1].rstrip() + '…'
+
+    @classmethod
+    def _render_email_batch_title(cls, deliveries):
+        names = []
+        seen = set()
+        for delivery in deliveries:
+            actor = delivery.event.actor
+            actor_id = getattr(delivery.event, 'actor_id', None)
+            name = actor.name if actor_id else ''
+            if not actor_id or not name or actor_id in seen:
+                continue
+            seen.add(actor_id)
+            names.append(name)
+
+        if not names:
+            return str(_('New messages'))
+        if len(names) == 1:
+            return str(_('Messages from {name}').format(name=names[0]))
+        if len(names) == 2:
+            return str(_('Messages from {first} and {second}').format(first=names[0], second=names[1]))
+        return str(_('Messages from {name} and {count} people').format(name=names[0], count=len(names)))
+
+    @classmethod
+    def _render_email_batch_body(cls, deliveries, pref: NotificationPreference):
+        grouped = []
+        indexes = {}
+        hide_message_content = bool(pref.hide_message_content)
+        for delivery in deliveries:
+            actor = delivery.event.actor
+            actor_key = getattr(delivery.event, 'actor_id', None) or f'event-{delivery.event_id}'
+            actor_name = actor.name if actor else str(_('Someone'))
+            if actor_key not in indexes:
+                indexes[actor_key] = len(grouped)
+                grouped.append(dict(name=actor_name, items=[]))
+            _title, body = delivery.event.render_delivery_message(
+                hide_message_content=hide_message_content,
+                hidden_direct_message_text=pref.hidden_direct_message_text,
+                hidden_group_message_text=pref.hidden_group_message_text,
+            )
+            grouped[indexes[actor_key]]['items'].append(body)
+
+        lines = [str(_('You have unread messages:')), '']
+        remaining = cls.EMAIL_BATCH_MESSAGE_LIMIT
+        omitted = 0
+        for group in grouped:
+            if remaining <= 0:
+                omitted += len(group['items'])
+                continue
+            items = group['items']
+            lines.append(str(_('{name} ({count} messages)').format(name=group['name'], count=len(items))))
+            for item in items[:remaining]:
+                lines.append(f'- {cls._truncate_email_line(item)}')
+            if len(items) > remaining:
+                omitted += len(items) - remaining
+            remaining -= min(len(items), remaining)
+            lines.append('')
+
+        if omitted > 0:
+            lines.append(str(_('And {count} more messages.').format(count=omitted)))
+        lines.append(str(_('Open Sermo to reply.')))
+        body = '\n'.join(lines).strip()
+        if len(body) <= cls.EMAIL_BATCH_BODY_LIMIT:
+            return body
+        return body[:cls.EMAIL_BATCH_BODY_LIMIT - 1].rstrip() + '…'
+
+    @classmethod
+    def _attempt_send_email_batch(cls, user: User, pref: NotificationPreference, limit=50):
+        target = cls._channel_target(user, UserNotificationChoice.EMAIL)
+        if not target:
+            return []
+
+        deliveries = list(
+            cls.objects.filter(
+                status=NotificationDeliveryStatusChoice.PENDING,
+                channel=UserNotificationChoice.EMAIL,
+                event__user=user,
+                event__event_type__in=cls.MESSAGE_EVENT_TYPES,
+            )
+            .select_related('event', 'event__user', 'event__actor', 'event__space')
+            .order_by('event__created_at', 'id')[:limit]
+        )
+        if not deliveries:
+            return []
+
+        title = cls._render_email_batch_title(deliveries)
+        body = cls._render_email_batch_body(deliveries, pref)
+        attempted_at = timezone.now()
+        try:
+            notificator.mail(
+                target,
+                title=title,
+                body=body,
+                recipient_name=user.name,
+            )
+            ok, detail = True, None
+        except NotificatorAPIError as err:
+            ok, detail = False, str(err)
+        except Exception as err:
+            ok, detail = False, str(err)
+
+        status = NotificationDeliveryStatusChoice.SENT if ok else NotificationDeliveryStatusChoice.FAILED
+        detail = None if ok else str(detail)[:255]
+        ids = [delivery.id for delivery in deliveries]
+        cls.objects.filter(id__in=ids).update(status=status, detail=detail, attempted_at=attempted_at)
+        for delivery in deliveries:
+            delivery.status = status
+            delivery.detail = detail
+            delivery.attempted_at = attempted_at
+        return deliveries
 
     def _attempt_send(self, pref: NotificationPreference):
         target = self._channel_target(self.event.user, self.channel)
@@ -1348,7 +1478,10 @@ class NotificationDelivery(models.Model):
                 attempted_at=attempted_at,
             )
             if status == NotificationDeliveryStatusChoice.PENDING and detail is None:
-                delivery._attempt_send(pref)
+                if cls._is_message_email_delivery(delivery):
+                    cls._attempt_send_email_batch(event.user, pref)
+                else:
+                    delivery._attempt_send(pref)
             deliveries.append(delivery)
         deliveries.extend(PushDelivery.enqueue_for_event(event))
         return deliveries
@@ -1359,7 +1492,10 @@ class NotificationDelivery(models.Model):
         if user is not None:
             query = query.filter(event__user=user)
         deliveries = list(query.order_by('created_at')[:limit])
+        processed_delivery_ids = set()
         for delivery in deliveries:
+            if delivery.id in processed_delivery_ids:
+                continue
             pref = NotificationPreference.objects.filter(
                 user=delivery.event.user,
                 channel=delivery.channel,
@@ -1385,6 +1521,10 @@ class NotificationDelivery(models.Model):
             if not cls._offline_threshold_reached(delivery.event.user, pref.offline_threshold_minutes):
                 delivery.detail = 'waiting_offline_threshold'
                 delivery.save(update_fields=['detail'])
+                continue
+            if cls._is_message_email_delivery(delivery):
+                batch = cls._attempt_send_email_batch(delivery.event.user, pref)
+                processed_delivery_ids.update(item.id for item in batch)
                 continue
             delivery.detail = None
             delivery.save(update_fields=['detail'])

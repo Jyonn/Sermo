@@ -437,3 +437,35 @@ msgstr "你不是此聊天室的所有者"
 #: utils/auth.py:212
 msgid "You are not the owner of this message"
 msgstr "你不是此消息的所有者"
+
+msgid "New messages"
+msgstr "新消息"
+
+#, python-brace-format
+msgid "Messages from {name}"
+msgstr "来自 {name} 的消息"
+
+#, python-brace-format
+msgid "Messages from {first} and {second}"
+msgstr "来自 {first} 和 {second} 的消息"
+
+#, python-brace-format
+msgid "Messages from {name} and {count} people"
+msgstr "来自 {name} 等 {count} 位好友的消息"
+
+msgid "Someone"
+msgstr "有人"
+
+msgid "You have unread messages:"
+msgstr "你有未读消息："
+
+#, python-brace-format
+msgid "{name} ({count} messages)"
+msgstr "{name}（{count} 条）"
+
+#, python-brace-format
+msgid "And {count} more messages."
+msgstr "还有 {count} 条消息。"
+
+msgid "Open Sermo to reply."
+msgstr "打开 Sermo 回复。"
