@@ -363,8 +363,14 @@ class ChatMember(models.Model):
     def _dictify_invited_by(self):
         return self.invited_by.tiny_json() if self.invited_by_id else None
 
+    def _dictify_chat_id(self):
+        return self.chat_id
+
+    def _dictify_chat(self):
+        return self.chat.jsonl()
+
     def json(self):
-        return self.dictify('user', 'invited_by', 'role', 'status', 'created_at', 'updated_at')
+        return self.dictify('chat_id', 'chat', 'user', 'invited_by', 'role', 'status', 'created_at', 'updated_at')
 
     @classmethod
     def index(cls, member_id):
