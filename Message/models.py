@@ -641,6 +641,10 @@ class ImageMetadata(models.Model):
     STATUS_PENDING = 0
     STATUS_READY = 1
     STATUS_FAILED = 2
+    GEOCODING_PENDING = 0
+    GEOCODING_READY = 1
+    GEOCODING_FAILED = 2
+    GEOCODING_UNAVAILABLE = 3
     _FETCHING_IDS = set()
     _FETCHING_LOCK = threading.Lock()
 
@@ -655,6 +659,8 @@ class ImageMetadata(models.Model):
     latitude = models.FloatField(null=True, blank=True)
     longitude = models.FloatField(null=True, blank=True)
     address = models.CharField(max_length=500, blank=True, default='')
+    geocoding_status = models.IntegerField(default=GEOCODING_PENDING, db_index=True)
+    geocoding_error = models.CharField(max_length=500, blank=True, default='')
     error = models.CharField(max_length=500, blank=True, default='')
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -691,23 +697,40 @@ class ImageMetadata(models.Model):
         try:
             raw = fetch_qiniu_exif(message.source_media_uri())
             parsed = parse_exif(raw)
-            address = ''
-            if geocode and parsed['latitude'] is not None and parsed['longitude'] is not None:
-                cached = cls.objects.filter(
-                    latitude=parsed['latitude'],
-                    longitude=parsed['longitude'],
-                ).exclude(address='').values_list('address', flat=True).first()
-                address = cached or reverse_geocode(parsed['latitude'], parsed['longitude'])
             for field, value in parsed.items():
                 setattr(metadata, field, value)
             metadata.raw_exif = raw
-            metadata.address = address
+            metadata.address = ''
             metadata.status = cls.STATUS_READY
             metadata.error = ''
+            metadata.geocoding_status = (
+                cls.GEOCODING_PENDING
+                if parsed['latitude'] is not None and parsed['longitude'] is not None
+                else cls.GEOCODING_UNAVAILABLE
+            )
+            metadata.geocoding_error = ''
+            metadata.save()
         except Exception as error:
             metadata.status = cls.STATUS_FAILED
             metadata.error = str(error)[:500]
-        metadata.save()
+            metadata.save(update_fields=['status', 'error', 'updated_at'])
+            return metadata
+
+        if not geocode or metadata.geocoding_status == cls.GEOCODING_UNAVAILABLE:
+            return metadata
+
+        try:
+            cached = cls.objects.filter(
+                latitude=metadata.latitude,
+                longitude=metadata.longitude,
+            ).exclude(address='').values_list('address', flat=True).first()
+            metadata.address = cached or reverse_geocode(metadata.latitude, metadata.longitude)
+            metadata.geocoding_status = cls.GEOCODING_READY
+            metadata.geocoding_error = ''
+        except Exception as error:
+            metadata.geocoding_status = cls.GEOCODING_FAILED
+            metadata.geocoding_error = str(error)[:500]
+        metadata.save(update_fields=['address', 'geocoding_status', 'geocoding_error', 'updated_at'])
         return metadata
 
     def jsonl(self):
@@ -721,4 +744,5 @@ class ImageMetadata(models.Model):
             latitude=self.latitude,
             longitude=self.longitude,
             address=self.address,
+            geocoding_status=self.geocoding_status,
         )
