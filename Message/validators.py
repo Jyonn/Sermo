@@ -13,6 +13,7 @@ class MessageErrors:
     PAYLOAD_INVALID = Error(message=_('Invalid message payload'), code=Code.BadRequest)
     MEDIA_KIND_INVALID = Error(message=_('Invalid media kind'), code=Code.BadRequest)
     AUDIO_DURATION_INVALID = Error(message=_('Audio message cannot exceed 60 seconds'), code=Code.BadRequest)
+    REPLY_TARGET_INVALID = Error(message=_('The replied message is not in this chat'), code=Code.BadRequest)
 
 
 class MessageValidator:

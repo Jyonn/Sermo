@@ -37,6 +37,7 @@ class MessageView(View):
     @analyse.json(
         MessageParams.content,
         MessageParams.type,
+        MessageParams.reply_to_message_id,
     )
     def post(self, request: Request):
         with transaction.atomic():
@@ -44,7 +45,8 @@ class MessageView(View):
                 chat=request.query.chat,
                 user=request.user,
                 message_type=request.json.type,
-                content=request.json.content)
+                content=request.json.content,
+                reply_to=request.json.reply_to)
             NotificationEvent.emit_message_notifications(message, actor=request.user)
         return message.jsonl(request=request)
 

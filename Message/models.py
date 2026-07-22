@@ -372,6 +372,13 @@ class Message(models.Model):
 
     chat = models.ForeignKey(Chat, on_delete=models.CASCADE, db_index=True)
     user = models.ForeignKey(User, on_delete=models.CASCADE)
+    reply_to = models.ForeignKey(
+        'self',
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='replies',
+    )
 
     type = models.IntegerField(choices=MessageTypeChoice.to_choices())
     content = models.CharField(max_length=vldt.MAX_CONTENT_LENGTH)
@@ -392,10 +399,18 @@ class Message(models.Model):
         return cls.visible_queryset().filter(chat=chat)
 
     @classmethod
-    def create(cls, chat: Chat, user: User, message_type, content):
+    def create(cls, chat: Chat, user: User, message_type, content, reply_to=None):
         if chat.has_active_member(user):
+            if reply_to is not None and (reply_to.chat_id != chat.id or reply_to.is_deleted):
+                raise MessageErrors.REPLY_TARGET_INVALID
             normalized_content = cls.normalize_content(message_type, content)
-            message = cls.objects.create(chat=chat, user=user, type=message_type, content=normalized_content)
+            message = cls.objects.create(
+                chat=chat,
+                user=user,
+                type=message_type,
+                content=normalized_content,
+                reply_to=reply_to,
+            )
             if message.type in cls.MEDIA_KIND_BY_TYPE:
                 message.ensure_blob_slug(save=True)
             if message.type == MessageTypeChoice.IMAGE:
@@ -551,6 +566,18 @@ class Message(models.Model):
     def _dictify_content(self):
         return self.preview_text()
 
+    def _reply_to_payload(self):
+        if self.reply_to_id is None:
+            return None
+        reply_to = self.reply_to
+        return dict(
+            message_id=reply_to.id,
+            user=reply_to.user.tiny_json(),
+            type=reply_to.type,
+            content='消息已删除' if reply_to.is_deleted else reply_to.preview_text(),
+            is_deleted=reply_to.is_deleted,
+        )
+
     def source_media_uri(self):
         if self.type not in self.MEDIA_KIND_BY_TYPE:
             return ''
@@ -566,6 +593,7 @@ class Message(models.Model):
             type=self.type,
             content=self.preview_text(),
             payload=self._payload_for_type(request=request),
+            reply_to=self._reply_to_payload(),
             created_at=self.created_at.timestamp(),
         )
 
@@ -586,17 +614,17 @@ class Message(models.Model):
 
     @classmethod
     def latest(cls, chat: Chat, limit: int, request: HttpRequest = None):
-        messages = cls.visible_in_chat(chat).order_by('-created_at')[:limit]
+        messages = cls.visible_in_chat(chat).select_related('user', 'reply_to', 'reply_to__user').order_by('-created_at')[:limit]
         return [message.jsonl(request=request) for message in messages]
 
     @classmethod
     def older(cls, chat: Chat, message_id, limit: int, request: HttpRequest = None):
-        messages = cls.visible_in_chat(chat).filter(id__lt=message_id).order_by('-created_at')[:limit]
+        messages = cls.visible_in_chat(chat).select_related('user', 'reply_to', 'reply_to__user').filter(id__lt=message_id).order_by('-created_at')[:limit]
         return [message.jsonl(request=request) for message in messages]
 
     @classmethod
     def newer(cls, chat: Chat, message_id, limit: int, request: HttpRequest = None):
-        messages = cls.visible_in_chat(chat).filter(id__gt=message_id).order_by('created_at')[:limit]
+        messages = cls.visible_in_chat(chat).select_related('user', 'reply_to', 'reply_to__user').filter(id__gt=message_id).order_by('created_at')[:limit]
         return [message.jsonl(request=request) for message in messages]
 
     @classmethod
@@ -610,6 +638,7 @@ class Message(models.Model):
 
         rows = list(
             cls.visible_queryset()
+            .select_related('user', 'reply_to', 'reply_to__user')
             .filter(chat_id__in=chat_ids, id__gt=after)
             .order_by('id')[:limit + 1]
         )

@@ -9,6 +9,7 @@ class MessageParams(metaclass=Params):
     model_class = Message
 
     message_id = Validator('message_id', final_name='message').to(int).to(Message.index)
+    reply_to_message_id = Validator('reply_to_message_id', final_name='reply_to').to(int).to(Message.index).null().default(None)
     chat_id = Validator('chat_id', final_name='chat').to(int).to(Chat.index)
 
     content: Validator
