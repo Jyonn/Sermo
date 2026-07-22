@@ -1567,10 +1567,12 @@ class WebPushDelivery(models.Model):
 
     def _payload(self):
         payload = dict(self.event.payload or {})
+        official_user = self.event.space.official_user
         payload.update(
             notification_event_id=self.event_id,
             event_type=self.event.event_type,
             space_slug=self.event.space.slug,
+            icon=official_user.tiny_json().get('avatar_uri') if official_user else '',
         )
         return payload
 
