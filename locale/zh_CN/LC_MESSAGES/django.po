@@ -467,8 +467,8 @@ msgstr "{name}（{count} 条）"
 msgid "And {count} more messages."
 msgstr "还有 {count} 条消息。"
 
-msgid "Open Sermo to reply."
-msgstr "打开 Sermo 回复。"
+msgid "Open Sermo Yanlang to reply."
+msgstr "打开 Sermo 言浪回复。"
 msgid "Chat {chat} is not a direct chat"
 msgstr "会话 {chat} 不是私聊"
 

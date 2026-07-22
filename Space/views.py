@@ -95,7 +95,7 @@ class SpaceEmailCodeRequestView(View):
             purpose=purpose,
             space=space,
         )
-        title = 'Sermo space verification code'
+        title = 'Sermo 言浪空间验证码'
         body = f'Your verification code is {verify_code.code}. It expires in {SpaceEmailVerificationCode.EXPIRE_SECONDS // 60} minutes.'
         try:
             notificator.mail(

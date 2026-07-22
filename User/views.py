@@ -266,7 +266,7 @@ class ContactVerificationCodeRequestView(View):
             channel=channel,
             target=request.json.target,
         )
-        title = 'Sermo verification code'
+        title = 'Sermo 言浪验证码'
         expire_minutes = UserContactVerificationCode.EXPIRE_SECONDS // 60
         body = f'Your verification code is {code_obj.code}. It expires in {expire_minutes} minutes.'
         try:

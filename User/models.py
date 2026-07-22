@@ -1351,7 +1351,7 @@ class NotificationDelivery(models.Model):
 
         if omitted > 0:
             lines.append(str(_('And {count} more messages.').format(count=omitted)))
-        lines.append(str(_('Open Sermo to reply.')))
+        lines.append(str(_('Open Sermo Yanlang to reply.')))
         body = '\n'.join(lines).strip()
         if len(body) <= cls.EMAIL_BATCH_BODY_LIMIT:
             return body
