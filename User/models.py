@@ -866,6 +866,7 @@ class NotificationPreference(models.Model):
     hide_message_content = models.BooleanField(default=False)
     hidden_direct_message_text = models.CharField(max_length=255, blank=True, default='')
     hidden_group_message_text = models.CharField(max_length=255, blank=True, default='')
+    friend_online_message_text = models.CharField(max_length=255, blank=True, default='')
     open_chat_on_tap = models.BooleanField(default=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -915,6 +916,7 @@ class NotificationPreference(models.Model):
         hide_message_content=None,
         hidden_direct_message_text=None,
         hidden_group_message_text=None,
+        friend_online_message_text=None,
         open_chat_on_tap=None,
     ):
         pref, _created = cls.objects.get_or_create(
@@ -926,6 +928,7 @@ class NotificationPreference(models.Model):
                 hide_message_content=False,
                 hidden_direct_message_text='',
                 hidden_group_message_text='',
+                friend_online_message_text='',
                 open_chat_on_tap=True,
             ),
         )
@@ -945,6 +948,9 @@ class NotificationPreference(models.Model):
         if hidden_group_message_text is not None:
             pref.hidden_group_message_text = hidden_group_message_text.strip()
             updates.append('hidden_group_message_text')
+        if friend_online_message_text is not None:
+            pref.friend_online_message_text = friend_online_message_text.strip()
+            updates.append('friend_online_message_text')
         if open_chat_on_tap is not None:
             pref.open_chat_on_tap = bool(open_chat_on_tap)
             updates.append('open_chat_on_tap')
@@ -960,6 +966,7 @@ class NotificationPreference(models.Model):
             'hide_message_content',
             'hidden_direct_message_text',
             'hidden_group_message_text',
+            'friend_online_message_text',
             'open_chat_on_tap',
         )
 
@@ -1103,6 +1110,7 @@ class NotificationEvent(models.Model):
         hide_message_content=False,
         hidden_direct_message_text='',
         hidden_group_message_text='',
+        friend_online_message_text='',
     ):
         payload = self.payload or {}
         actor_name = self.actor.name if self.actor_id else None
@@ -1158,7 +1166,7 @@ class NotificationEvent(models.Model):
             return str(title), str(body)
         if kind == 'peer_online':
             title = _('Friend online')
-            body = _('{name} is online now.').format(name=actor_name or _('Your friend'))
+            body = friend_online_message_text.strip() or _('{name} is online now.').format(name=actor_name or _('Your friend'))
             return str(title), str(body)
 
         return str(_('System notification')), str(_('You have a new notification.'))
@@ -1328,6 +1336,7 @@ class NotificationDelivery(models.Model):
                 hide_message_content=hide_message_content,
                 hidden_direct_message_text=pref.hidden_direct_message_text,
                 hidden_group_message_text=pref.hidden_group_message_text,
+                friend_online_message_text=pref.friend_online_message_text,
             )
             grouped[indexes[actor_key]]['items'].append(body)
 
@@ -1417,6 +1426,7 @@ class NotificationDelivery(models.Model):
             hide_message_content=hide_message_content,
             hidden_direct_message_text=pref.hidden_direct_message_text,
             hidden_group_message_text=pref.hidden_group_message_text,
+            friend_online_message_text=pref.friend_online_message_text,
         )
         try:
             if self.channel == UserNotificationChoice.EMAIL:

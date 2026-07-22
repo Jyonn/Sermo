@@ -108,6 +108,14 @@ class NotificationPreferenceParams(metaclass=Params):
             lambda x: x is None or len(x) <= 255,
             message=_('hidden_group_message_text should be at most 255 characters')
         )
+    friend_online_message_text = Validator('friend_online_message_text') \
+        .to(str) \
+        .null().default(None) \
+        .to(lambda x: None if x is None else x.strip()) \
+        .bool(
+            lambda x: x is None or len(x) <= 255,
+            message=_('friend_online_message_text should be at most 255 characters')
+        )
     open_chat_on_tap = Validator('open_chat_on_tap') \
         .to(int) \
         .null().default(None) \

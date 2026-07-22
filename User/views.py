@@ -100,6 +100,7 @@ class NotificationPreferenceView(View):
         NotificationPreferenceParams.hide_message_content,
         NotificationPreferenceParams.hidden_direct_message_text,
         NotificationPreferenceParams.hidden_group_message_text,
+        NotificationPreferenceParams.friend_online_message_text,
         NotificationPreferenceParams.open_chat_on_tap,
     )
     def post(self, request: Request):
@@ -115,6 +116,7 @@ class NotificationPreferenceView(View):
             hide_message_content=None if hide_message_content is None else bool(hide_message_content),
             hidden_direct_message_text=request.json.hidden_direct_message_text,
             hidden_group_message_text=request.json.hidden_group_message_text,
+            friend_online_message_text=request.json.friend_online_message_text,
             open_chat_on_tap=None if open_chat_on_tap is None else bool(open_chat_on_tap),
         )
         return pref.json()
