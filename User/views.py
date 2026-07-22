@@ -9,7 +9,7 @@ from utils.qiniu import issue_avatar_upload, validate_avatar_key, avatar_uri_for
 from utils.global_settings import notificator
 from User.models import (
     NotificationPreference,
-    PushDevice,
+    WebPushSubscription,
     RefreshToken,
     UserGestureLockPreference,
     UserContactVerificationCode,
@@ -24,7 +24,7 @@ from User.params import (
     NotificationPreferenceParams,
     UserGestureLockPreferenceParams,
     UserWebReminderPreferenceParams,
-    PushDeviceParams,
+    WebPushSubscriptionParams,
     UserContactVerificationCodeParams,
 )
 from User.validators import UserErrors
@@ -199,25 +199,39 @@ class UserGestureLockPreferenceView(View):
         return pref.json()
 
 
-class PushDeviceView(View):
+class WebPushSubscriptionView(View):
+    @auth.require_user
+    def get(self, request: Request):
+        from utils.webpush import vapid_public_key
+
+        return dict(
+            public_key=vapid_public_key(),
+            subscriptions=[item.json() for item in WebPushSubscription.active_for_user(request.user)],
+        )
+
     @auth.require_user
     @analyse.json(
-        PushDeviceParams.provider,
-        PushDeviceParams.client_id,
-        PushDeviceParams.platform,
-        PushDeviceParams.device_id,
-        PushDeviceParams.app_version,
+        WebPushSubscriptionParams.endpoint,
+        WebPushSubscriptionParams.p256dh,
+        WebPushSubscriptionParams.auth,
+        WebPushSubscriptionParams.origin,
     )
     def post(self, request: Request):
-        device = PushDevice.register(
+        subscription = WebPushSubscription.register(
             user=request.user,
-            provider=request.json.provider,
-            client_id=request.json.client_id,
-            platform=request.json.platform,
-            device_id=request.json.device_id,
-            app_version=request.json.app_version,
+            endpoint=request.json.endpoint,
+            p256dh=request.json.p256dh,
+            auth=request.json.auth,
+            origin=request.json.origin,
+            user_agent=request.META.get('HTTP_USER_AGENT', ''),
         )
-        return device.json()
+        return subscription.json()
+
+    @auth.require_user
+    @analyse.json(WebPushSubscriptionParams.endpoint)
+    def delete(self, request: Request):
+        WebPushSubscription.objects.filter(user=request.user, endpoint=request.json.endpoint).delete()
+        return OK
 
 
 class PasswordView(View):

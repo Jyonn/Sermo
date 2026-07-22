@@ -785,68 +785,57 @@ class NotificationDeliveryStatusChoice(Choice):
     SKIPPED = 3
 
 
-class PushDevice(models.Model):
-    PROVIDER_GETUI = 'getui'
-    PLATFORM_ANDROID = 'android'
-
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='push_devices', db_index=True)
-    space = models.ForeignKey('Space.Space', on_delete=models.CASCADE, related_name='push_devices', db_index=True)
-    provider = models.CharField(max_length=32, default=PROVIDER_GETUI, db_index=True)
-    client_id = models.CharField(max_length=128, db_index=True)
-    platform = models.CharField(max_length=32, default=PLATFORM_ANDROID)
-    device_id = models.CharField(max_length=128, blank=True, default='')
-    app_version = models.CharField(max_length=32, blank=True, default='')
+class WebPushSubscription(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='web_push_subscriptions', db_index=True)
+    space = models.ForeignKey('Space.Space', on_delete=models.CASCADE, related_name='web_push_subscriptions', db_index=True)
+    endpoint = models.TextField(unique=True)
+    p256dh = models.CharField(max_length=255)
+    auth = models.CharField(max_length=255)
+    origin = models.CharField(max_length=255)
+    user_agent = models.CharField(max_length=255, blank=True, default='')
     enabled = models.BooleanField(default=True, db_index=True)
     last_seen_at = models.DateTimeField(auto_now=True)
     created_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        unique_together = ('provider', 'client_id')
 
     @classmethod
     def register(
         cls,
         user: User,
-        provider: str,
-        client_id: str,
-        platform: str = PLATFORM_ANDROID,
-        device_id: str = '',
-        app_version: str = '',
+        endpoint: str,
+        p256dh: str,
+        auth: str,
+        origin: str,
+        user_agent: str = '',
     ):
-        normalized_provider = (provider or cls.PROVIDER_GETUI).strip().lower()
-        normalized_client_id = (client_id or '').strip()
-        if not normalized_client_id:
-            raise UserErrors.PUSH_DEVICE_INVALID
-        device, _created = cls.objects.update_or_create(
-            provider=normalized_provider,
-            client_id=normalized_client_id,
+        normalized_endpoint = (endpoint or '').strip()
+        if not normalized_endpoint or not p256dh or not auth or not origin:
+            raise UserErrors.WEB_PUSH_SUBSCRIPTION_INVALID
+        subscription, _created = cls.objects.update_or_create(
+            endpoint=normalized_endpoint,
             defaults=dict(
                 user=user,
                 space_id=user.space_id,
-                platform=(platform or cls.PLATFORM_ANDROID).strip().lower(),
-                device_id=(device_id or '').strip(),
-                app_version=(app_version or '').strip(),
+                p256dh=p256dh.strip(),
+                auth=auth.strip(),
+                origin=origin.strip(),
+                user_agent=(user_agent or '')[:255],
                 enabled=True,
             ),
         )
-        return device
+        return subscription
 
     @classmethod
     def active_for_user(cls, user: User):
         return cls.objects.filter(
             user=user,
             space_id=user.space_id,
-            provider=cls.PROVIDER_GETUI,
             enabled=True,
         )
 
     def json(self):
         return self.dictify(
-            'provider',
-            'client_id',
-            'platform',
-            'device_id',
-            'app_version',
+            'endpoint',
+            'origin',
             'enabled',
             'last_seen_at',
         )
@@ -1501,7 +1490,7 @@ class NotificationDelivery(models.Model):
                 else:
                     delivery._attempt_send(pref)
             deliveries.append(delivery)
-        deliveries.extend(PushDelivery.enqueue_for_event(event))
+        deliveries.extend(WebPushDelivery.enqueue_for_event(event))
         return deliveries
 
     @classmethod
@@ -1550,9 +1539,9 @@ class NotificationDelivery(models.Model):
         return deliveries
 
 
-class PushDelivery(models.Model):
-    event = models.ForeignKey(NotificationEvent, on_delete=models.CASCADE, related_name='push_deliveries', db_index=True)
-    device = models.ForeignKey(PushDevice, on_delete=models.CASCADE, related_name='deliveries', db_index=True)
+class WebPushDelivery(models.Model):
+    event = models.ForeignKey(NotificationEvent, on_delete=models.CASCADE, related_name='web_push_deliveries', db_index=True)
+    subscription = models.ForeignKey(WebPushSubscription, on_delete=models.CASCADE, related_name='deliveries', db_index=True)
     status = models.IntegerField(
         choices=NotificationDeliveryStatusChoice.to_choices(),
         default=NotificationDeliveryStatusChoice.PENDING,
@@ -1565,9 +1554,9 @@ class PushDelivery(models.Model):
     @classmethod
     def enqueue_for_event(cls, event: NotificationEvent):
         deliveries = []
-        devices = list(PushDevice.active_for_user(event.user))
-        for device in devices:
-            delivery = cls.objects.create(event=event, device=device)
+        subscriptions = list(WebPushSubscription.active_for_user(event.user))
+        for subscription in subscriptions:
+            delivery = cls.objects.create(event=event, subscription=subscription)
             delivery._attempt_send()
             deliveries.append(delivery)
         return deliveries
@@ -1582,24 +1571,27 @@ class PushDelivery(models.Model):
         return payload
 
     def _attempt_send(self):
-        from utils.getui import GetuiNotConfigured, send_to_cid
+        from utils.webpush import WebPushNotConfigured, is_expired_subscription_error, send_web_push
 
         title, body = self.event.render_delivery_message()
         try:
-            send_to_cid(
-                cid=self.device.client_id,
+            send_web_push(
+                subscription=self.subscription,
                 title=title,
                 body=body,
                 payload=self._payload(),
             )
             self.status = NotificationDeliveryStatusChoice.SENT
             self.detail = None
-        except GetuiNotConfigured as err:
+        except WebPushNotConfigured as err:
             self.status = NotificationDeliveryStatusChoice.SKIPPED
             self.detail = str(err)[:255]
         except Exception as err:
             self.status = NotificationDeliveryStatusChoice.FAILED
             self.detail = str(err)[:255]
+            if is_expired_subscription_error(err):
+                self.subscription.enabled = False
+                self.subscription.save(update_fields=['enabled'])
 
         self.attempted_at = timezone.now()
         self.save(update_fields=['status', 'detail', 'attempted_at'])

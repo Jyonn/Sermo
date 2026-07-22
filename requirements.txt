@@ -7,3 +7,6 @@ django-cors-headers
 pymysql
 notificator
 pyjwt
+pywebpush
+py-vapid<1.9
+cryptography<45

@@ -44,7 +44,7 @@ class UserErrors:
     AVATAR_FILE_TYPE_INVALID = Error(message=_('Invalid avatar image type'), code=Code.BadRequest)
     AVATAR_KEY_INVALID = Error(message=_('Invalid avatar key'), code=Code.BadRequest)
     AVATAR_DELETE_FAILED = Error(message=_('Failed to delete previous avatar'), code=Code.InternalServerError)
-    PUSH_DEVICE_INVALID = Error(message=_('Invalid push device'), code=Code.BadRequest)
+    WEB_PUSH_SUBSCRIPTION_INVALID = Error(message=_('Invalid web push subscription'), code=Code.BadRequest)
     EMAIL_NOT_VERIFIED = Error(message=_('Email is not verified'), code=Code.Forbidden)
     GESTURE_LOCK_PAYLOAD_INVALID = Error(message=_('Invalid gesture lock payload'), code=Code.BadRequest)
 

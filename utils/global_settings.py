@@ -15,11 +15,9 @@ class Globals:
         QINIU_SECRET_KEY = Config.get_value_by_key(CI.QINIU_SECRET_KEY)
         QINIU_BUCKET = Config.get_value_by_key(CI.QINIU_BUCKET)
         QINIU_DOMAIN = Config.get_value_by_key(CI.QINIU_DOMAIN)
-        GETUI_APP_ID = Config.get_value_by_key(CI.GETUI_APP_ID)
-        GETUI_APP_KEY = Config.get_value_by_key(CI.GETUI_APP_KEY)
-        GETUI_APP_SECRET = Config.get_value_by_key(CI.GETUI_APP_SECRET)
-        GETUI_MASTER_SECRET = Config.get_value_by_key(CI.GETUI_MASTER_SECRET)
-        GETUI_BASE_URL = Config.get_value_by_key(CI.GETUI_BASE_URL, default='https://restapi.getui.com/v2')
+        WEB_PUSH_VAPID_PUBLIC_KEY = Config.get_value_by_key(CI.WEB_PUSH_VAPID_PUBLIC_KEY)
+        WEB_PUSH_VAPID_PRIVATE_KEY = Config.get_value_by_key(CI.WEB_PUSH_VAPID_PRIVATE_KEY)
+        WEB_PUSH_VAPID_SUBJECT = Config.get_value_by_key(CI.WEB_PUSH_VAPID_SUBJECT, default='mailto:admin@sermo.jyonn.space')
     except Exception as e:
         if not PROJ_INIT:
             raise e

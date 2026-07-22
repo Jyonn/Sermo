@@ -8,7 +8,7 @@ from User.models import (
     UserGestureLockPreference,
     UserWebReminderPreference,
     UserContactVerificationCode,
-    PushDevice,
+    WebPushSubscription,
 )
 
 
@@ -183,30 +183,22 @@ class UserContactVerificationCodeParams(metaclass=Params):
     code: Validator
 
 
-class PushDeviceParams(metaclass=Params):
-    model_class = PushDevice
+class WebPushSubscriptionParams(metaclass=Params):
+    model_class = WebPushSubscription
 
-    provider = Validator('provider') \
-        .to(str) \
-        .null().default(PushDevice.PROVIDER_GETUI) \
-        .to(lambda x: (x or '').strip().lower()) \
-        .bool(lambda x: x == PushDevice.PROVIDER_GETUI, message=_('Invalid push provider'))
-    client_id = Validator('client_id') \
+    endpoint = Validator('endpoint') \
         .to(str) \
         .to(lambda x: (x or '').strip()) \
-        .bool(lambda x: 0 < len(x) <= 128, message=_('Invalid push client id'))
-    platform = Validator('platform') \
+        .bool(lambda x: 0 < len(x) <= 2048 and x.startswith('https://'), message=_('Invalid push endpoint'))
+    p256dh = Validator('p256dh') \
         .to(str) \
-        .null().default(PushDevice.PLATFORM_ANDROID) \
-        .to(lambda x: (x or '').strip().lower()) \
-        .bool(lambda x: 0 < len(x) <= 32, message=_('Invalid push platform'))
-    device_id = Validator('device_id') \
-        .to(str) \
-        .null().default('') \
         .to(lambda x: (x or '').strip()) \
-        .bool(lambda x: len(x) <= 128, message=_('Invalid device id'))
-    app_version = Validator('app_version') \
+        .bool(lambda x: 0 < len(x) <= 255, message=_('Invalid push key'))
+    auth = Validator('auth') \
         .to(str) \
-        .null().default('') \
         .to(lambda x: (x or '').strip()) \
-        .bool(lambda x: len(x) <= 32, message=_('Invalid app version'))
+        .bool(lambda x: 0 < len(x) <= 255, message=_('Invalid push auth secret'))
+    origin = Validator('origin') \
+        .to(str) \
+        .to(lambda x: (x or '').strip()) \
+        .bool(lambda x: 0 < len(x) <= 255, message=_('Invalid push origin'))
