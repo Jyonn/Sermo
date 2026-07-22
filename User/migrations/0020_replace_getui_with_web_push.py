@@ -9,13 +9,20 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        migrations.DeleteModel(name='PushDelivery'),
-        migrations.DeleteModel(name='PushDevice'),
+        migrations.SeparateDatabaseAndState(
+            database_operations=[migrations.RunSQL('DROP TABLE IF EXISTS User_pushdelivery')],
+            state_operations=[migrations.DeleteModel(name='PushDelivery')],
+        ),
+        migrations.SeparateDatabaseAndState(
+            database_operations=[migrations.RunSQL('DROP TABLE IF EXISTS User_pushdevice')],
+            state_operations=[migrations.DeleteModel(name='PushDevice')],
+        ),
         migrations.CreateModel(
             name='WebPushSubscription',
             fields=[
                 ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('endpoint', models.TextField(unique=True)),
+                ('endpoint', models.TextField()),
+                ('endpoint_digest', models.CharField(max_length=64, unique=True)),
                 ('p256dh', models.CharField(max_length=255)),
                 ('auth', models.CharField(max_length=255)),
                 ('origin', models.CharField(max_length=255)),

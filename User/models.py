@@ -1,4 +1,5 @@
 import datetime
+import hashlib
 import ipaddress
 import re
 
@@ -788,7 +789,8 @@ class NotificationDeliveryStatusChoice(Choice):
 class WebPushSubscription(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='web_push_subscriptions', db_index=True)
     space = models.ForeignKey('Space.Space', on_delete=models.CASCADE, related_name='web_push_subscriptions', db_index=True)
-    endpoint = models.TextField(unique=True)
+    endpoint = models.TextField()
+    endpoint_digest = models.CharField(max_length=64, unique=True)
     p256dh = models.CharField(max_length=255)
     auth = models.CharField(max_length=255)
     origin = models.CharField(max_length=255)
@@ -810,11 +812,13 @@ class WebPushSubscription(models.Model):
         normalized_endpoint = (endpoint or '').strip()
         if not normalized_endpoint or not p256dh or not auth or not origin:
             raise UserErrors.WEB_PUSH_SUBSCRIPTION_INVALID
+        endpoint_digest = hashlib.sha256(normalized_endpoint.encode('utf-8')).hexdigest()
         subscription, _created = cls.objects.update_or_create(
-            endpoint=normalized_endpoint,
+            endpoint_digest=endpoint_digest,
             defaults=dict(
                 user=user,
                 space_id=user.space_id,
+                endpoint=normalized_endpoint,
                 p256dh=p256dh.strip(),
                 auth=auth.strip(),
                 origin=origin.strip(),
