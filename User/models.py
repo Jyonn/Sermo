@@ -1,10 +1,12 @@
 import datetime
 import hashlib
 import ipaddress
+import logging
 import re
+import threading
 
 from notificator import NotificatorAPIError
-from django.db import transaction
+from django.db import close_old_connections, transaction
 from django.db.models import Q
 from django.utils import timezone
 from django.utils.crypto import get_random_string
@@ -19,6 +21,7 @@ from utils import function
 
 
 FRONTEND_SPACE_HOST_SUFFIX = 'sermo.jyonn.space'
+logger = logging.getLogger(__name__)
 
 
 class UserNotificationChoice(Choice):
@@ -1200,9 +1203,40 @@ class NotificationEvent(models.Model):
                 event_type=event_type,
                 payload=payload,
             )
-            NotificationDelivery.enqueue_for_event(event)
             created_events.append(event)
+        cls._enqueue_deliveries_after_commit([event.id for event in created_events])
         return created_events
+
+    @classmethod
+    def _enqueue_deliveries_after_commit(cls, event_ids):
+        event_ids = tuple(event_ids)
+        if not event_ids:
+            return
+
+        def start():
+            threading.Thread(
+                target=cls._enqueue_deliveries,
+                args=(event_ids,),
+                daemon=True,
+                name='notification-delivery',
+            ).start()
+
+        transaction.on_commit(start)
+
+    @classmethod
+    def _enqueue_deliveries(cls, event_ids):
+        close_old_connections()
+        try:
+            events = cls.objects.filter(id__in=event_ids).select_related('user', 'actor', 'space')
+            events_by_id = {event.id: event for event in events}
+            for event_id in event_ids:
+                event = events_by_id.get(event_id)
+                if event is not None:
+                    NotificationDelivery.enqueue_for_event(event)
+        except Exception:
+            logger.exception('Failed to enqueue notification deliveries for events %s', event_ids)
+        finally:
+            close_old_connections()
 
     @classmethod
     def emit_system_event(cls, user: User, actor: User, payload: dict):
@@ -1213,7 +1247,7 @@ class NotificationEvent(models.Model):
             event_type=NotificationEventTypeChoice.SYSTEM,
             payload=payload or {},
         )
-        NotificationDelivery.enqueue_for_event(event)
+        cls._enqueue_deliveries_after_commit([event.id])
         return event
 
 
