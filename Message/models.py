@@ -1,6 +1,7 @@
 import hashlib
 import json
 import ipaddress
+import os
 import re
 import socket
 import threading
@@ -358,6 +359,7 @@ class Message(models.Model):
     vldt = MessageValidator
     MEDIA_KIND_BY_TYPE = {
         MessageTypeChoice.IMAGE: 'image',
+        MessageTypeChoice.FILE: 'file',
         MessageTypeChoice.VIDEO: 'video',
         MessageTypeChoice.AUDIO: 'audio',
     }
@@ -434,11 +436,21 @@ class Message(models.Model):
             if duration_seconds <= 0 or duration_seconds > cls.vldt.MAX_AUDIO_DURATION_SECONDS:
                 raise MessageErrors.AUDIO_DURATION_INVALID
             normalized['duration_seconds'] = round(duration_seconds, 1)
+        if message_type == MessageTypeChoice.FILE:
+            file_name = os.path.basename(str(payload.get('file_name') or '').strip())[:180]
+            if not file_name:
+                raise MessageErrors.PAYLOAD_INVALID
+            try:
+                file_size = max(0, int(payload.get('file_size') or 0))
+            except (TypeError, ValueError):
+                raise MessageErrors.PAYLOAD_INVALID
+            normalized['file_name'] = file_name
+            normalized['file_size'] = file_size
         return json.dumps(normalized, separators=(',', ':'), ensure_ascii=False)
 
     @classmethod
     def normalize_content(cls, message_type, content):
-        if message_type in (MessageTypeChoice.TEXT, MessageTypeChoice.SYSTEM, MessageTypeChoice.FILE):
+        if message_type in (MessageTypeChoice.TEXT, MessageTypeChoice.SYSTEM):
             normalized = (content or '').strip()
             if not normalized:
                 raise MessageErrors.CONTENT_EMPTY
@@ -496,7 +508,7 @@ class Message(models.Model):
             return payload
         if self.type == MessageTypeChoice.SYSTEM:
             return dict(kind='system', text=self.content)
-        if self.type == MessageTypeChoice.FILE:
+        if self.type == MessageTypeChoice.FILE and not self.content.lstrip().startswith('{'):
             return dict(kind='file', text=self.content)
         if self.type in self.MEDIA_KIND_BY_TYPE:
             payload = self._parse_payload(self.content)
@@ -515,6 +527,9 @@ class Message(models.Model):
                 response['mime_type'] = mime_type
             if self.type == MessageTypeChoice.AUDIO and 'duration_seconds' in payload:
                 response['duration_seconds'] = payload.get('duration_seconds')
+            if self.type == MessageTypeChoice.FILE:
+                response['file_name'] = payload.get('file_name') or '文件'
+                response['file_size'] = payload.get('file_size') or 0
             return response
         return None
 
@@ -532,6 +547,8 @@ class Message(models.Model):
 
     def source_media_uri(self):
         if self.type not in self.MEDIA_KIND_BY_TYPE:
+            return ''
+        if self.type == MessageTypeChoice.FILE and not self.content.lstrip().startswith('{'):
             return ''
         payload = self._parse_payload(self.content)
         return (payload.get('uri') or '').strip()

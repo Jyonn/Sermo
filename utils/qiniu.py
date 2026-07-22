@@ -27,11 +27,16 @@ MESSAGE_MEDIA_MAX_FILE_SIZE = {
     'image': 10 * 1024 * 1024,
     'video': 500 * 1024 * 1024,
     'audio': 20 * 1024 * 1024,
+    'file': 100 * 1024 * 1024,
 }
 MESSAGE_MEDIA_ALLOWED_EXTENSIONS = {
     'image': {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.svg'},
     'video': {'.mp4', '.mov', '.m4v', '.webm', '.ogv'},
     'audio': {'.mp3', '.wav', '.m4a', '.ogg', '.aac', '.webm'},
+    'file': {
+        '.pdf', '.txt', '.md', '.doc', '.docx', '.xls', '.xlsx', '.csv',
+        '.ppt', '.pptx', '.zip', '.rar', '.7z', '.tar', '.gz', '.json',
+    },
 }
 ALLOWED_IMAGE_EXTENSIONS = {
     '.jpg',
