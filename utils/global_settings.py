@@ -18,6 +18,8 @@ class Globals:
         WEB_PUSH_VAPID_PUBLIC_KEY = Config.get_value_by_key(CI.WEB_PUSH_VAPID_PUBLIC_KEY)
         WEB_PUSH_VAPID_PRIVATE_KEY = Config.get_value_by_key(CI.WEB_PUSH_VAPID_PRIVATE_KEY)
         WEB_PUSH_VAPID_SUBJECT = Config.get_value_by_key(CI.WEB_PUSH_VAPID_SUBJECT, default='mailto:admin@sermo.jyonn.space')
+        REVERSE_GEOCODING_URL = Config.get_value_by_key(CI.REVERSE_GEOCODING_URL, default='https://nominatim.openstreetmap.org/reverse')
+        REVERSE_GEOCODING_USER_AGENT = Config.get_value_by_key(CI.REVERSE_GEOCODING_USER_AGENT, default='Sermo/0.2 (admin@sermo.jyonn.space)')
     except Exception as e:
         if not PROJ_INIT:
             raise e

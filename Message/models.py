@@ -398,6 +398,8 @@ class Message(models.Model):
             message = cls.objects.create(chat=chat, user=user, type=message_type, content=normalized_content)
             if message.type in cls.MEDIA_KIND_BY_TYPE:
                 message.ensure_blob_slug(save=True)
+            if message.type == MessageTypeChoice.IMAGE:
+                ImageMetadata.queue_for_message(message)
             if message.type == MessageTypeChoice.TEXT:
                 LinkPreview.queue_for_text(message.content)
             return message
@@ -530,6 +532,10 @@ class Message(models.Model):
             if self.type == MessageTypeChoice.FILE:
                 response['file_name'] = payload.get('file_name') or '文件'
                 response['file_size'] = payload.get('file_size') or 0
+            if self.type == MessageTypeChoice.IMAGE:
+                metadata = ImageMetadata.objects.filter(message=self).first()
+                if metadata is not None:
+                    response['image_metadata'] = metadata.jsonl()
             return response
         return None
 
@@ -629,3 +635,90 @@ class Message(models.Model):
     def remove(self):
         self.is_deleted = True
         self.save(update_fields=['is_deleted'])
+
+
+class ImageMetadata(models.Model):
+    STATUS_PENDING = 0
+    STATUS_READY = 1
+    STATUS_FAILED = 2
+    _FETCHING_IDS = set()
+    _FETCHING_LOCK = threading.Lock()
+
+    message = models.OneToOneField(Message, on_delete=models.CASCADE, related_name='image_metadata')
+    status = models.IntegerField(default=STATUS_PENDING, db_index=True)
+    raw_exif = models.JSONField(default=dict, blank=True)
+    make = models.CharField(max_length=255, blank=True, default='')
+    model = models.CharField(max_length=255, blank=True, default='')
+    lens_model = models.CharField(max_length=255, blank=True, default='')
+    software = models.CharField(max_length=255, blank=True, default='')
+    taken_at = models.DateTimeField(null=True, blank=True)
+    latitude = models.FloatField(null=True, blank=True)
+    longitude = models.FloatField(null=True, blank=True)
+    address = models.CharField(max_length=500, blank=True, default='')
+    error = models.CharField(max_length=500, blank=True, default='')
+    updated_at = models.DateTimeField(auto_now=True)
+
+    @classmethod
+    def queue_for_message(cls, message: Message):
+        metadata, _created = cls.objects.get_or_create(message=message)
+        transaction.on_commit(lambda: cls.fetch_async(metadata.id))
+        return metadata
+
+    @classmethod
+    def fetch_async(cls, metadata_id: int):
+        with cls._FETCHING_LOCK:
+            if metadata_id in cls._FETCHING_IDS:
+                return
+            cls._FETCHING_IDS.add(metadata_id)
+        threading.Thread(target=cls.refresh_by_id, args=(metadata_id,), daemon=True).start()
+
+    @classmethod
+    def refresh_by_id(cls, metadata_id: int):
+        close_old_connections()
+        try:
+            metadata = cls.objects.select_related('message').get(id=metadata_id)
+            cls.refresh_for_message(metadata.message)
+        finally:
+            with cls._FETCHING_LOCK:
+                cls._FETCHING_IDS.discard(metadata_id)
+            close_old_connections()
+
+    @classmethod
+    def refresh_for_message(cls, message: Message, geocode: bool = True):
+        from Message.image_metadata import fetch_qiniu_exif, parse_exif, reverse_geocode
+
+        metadata, _created = cls.objects.get_or_create(message=message)
+        try:
+            raw = fetch_qiniu_exif(message.source_media_uri())
+            parsed = parse_exif(raw)
+            address = ''
+            if geocode and parsed['latitude'] is not None and parsed['longitude'] is not None:
+                cached = cls.objects.filter(
+                    latitude=parsed['latitude'],
+                    longitude=parsed['longitude'],
+                ).exclude(address='').values_list('address', flat=True).first()
+                address = cached or reverse_geocode(parsed['latitude'], parsed['longitude'])
+            for field, value in parsed.items():
+                setattr(metadata, field, value)
+            metadata.raw_exif = raw
+            metadata.address = address
+            metadata.status = cls.STATUS_READY
+            metadata.error = ''
+        except Exception as error:
+            metadata.status = cls.STATUS_FAILED
+            metadata.error = str(error)[:500]
+        metadata.save()
+        return metadata
+
+    def jsonl(self):
+        return dict(
+            status=self.status,
+            make=self.make,
+            model=self.model,
+            lens_model=self.lens_model,
+            software=self.software,
+            taken_at=self.taken_at.timestamp() if self.taken_at else None,
+            latitude=self.latitude,
+            longitude=self.longitude,
+            address=self.address,
+        )
