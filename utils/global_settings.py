@@ -25,6 +25,11 @@ class Globals:
             CI.AMAP_REVERSE_GEOCODING_URL,
             default='https://restapi.amap.com/v3/geocode/regeo',
         )
+        OPENCAGE_API_KEY = Config.get_value_by_key(CI.OPENCAGE_API_KEY, default='')
+        OPENCAGE_GEOCODING_URL = Config.get_value_by_key(
+            CI.OPENCAGE_GEOCODING_URL,
+            default='https://api.opencagedata.com/geocode/v1/json',
+        )
     except Exception as e:
         if not PROJ_INIT:
             raise e

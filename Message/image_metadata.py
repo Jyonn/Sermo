@@ -12,6 +12,8 @@ from utils.qiniu import sign_private_processed_url
 
 _geocode_lock = threading.Lock()
 _last_geocode_at = 0.0
+_opencage_lock = threading.Lock()
+_last_opencage_at = 0.0
 
 
 def _value(raw, key):
@@ -139,6 +141,33 @@ def _reverse_geocode_amap(latitude: float, longitude: float):
     return address[:500]
 
 
+def _reverse_geocode_opencage(latitude: float, longitude: float):
+    global _last_opencage_at
+    with _opencage_lock:
+        wait_seconds = 1.05 - (time.monotonic() - _last_opencage_at)
+        if wait_seconds > 0:
+            time.sleep(wait_seconds)
+        response = requests.get(
+            Globals.OPENCAGE_GEOCODING_URL,
+            params={
+                'key': Globals.OPENCAGE_API_KEY,
+                'q': f'{latitude},{longitude}',
+                'language': 'zh-CN',
+                'no_annotations': 1,
+                'limit': 1,
+            },
+            timeout=10,
+        )
+        _last_opencage_at = time.monotonic()
+    response.raise_for_status()
+    payload = response.json()
+    results = payload.get('results') or []
+    address = str((results[0] if results else {}).get('formatted') or '').strip()
+    if not address:
+        raise ValueError('OpenCage returned an empty address')
+    return address[:500]
+
+
 def _reverse_geocode_nominatim(latitude: float, longitude: float):
     global _last_geocode_at
     with _geocode_lock:
@@ -168,17 +197,21 @@ def _reverse_geocode_nominatim(latitude: float, longitude: float):
 
 
 def reverse_geocode(latitude: float, longitude: float):
-    amap_error = None
+    errors = []
     if Globals.AMAP_WEBSERVICE_KEY:
         try:
             return _reverse_geocode_amap(latitude, longitude), 'amap'
         except Exception as error:
-            amap_error = error
+            errors.append(f'Amap failed: {error}')
+    if Globals.OPENCAGE_API_KEY:
+        try:
+            return _reverse_geocode_opencage(latitude, longitude), 'opencage'
+        except Exception as error:
+            errors.append(f'OpenCage failed: {error}')
     try:
         return _reverse_geocode_nominatim(latitude, longitude), 'nominatim'
     except Exception as nominatim_error:
-        if amap_error is not None:
-            raise RuntimeError(
-                f'Amap failed: {amap_error}; Nominatim failed: {nominatim_error}'
-            ) from nominatim_error
+        errors.append(f'Nominatim failed: {nominatim_error}')
+        if len(errors) > 1:
+            raise RuntimeError('; '.join(errors)) from nominatim_error
         raise
