@@ -1,10 +1,11 @@
 from django.core.management.base import BaseCommand
+from django.db.models import Q
 
 from Message.models import ImageMetadata, Message, MessageTypeChoice
 
 
 class Command(BaseCommand):
-    help = 'Fetch EXIF metadata for existing image messages.'
+    help = 'Fetch imageInfo, EXIF, and optional location metadata for existing image messages.'
 
     def add_arguments(self, parser):
         parser.add_argument('--force', action='store_true')
@@ -14,7 +15,12 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         query = Message.objects.filter(type=MessageTypeChoice.IMAGE, is_deleted=False).order_by('id')
         if not options['force']:
-            query = query.filter(image_metadata__isnull=True)
+            query = query.filter(
+                Q(image_metadata__isnull=True)
+                | Q(image_metadata__file_size__isnull=True)
+                | Q(image_metadata__pixel_width__isnull=True)
+                | Q(image_metadata__pixel_height__isnull=True)
+            )
         if options['limit'] > 0:
             query = query[:options['limit']]
 

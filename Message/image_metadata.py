@@ -76,6 +76,34 @@ def fetch_qiniu_exif(source_uri: str):
     return payload
 
 
+def fetch_qiniu_image_info(source_uri: str):
+    response = requests.get(
+        sign_private_processed_url(source_uri, 'imageInfo', expire_seconds=300),
+        timeout=12,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    if not isinstance(payload, dict):
+        raise ValueError('invalid imageInfo response')
+    return payload
+
+
+def parse_image_info(raw):
+    try:
+        file_size = int(raw.get('size'))
+        pixel_width = int(raw.get('width'))
+        pixel_height = int(raw.get('height'))
+    except (TypeError, ValueError) as error:
+        raise ValueError('incomplete imageInfo response') from error
+    if file_size < 0 or pixel_width <= 0 or pixel_height <= 0:
+        raise ValueError('invalid imageInfo dimensions')
+    return dict(
+        file_size=file_size,
+        pixel_width=pixel_width,
+        pixel_height=pixel_height,
+    )
+
+
 def parse_exif(raw):
     latitude = _coordinate(_value(raw, 'GPSLatitude'), _value(raw, 'GPSLatitudeRef'))
     longitude = _coordinate(_value(raw, 'GPSLongitude'), _value(raw, 'GPSLongitudeRef'))
@@ -90,7 +118,28 @@ def parse_exif(raw):
     )
 
 
-def reverse_geocode(latitude: float, longitude: float):
+def _reverse_geocode_amap(latitude: float, longitude: float):
+    response = requests.get(
+        Globals.AMAP_REVERSE_GEOCODING_URL,
+        params={
+            'key': Globals.AMAP_WEBSERVICE_KEY,
+            'location': f'{longitude},{latitude}',
+            'output': 'JSON',
+            'extensions': 'base',
+        },
+        timeout=8,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    if str(payload.get('status')) != '1':
+        raise ValueError(payload.get('info') or 'Amap reverse geocoding failed')
+    address = str((payload.get('regeocode') or {}).get('formatted_address') or '').strip()
+    if not address:
+        raise ValueError('Amap returned an empty address')
+    return address[:500]
+
+
+def _reverse_geocode_nominatim(latitude: float, longitude: float):
     global _last_geocode_at
     with _geocode_lock:
         wait_seconds = 1.05 - (time.monotonic() - _last_geocode_at)
@@ -112,4 +161,24 @@ def reverse_geocode(latitude: float, longitude: float):
         _last_geocode_at = time.monotonic()
     response.raise_for_status()
     payload = response.json()
-    return str(payload.get('display_name') or '').strip()[:500]
+    address = str(payload.get('display_name') or '').strip()
+    if not address:
+        raise ValueError('Nominatim returned an empty address')
+    return address[:500]
+
+
+def reverse_geocode(latitude: float, longitude: float):
+    amap_error = None
+    if Globals.AMAP_WEBSERVICE_KEY:
+        try:
+            return _reverse_geocode_amap(latitude, longitude), 'amap'
+        except Exception as error:
+            amap_error = error
+    try:
+        return _reverse_geocode_nominatim(latitude, longitude), 'nominatim'
+    except Exception as nominatim_error:
+        if amap_error is not None:
+            raise RuntimeError(
+                f'Amap failed: {amap_error}; Nominatim failed: {nominatim_error}'
+            ) from nominatim_error
+        raise

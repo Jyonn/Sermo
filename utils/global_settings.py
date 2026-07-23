@@ -20,6 +20,11 @@ class Globals:
         WEB_PUSH_VAPID_SUBJECT = Config.get_value_by_key(CI.WEB_PUSH_VAPID_SUBJECT, default='mailto:admin@sermo.jyonn.space')
         REVERSE_GEOCODING_URL = Config.get_value_by_key(CI.REVERSE_GEOCODING_URL, default='https://nominatim.openstreetmap.org/reverse')
         REVERSE_GEOCODING_USER_AGENT = Config.get_value_by_key(CI.REVERSE_GEOCODING_USER_AGENT, default='Sermo/0.2 (admin@sermo.jyonn.space)')
+        AMAP_WEBSERVICE_KEY = Config.get_value_by_key(CI.AMAP_WEBSERVICE_KEY, default='')
+        AMAP_REVERSE_GEOCODING_URL = Config.get_value_by_key(
+            CI.AMAP_REVERSE_GEOCODING_URL,
+            default='https://restapi.amap.com/v3/geocode/regeo',
+        )
     except Exception as e:
         if not PROJ_INIT:
             raise e

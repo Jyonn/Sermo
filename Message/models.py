@@ -713,9 +713,13 @@ class ImageMetadata(models.Model):
     lens_model = models.CharField(max_length=255, blank=True, default='')
     software = models.CharField(max_length=255, blank=True, default='')
     taken_at = models.DateTimeField(null=True, blank=True)
+    file_size = models.BigIntegerField(null=True, blank=True)
+    pixel_width = models.PositiveIntegerField(null=True, blank=True)
+    pixel_height = models.PositiveIntegerField(null=True, blank=True)
     latitude = models.FloatField(null=True, blank=True)
     longitude = models.FloatField(null=True, blank=True)
     address = models.CharField(max_length=500, blank=True, default='')
+    geocoding_provider = models.CharField(max_length=32, blank=True, default='')
     geocoding_status = models.IntegerField(default=GEOCODING_PENDING, db_index=True)
     geocoding_error = models.CharField(max_length=500, blank=True, default='')
     error = models.CharField(max_length=500, blank=True, default='')
@@ -748,23 +752,46 @@ class ImageMetadata(models.Model):
 
     @classmethod
     def refresh_for_message(cls, message: Message, geocode: bool = True):
-        from Message.image_metadata import fetch_qiniu_exif, parse_exif, reverse_geocode
+        from Message.image_metadata import (
+            fetch_qiniu_exif,
+            fetch_qiniu_image_info,
+            parse_exif,
+            parse_image_info,
+            reverse_geocode,
+        )
 
         metadata, _created = cls.objects.get_or_create(message=message)
         try:
-            raw = fetch_qiniu_exif(message.source_media_uri())
-            parsed = parse_exif(raw)
-            for field, value in parsed.items():
+            previous_coordinates = (metadata.latitude, metadata.longitude)
+            previous_address = metadata.address
+            previous_provider = metadata.geocoding_provider
+            source_uri = message.source_media_uri()
+            image_info = fetch_qiniu_image_info(source_uri)
+            properties = parse_image_info(image_info)
+            try:
+                raw_exif = fetch_qiniu_exif(source_uri)
+            except Exception:
+                raw_exif = {}
+            parsed_exif = parse_exif(raw_exif)
+            for field, value in {**properties, **parsed_exif}.items():
                 setattr(metadata, field, value)
-            metadata.raw_exif = raw
-            metadata.address = ''
+            metadata.raw_exif = raw_exif
             metadata.status = cls.STATUS_READY
             metadata.error = ''
-            metadata.geocoding_status = (
-                cls.GEOCODING_PENDING
-                if parsed['latitude'] is not None and parsed['longitude'] is not None
-                else cls.GEOCODING_UNAVAILABLE
-            )
+            coordinates = (parsed_exif['latitude'], parsed_exif['longitude'])
+            has_coordinates = all(value is not None for value in coordinates)
+            if has_coordinates and coordinates == previous_coordinates and previous_address:
+                metadata.address = previous_address
+                metadata.geocoding_provider = previous_provider
+                metadata.geocoding_status = cls.GEOCODING_READY
+            elif has_coordinates:
+                metadata.address = ''
+                metadata.geocoding_provider = ''
+                metadata.geocoding_status = cls.GEOCODING_PENDING
+            else:
+                metadata.address = ''
+                metadata.geocoding_provider = ''
+                metadata.geocoding_status = cls.GEOCODING_UNAVAILABLE
             metadata.geocoding_error = ''
             metadata.save()
         except Exception as error:
@@ -773,21 +800,37 @@ class ImageMetadata(models.Model):
             metadata.save(update_fields=['status', 'error', 'updated_at'])
             return metadata
 
-        if not geocode or metadata.geocoding_status == cls.GEOCODING_UNAVAILABLE:
+        if (
+            not geocode
+            or metadata.geocoding_status in (cls.GEOCODING_READY, cls.GEOCODING_UNAVAILABLE)
+        ):
             return metadata
 
         try:
             cached = cls.objects.filter(
                 latitude=metadata.latitude,
                 longitude=metadata.longitude,
-            ).exclude(address='').values_list('address', flat=True).first()
-            metadata.address = cached or reverse_geocode(metadata.latitude, metadata.longitude)
+            ).exclude(address='').values('address', 'geocoding_provider').first()
+            if cached:
+                metadata.address = cached['address']
+                metadata.geocoding_provider = cached['geocoding_provider']
+            else:
+                metadata.address, metadata.geocoding_provider = reverse_geocode(
+                    metadata.latitude,
+                    metadata.longitude,
+                )
             metadata.geocoding_status = cls.GEOCODING_READY
             metadata.geocoding_error = ''
         except Exception as error:
             metadata.geocoding_status = cls.GEOCODING_FAILED
             metadata.geocoding_error = str(error)[:500]
-        metadata.save(update_fields=['address', 'geocoding_status', 'geocoding_error', 'updated_at'])
+        metadata.save(update_fields=[
+            'address',
+            'geocoding_provider',
+            'geocoding_status',
+            'geocoding_error',
+            'updated_at',
+        ])
         return metadata
 
     def jsonl(self):
@@ -798,8 +841,12 @@ class ImageMetadata(models.Model):
             lens_model=self.lens_model,
             software=self.software,
             taken_at=self.taken_at.timestamp() if self.taken_at else None,
+            file_size=self.file_size,
+            pixel_width=self.pixel_width,
+            pixel_height=self.pixel_height,
             latitude=self.latitude,
             longitude=self.longitude,
             address=self.address,
+            geocoding_provider=self.geocoding_provider,
             geocoding_status=self.geocoding_status,
         )
