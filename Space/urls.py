@@ -3,6 +3,7 @@ from django.urls import path
 from Space.views import (
     SpaceAdminSettingsView,
     SpaceAdminDashboardView,
+    SpaceAdminBroadcastView,
     SpaceAdminOfficialLoginTicketView,
     SpaceAdminUserListView,
     SpaceAdminUserRemoveView,
@@ -20,6 +21,7 @@ urlpatterns = [
     path('email-code', SpaceEmailCodeRequestView.as_view(), name='space email verification code'),
     path('', SpaceView.as_view(), name='space create'),
     path('admin/dashboard', SpaceAdminDashboardView.as_view(), name='space admin dashboard'),
+    path('admin/broadcast', SpaceAdminBroadcastView.as_view(), name='space admin broadcast'),
     path('admin/official-login-ticket', SpaceAdminOfficialLoginTicketView.as_view(), name='space admin official login ticket'),
     path('admin/settings', SpaceAdminSettingsView.as_view(), name='space admin settings'),
     path('admin/users', SpaceAdminUserListView.as_view(), name='space admin users'),

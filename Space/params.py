@@ -1,7 +1,9 @@
 from django.utils.translation import gettext_lazy as _
 from smartdjango import Params, Validator
 
+from Message.validators import MessageValidator
 from Space.models import Space, SpaceEmailVerificationCode
+from Message.params import MessageParams
 from User.params import UserParams
 
 
@@ -50,3 +52,14 @@ class SpaceLookupParams(metaclass=Params):
 
 class SpaceOfficialLoginTicketParams(metaclass=Params):
     token = Validator('token').to(str)
+
+
+class SpaceAdminBroadcastParams(metaclass=Params):
+    content = MessageParams.content.copy()
+    broadcast_id = Validator('broadcast_id') \
+        .to(str) \
+        .to(lambda x: x.strip()) \
+        .bool(
+            lambda x: 0 < len(x) <= MessageValidator.MAX_CLIENT_MESSAGE_ID_LENGTH,
+            message=_('Invalid broadcast id'),
+        )

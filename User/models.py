@@ -1210,7 +1210,7 @@ class NotificationEvent(models.Model):
         return NotificationEventTypeChoice.DIRECT_MESSAGE
 
     @classmethod
-    def emit_message_notifications(cls, message, actor: User):
+    def emit_message_notifications(cls, message, actor: User, enqueue=True):
         event_type = cls._message_event_type(message.chat)
         payload = dict(
             chat_id=message.chat_id,
@@ -1228,7 +1228,8 @@ class NotificationEvent(models.Model):
                 payload=payload,
             )
             created_events.append(event)
-        cls._enqueue_deliveries_after_commit([event.id for event in created_events])
+        if enqueue:
+            cls._enqueue_deliveries_after_commit([event.id for event in created_events])
         return created_events
 
     @classmethod

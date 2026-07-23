@@ -3,6 +3,7 @@ import logging
 
 from django.views import View
 from django.utils import timezone
+from django.db import transaction
 from django.db.models import Q
 from notificator import NotificatorAPIError
 from smartdjango import analyse
@@ -13,13 +14,23 @@ from Space.params import (
     SpaceParams,
     SpaceEmailVerificationCodeParams,
     SpaceLookupParams,
+    SpaceAdminBroadcastParams,
     SpaceOfficialLoginTicketParams,
     SpaceUserListParams,
 )
 from Space.validators import SpaceErrors
 from utils import auth
 from utils.auth import Request
-from User.models import OfficialLoginTicket, User, UserRoleChoice
+from Chat.models import Chat
+from Friendship.models import Friendship
+from Message.models import Message, MessageTypeChoice
+from User.models import (
+    NotificationEvent,
+    NotificationPreference,
+    OfficialLoginTicket,
+    User,
+    UserRoleChoice,
+)
 from User.params import UserParams
 from User.validators import UserErrors
 from utils.global_settings import notificator
@@ -274,6 +285,39 @@ class SpaceUserListView(View):
 
 
 class SpaceAdminUserListView(SpaceUserListView):
+    @staticmethod
+    def _contact_status(user):
+        return dict(
+            email=dict(
+                bound=bool(user.email),
+                verified=user.email_verified_at is not None,
+            ),
+            sms=dict(
+                bound=bool(user.phone),
+                verified=user.phone_verified_at is not None,
+            ),
+            bark=dict(
+                bound=bool(user.bark),
+                verified=user.bark_verified_at is not None,
+            ),
+        )
+
+    @staticmethod
+    def _notification_status(user, preferences):
+        rows = []
+        for channel in NotificationPreference.supported_channels():
+            pref = preferences.get((user.id, channel))
+            rows.append(dict(
+                channel=channel,
+                enabled=pref.enabled if pref else NotificationPreference._default_enabled(user, channel),
+                offline_threshold_minutes=(
+                    pref.offline_threshold_minutes
+                    if pref
+                    else NotificationPreference._default_threshold(channel)
+                ),
+            ))
+        return rows
+
     @auth.require_space
     @analyse.query(
         SpaceUserListParams.q,
@@ -323,7 +367,64 @@ class SpaceAdminUserListView(SpaceUserListView):
 
         rows = active_rows + deleted_rows
         paged_rows = rows[offset:offset + limit]
-        return [user.json_admin() for user in paged_rows]
+        user_ids = [user.id for user in paged_rows]
+        preferences = {
+            (pref.user_id, pref.channel): pref
+            for pref in NotificationPreference.objects.filter(user_id__in=user_ids)
+        }
+        payload = []
+        for user in paged_rows:
+            item = user.json_admin()
+            item['contacts'] = self._contact_status(user)
+            item['notification_preferences'] = self._notification_status(user, preferences)
+            payload.append(item)
+        return payload
+
+
+class SpaceAdminBroadcastView(View):
+    @auth.require_space
+    @analyse.json(
+        SpaceAdminBroadcastParams.content,
+        SpaceAdminBroadcastParams.broadcast_id,
+    )
+    def post(self, request: Request):
+        official = request.space.ensure_official_user()
+        recipients = list(User.objects.filter(
+            space=request.space,
+            is_deleted=False,
+            role=UserRoleChoice.MEMBER,
+        ).order_by('id'))
+        created_count = 0
+        notification_event_ids = []
+
+        with transaction.atomic():
+            for recipient in recipients:
+                Friendship.ensure_locked_friendship(official, recipient)
+                chat = Chat.get_or_create_direct(official, recipient)
+                message = Message.create(
+                    chat=chat,
+                    user=official,
+                    message_type=MessageTypeChoice.TEXT,
+                    content=request.json.content,
+                    client_message_id=request.json.broadcast_id,
+                )
+                if not getattr(message, '_was_created', True):
+                    continue
+                created_count += 1
+                events = NotificationEvent.emit_message_notifications(
+                    message,
+                    actor=official,
+                    enqueue=False,
+                )
+                notification_event_ids.extend(event.id for event in events)
+
+            NotificationEvent._enqueue_deliveries_after_commit(notification_event_ids)
+
+        return dict(
+            recipients_count=len(recipients),
+            sent_count=created_count,
+            duplicate_count=len(recipients) - created_count,
+        )
 
 
 class SpaceAdminUserRemoveView(View):
