@@ -800,10 +800,22 @@ class ImageMetadata(models.Model):
             metadata.save(update_fields=['status', 'error', 'updated_at'])
             return metadata
 
-        if (
-            not geocode
-            or metadata.geocoding_status in (cls.GEOCODING_READY, cls.GEOCODING_UNAVAILABLE)
+        if not geocode or metadata.geocoding_status in (
+            cls.GEOCODING_READY,
+            cls.GEOCODING_UNAVAILABLE,
         ):
+            return metadata
+
+        return cls.refresh_geocoding(metadata)
+
+    @classmethod
+    def refresh_geocoding(cls, metadata):
+        from Message.image_metadata import reverse_geocode
+
+        if metadata.latitude is None or metadata.longitude is None:
+            metadata.geocoding_status = cls.GEOCODING_UNAVAILABLE
+            metadata.geocoding_error = ''
+            metadata.save(update_fields=['geocoding_status', 'geocoding_error', 'updated_at'])
             return metadata
 
         try:
