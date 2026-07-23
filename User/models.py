@@ -860,8 +860,11 @@ class NotificationPreference(models.Model):
     enabled = models.BooleanField(default=False)
     offline_threshold_minutes = models.PositiveIntegerField(default=30)
     hide_message_content = models.BooleanField(default=False)
+    hidden_direct_message_title = models.CharField(max_length=80, blank=True, default='')
     hidden_direct_message_text = models.CharField(max_length=255, blank=True, default='')
+    hidden_group_message_title = models.CharField(max_length=80, blank=True, default='')
     hidden_group_message_text = models.CharField(max_length=255, blank=True, default='')
+    friend_online_message_title = models.CharField(max_length=80, blank=True, default='')
     friend_online_message_text = models.CharField(max_length=255, blank=True, default='')
     open_chat_on_tap = models.BooleanField(default=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -910,8 +913,11 @@ class NotificationPreference(models.Model):
         enabled=None,
         offline_threshold_minutes=None,
         hide_message_content=None,
+        hidden_direct_message_title=None,
         hidden_direct_message_text=None,
+        hidden_group_message_title=None,
         hidden_group_message_text=None,
+        friend_online_message_title=None,
         friend_online_message_text=None,
         open_chat_on_tap=None,
     ):
@@ -922,8 +928,11 @@ class NotificationPreference(models.Model):
                 enabled=cls._default_enabled(user, channel),
                 offline_threshold_minutes=cls._default_threshold(channel),
                 hide_message_content=False,
+                hidden_direct_message_title='',
                 hidden_direct_message_text='',
+                hidden_group_message_title='',
                 hidden_group_message_text='',
+                friend_online_message_title='',
                 friend_online_message_text='',
                 open_chat_on_tap=True,
             ),
@@ -938,12 +947,21 @@ class NotificationPreference(models.Model):
         if hide_message_content is not None:
             pref.hide_message_content = bool(hide_message_content)
             updates.append('hide_message_content')
+        if hidden_direct_message_title is not None:
+            pref.hidden_direct_message_title = hidden_direct_message_title.strip()
+            updates.append('hidden_direct_message_title')
         if hidden_direct_message_text is not None:
             pref.hidden_direct_message_text = hidden_direct_message_text.strip()
             updates.append('hidden_direct_message_text')
+        if hidden_group_message_title is not None:
+            pref.hidden_group_message_title = hidden_group_message_title.strip()
+            updates.append('hidden_group_message_title')
         if hidden_group_message_text is not None:
             pref.hidden_group_message_text = hidden_group_message_text.strip()
             updates.append('hidden_group_message_text')
+        if friend_online_message_title is not None:
+            pref.friend_online_message_title = friend_online_message_title.strip()
+            updates.append('friend_online_message_title')
         if friend_online_message_text is not None:
             pref.friend_online_message_text = friend_online_message_text.strip()
             updates.append('friend_online_message_text')
@@ -960,8 +978,11 @@ class NotificationPreference(models.Model):
             'enabled',
             'offline_threshold_minutes',
             'hide_message_content',
+            'hidden_direct_message_title',
             'hidden_direct_message_text',
+            'hidden_group_message_title',
             'hidden_group_message_text',
+            'friend_online_message_title',
             'friend_online_message_text',
             'open_chat_on_tap',
         )
@@ -1104,8 +1125,11 @@ class NotificationEvent(models.Model):
     def render_delivery_message(
         self,
         hide_message_content=False,
+        hidden_direct_message_title='',
         hidden_direct_message_text='',
+        hidden_group_message_title='',
         hidden_group_message_text='',
+        friend_online_message_title='',
         friend_online_message_text='',
     ):
         payload = self.payload or {}
@@ -1113,7 +1137,7 @@ class NotificationEvent(models.Model):
 
         if self.event_type == NotificationEventTypeChoice.DIRECT_MESSAGE:
             if hide_message_content:
-                return str(_('New direct message')), str(
+                return str(hidden_direct_message_title.strip() or _('New direct message')), str(
                     hidden_direct_message_text.strip() or _('You received a new direct message.')
                 )
             title = _('New direct message')
@@ -1124,7 +1148,7 @@ class NotificationEvent(models.Model):
 
         if self.event_type == NotificationEventTypeChoice.GROUP_MESSAGE:
             if hide_message_content:
-                return str(_('New group message')), str(
+                return str(hidden_group_message_title.strip() or _('New group message')), str(
                     hidden_group_message_text.strip() or _('You received a new group message.')
                 )
             title = _('New group message')
@@ -1161,7 +1185,7 @@ class NotificationEvent(models.Model):
                 body = _('A user rejected your group invite.')
             return str(title), str(body)
         if kind == 'peer_online':
-            title = _('Friend online')
+            title = friend_online_message_title.strip() or _('Friend online')
             body = friend_online_message_text.strip() or _('{name} is online now.').format(name=actor_name or _('Your friend'))
             return str(title), str(body)
 
@@ -1361,8 +1385,11 @@ class NotificationDelivery(models.Model):
                 grouped.append(dict(name=actor_name, items=[]))
             _title, body = delivery.event.render_delivery_message(
                 hide_message_content=hide_message_content,
+                hidden_direct_message_title=pref.hidden_direct_message_title,
                 hidden_direct_message_text=pref.hidden_direct_message_text,
+                hidden_group_message_title=pref.hidden_group_message_title,
                 hidden_group_message_text=pref.hidden_group_message_text,
+                friend_online_message_title=pref.friend_online_message_title,
                 friend_online_message_text=pref.friend_online_message_text,
             )
             grouped[indexes[actor_key]]['items'].append(body)
@@ -1451,8 +1478,11 @@ class NotificationDelivery(models.Model):
         )
         title, body = self.event.render_delivery_message(
             hide_message_content=hide_message_content,
+            hidden_direct_message_title=pref.hidden_direct_message_title,
             hidden_direct_message_text=pref.hidden_direct_message_text,
+            hidden_group_message_title=pref.hidden_group_message_title,
             hidden_group_message_text=pref.hidden_group_message_text,
+            friend_online_message_title=pref.friend_online_message_title,
             friend_online_message_text=pref.friend_online_message_text,
         )
         try:

@@ -92,6 +92,14 @@ class NotificationPreferenceParams(metaclass=Params):
         .to(int) \
         .null().default(None) \
         .bool(lambda x: x is None or x in (0, 1), message=_('hide_message_content should be 0 or 1'))
+    hidden_direct_message_title = Validator('hidden_direct_message_title') \
+        .to(str) \
+        .null().default(None) \
+        .to(lambda x: None if x is None else x.strip()) \
+        .bool(
+            lambda x: x is None or len(x) <= 80,
+            message=_('hidden_direct_message_title should be at most 80 characters')
+        )
     hidden_direct_message_text = Validator('hidden_direct_message_text') \
         .to(str) \
         .null().default(None) \
@@ -107,6 +115,22 @@ class NotificationPreferenceParams(metaclass=Params):
         .bool(
             lambda x: x is None or len(x) <= 255,
             message=_('hidden_group_message_text should be at most 255 characters')
+        )
+    hidden_group_message_title = Validator('hidden_group_message_title') \
+        .to(str) \
+        .null().default(None) \
+        .to(lambda x: None if x is None else x.strip()) \
+        .bool(
+            lambda x: x is None or len(x) <= 80,
+            message=_('hidden_group_message_title should be at most 80 characters')
+        )
+    friend_online_message_title = Validator('friend_online_message_title') \
+        .to(str) \
+        .null().default(None) \
+        .to(lambda x: None if x is None else x.strip()) \
+        .bool(
+            lambda x: x is None or len(x) <= 80,
+            message=_('friend_online_message_title should be at most 80 characters')
         )
     friend_online_message_text = Validator('friend_online_message_text') \
         .to(str) \
