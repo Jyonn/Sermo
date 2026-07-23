@@ -23,7 +23,8 @@ from utils import auth
 from utils.auth import Request
 from Chat.models import Chat
 from Friendship.models import Friendship
-from Message.models import Message, MessageTypeChoice
+from Message.models import Message
+from Message.params import MessageParams
 from User.models import (
     NotificationEvent,
     NotificationPreference,
@@ -34,6 +35,7 @@ from User.models import (
 from User.params import UserParams
 from User.validators import UserErrors
 from utils.global_settings import notificator
+from utils.qiniu import issue_message_upload
 
 
 logger = logging.getLogger(__name__)
@@ -385,6 +387,7 @@ class SpaceAdminBroadcastView(View):
     @auth.require_space
     @analyse.json(
         SpaceAdminBroadcastParams.content,
+        SpaceAdminBroadcastParams.type,
         SpaceAdminBroadcastParams.broadcast_id,
     )
     def post(self, request: Request):
@@ -404,7 +407,7 @@ class SpaceAdminBroadcastView(View):
                 message = Message.create(
                     chat=chat,
                     user=official,
-                    message_type=MessageTypeChoice.TEXT,
+                    message_type=request.json.type,
                     content=request.json.content,
                     client_message_id=request.json.broadcast_id,
                 )
@@ -424,6 +427,21 @@ class SpaceAdminBroadcastView(View):
             recipients_count=len(recipients),
             sent_count=created_count,
             duplicate_count=len(recipients) - created_count,
+        )
+
+
+class SpaceAdminBroadcastUploadView(View):
+    @auth.require_space
+    @analyse.json(
+        MessageParams.kind,
+        MessageParams.file_name,
+        MessageParams.content_type,
+    )
+    def post(self, request: Request):
+        return issue_message_upload(
+            kind=request.json.kind,
+            file_name=request.json.file_name,
+            content_type=request.json.content_type,
         )
 
 

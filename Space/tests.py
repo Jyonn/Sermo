@@ -4,6 +4,7 @@ from unittest.mock import patch
 from django.test import TestCase
 
 from Chat.models import Chat
+from Config.models import Config, ConfigInstance
 from Message.models import Message
 from Space.models import Space
 from User.models import NotificationPreference, User, UserNotificationChoice
@@ -24,6 +25,10 @@ class SpaceAdminApiTests(TestCase):
             email='member@example.com',
             verified=True,
         )
+        Config.objects.create(
+            key=ConfigInstance.QINIU_DOMAIN,
+            value='https://resource.example.com',
+        )
         self.token = auth.get_space_login_token(self.space)['auth']
 
     def authorization(self):
@@ -31,7 +36,7 @@ class SpaceAdminApiTests(TestCase):
 
     @patch('User.models.NotificationEvent._enqueue_deliveries_after_commit')
     def test_broadcast_is_idempotent(self, enqueue):
-        payload = dict(content='Hello everyone', broadcast_id='broadcast:test')
+        payload = dict(content='Hello everyone', type=0, broadcast_id='broadcast:test')
 
         first = self.client.post(
             '/spaces/admin/broadcast',
@@ -58,6 +63,36 @@ class SpaceAdminApiTests(TestCase):
             1,
         )
         self.assertEqual(second.json()['body']['duplicate_count'], 1)
+        enqueue.assert_called()
+
+    @patch('User.models.NotificationEvent._enqueue_deliveries_after_commit')
+    def test_broadcast_supports_media_messages(self, enqueue):
+        payload = dict(
+            content=json.dumps({
+                'key': 'sermo/messages/image/test.jpg',
+                'mime_type': 'image/jpeg',
+            }),
+            type=1,
+            broadcast_id='broadcast:image:test',
+        )
+
+        response = self.client.post(
+            '/spaces/admin/broadcast',
+            data=json.dumps(payload),
+            content_type='application/json',
+            **self.authorization(),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        chat = Chat.get_or_create_direct(self.official, self.member)
+        message = Message.objects.get(
+            chat=chat,
+            user=self.official,
+            client_message_id=payload['broadcast_id'],
+        )
+        self.assertEqual(message.type, 1)
+        self.assertIsNotNone(message.blob_slug)
+        self.assertEqual(message.preview_text(), '[图片]')
         enqueue.assert_called()
 
     def test_member_list_only_exposes_contact_status(self):

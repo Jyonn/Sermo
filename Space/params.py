@@ -56,6 +56,7 @@ class SpaceOfficialLoginTicketParams(metaclass=Params):
 
 class SpaceAdminBroadcastParams(metaclass=Params):
     content = MessageParams.content.copy()
+    type = MessageParams.type.copy().null().default(0)
     broadcast_id = Validator('broadcast_id') \
         .to(str) \
         .to(lambda x: x.strip()) \
