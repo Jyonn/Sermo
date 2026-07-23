@@ -19,3 +19,4 @@ class MessageErrors:
 class MessageValidator:
     MAX_CONTENT_LENGTH = 512
     MAX_AUDIO_DURATION_SECONDS = 60
+    MAX_CLIENT_MESSAGE_ID_LENGTH = 64

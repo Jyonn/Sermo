@@ -38,6 +38,7 @@ class MessageView(View):
         MessageParams.content,
         MessageParams.type,
         MessageParams.reply_to_message_id,
+        MessageParams.client_message_id,
     )
     def post(self, request: Request):
         with transaction.atomic():
@@ -46,8 +47,10 @@ class MessageView(View):
                 user=request.user,
                 message_type=request.json.type,
                 content=request.json.content,
-                reply_to=request.json.reply_to)
-            NotificationEvent.emit_message_notifications(message, actor=request.user)
+                reply_to=request.json.reply_to,
+                client_message_id=request.json.client_message_id)
+            if getattr(message, '_was_created', True):
+                NotificationEvent.emit_message_notifications(message, actor=request.user)
         return message.jsonl(request=request)
 
     @auth.require_user

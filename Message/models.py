@@ -10,7 +10,7 @@ from html.parser import HTMLParser
 from urllib.parse import urljoin, urlparse, urlunparse
 
 import requests
-from django.db import close_old_connections, transaction
+from django.db import IntegrityError, close_old_connections, transaction
 from django.http import HttpRequest
 from django.urls import reverse
 from django.utils import timezone
@@ -379,6 +379,7 @@ class Message(models.Model):
         on_delete=models.SET_NULL,
         related_name='replies',
     )
+    client_message_id = models.CharField(max_length=64, null=True, blank=True)
 
     type = models.IntegerField(choices=MessageTypeChoice.to_choices())
     content = models.CharField(max_length=vldt.MAX_CONTENT_LENGTH)
@@ -389,6 +390,12 @@ class Message(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=['chat', 'user', 'client_message_id'],
+                name='message_unique_client_id',
+            ),
+        ]
 
     @classmethod
     def visible_queryset(cls):
@@ -399,18 +406,38 @@ class Message(models.Model):
         return cls.visible_queryset().filter(chat=chat)
 
     @classmethod
-    def create(cls, chat: Chat, user: User, message_type, content, reply_to=None):
+    def create(cls, chat: Chat, user: User, message_type, content, reply_to=None, client_message_id=None):
         if chat.has_active_member(user):
             if reply_to is not None and (reply_to.chat_id != chat.id or reply_to.is_deleted):
                 raise MessageErrors.REPLY_TARGET_INVALID
+            normalized_client_id = (client_message_id or '').strip()[:cls.vldt.MAX_CLIENT_MESSAGE_ID_LENGTH] or None
+            if normalized_client_id:
+                existing = cls.objects.filter(
+                    chat=chat,
+                    user=user,
+                    client_message_id=normalized_client_id,
+                ).first()
+                if existing is not None:
+                    existing._was_created = False
+                    return existing
             normalized_content = cls.normalize_content(message_type, content)
-            message = cls.objects.create(
-                chat=chat,
-                user=user,
-                type=message_type,
-                content=normalized_content,
-                reply_to=reply_to,
-            )
+            try:
+                with transaction.atomic():
+                    message = cls.objects.create(
+                        chat=chat,
+                        user=user,
+                        type=message_type,
+                        content=normalized_content,
+                        reply_to=reply_to,
+                        client_message_id=normalized_client_id,
+                    )
+            except IntegrityError:
+                if normalized_client_id is None:
+                    raise
+                message = cls.objects.get(chat=chat, user=user, client_message_id=normalized_client_id)
+                message._was_created = False
+                return message
+            message._was_created = True
             if message.type in cls.MEDIA_KIND_BY_TYPE:
                 message.ensure_blob_slug(save=True)
             if message.type == MessageTypeChoice.IMAGE:
@@ -589,6 +616,7 @@ class Message(models.Model):
     def jsonl(self, request: HttpRequest = None):
         return dict(
             message_id=self.id,
+            client_message_id=self.client_message_id,
             user=self.user.tiny_json(),
             type=self.type,
             content=self.preview_text(),
