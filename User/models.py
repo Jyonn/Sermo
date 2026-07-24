@@ -21,7 +21,16 @@ from utils import function
 
 
 FRONTEND_SPACE_HOST_SUFFIX = 'sermo.jyonn.space'
+BARK_ENDPOINT_PATTERN = re.compile(r'^https://api\.day\.app/([^/?#\s]+)', re.IGNORECASE)
 logger = logging.getLogger(__name__)
+
+
+def normalize_bark_endpoint(value):
+    target = (value or '').strip()
+    matched = BARK_ENDPOINT_PATTERN.match(target)
+    if matched is None:
+        return target
+    return f'https://api.day.app/{matched.group(1)}'
 
 
 class UserNotificationChoice(Choice):
@@ -395,7 +404,7 @@ class User(models.Model):
             self.save(update_fields=['phone', 'phone_verified_at'])
             return self
         if channel == UserNotificationChoice.BARK:
-            self.bark = target
+            self.bark = normalize_bark_endpoint(target)
             self.bark_verified_at = now
             self.save(update_fields=['bark', 'bark_verified_at'])
             return self
@@ -733,6 +742,8 @@ class UserContactVerificationCode(models.Model):
         target = (target or '').strip()
         if channel == UserNotificationChoice.EMAIL:
             return target.lower()
+        if channel == UserNotificationChoice.BARK:
+            return normalize_bark_endpoint(target)
         return target
 
     @classmethod

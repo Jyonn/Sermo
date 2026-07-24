@@ -2,7 +2,21 @@ from unittest.mock import patch
 
 from django.test import SimpleTestCase
 
-from User.models import NotificationEvent, NotificationEventTypeChoice
+from User.models import NotificationEvent, NotificationEventTypeChoice, normalize_bark_endpoint
+
+
+class BarkEndpointNormalizationTests(SimpleTestCase):
+    def test_copied_push_url_discards_sample_message(self):
+        self.assertEqual(
+            normalize_bark_endpoint('https://api.day.app/p7eciGfLv6oNuwQktkLE5Q/这里改成你自己的推送内容'),
+            'https://api.day.app/p7eciGfLv6oNuwQktkLE5Q',
+        )
+
+    def test_endpoint_without_message_is_unchanged(self):
+        self.assertEqual(
+            normalize_bark_endpoint('https://api.day.app/p7eciGfLv6oNuwQktkLE5Q'),
+            'https://api.day.app/p7eciGfLv6oNuwQktkLE5Q',
+        )
 
 
 class NotificationEventDeliveryTests(SimpleTestCase):

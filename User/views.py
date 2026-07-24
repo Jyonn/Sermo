@@ -316,13 +316,13 @@ class ContactBindingConfirmView(View):
         _require_password_enabled(request.user)
         channel = request.json.channel
         target = request.json.target
-        UserContactVerificationCode.verify(
+        verification = UserContactVerificationCode.verify(
             user=request.user,
             channel=channel,
             target=target,
             code=request.json.code,
         )
-        request.user.bind_contact(channel=channel, target=target)
+        request.user.bind_contact(channel=channel, target=verification.target)
         if channel == UserNotificationChoice.EMAIL:
             NotificationPreference.set_preference(
                 user=request.user,
