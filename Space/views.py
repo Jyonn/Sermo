@@ -226,6 +226,18 @@ class SpaceAdminOfficialLoginTicketView(View):
         )
 
 
+class SpaceAdminSessionView(View):
+    @auth.require_user
+    def post(self, request: Request):
+        space = request.user.space
+        if not request.user.is_official or space.official_user_id != request.user.id:
+            raise SpaceErrors.ADMIN_ACCESS_FORBIDDEN
+        return dict(
+            space=space.json_private(),
+            auth=auth.get_space_login_token(space),
+        )
+
+
 class SpaceAdminDashboardView(View):
     @auth.require_space
     def get(self, request: Request):

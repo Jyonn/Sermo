@@ -27,6 +27,7 @@ class SpaceErrors:
     MEMBER_LIMIT_INVALID = Error(message=_('Member limit should be at least 1'), code=Code.BadRequest)
     MEMBER_LIMIT_TOO_LOW = Error(message=_('Member limit cannot be lower than current member count'), code=Code.BadRequest)
     MEMBER_LIMIT_REACHED = Error(message=_('This space has reached its member limit'), code=Code.BadRequest)
+    ADMIN_ACCESS_FORBIDDEN = Error(message=_('Only the official account can access space administration'), code=Code.Forbidden)
     NOTIFICATOR_FAILED = Error(message=_('Failed to send notification'), code=Code.InternalServerError)
 
 

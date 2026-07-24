@@ -34,6 +34,29 @@ class SpaceAdminApiTests(TestCase):
     def authorization(self):
         return dict(HTTP_AUTHORIZATION=f'Bearer {self.token}')
 
+    def user_authorization(self, user):
+        token = auth.get_login_token(user)['auth']
+        return dict(HTTP_AUTHORIZATION=f'Bearer {token}')
+
+    def test_official_user_can_exchange_admin_session(self):
+        response = self.client.post(
+            '/spaces/admin/session',
+            **self.user_authorization(self.official),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        payload = response.json()['body']
+        self.assertEqual(payload['space']['space_id'], self.space.id)
+        self.assertIn('auth', payload['auth'])
+
+    def test_member_cannot_exchange_admin_session(self):
+        response = self.client.post(
+            '/spaces/admin/session',
+            **self.user_authorization(self.member),
+        )
+
+        self.assertEqual(response.status_code, 403, response.content)
+
     @patch('User.models.NotificationEvent._enqueue_deliveries_after_commit')
     def test_broadcast_is_idempotent(self, enqueue):
         payload = dict(content='Hello everyone', type=0, broadcast_id='broadcast:test')
