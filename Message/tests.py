@@ -4,6 +4,7 @@ from unittest.mock import Mock, patch
 from django.test import SimpleTestCase
 
 from Message.image_metadata import _reverse_geocode_opencage, parse_image_info, reverse_geocode
+from Message.video_metadata import parse_avinfo
 from Message.models import Message, MessageTypeChoice
 from utils.global_settings import Globals
 
@@ -102,6 +103,43 @@ class ImageMetadataTests(SimpleTestCase):
 
         self.assertEqual(address, '杭州市临平区')
         self.assertEqual(provider, 'nominatim')
+
+
+class VideoMetadataTests(SimpleTestCase):
+    def test_parse_avinfo_extracts_video_and_quicktime_metadata(self):
+        metadata = parse_avinfo({
+            'streams': [
+                {
+                    'codec_type': 'video',
+                    'codec_name': 'h264',
+                    'width': 1920,
+                    'height': 1080,
+                    'avg_frame_rate': '30000/1001',
+                    'tags': {
+                        'com.apple.quicktime.make': 'Apple',
+                        'com.apple.quicktime.model': 'iPhone',
+                        'com.apple.quicktime.location.ISO6709': '+31.2304+121.4737/',
+                    },
+                },
+                {'codec_type': 'audio', 'codec_name': 'aac'},
+            ],
+            'format': {
+                'duration': '12.5',
+                'size': '3145728',
+                'bit_rate': '2048000',
+                'tags': {'creation_time': '2026-07-24T10:20:30Z'},
+            },
+        })
+
+        self.assertEqual(metadata['pixel_width'], 1920)
+        self.assertEqual(metadata['pixel_height'], 1080)
+        self.assertAlmostEqual(metadata['frame_rate'], 29.97002997)
+        self.assertEqual(metadata['video_codec'], 'h264')
+        self.assertEqual(metadata['audio_codec'], 'aac')
+        self.assertEqual(metadata['make'], 'Apple')
+        self.assertEqual(metadata['model'], 'iPhone')
+        self.assertEqual(metadata['latitude'], 31.2304)
+        self.assertEqual(metadata['longitude'], 121.4737)
 
 
 class LocationMessageTests(SimpleTestCase):

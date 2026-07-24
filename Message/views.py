@@ -3,7 +3,7 @@ from django.http import HttpResponseRedirect
 from django.views import View
 from smartdjango import analyse, OK
 
-from Message.models import ImageMetadata, LinkPreview, Message, MessageTypeChoice
+from Message.models import ImageMetadata, LinkPreview, Message, MessageTypeChoice, VideoMetadata
 from Message.params import MessageParams
 from Message.validators import MessageErrors
 from utils.qiniu import issue_message_upload, build_message_image_thumbnail_uri, build_message_video_thumbnail_uri, sign_private_download_url
@@ -120,6 +120,21 @@ class MessageImageMetadataView(View):
         metadata = ImageMetadata.objects.filter(message=message).first()
         if metadata is None:
             metadata = ImageMetadata.queue_for_message(message)
+        return metadata.jsonl()
+
+
+class MessageVideoMetadataView(View):
+    @auth.require_user
+    @analyse.query(MessageParams.message_id)
+    def get(self, request: Request):
+        message: Message = request.query.message
+        if not message.chat.has_active_member(request.user):
+            raise MessageErrors.NOT_A_MEMBER
+        if message.type != MessageTypeChoice.VIDEO:
+            raise MessageErrors.TYPE_INVALID
+        metadata = VideoMetadata.objects.filter(message=message).first()
+        if metadata is None:
+            metadata = VideoMetadata.queue_for_message(message)
         return metadata.jsonl()
 
 

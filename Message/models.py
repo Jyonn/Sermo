@@ -444,6 +444,8 @@ class Message(models.Model):
                 message.ensure_blob_slug(save=True)
             if message.type == MessageTypeChoice.IMAGE:
                 ImageMetadata.queue_for_message(message)
+            elif message.type == MessageTypeChoice.VIDEO:
+                VideoMetadata.queue_for_message(message)
             if message.type == MessageTypeChoice.TEXT:
                 LinkPreview.queue_for_text(message.content)
             return message
@@ -616,6 +618,10 @@ class Message(models.Model):
                 metadata = ImageMetadata.objects.filter(message=self).first()
                 if metadata is not None:
                     response['image_metadata'] = metadata.jsonl()
+            elif self.type == MessageTypeChoice.VIDEO:
+                metadata = VideoMetadata.objects.filter(message=self).first()
+                if metadata is not None:
+                    response['video_metadata'] = metadata.jsonl()
             return response
         return None
 
@@ -894,6 +900,164 @@ class ImageMetadata(models.Model):
             file_size=self.file_size,
             pixel_width=self.pixel_width,
             pixel_height=self.pixel_height,
+            latitude=self.latitude,
+            longitude=self.longitude,
+            address=self.address,
+            geocoding_provider=self.geocoding_provider,
+            geocoding_status=self.geocoding_status,
+        )
+
+
+class VideoMetadata(models.Model):
+    STATUS_PENDING = 0
+    STATUS_READY = 1
+    STATUS_FAILED = 2
+    GEOCODING_PENDING = ImageMetadata.GEOCODING_PENDING
+    GEOCODING_READY = ImageMetadata.GEOCODING_READY
+    GEOCODING_FAILED = ImageMetadata.GEOCODING_FAILED
+    GEOCODING_UNAVAILABLE = ImageMetadata.GEOCODING_UNAVAILABLE
+    _FETCHING_IDS = set()
+    _FETCHING_LOCK = threading.Lock()
+
+    message = models.OneToOneField(Message, on_delete=models.CASCADE, related_name='video_metadata')
+    status = models.IntegerField(default=STATUS_PENDING, db_index=True)
+    raw_avinfo = models.JSONField(default=dict, blank=True)
+    duration_seconds = models.FloatField(null=True, blank=True)
+    file_size = models.BigIntegerField(null=True, blank=True)
+    pixel_width = models.PositiveIntegerField(null=True, blank=True)
+    pixel_height = models.PositiveIntegerField(null=True, blank=True)
+    frame_rate = models.FloatField(null=True, blank=True)
+    bit_rate = models.BigIntegerField(null=True, blank=True)
+    video_codec = models.CharField(max_length=64, blank=True, default='')
+    audio_codec = models.CharField(max_length=64, blank=True, default='')
+    make = models.CharField(max_length=255, blank=True, default='')
+    model = models.CharField(max_length=255, blank=True, default='')
+    lens_model = models.CharField(max_length=255, blank=True, default='')
+    software = models.CharField(max_length=255, blank=True, default='')
+    taken_at = models.DateTimeField(null=True, blank=True)
+    latitude = models.FloatField(null=True, blank=True)
+    longitude = models.FloatField(null=True, blank=True)
+    address = models.CharField(max_length=500, blank=True, default='')
+    geocoding_provider = models.CharField(max_length=32, blank=True, default='')
+    geocoding_status = models.IntegerField(default=GEOCODING_PENDING, db_index=True)
+    geocoding_error = models.CharField(max_length=500, blank=True, default='')
+    error = models.CharField(max_length=500, blank=True, default='')
+    updated_at = models.DateTimeField(auto_now=True)
+
+    @classmethod
+    def queue_for_message(cls, message: Message):
+        metadata, _created = cls.objects.get_or_create(message=message)
+        transaction.on_commit(lambda: cls.fetch_async(metadata.id))
+        return metadata
+
+    @classmethod
+    def fetch_async(cls, metadata_id: int):
+        with cls._FETCHING_LOCK:
+            if metadata_id in cls._FETCHING_IDS:
+                return
+            cls._FETCHING_IDS.add(metadata_id)
+        threading.Thread(target=cls.refresh_by_id, args=(metadata_id,), daemon=True).start()
+
+    @classmethod
+    def refresh_by_id(cls, metadata_id: int):
+        close_old_connections()
+        try:
+            metadata = cls.objects.select_related('message').get(id=metadata_id)
+            cls.refresh_for_message(metadata.message)
+        finally:
+            with cls._FETCHING_LOCK:
+                cls._FETCHING_IDS.discard(metadata_id)
+            close_old_connections()
+
+    @classmethod
+    def refresh_for_message(cls, message: Message, geocode: bool = True):
+        from Message.image_metadata import reverse_geocode
+        from Message.video_metadata import fetch_qiniu_avinfo, parse_avinfo
+
+        metadata, _created = cls.objects.get_or_create(message=message)
+        try:
+            previous_coordinates = (metadata.latitude, metadata.longitude)
+            previous_address = metadata.address
+            previous_provider = metadata.geocoding_provider
+            raw_avinfo = fetch_qiniu_avinfo(message.source_media_uri())
+            properties = parse_avinfo(raw_avinfo)
+            for field, value in properties.items():
+                setattr(metadata, field, value)
+            metadata.raw_avinfo = raw_avinfo
+            metadata.status = cls.STATUS_READY
+            metadata.error = ''
+            coordinates = (metadata.latitude, metadata.longitude)
+            has_coordinates = all(value is not None for value in coordinates)
+            if has_coordinates and coordinates == previous_coordinates and previous_address:
+                metadata.address = previous_address
+                metadata.geocoding_provider = previous_provider
+                metadata.geocoding_status = cls.GEOCODING_READY
+            elif has_coordinates:
+                metadata.address = ''
+                metadata.geocoding_provider = ''
+                metadata.geocoding_status = cls.GEOCODING_PENDING
+            else:
+                metadata.address = ''
+                metadata.geocoding_provider = ''
+                metadata.geocoding_status = cls.GEOCODING_UNAVAILABLE
+            metadata.geocoding_error = ''
+            metadata.save()
+        except Exception as error:
+            metadata.status = cls.STATUS_FAILED
+            metadata.error = str(error)[:500]
+            metadata.save(update_fields=['status', 'error', 'updated_at'])
+            return metadata
+
+        if not geocode or metadata.geocoding_status != cls.GEOCODING_PENDING:
+            return metadata
+        try:
+            cached = cls.objects.filter(
+                latitude=metadata.latitude,
+                longitude=metadata.longitude,
+            ).exclude(address='').values('address', 'geocoding_provider').first()
+            if not cached:
+                cached = ImageMetadata.objects.filter(
+                    latitude=metadata.latitude,
+                    longitude=metadata.longitude,
+                ).exclude(address='').values('address', 'geocoding_provider').first()
+            if cached:
+                metadata.address = cached['address']
+                metadata.geocoding_provider = cached['geocoding_provider']
+            else:
+                metadata.address, metadata.geocoding_provider = reverse_geocode(
+                    metadata.latitude,
+                    metadata.longitude,
+                )
+            metadata.geocoding_status = cls.GEOCODING_READY
+            metadata.geocoding_error = ''
+        except Exception as error:
+            metadata.geocoding_status = cls.GEOCODING_FAILED
+            metadata.geocoding_error = str(error)[:500]
+        metadata.save(update_fields=[
+            'address',
+            'geocoding_provider',
+            'geocoding_status',
+            'geocoding_error',
+            'updated_at',
+        ])
+        return metadata
+
+    def jsonl(self):
+        return dict(
+            status=self.status,
+            duration_seconds=self.duration_seconds,
+            file_size=self.file_size,
+            pixel_width=self.pixel_width,
+            pixel_height=self.pixel_height,
+            frame_rate=self.frame_rate,
+            bit_rate=self.bit_rate,
+            video_codec=self.video_codec,
+            audio_codec=self.audio_codec,
+            make=self.make,
+            model=self.model,
+            lens_model=self.lens_model,
+            software=self.software,
+            taken_at=self.taken_at.timestamp() if self.taken_at else None,
             latitude=self.latitude,
             longitude=self.longitude,
             address=self.address,
