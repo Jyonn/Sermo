@@ -148,6 +148,7 @@ class NotificationPreferenceView(View):
         NotificationPreferenceParams.friend_online_message_title,
         NotificationPreferenceParams.friend_online_message_text,
         NotificationPreferenceParams.open_chat_on_tap,
+        NotificationPreferenceParams.bark_icon_mode,
     )
     def post(self, request: Request):
         _require_password_enabled(request.user)
@@ -167,6 +168,7 @@ class NotificationPreferenceView(View):
             friend_online_message_title=request.json.friend_online_message_title,
             friend_online_message_text=request.json.friend_online_message_text,
             open_chat_on_tap=None if open_chat_on_tap is None else bool(open_chat_on_tap),
+            bark_icon_mode=request.json.bark_icon_mode,
         )
         return pref.json()
 

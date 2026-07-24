@@ -1017,6 +1017,10 @@ class WebPushSubscription(models.Model):
 
 
 class NotificationPreference(models.Model):
+    BARK_ICON_NONE = 0
+    BARK_ICON_SPACE = 1
+    BARK_ICON_ACTOR = 2
+
     CHANNEL_DEFAULT_THRESHOLDS = {
         UserNotificationChoice.EMAIL: 30,
         UserNotificationChoice.SMS: 15,
@@ -1035,6 +1039,7 @@ class NotificationPreference(models.Model):
     friend_online_message_title = models.CharField(max_length=80, blank=True, default='')
     friend_online_message_text = models.CharField(max_length=255, blank=True, default='')
     open_chat_on_tap = models.BooleanField(default=True)
+    bark_icon_mode = models.PositiveSmallIntegerField(default=BARK_ICON_SPACE)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
@@ -1068,6 +1073,7 @@ class NotificationPreference(models.Model):
                 defaults=dict(
                     enabled=cls._default_enabled(user, channel),
                     offline_threshold_minutes=cls._default_threshold(channel),
+                    bark_icon_mode=cls.BARK_ICON_SPACE,
                 ),
             )
             prefs.append(pref)
@@ -1088,6 +1094,7 @@ class NotificationPreference(models.Model):
         friend_online_message_title=None,
         friend_online_message_text=None,
         open_chat_on_tap=None,
+        bark_icon_mode=None,
     ):
         pref, _created = cls.objects.get_or_create(
             user=user,
@@ -1103,6 +1110,7 @@ class NotificationPreference(models.Model):
                 friend_online_message_title='',
                 friend_online_message_text='',
                 open_chat_on_tap=True,
+                bark_icon_mode=cls.BARK_ICON_SPACE,
             ),
         )
         updates = []
@@ -1136,6 +1144,9 @@ class NotificationPreference(models.Model):
         if open_chat_on_tap is not None:
             pref.open_chat_on_tap = bool(open_chat_on_tap)
             updates.append('open_chat_on_tap')
+        if bark_icon_mode is not None:
+            pref.bark_icon_mode = bark_icon_mode
+            updates.append('bark_icon_mode')
         if updates:
             pref.save(update_fields=updates)
         return pref
@@ -1153,6 +1164,7 @@ class NotificationPreference(models.Model):
             'friend_online_message_title',
             'friend_online_message_text',
             'open_chat_on_tap',
+            'bark_icon_mode',
         )
 
 
@@ -1505,6 +1517,15 @@ class NotificationDelivery(models.Model):
             return None
         return f'https://{space_slug}.{FRONTEND_SPACE_HOST_SUFFIX}/app/chats/{chat_id}'
 
+    def _bark_icon_url(self, pref: NotificationPreference):
+        if pref.bark_icon_mode == NotificationPreference.BARK_ICON_SPACE:
+            official_user = self.event.space.official_user
+            return official_user.tiny_json().get('avatar_uri') if official_user else None
+        if pref.bark_icon_mode == NotificationPreference.BARK_ICON_ACTOR:
+            actor = self.event.actor
+            return actor.tiny_json().get('avatar_uri') if actor else None
+        return None
+
     @classmethod
     def _is_message_email_delivery(cls, delivery):
         return (
@@ -1673,6 +1694,7 @@ class NotificationDelivery(models.Model):
                     target,
                     title=title,
                     body=body,
+                    icon=self._bark_icon_url(pref),
                     url=self._bark_chat_url(pref),
                 )
             else:

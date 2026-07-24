@@ -150,6 +150,10 @@ class NotificationPreferenceParams(metaclass=Params):
         .to(int) \
         .null().default(None) \
         .bool(lambda x: x is None or x in (0, 1), message=_('open_chat_on_tap should be 0 or 1'))
+    bark_icon_mode = Validator('bark_icon_mode') \
+        .to(int) \
+        .null().default(None) \
+        .bool(lambda x: x is None or x in (0, 1, 2), message=_('bark_icon_mode should be 0, 1 or 2'))
 
 
 class UserWebReminderPreferenceParams(metaclass=Params):
