@@ -45,8 +45,8 @@ class FriendshipRequestView(View):
 
     @auth.require_user
     def get(self, request: Request):
-        incoming = Friendship.pending_incoming(request.user)
-        outgoing = Friendship.pending_outgoing(request.user)
+        incoming = Friendship.request_history_incoming(request.user)
+        outgoing = Friendship.request_history_outgoing(request.user)
         return dict(
             incoming=[item.json() for item in incoming],
             outgoing=[item.json() for item in outgoing],

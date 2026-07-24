@@ -384,6 +384,28 @@ class Friendship(models.Model):
         ).order_by('-updated_at')
         return list(rows.select_related('user_low', 'user_high', 'requested_by')[:100])
 
+    @classmethod
+    def request_history_incoming(cls, user: User):
+        rows = cls.objects.filter(
+            space=user.space,
+            is_system_locked=False,
+        ).filter(
+            (Q(user_low=user) | Q(user_high=user))
+            & ~Q(requested_by=user)
+        ).order_by('-updated_at', '-id')
+        return list(rows.select_related('user_low', 'user_high', 'requested_by')[:200])
+
+    @classmethod
+    def request_history_outgoing(cls, user: User):
+        rows = cls.objects.filter(
+            space=user.space,
+            requested_by=user,
+            is_system_locked=False,
+        ).filter(
+            Q(user_low=user) | Q(user_high=user)
+        ).order_by('-updated_at', '-id')
+        return list(rows.select_related('user_low', 'user_high', 'requested_by')[:200])
+
     def _dictify_created_at(self):
         return self.created_at.timestamp()
 
