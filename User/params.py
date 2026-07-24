@@ -43,6 +43,12 @@ class AuthParams(metaclass=Params):
     refresh = Validator('refresh') \
         .to(str) \
         .bool(lambda x: len(x) > 0, message=_('Empty refresh token'))
+    account_user_id = Validator('user_id').to(int)
+    switch_ticket = Validator('ticket').to(str).bool(lambda x: len(x.strip()) > 0, message=_('Empty account switch ticket'))
+
+
+class UserPrivateAccountParams(metaclass=Params):
+    enabled = Validator('enabled').to(int).bool(lambda x: x in (0, 1), message=_('enabled should be 0 or 1'))
 
 
 class UserPasswordParams(metaclass=Params):

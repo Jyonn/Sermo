@@ -17,6 +17,10 @@ from User.views import (
     AvatarPresetView,
     AvatarCustomUploadView,
     AvatarCustomView,
+    AccountSwitchListView,
+    AccountSwitchTicketView,
+    AccountSwitchExchangeView,
+    PrivateAccountView,
 )
 
 urlpatterns = [
@@ -24,6 +28,10 @@ urlpatterns = [
     path('me', UserMeView.as_view(), name='user me'),
     path('refresh', RefreshView.as_view(), name='token refresh'),
     path('logout', LogoutView.as_view(), name='token revoke'),
+    path('me/switch-accounts', AccountSwitchListView.as_view(), name='account switch list'),
+    path('me/switch-account', AccountSwitchTicketView.as_view(), name='account switch ticket'),
+    path('switch-account/exchange', AccountSwitchExchangeView.as_view(), name='account switch exchange'),
+    path('me/private-account', PrivateAccountView.as_view(), name='private account'),
     path('me/notification-prefs', NotificationPreferenceView.as_view(), name='notification prefs'),
     path('me/web-reminder-prefs', UserWebReminderPreferenceView.as_view(), name='web reminder prefs'),
     path('me/gesture-lock', UserGestureLockPreferenceView.as_view(), name='gesture lock prefs'),

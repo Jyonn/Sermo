@@ -15,6 +15,7 @@ from User.models import (
     UserContactVerificationCode,
     UserNotificationChoice,
     UserWebReminderPreference,
+    AccountSwitchTicket,
 )
 from User.params import (
     AuthParams,
@@ -26,6 +27,7 @@ from User.params import (
     UserWebReminderPreferenceParams,
     WebPushSubscriptionParams,
     UserContactVerificationCodeParams,
+    UserPrivateAccountParams,
 )
 from User.validators import UserErrors
 
@@ -83,6 +85,46 @@ class LogoutView(View):
     def post(self, request: Request):
         auth.revoke_refresh_token(request.json.refresh)
         return OK
+
+
+class AccountSwitchListView(View):
+    @auth.require_user
+    def get(self, request: Request):
+        return [
+            dict(
+                user=target.tiny_json(),
+                space=target.space.json(),
+            )
+            for target in AccountSwitchTicket.available_targets(request.user)
+        ]
+
+
+class AccountSwitchTicketView(View):
+    @auth.require_user
+    @analyse.json(AuthParams.account_user_id)
+    def post(self, request: Request):
+        ticket = AccountSwitchTicket.issue(request.user, request.json.user_id)
+        return dict(
+            token=ticket.token,
+            expires_in=AccountSwitchTicket.EXPIRE_SECONDS,
+            space=ticket.target_user.space.json(),
+        )
+
+
+class AccountSwitchExchangeView(View):
+    @analyse.json(AuthParams.switch_ticket)
+    def post(self, request: Request):
+        user = AccountSwitchTicket.exchange(request.json.ticket)
+        user.log_login()
+        return dict(space=user.space.json(), auth=auth.get_login_token(user))
+
+
+class PrivateAccountView(View):
+    @auth.require_user
+    @analyse.json(UserPrivateAccountParams.enabled)
+    def post(self, request: Request):
+        request.user.set_private_account(bool(request.json.enabled))
+        return request.user.json_me()
 
 
 class NotificationPreferenceView(View):

@@ -129,6 +129,7 @@ class User(models.Model):
     phone_verified_at = models.DateTimeField(null=True, blank=True)
     bark = models.CharField(max_length=100, null=True, blank=True)
     bark_verified_at = models.DateTimeField(null=True, blank=True)
+    is_private_account = models.BooleanField(default=False)
     welcome_message = models.CharField(
         max_length=vldt.WELCOME_MESSAGE_MAX_LENGTH,
         default='',
@@ -393,15 +394,36 @@ class User(models.Model):
         now = timezone.now()
 
         if channel == UserNotificationChoice.EMAIL:
-            self.email = self._normalize_email(target)
-            self.email_verified_at = now
-            self.account_level = UserAccountLevelChoice.VERIFIED
-            self.save(update_fields=['email', 'email_verified_at', 'account_level'])
+            normalized = self._normalize_email(target)
+            with transaction.atomic():
+                from Space.models import Space
+                Space.objects.select_for_update().get(id=self.space_id)
+                if not self.is_official and User.objects.filter(
+                    space_id=self.space_id,
+                    role=UserRoleChoice.MEMBER,
+                    is_deleted=False,
+                    email=normalized,
+                ).exclude(id=self.id).exists():
+                    raise UserErrors.CONTACT_ALREADY_BOUND
+                self.email = normalized
+                self.email_verified_at = now
+                self.account_level = UserAccountLevelChoice.VERIFIED
+                self.save(update_fields=['email', 'email_verified_at', 'account_level'])
             return self
         if channel == UserNotificationChoice.SMS:
-            self.phone = target
-            self.phone_verified_at = now
-            self.save(update_fields=['phone', 'phone_verified_at'])
+            with transaction.atomic():
+                from Space.models import Space
+                Space.objects.select_for_update().get(id=self.space_id)
+                if not self.is_official and User.objects.filter(
+                    space_id=self.space_id,
+                    role=UserRoleChoice.MEMBER,
+                    is_deleted=False,
+                    phone=target,
+                ).exclude(id=self.id).exists():
+                    raise UserErrors.CONTACT_ALREADY_BOUND
+                self.phone = target
+                self.phone_verified_at = now
+                self.save(update_fields=['phone', 'phone_verified_at'])
             return self
         if channel == UserNotificationChoice.BARK:
             self.bark = normalize_bark_endpoint(target)
@@ -409,6 +431,18 @@ class User(models.Model):
             self.save(update_fields=['bark', 'bark_verified_at'])
             return self
         raise UserErrors.CONTACT_CHANNEL_INVALID
+
+    def set_private_account(self, enabled: bool):
+        if enabled and not (
+            self.email
+            and self.email_verified_at is not None
+            and self.phone
+            and self.phone_verified_at is not None
+        ):
+            raise UserErrors.PRIVATE_ACCOUNT_CONTACTS_REQUIRED
+        self.is_private_account = bool(enabled)
+        self.save(update_fields=['is_private_account'])
+        return self
 
     def set_preset_avatar(self, preset_id: int, save=True):
         previous_avatar_type = self.avatar_type
@@ -635,6 +669,7 @@ class User(models.Model):
             'email_verified_at',
             'phone_verified_at',
             'bark_verified_at',
+            'is_private_account',
         )
 
 
@@ -698,6 +733,76 @@ class OfficialLoginTicket(models.Model):
         item.used_at = timezone.now()
         item.save(update_fields=['used_at'])
         return item.user
+
+
+class AccountSwitchTicket(models.Model):
+    TOKEN_LENGTH = 48
+    EXPIRE_SECONDS = 60
+
+    source_user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='issued_account_switch_tickets')
+    target_user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='account_switch_tickets')
+    token = models.CharField(max_length=96, unique=True, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField(db_index=True)
+    used_at = models.DateTimeField(null=True, blank=True)
+
+    @classmethod
+    def available_targets(cls, user):
+        contact_filter = Q()
+        if user.email and user.email_verified_at is not None:
+            contact_filter |= Q(email=user.email, email_verified_at__isnull=False)
+        if user.phone and user.phone_verified_at is not None:
+            contact_filter |= Q(phone=user.phone, phone_verified_at__isnull=False)
+
+        targets = User.objects.none()
+        if contact_filter:
+            targets = User.objects.filter(
+                contact_filter,
+                role=UserRoleChoice.MEMBER,
+                is_deleted=False,
+                is_private_account=False,
+            ).exclude(id=user.id)
+
+        admin_target = None
+        if user.email and user.email_verified_at is not None and user.email == user.space.email:
+            admin_target = user.space.official_user or user.space.ensure_official_user()
+
+        rows = list(targets.select_related('space').order_by('space__name', 'name'))
+        if admin_target and admin_target.id != user.id:
+            rows.insert(0, admin_target)
+        return rows
+
+    @classmethod
+    def issue(cls, source_user, target_user_id):
+        target = next((item for item in cls.available_targets(source_user) if item.id == target_user_id), None)
+        if target is None:
+            raise UserErrors.ACCOUNT_SWITCH_FORBIDDEN
+        now = timezone.now()
+        cls.objects.filter(source_user=source_user, used_at__isnull=True).update(used_at=now)
+        return cls.objects.create(
+            source_user=source_user,
+            target_user=target,
+            token=get_random_string(cls.TOKEN_LENGTH),
+            expires_at=now + datetime.timedelta(seconds=cls.EXPIRE_SECONDS),
+        )
+
+    @classmethod
+    def exchange(cls, token):
+        now = timezone.now()
+        with transaction.atomic():
+            item = cls.objects.select_for_update().select_related('target_user__space').filter(
+                token=(token or '').strip(),
+                used_at__isnull=True,
+            ).first()
+            if item is None:
+                raise UserErrors.ACCOUNT_SWITCH_TICKET_INVALID
+            item.used_at = now
+            item.save(update_fields=['used_at'])
+            if item.expires_at <= now:
+                raise UserErrors.ACCOUNT_SWITCH_TICKET_EXPIRED
+            if item.target_user.is_deleted:
+                raise UserErrors.ACCOUNT_SWITCH_FORBIDDEN
+            return item.target_user
 
 
 class UserLoginLog(models.Model):
