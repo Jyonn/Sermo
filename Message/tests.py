@@ -1,8 +1,10 @@
+import json
 from unittest.mock import Mock, patch
 
 from django.test import SimpleTestCase
 
 from Message.image_metadata import _reverse_geocode_opencage, parse_image_info, reverse_geocode
+from Message.models import Message, MessageTypeChoice
 from utils.global_settings import Globals
 
 
@@ -100,3 +102,24 @@ class ImageMetadataTests(SimpleTestCase):
 
         self.assertEqual(address, '杭州市临平区')
         self.assertEqual(provider, 'nominatim')
+
+
+class LocationMessageTests(SimpleTestCase):
+    @patch('Message.image_metadata.reverse_geocode', return_value=('新加坡滨海湾', 'opencage'))
+    def test_normalize_location_message(self, geocode):
+        normalized = Message.normalize_content(
+            MessageTypeChoice.LOCATION,
+            json.dumps({'latitude': 1.2834012, 'longitude': 103.8607123}),
+        )
+
+        self.assertEqual(
+            json.loads(normalized),
+            {
+                'kind': 'location',
+                'latitude': 1.283401,
+                'longitude': 103.860712,
+                'address': '新加坡滨海湾',
+                'geocoding_provider': 'opencage',
+            },
+        )
+        geocode.assert_called_once_with(1.283401, 103.860712)

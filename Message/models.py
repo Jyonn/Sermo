@@ -30,6 +30,7 @@ class MessageTypeChoice(Choice):
     SYSTEM = 3
     VIDEO = 4
     AUDIO = 5
+    LOCATION = 6
 
 
 class LinkPreviewStatusChoice(Choice):
@@ -368,6 +369,7 @@ class Message(models.Model):
         MessageTypeChoice.VIDEO: '[视频]',
         MessageTypeChoice.AUDIO: '[语音]',
         MessageTypeChoice.FILE: '[文件]',
+        MessageTypeChoice.LOCATION: '[位置]',
     }
 
     chat = models.ForeignKey(Chat, on_delete=models.CASCADE, db_index=True)
@@ -508,6 +510,38 @@ class Message(models.Model):
                 raise MessageErrors.CONTENT_TOO_LONG
             return normalized
 
+        if message_type == MessageTypeChoice.LOCATION:
+            payload = cls._parse_payload(content)
+            try:
+                latitude = round(float(payload.get('latitude')), 6)
+                longitude = round(float(payload.get('longitude')), 6)
+            except (TypeError, ValueError):
+                raise MessageErrors.PAYLOAD_INVALID
+            if not -90 <= latitude <= 90 or not -180 <= longitude <= 180:
+                raise MessageErrors.PAYLOAD_INVALID
+
+            address = ''
+            geocoding_provider = ''
+            try:
+                from Message.image_metadata import reverse_geocode
+                address, geocoding_provider = reverse_geocode(latitude, longitude)
+            except Exception:
+                pass
+            normalized = json.dumps(
+                dict(
+                    kind='location',
+                    latitude=latitude,
+                    longitude=longitude,
+                    address=address,
+                    geocoding_provider=geocoding_provider,
+                ),
+                separators=(',', ':'),
+                ensure_ascii=False,
+            )
+            if len(normalized) > cls.vldt.MAX_CONTENT_LENGTH:
+                raise MessageErrors.CONTENT_TOO_LONG
+            return normalized
+
         raise MessageErrors.TYPE_INVALID
 
     @classmethod
@@ -552,6 +586,8 @@ class Message(models.Model):
             return payload
         if self.type == MessageTypeChoice.SYSTEM:
             return dict(kind='system', text=self.content)
+        if self.type == MessageTypeChoice.LOCATION:
+            return self._parse_payload(self.content)
         if self.type == MessageTypeChoice.FILE and not self.content.lstrip().startswith('{'):
             return dict(kind='file', text=self.content)
         if self.type in self.MEDIA_KIND_BY_TYPE:
