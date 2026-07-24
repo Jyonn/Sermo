@@ -678,17 +678,17 @@ class Message(models.Model):
 
     @classmethod
     def latest(cls, chat: Chat, limit: int, request: HttpRequest = None):
-        messages = cls.visible_in_chat(chat).select_related('user', 'reply_to', 'reply_to__user').order_by('-created_at')[:limit]
+        messages = cls.visible_in_chat(chat).select_related('user', 'reply_to', 'reply_to__user').order_by('-id')[:limit]
         return [message.jsonl(request=request) for message in messages]
 
     @classmethod
     def older(cls, chat: Chat, message_id, limit: int, request: HttpRequest = None):
-        messages = cls.visible_in_chat(chat).select_related('user', 'reply_to', 'reply_to__user').filter(id__lt=message_id).order_by('-created_at')[:limit]
+        messages = cls.visible_in_chat(chat).select_related('user', 'reply_to', 'reply_to__user').filter(id__lt=message_id).order_by('-id')[:limit]
         return [message.jsonl(request=request) for message in messages]
 
     @classmethod
     def newer(cls, chat: Chat, message_id, limit: int, request: HttpRequest = None):
-        messages = cls.visible_in_chat(chat).select_related('user', 'reply_to', 'reply_to__user').filter(id__gt=message_id).order_by('created_at')[:limit]
+        messages = cls.visible_in_chat(chat).select_related('user', 'reply_to', 'reply_to__user').filter(id__gt=message_id).order_by('id')[:limit]
         return [message.jsonl(request=request) for message in messages]
 
     @classmethod
