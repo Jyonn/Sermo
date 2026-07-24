@@ -20,7 +20,7 @@ from smartdjango import models, Choice
 from Chat.models import Chat
 from Message.validators import MessageErrors, MessageValidator
 from User.models import User
-from utils.qiniu import sign_private_download_url, avatar_uri_for_key, build_message_image_thumbnail_uri, validate_message_media_key
+from utils.qiniu import sign_private_download_url, avatar_uri_for_key, build_message_image_thumbnail_uri, build_message_video_thumbnail_uri, validate_message_media_key
 
 
 class MessageTypeChoice(Choice):
@@ -596,12 +596,14 @@ class Message(models.Model):
             response = dict(kind=payload.get('kind') or self.MEDIA_KIND_BY_TYPE[self.type])
             if self.blob_slug:
                 response['uri'] = self.media_blob_uri(request=request)
-                if self.type == MessageTypeChoice.IMAGE:
+                if self.type in (MessageTypeChoice.IMAGE, MessageTypeChoice.VIDEO):
                     response['thumbnail_uri'] = self.media_blob_uri(request=request, thumbnail=True)
             elif uri:
                 response['uri'] = sign_private_download_url(uri)
                 if self.type == MessageTypeChoice.IMAGE:
                     response['thumbnail_uri'] = build_message_image_thumbnail_uri(uri)
+                elif self.type == MessageTypeChoice.VIDEO:
+                    response['thumbnail_uri'] = build_message_video_thumbnail_uri(uri)
             mime_type = (str(payload.get('mime_type') or '').strip())[:100]
             if mime_type:
                 response['mime_type'] = mime_type

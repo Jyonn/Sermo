@@ -107,6 +107,11 @@ def build_message_image_thumbnail_uri(uri: str, width: int = 120):
     return sign_private_processed_url(uri, f'imageView2/2/w/{normalized_width}/q/70')
 
 
+def build_message_video_thumbnail_uri(uri: str, width: int = 480):
+    normalized_width = max(120, min(int(width), 960))
+    return sign_private_processed_url(uri, f'vframe/jpg/offset/0.1/w/{normalized_width}')
+
+
 def build_avatar_display_uri(uri: str, size: int = 400):
     normalized_size = max(96, min(int(size), 1024))
     return sign_private_processed_url(uri, f'imageView2/1/w/{normalized_size}/h/{normalized_size}/q/85')

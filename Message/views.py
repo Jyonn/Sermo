@@ -6,7 +6,7 @@ from smartdjango import analyse, OK
 from Message.models import ImageMetadata, LinkPreview, Message, MessageTypeChoice
 from Message.params import MessageParams
 from Message.validators import MessageErrors
-from utils.qiniu import issue_message_upload, build_message_image_thumbnail_uri, sign_private_download_url
+from utils.qiniu import issue_message_upload, build_message_image_thumbnail_uri, build_message_video_thumbnail_uri, sign_private_download_url
 from utils import auth
 from utils.auth import Request
 from User.models import NotificationEvent
@@ -143,9 +143,11 @@ class MessageBlobView(View):
 class MessageBlobThumbnailView(View):
     def get(self, request: Request, blob_slug: str):
         message = Message.index_by_blob_slug(blob_slug)
-        if message.type != MessageTypeChoice.IMAGE:
+        if message.type not in (MessageTypeChoice.IMAGE, MessageTypeChoice.VIDEO):
             raise MessageErrors.NOT_EXISTS
         source_uri = message.source_media_uri()
         if not source_uri:
             raise MessageErrors.NOT_EXISTS
+        if message.type == MessageTypeChoice.VIDEO:
+            return MessageBlobView._redirect(build_message_video_thumbnail_uri(source_uri))
         return MessageBlobView._redirect(build_message_image_thumbnail_uri(source_uri))
