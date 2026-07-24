@@ -28,6 +28,7 @@ from User.params import (
     WebPushSubscriptionParams,
     UserContactVerificationCodeParams,
     UserPrivateAccountParams,
+    UserContactUnbindParams,
 )
 from User.validators import UserErrors
 
@@ -371,6 +372,29 @@ class ContactBindingConfirmView(View):
                 channel=UserNotificationChoice.EMAIL,
                 enabled=True,
             )
+        return request.user.json_me()
+
+
+class ContactUnbindView(View):
+    @auth.require_user
+    @analyse.json(
+        UserContactUnbindParams.channel,
+        UserContactUnbindParams.code,
+    )
+    def delete(self, request: Request):
+        channel = request.json.channel
+        verification = None
+        if channel in (UserNotificationChoice.EMAIL, UserNotificationChoice.SMS):
+            target = request.user.email if channel == UserNotificationChoice.EMAIL else request.user.phone
+            if not target:
+                raise UserErrors.CONTACT_NOT_BOUND
+            verification = UserContactVerificationCode.verify(
+                user=request.user,
+                channel=channel,
+                target=target,
+                code=request.json.code,
+            )
+        request.user.unbind_contact(channel, verification=verification)
         return request.user.json_me()
 
 

@@ -213,6 +213,11 @@ class UserContactVerificationCodeParams(metaclass=Params):
     code: Validator
 
 
+class UserContactUnbindParams(metaclass=Params):
+    channel = NotificationPreferenceParams.channel.copy()
+    code = UserContactVerificationCodeParams.code.copy().null().default(None)
+
+
 class WebPushSubscriptionParams(metaclass=Params):
     model_class = WebPushSubscription
 

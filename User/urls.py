@@ -21,6 +21,7 @@ from User.views import (
     AccountSwitchTicketView,
     AccountSwitchExchangeView,
     PrivateAccountView,
+    ContactUnbindView,
 )
 
 urlpatterns = [
@@ -39,6 +40,7 @@ urlpatterns = [
     path('me/password', PasswordView.as_view(), name='password'),
     path('me/contact-code', ContactVerificationCodeRequestView.as_view(), name='contact verification code'),
     path('me/bind-contact', ContactBindingConfirmView.as_view(), name='contact bind confirm'),
+    path('me/unbind-contact', ContactUnbindView.as_view(), name='contact unbind'),
     path('me/name', UserNameView.as_view(), name='user name'),
     path('me/welcome-message', WelcomeMessageView.as_view(), name='welcome message'),
     path('me/avatar/preset', AvatarPresetView.as_view(), name='avatar preset'),

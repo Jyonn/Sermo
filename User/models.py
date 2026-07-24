@@ -129,6 +129,9 @@ class User(models.Model):
     phone_verified_at = models.DateTimeField(null=True, blank=True)
     bark = models.CharField(max_length=100, null=True, blank=True)
     bark_verified_at = models.DateTimeField(null=True, blank=True)
+    email_unbound_at = models.DateTimeField(null=True, blank=True)
+    phone_unbound_at = models.DateTimeField(null=True, blank=True)
+    bark_unbound_at = models.DateTimeField(null=True, blank=True)
     is_private_account = models.BooleanField(default=False)
     welcome_message = models.CharField(
         max_length=vldt.WELCOME_MESSAGE_MAX_LENGTH,
@@ -270,6 +273,7 @@ class User(models.Model):
             account_level=UserAccountLevelChoice.VERIFIED if verified else UserAccountLevelChoice.BASIC,
             avatar_type=UserAvatarTypeChoice.PRESET,
             avatar_uri=cls.build_preset_avatar_uri(default_avatar_preset_id),
+            is_private_account=role == UserRoleChoice.OFFICIAL,
         )
         if password:
             user.set_password(password)
@@ -433,7 +437,7 @@ class User(models.Model):
         raise UserErrors.CONTACT_CHANNEL_INVALID
 
     def set_private_account(self, enabled: bool):
-        if enabled and not (
+        if enabled and not self.is_official and not (
             self.email
             and self.email_verified_at is not None
             and self.phone
@@ -442,6 +446,51 @@ class User(models.Model):
             raise UserErrors.PRIVATE_ACCOUNT_CONTACTS_REQUIRED
         self.is_private_account = bool(enabled)
         self.save(update_fields=['is_private_account'])
+        return self
+
+    def unbind_contact(self, channel: int, verification=None):
+        now = timezone.now()
+        if channel == UserNotificationChoice.EMAIL:
+            if not self.email or self.email_verified_at is None:
+                raise UserErrors.CONTACT_NOT_BOUND
+            if verification is None or verification.target != self.email:
+                raise UserErrors.CONTACT_UNBIND_TARGET_MISMATCH
+            available_at = self.email_unbound_at + datetime.timedelta(days=30) if self.email_unbound_at else None
+            if available_at and available_at > now:
+                raise UserErrors.CONTACT_UNBIND_TOO_FREQUENT(available_at=available_at.isoformat())
+            self.email = None
+            self.email_verified_at = None
+            self.email_unbound_at = now
+            if not self.is_official:
+                self.account_level = UserAccountLevelChoice.BASIC
+                self.is_private_account = False
+            fields = ['email', 'email_verified_at', 'email_unbound_at', 'account_level', 'is_private_account']
+        elif channel == UserNotificationChoice.SMS:
+            if not self.phone or self.phone_verified_at is None:
+                raise UserErrors.CONTACT_NOT_BOUND
+            if verification is None or verification.target != self.phone:
+                raise UserErrors.CONTACT_UNBIND_TARGET_MISMATCH
+            available_at = self.phone_unbound_at + datetime.timedelta(days=365) if self.phone_unbound_at else None
+            if available_at and available_at > now:
+                raise UserErrors.CONTACT_UNBIND_TOO_FREQUENT(available_at=available_at.isoformat())
+            self.phone = None
+            self.phone_verified_at = None
+            self.phone_unbound_at = now
+            if not self.is_official:
+                self.is_private_account = False
+            fields = ['phone', 'phone_verified_at', 'phone_unbound_at', 'is_private_account']
+        elif channel == UserNotificationChoice.BARK:
+            if not self.bark or self.bark_verified_at is None:
+                raise UserErrors.CONTACT_NOT_BOUND
+            self.bark = None
+            self.bark_verified_at = None
+            self.bark_unbound_at = now
+            fields = ['bark', 'bark_verified_at', 'bark_unbound_at']
+        else:
+            raise UserErrors.CONTACT_CHANNEL_INVALID
+
+        self.save(update_fields=fields)
+        NotificationPreference.set_preference(user=self, channel=channel, enabled=False)
         return self
 
     def set_preset_avatar(self, preset_id: int, save=True):
@@ -669,6 +718,9 @@ class User(models.Model):
             'email_verified_at',
             'phone_verified_at',
             'bark_verified_at',
+            'email_unbound_at',
+            'phone_unbound_at',
+            'bark_unbound_at',
             'is_private_account',
         )
 
@@ -768,7 +820,7 @@ class AccountSwitchTicket(models.Model):
             admin_target = user.space.official_user or user.space.ensure_official_user()
 
         rows = list(targets.select_related('space').order_by('space__name', 'name'))
-        if admin_target and admin_target.id != user.id:
+        if admin_target and admin_target.id != user.id and not admin_target.is_private_account:
             rows.insert(0, admin_target)
         return rows
 
