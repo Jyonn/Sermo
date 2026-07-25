@@ -139,3 +139,33 @@ class SpaceAdminApiTests(TestCase):
         )
         self.assertTrue(email_pref['enabled'])
         self.assertEqual(email_pref['offline_threshold_minutes'], 12)
+
+    def test_admin_can_name_space_growth_levels(self):
+        level_names = ['初见', '同路', '热场', '浪尖', '尽兴']
+        response = self.client.post(
+            '/spaces/admin/settings',
+            data=json.dumps({
+                'name': self.space.name,
+                'group_square_enabled': 1,
+                'member_limit': 100,
+                'level_names': level_names,
+            }),
+            content_type='application/json',
+            **self.authorization(),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.space.refresh_from_db()
+        self.assertEqual(self.space.level_names, level_names)
+        self.assertEqual(response.json()['body']['level_names'], level_names)
+
+    def test_official_account_has_highest_growth_level(self):
+        self.space.level_names = ['初见', '同路', '热场', '浪尖', '尽兴']
+        self.space.save(update_fields=['level_names'])
+
+        growth = self.official.calculate_growth()
+
+        self.assertEqual(growth['score'], 120)
+        self.assertEqual(growth['level'], 5)
+        self.assertEqual(growth['name'], '尽兴')
+        self.assertIn('广场光环', growth['privileges'])

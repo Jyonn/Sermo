@@ -9,6 +9,10 @@ from smartdjango import Choice
 from Space.validators import SpaceValidator, SpaceErrors
 
 
+def default_level_names():
+    return ['初来', '同频', '热聊', '浪潮', '尽兴']
+
+
 class SpaceNormalizers:
     @staticmethod
     def name(value):
@@ -48,6 +52,7 @@ class Space(models.Model):
     )
     group_square_enabled = models.BooleanField(default=False)
     member_limit = models.PositiveIntegerField(null=True, blank=True, default=None)
+    level_names = models.JSONField(default=default_level_names)
     created_at = models.DateTimeField(auto_now_add=True)
 
     @classmethod
@@ -173,9 +178,10 @@ class Space(models.Model):
             raise SpaceErrors.MEMBER_LIMIT_REACHED
         return self
 
-    def set_admin_settings(self, name, group_square_enabled, member_limit):
+    def set_admin_settings(self, name, group_square_enabled, member_limit, level_names=None):
         normalized_name = self.vldt.name(name)
         normalized_member_limit = self.vldt.member_limit(member_limit)
+        normalized_level_names = self.vldt.level_names(level_names or self.level_names)
         current_member_count = self.active_member_count()
         if normalized_member_limit is not None and normalized_member_limit < current_member_count:
             raise SpaceErrors.MEMBER_LIMIT_TOO_LOW
@@ -183,7 +189,8 @@ class Space(models.Model):
         self.name = normalized_name
         self.group_square_enabled = bool(group_square_enabled)
         self.member_limit = normalized_member_limit
-        self.save(update_fields=['name', 'group_square_enabled', 'member_limit'])
+        self.level_names = normalized_level_names
+        self.save(update_fields=['name', 'group_square_enabled', 'member_limit', 'level_names'])
         return self
 
     def json(self):
@@ -197,6 +204,7 @@ class Space(models.Model):
             'official_user',
             'group_square_enabled',
             'member_limit',
+            'level_names',
             'created_at',
         )
 
@@ -210,6 +218,7 @@ class Space(models.Model):
             'official_user',
             'group_square_enabled',
             'member_limit',
+            'level_names',
             'created_at',
         )
 

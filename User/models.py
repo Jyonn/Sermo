@@ -147,6 +147,8 @@ class User(models.Model):
         max_length=255,
         default='',
     )
+    growth_score = models.PositiveIntegerField(default=0)
+    growth_level = models.PositiveSmallIntegerField(default=1)
 
     created_at = models.DateTimeField(auto_now_add=True)
     salt = models.CharField(max_length=vldt.SALT_MAX_LENGTH)
@@ -660,6 +662,66 @@ class User(models.Model):
     def _dictify_has_password(self):
         return self.has_password
 
+    def _dictify_growth_level_name(self):
+        names = self.space.level_names or []
+        index = max(0, min(len(names) - 1, self.growth_level - 1))
+        return names[index] if names else ''
+
+    def calculate_growth(self, save=True):
+        if self.is_official:
+            score = 120
+        else:
+            from Friendship.models import Friendship, FriendshipStatusChoice
+            from Message.models import Message
+
+            security_score = (
+                (8 if self.has_password else 0)
+                + (14 if self.email_verified_at else 0)
+                + (14 if self.phone_verified_at else 0)
+                + (6 if self.bark_verified_at else 0)
+            )
+            tenure_days = max(0, (timezone.now() - self.created_at).days)
+            tenure_score = min(18, tenure_days // 7)
+            friendship_count = Friendship.objects.filter(
+                Q(user_low=self) | Q(user_high=self),
+                status=FriendshipStatusChoice.ACCEPTED,
+            ).count()
+            friendship_score = min(24, friendship_count * 3)
+            active_days = Message.objects.filter(
+                user=self,
+                is_deleted=False,
+            ).values('created_at__date').distinct().count()
+            activity_score = min(40, active_days * 2)
+            score = min(120, security_score + tenure_score + friendship_score + activity_score)
+
+        thresholds = [0, 15, 35, 65, 100]
+        level = max(index + 1 for index, threshold in enumerate(thresholds) if score >= threshold)
+        if save and (self.growth_score != score or self.growth_level != level):
+            self.growth_score = score
+            self.growth_level = level
+            self.save(update_fields=['growth_score', 'growth_level'])
+        names = self.space.level_names or []
+        next_score = thresholds[level] if level < len(thresholds) else None
+        current_threshold = thresholds[level - 1]
+        progress = 1 if next_score is None else (score - current_threshold) / max(1, next_score - current_threshold)
+        privileges = ['基础沟通']
+        if level >= 2:
+            privileges.append('等级徽章')
+        if level >= 3:
+            privileges.append('主题橱窗')
+        if level >= 4:
+            privileges.append('广场光环')
+        if level >= 5:
+            privileges.append('尽兴徽记')
+        return dict(
+            score=score,
+            level=level,
+            name=names[level - 1] if len(names) >= level else f'Lv.{level}',
+            next_score=next_score,
+            progress=round(max(0, min(1, progress)), 4),
+            privileges=privileges,
+        )
+
     def tiny_json(self):
         return self.dictify('name', 'user_id', 'official', 'avatar_type', 'avatar_uri')
 
@@ -671,6 +733,7 @@ class User(models.Model):
             'verified',
             'is_alive',
             'welcome_message',
+            'growth_level',
             'avatar_type',
             'avatar_uri',
         )
@@ -701,7 +764,7 @@ class User(models.Model):
         return data
 
     def json_me(self):
-        return self.dictify(
+        payload = self.dictify(
             'name',
             'user_id',
             'official',
@@ -724,6 +787,8 @@ class User(models.Model):
             'bark_unbound_at',
             'is_private_account',
         )
+        payload['growth'] = self.calculate_growth()
+        return payload
 
 
 class RefreshToken(models.Model):

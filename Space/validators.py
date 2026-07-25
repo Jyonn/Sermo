@@ -27,6 +27,7 @@ class SpaceErrors:
     MEMBER_LIMIT_INVALID = Error(message=_('Member limit should be at least 1'), code=Code.BadRequest)
     MEMBER_LIMIT_TOO_LOW = Error(message=_('Member limit cannot be lower than current member count'), code=Code.BadRequest)
     MEMBER_LIMIT_REACHED = Error(message=_('This space has reached its member limit'), code=Code.BadRequest)
+    LEVEL_NAMES_INVALID = Error(message=_('Space level names are invalid'), code=Code.BadRequest)
     ADMIN_ACCESS_FORBIDDEN = Error(message=_('Only the official account can access space administration'), code=Code.Forbidden)
     NOTIFICATOR_FAILED = Error(message=_('Failed to send notification'), code=Code.InternalServerError)
 
@@ -36,6 +37,8 @@ class SpaceValidator:
     SLUG_MAX_LENGTH = 15
     SLUG_MIN_LENGTH = 3
     MEMBER_LIMIT_MAX = 10000
+    LEVEL_COUNT = 5
+    LEVEL_NAME_MAX_LENGTH = 8
 
     @classmethod
     def name(cls, value):
@@ -66,3 +69,14 @@ class SpaceValidator:
         if member_limit < 1 or member_limit > cls.MEMBER_LIMIT_MAX:
             raise SpaceErrors.MEMBER_LIMIT_INVALID
         return member_limit
+
+    @classmethod
+    def level_names(cls, value):
+        if not isinstance(value, list) or len(value) != cls.LEVEL_COUNT:
+            raise SpaceErrors.LEVEL_NAMES_INVALID
+        normalized = [(item or '').strip() if isinstance(item, str) else '' for item in value]
+        if any(not item or len(item) > cls.LEVEL_NAME_MAX_LENGTH for item in normalized):
+            raise SpaceErrors.LEVEL_NAMES_INVALID
+        if len(set(normalized)) != cls.LEVEL_COUNT:
+            raise SpaceErrors.LEVEL_NAMES_INVALID
+        return normalized

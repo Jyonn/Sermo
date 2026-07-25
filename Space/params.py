@@ -14,6 +14,7 @@ class SpaceParams(metaclass=Params):
     name: Validator
     email: Validator
     member_limit: Validator
+    level_names = Validator('level_names').null().default(None)
     password = UserParams.password.copy().null().default(None)
     language = UserParams.language.copy()
     group_square_enabled = Validator('group_square_enabled') \

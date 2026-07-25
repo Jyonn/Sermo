@@ -206,12 +206,14 @@ class SpaceAdminSettingsView(View):
         SpaceParams.name,
         SpaceParams.group_square_enabled,
         SpaceParams.member_limit,
+        SpaceParams.level_names,
     )
     def post(self, request: Request):
         space = request.space.set_admin_settings(
             name=request.json.name,
             group_square_enabled=request.json.group_square_enabled,
             member_limit=request.json.member_limit,
+            level_names=request.json.level_names() if request.json.level_names is not None else None,
         )
         return space.json_private()
 
@@ -295,7 +297,14 @@ class SpaceUserListView(View):
         offset = request.query.offset
         limit = request.query.limit
         rows = users.order_by('name_pinyin', 'lower_name', 'id')[offset:offset + limit]
-        return [user.jsonl() for user in rows]
+        level_names = request.user.space.level_names or []
+        payload = []
+        for user in rows:
+            item = user.jsonl()
+            level_index = max(0, min(len(level_names) - 1, user.growth_level - 1))
+            item['growth_level_name'] = level_names[level_index] if level_names else ''
+            payload.append(item)
+        return payload
 
 
 class SpaceAdminUserListView(SpaceUserListView):
@@ -389,6 +398,9 @@ class SpaceAdminUserListView(SpaceUserListView):
         payload = []
         for user in paged_rows:
             item = user.json_admin()
+            level_names = request.space.level_names or []
+            level_index = max(0, min(len(level_names) - 1, user.growth_level - 1))
+            item['growth_level_name'] = level_names[level_index] if level_names else ''
             item['contacts'] = self._contact_status(user)
             item['notification_preferences'] = self._notification_status(user, preferences)
             payload.append(item)
