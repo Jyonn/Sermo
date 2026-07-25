@@ -670,6 +670,7 @@ class User(models.Model):
             'official',
             'verified',
             'is_alive',
+            'welcome_message',
             'avatar_type',
             'avatar_uri',
         )
