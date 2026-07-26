@@ -5,7 +5,13 @@ from smartdjango import analyse, OK
 
 from utils import auth, function
 from utils.auth import Request
-from utils.qiniu import issue_avatar_upload, validate_avatar_key, avatar_uri_for_key
+from utils.qiniu import (
+    issue_avatar_upload,
+    validate_avatar_key,
+    avatar_uri_for_key,
+    issue_chat_background_upload,
+    validate_chat_background_key,
+)
 from utils.global_settings import notificator
 from User.models import (
     NotificationPreference,
@@ -563,3 +569,33 @@ class AvatarCustomView(View):
         key = validate_avatar_key(request.json.key)
         request.user.set_custom_avatar(avatar_uri_for_key(key))
         return request.user.dictify('avatar_type', 'avatar_uri')
+
+
+class ChatBackgroundUploadView(View):
+    @auth.require_user
+    @analyse.json(
+        UserParams.avatar_file_name,
+        UserParams.avatar_content_type,
+    )
+    def post(self, request: Request):
+        request.user.require_growth_capability('chat_background')
+        return issue_chat_background_upload(
+            file_name=request.json.file_name,
+            content_type=request.json.content_type,
+        )
+
+
+class ChatBackgroundView(View):
+    @auth.require_user
+    @analyse.json(
+        UserParams.chat_background_theme,
+        UserParams.chat_background_key,
+    )
+    def post(self, request: Request):
+        theme = request.json.chat_background_theme
+        uri = ''
+        if theme == 'custom':
+            key = validate_chat_background_key(request.json.chat_background_key)
+            uri = avatar_uri_for_key(key)
+        request.user.set_chat_background(theme, uri)
+        return request.user.json_me()

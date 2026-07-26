@@ -311,3 +311,58 @@ class SpaceAdminApiTests(TestCase):
         )
         self.assertEqual(nickname_cooldown.status_code, 400)
         self.assertEqual(nickname_cooldown.json()['identifier'], 'USER@NICKNAME_CHANGE_COOLDOWN')
+
+    def test_chat_background_requires_level_eight(self):
+        locked = self.client.post(
+            '/users/me/chat-background',
+            data=json.dumps({'theme': 'paper'}),
+            content_type='application/json',
+            **self.user_authorization(self.member),
+        )
+        self.assertEqual(locked.status_code, 403)
+        self.assertEqual(locked.json()['identifier'], 'USER@GROWTH_LEVEL_REQUIRED')
+
+        self.member.set_password('safe-password')
+        GrowthEvent.objects.create(
+            user=self.member,
+            event_key='test:reach-level-eight',
+            category='test',
+            title='达到八级',
+            points=405,
+        )
+        self.member.reconcile_growth()
+        self.assertEqual(self.member.effective_growth_level(), 8)
+
+        updated = self.client.post(
+            '/users/me/chat-background',
+            data=json.dumps({'theme': 'paper'}),
+            content_type='application/json',
+            **self.user_authorization(self.member),
+        )
+        self.assertEqual(updated.status_code, 200, updated.content)
+        self.member.refresh_from_db()
+        self.assertEqual(self.member.chat_background_theme, 'paper')
+        self.assertEqual(self.member.chat_background_uri, '')
+
+    @patch('User.models.delete_chat_background_by_uri')
+    def test_replacing_chat_background_removes_previous_image(self, delete_background):
+        self.member.set_password('safe-password')
+        GrowthEvent.objects.create(
+            user=self.member,
+            event_key='test:reach-level-eight-for-background',
+            category='test',
+            title='达到八级',
+            points=405,
+        )
+        self.member.reconcile_growth()
+        self.member.chat_background_theme = 'custom'
+        self.member.chat_background_uri = 'https://resource.example.com/sermo/chat-background/old.jpg'
+        self.member.save(update_fields=['chat_background_theme', 'chat_background_uri'])
+
+        self.member.set_chat_background('mint')
+
+        delete_background.assert_called_once_with(
+            'https://resource.example.com/sermo/chat-background/old.jpg'
+        )
+        self.assertEqual(self.member.chat_background_theme, 'mint')
+        self.assertEqual(self.member.chat_background_uri, '')

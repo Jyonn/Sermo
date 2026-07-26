@@ -15,7 +15,12 @@ from pypinyin import lazy_pinyin
 from smartdjango import models, Choice
 
 from utils.global_settings import notificator
-from utils.qiniu import sign_private_download_url, delete_avatar_by_uri, build_avatar_display_uri
+from utils.qiniu import (
+    sign_private_download_url,
+    delete_avatar_by_uri,
+    build_avatar_display_uri,
+    delete_chat_background_by_uri,
+)
 from User.validators import UserValidator, UserErrors
 from utils import function
 
@@ -49,7 +54,7 @@ GROWTH_UNLOCKS = {
     5: ['发送视频', '修改群名称', '昵称每年可改'],
     6: ['自定义欢迎语', '广场招呼', '昵称每月可改', '橱窗主题'],
     7: ['好友上线提醒', '昵称每周可改'],
-    8: ['下载语音'],
+    8: ['下载语音', '自定义聊天背景'],
     9: ['基础头像框'],
     10: ['广场光环'],
     11: ['聊天气泡主题'],
@@ -74,6 +79,7 @@ GROWTH_CAPABILITY_LEVELS = {
     'plaza_greeting': 6,
     'online_reminder': 7,
     'download_audio': 8,
+    'chat_background': 8,
 }
 
 
@@ -203,6 +209,8 @@ class User(models.Model):
     )
     growth_score = models.PositiveIntegerField(default=0)
     growth_level = models.PositiveSmallIntegerField(default=1)
+    chat_background_theme = models.CharField(max_length=16, default='default')
+    chat_background_uri = models.CharField(max_length=255, default='')
 
     created_at = models.DateTimeField(auto_now_add=True)
     salt = models.CharField(max_length=vldt.SALT_MAX_LENGTH)
@@ -433,6 +441,18 @@ class User(models.Model):
         required_level = GROWTH_CAPABILITY_LEVELS[capability]
         if self.effective_growth_level() < required_level:
             raise UserErrors.GROWTH_LEVEL_REQUIRED(level=required_level)
+        return self
+
+    def set_chat_background(self, theme, uri=''):
+        self.require_growth_capability('chat_background')
+        normalized_theme = self.validators.chat_background_theme(theme)
+        normalized_uri = (uri or '').strip() if normalized_theme == 'custom' else ''
+        previous_uri = self.chat_background_uri
+        self.chat_background_theme = normalized_theme
+        self.chat_background_uri = normalized_uri
+        self.save(update_fields=['chat_background_theme', 'chat_background_uri'])
+        if previous_uri and previous_uri != normalized_uri:
+            delete_chat_background_by_uri(previous_uri)
         return self
 
     def nickname_change_interval_days(self):
@@ -961,6 +981,12 @@ class User(models.Model):
             'phone_unbound_at',
             'bark_unbound_at',
             'is_private_account',
+            'chat_background_theme',
+        )
+        payload['chat_background_uri'] = (
+            sign_private_download_url(self.chat_background_uri)
+            if self.chat_background_uri
+            else ''
         )
         payload['growth'] = self.calculate_growth()
         payload['name_changed_at'] = self.name_changed_at.timestamp() if self.name_changed_at else None

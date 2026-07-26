@@ -52,6 +52,9 @@ class UserErrors:
     AVATAR_FILE_TYPE_INVALID = Error(message=_('Invalid avatar image type'), code=Code.BadRequest)
     AVATAR_KEY_INVALID = Error(message=_('Invalid avatar key'), code=Code.BadRequest)
     AVATAR_DELETE_FAILED = Error(message=_('Failed to delete previous avatar'), code=Code.InternalServerError)
+    CHAT_BACKGROUND_FILE_TYPE_INVALID = Error(message=_('Invalid chat background image type'), code=Code.BadRequest)
+    CHAT_BACKGROUND_KEY_INVALID = Error(message=_('Invalid chat background key'), code=Code.BadRequest)
+    CHAT_BACKGROUND_THEME_INVALID = Error(message=_('Invalid chat background theme'), code=Code.BadRequest)
     WEB_PUSH_SUBSCRIPTION_INVALID = Error(message=_('Invalid web push subscription'), code=Code.BadRequest)
     EMAIL_NOT_VERIFIED = Error(message=_('Email is not verified'), code=Code.Forbidden)
     GESTURE_LOCK_PAYLOAD_INVALID = Error(message=_('Invalid gesture lock payload'), code=Code.BadRequest)
@@ -101,6 +104,7 @@ class UserValidator:
     }
     AVATAR_PRESET_MIN_ID = 1
     AVATAR_PRESET_MAX_ID = 80
+    CHAT_BACKGROUND_THEMES = {'default', 'paper', 'mint', 'dusk', 'custom'}
     GESTURE_LOCK_MIN_MINUTES = 1
     GESTURE_LOCK_MAX_MINUTES = 30
 
@@ -170,3 +174,10 @@ class UserValidator:
         if not (cls.AVATAR_PRESET_MIN_ID <= preset_id <= cls.AVATAR_PRESET_MAX_ID):
             raise UserErrors.AVATAR_PRESET_INVALID
         return preset_id
+
+    @classmethod
+    def chat_background_theme(cls, value):
+        theme = (value or '').strip().lower()
+        if theme not in cls.CHAT_BACKGROUND_THEMES:
+            raise UserErrors.CHAT_BACKGROUND_THEME_INVALID
+        return theme

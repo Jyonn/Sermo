@@ -20,8 +20,10 @@ QINIU_RS_HOST = 'rs.qiniuapi.com'
 QINIU_RS_BATCH_URL = f'https://{QINIU_RS_HOST}/batch'
 QINIU_TOKEN_EXPIRE_SECONDS = 10 * 60
 AVATAR_MAX_FILE_SIZE = 5 * 1024 * 1024  # 5M
+CHAT_BACKGROUND_MAX_FILE_SIZE = 10 * 1024 * 1024  # 10M
 AVATAR_DOWNLOAD_EXPIRE_SECONDS = 30 * 24 * 60 * 60
 AVATAR_PREFIX = 'sermo/avatar/'
+CHAT_BACKGROUND_PREFIX = 'sermo/chat-background/'
 MESSAGE_MEDIA_PREFIX = 'sermo/messages'
 MESSAGE_MEDIA_MAX_FILE_SIZE = {
     'image': 10 * 1024 * 1024,
@@ -48,6 +50,9 @@ ALLOWED_IMAGE_EXTENSIONS = {
     '.svg',
 }
 SAFE_KEY_PATTERN = re.compile(r'^sermo/avatar/[A-Za-z0-9][A-Za-z0-9._-]*$')
+CHAT_BACKGROUND_SAFE_KEY_PATTERN = re.compile(
+    r'^sermo/chat-background/[A-Za-z0-9][A-Za-z0-9._-]*$'
+)
 
 
 def _urlsafe_base64(data: bytes):
@@ -164,6 +169,21 @@ def validate_avatar_key(key: str):
     return normalized
 
 
+def build_chat_background_key(file_name: str, content_type: str = None):
+    extension = _guess_extension(file_name, content_type)
+    return f'{CHAT_BACKGROUND_PREFIX}{uuid.uuid4().hex}{extension}'
+
+
+def validate_chat_background_key(key: str):
+    normalized = (key or '').strip()
+    if not CHAT_BACKGROUND_SAFE_KEY_PATTERN.fullmatch(normalized):
+        raise UserErrors.CHAT_BACKGROUND_KEY_INVALID
+    extension = os.path.splitext(normalized)[1].lower()
+    if extension not in ALLOWED_IMAGE_EXTENSIONS:
+        raise UserErrors.CHAT_BACKGROUND_FILE_TYPE_INVALID
+    return normalized
+
+
 def build_upload_token(key: str, expire_seconds: int = QINIU_TOKEN_EXPIRE_SECONDS, max_file_size: int = None):
     access_key = _required_config(CI.QINIU_ACCESS_KEY)
     secret_key = _required_config(CI.QINIU_SECRET_KEY)
@@ -195,10 +215,9 @@ def _entry_uri(key: str):
     return _urlsafe_base64(f'{bucket}:{key}'.encode())
 
 
-def delete_file(key: str):
-    normalized_key = validate_avatar_key(key)
+def _delete_file(key: str):
     content_type = 'application/x-www-form-urlencoded'
-    body = f'op=/delete/{_entry_uri(normalized_key)}'
+    body = f'op=/delete/{_entry_uri(key)}'
     response = requests.post(
         QINIU_RS_BATCH_URL,
         data=body,
@@ -226,6 +245,10 @@ def delete_file(key: str):
     raise UserErrors.AVATAR_DELETE_FAILED(details=item)
 
 
+def delete_file(key: str):
+    return _delete_file(validate_avatar_key(key))
+
+
 def key_from_avatar_uri(avatar_uri: str):
     normalized = (avatar_uri or '').strip()
     if not normalized:
@@ -248,6 +271,24 @@ def delete_avatar_by_uri(avatar_uri: str):
     return delete_file(key)
 
 
+def key_from_chat_background_uri(uri: str):
+    normalized = (uri or '').strip()
+    if not normalized:
+        return None
+    parsed = urlparse(normalized)
+    path = (parsed.path or '').lstrip('/')
+    if not parsed.scheme or not parsed.netloc or not path.startswith(CHAT_BACKGROUND_PREFIX):
+        return None
+    return validate_chat_background_key(path)
+
+
+def delete_chat_background_by_uri(uri: str):
+    key = key_from_chat_background_uri(uri)
+    if not key:
+        return None
+    return _delete_file(key)
+
+
 def issue_avatar_upload(file_name: str, content_type: str = None):
     key = build_avatar_key(file_name=file_name, content_type=content_type)
     avatar_uri = avatar_uri_for_key(key)
@@ -258,6 +299,19 @@ def issue_avatar_upload(file_name: str, content_type: str = None):
         avatar_uri=sign_private_download_url(avatar_uri),
         expires_in=QINIU_TOKEN_EXPIRE_SECONDS,
         max_file_size=AVATAR_MAX_FILE_SIZE,
+    )
+
+
+def issue_chat_background_upload(file_name: str, content_type: str = None):
+    key = build_chat_background_key(file_name=file_name, content_type=content_type)
+    uri = avatar_uri_for_key(key)
+    return dict(
+        upload_token=build_upload_token(key, max_file_size=CHAT_BACKGROUND_MAX_FILE_SIZE),
+        upload_url=QINIU_UPLOAD_URL,
+        key=key,
+        resource_uri=sign_private_download_url(uri),
+        expires_in=QINIU_TOKEN_EXPIRE_SECONDS,
+        max_file_size=CHAT_BACKGROUND_MAX_FILE_SIZE,
     )
 
 

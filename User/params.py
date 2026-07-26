@@ -32,6 +32,12 @@ class UserParams(metaclass=Params):
     avatar_content_type = Validator('content_type') \
         .to(str) \
         .null().default(None)
+    chat_background_theme = Validator('theme', final_name='chat_background_theme') \
+        .to(str) \
+        .to(User.validators.chat_background_theme)
+    chat_background_key = Validator('key', final_name='chat_background_key') \
+        .to(str) \
+        .null().default('')
     language = Validator('language') \
         .to(str) \
         .null().default(None) \
