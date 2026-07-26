@@ -1250,9 +1250,17 @@ class UserPasswordRecoveryChallenge(models.Model):
     def recovery_channels(user):
         channels = []
         if user.email and user.email_verified_at:
-            channels.append(dict(channel=UserNotificationChoice.EMAIL, masked=UserPasswordRecoveryChallenge.mask_email(user.email)))
+            channels.append(dict(
+                channel=UserNotificationChoice.EMAIL,
+                type='email',
+                masked=UserPasswordRecoveryChallenge.mask_email(user.email),
+            ))
         if user.phone and user.phone_verified_at:
-            channels.append(dict(channel=UserNotificationChoice.SMS, masked=UserPasswordRecoveryChallenge.mask_phone(user.phone)))
+            channels.append(dict(
+                channel=UserNotificationChoice.SMS,
+                type='sms',
+                masked=UserPasswordRecoveryChallenge.mask_phone(user.phone),
+            ))
         return channels
 
     @staticmethod
