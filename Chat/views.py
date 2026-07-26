@@ -64,7 +64,7 @@ class GroupChatNameView(View):
     @auth.require_chat_member()
     def post(self, request):
         chat: Chat = request.query.chat
-        chat.rename(request.json.title)
+        chat.rename(request.user, request.json.title)
         return chat.json()
 
 
@@ -142,6 +142,8 @@ class ChatPreferenceView(View):
     )
     @auth.require_chat_member()
     def post(self, request):
+        if request.json.online_reminder_enabled:
+            request.user.require_growth_capability('online_reminder')
         preference = ChatUserPreference.update(
             request.query.chat,
             request.user,

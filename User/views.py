@@ -428,6 +428,19 @@ class WelcomeMessageView(View):
         return dict(welcome_message=request.user.welcome_message)
 
 
+class PlazaGreetingView(View):
+    @auth.require_user
+    def get(self, request: Request):
+        return dict(plaza_greeting=request.user.plaza_greeting)
+
+    @auth.require_user
+    @analyse.json(UserParams.plaza_greeting)
+    def post(self, request: Request):
+        _require_password_enabled(request.user)
+        request.user.set_plaza_greeting(request.json.plaza_greeting)
+        return dict(plaza_greeting=request.user.plaza_greeting)
+
+
 class UserNameView(View):
     @auth.require_user
     @analyse.json(UserParams.name)
@@ -453,6 +466,7 @@ class AvatarCustomUploadView(View):
     )
     def post(self, request: Request):
         _require_password_enabled(request.user)
+        request.user.require_growth_capability('custom_avatar')
         return issue_avatar_upload(
             file_name=request.json.file_name,
             content_type=request.json.content_type,

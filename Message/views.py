@@ -70,6 +70,14 @@ class MessageUploadView(View):
         MessageParams.content_type,
     )
     def post(self, request: Request):
+        capability = {
+            'image': 'send_image',
+            'audio': 'send_audio',
+            'location': 'send_location',
+            'video': 'send_video',
+        }.get(request.json.kind)
+        if capability:
+            request.user.require_growth_capability(capability)
         return issue_message_upload(
             kind=request.json.kind,
             file_name=request.json.file_name,

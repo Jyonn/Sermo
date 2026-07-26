@@ -21,6 +21,7 @@ class UserParams(metaclass=Params):
     lower_name: Validator
     password: Validator
     welcome_message: Validator
+    plaza_greeting = Validator('plaza_greeting').to(str).to(User.validators.plaza_greeting)
     avatar_preset_id = Validator('avatar_preset_id') \
         .to(int) \
         .to(User.validators.avatar_preset_id)

@@ -55,6 +55,8 @@ class UserErrors:
     WEB_PUSH_SUBSCRIPTION_INVALID = Error(message=_('Invalid web push subscription'), code=Code.BadRequest)
     EMAIL_NOT_VERIFIED = Error(message=_('Email is not verified'), code=Code.Forbidden)
     GESTURE_LOCK_PAYLOAD_INVALID = Error(message=_('Invalid gesture lock payload'), code=Code.BadRequest)
+    GROWTH_LEVEL_REQUIRED = Error(message=_('Level {level} is required for this feature'), code=Code.Forbidden)
+    NICKNAME_CHANGE_COOLDOWN = Error(message=_('Nickname can be changed again at {available_at}'), code=Code.BadRequest)
 
 
 RESERVED_SPACE_SLUGS = {
@@ -78,6 +80,7 @@ class UserValidator:
     SPACE_SLUG_MIN_LENGTH = 3
     SPACE_SLUG_RANDOM_LENGTH = 5
     WELCOME_MESSAGE_MAX_LENGTH = 500
+    PLAZA_GREETING_MAX_LENGTH = 30
     LANGUAGE_MAX_LENGTH = 16
     DEFAULT_LANGUAGE = 'en'
     SUPPORTED_LANGUAGES = {'en', 'zh-CN'}
@@ -141,6 +144,15 @@ class UserValidator:
         if not message:
             raise UserErrors.WELCOME_MESSAGE_EMPTY
         if len(message) > cls.WELCOME_MESSAGE_MAX_LENGTH:
+            raise UserErrors.WELCOME_MESSAGE_TOO_LONG
+        return message
+
+    @classmethod
+    def plaza_greeting(cls, value):
+        message = (value or '').strip()
+        if not message:
+            raise UserErrors.WELCOME_MESSAGE_EMPTY
+        if len(message) > cls.PLAZA_GREETING_MAX_LENGTH:
             raise UserErrors.WELCOME_MESSAGE_TOO_LONG
         return message
 

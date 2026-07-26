@@ -410,6 +410,14 @@ class Message(models.Model):
     @classmethod
     def create(cls, chat: Chat, user: User, message_type, content, reply_to=None, client_message_id=None):
         if chat.has_active_member(user):
+            capability = {
+                MessageTypeChoice.IMAGE: 'send_image',
+                MessageTypeChoice.AUDIO: 'send_audio',
+                MessageTypeChoice.LOCATION: 'send_location',
+                MessageTypeChoice.VIDEO: 'send_video',
+            }.get(message_type)
+            if capability:
+                user.require_growth_capability(capability)
             if reply_to is not None and (reply_to.chat_id != chat.id or reply_to.is_deleted):
                 raise MessageErrors.REPLY_TARGET_INVALID
             normalized_client_id = (client_message_id or '').strip()[:cls.vldt.MAX_CLIENT_MESSAGE_ID_LENGTH] or None

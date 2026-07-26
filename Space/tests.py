@@ -253,3 +253,61 @@ class SpaceAdminApiTests(TestCase):
 
         self.member.refresh_from_db()
         self.assertTrue(self.member.is_private_account)
+
+    def test_message_and_profile_features_follow_growth_route(self):
+        chat = Chat.get_or_create_direct(self.official, self.member)
+        image_payload = json.dumps({
+            'key': 'sermo/messages/image/locked.jpg',
+            'mime_type': 'image/jpeg',
+        })
+        locked_image = self.client.post(
+            f'/messages/?chat_id={chat.id}',
+            data=json.dumps({'type': MessageTypeChoice.IMAGE, 'content': image_payload}),
+            content_type='application/json',
+            **self.user_authorization(self.member),
+        )
+        self.assertEqual(locked_image.status_code, 403)
+        self.assertEqual(locked_image.json()['identifier'], 'USER@GROWTH_LEVEL_REQUIRED')
+
+        self.member.set_password('safe-password')
+        self.member.calculate_growth()
+        self.assertEqual(self.member.effective_growth_level(), 4)
+        image_response = self.client.post(
+            f'/messages/?chat_id={chat.id}',
+            data=json.dumps({'type': MessageTypeChoice.IMAGE, 'content': image_payload}),
+            content_type='application/json',
+            **self.user_authorization(self.member),
+        )
+        self.assertEqual(image_response.status_code, 200, image_response.content)
+
+        nickname_locked = self.client.post(
+            '/users/me/name',
+            data=json.dumps({'name': 'NextMember'}),
+            content_type='application/json',
+            **self.user_authorization(self.member),
+        )
+        self.assertEqual(nickname_locked.status_code, 403)
+
+        GrowthEvent.objects.create(
+            user=self.member,
+            event_key='test:reach-level-five',
+            category='test',
+            title='达到五级',
+            points=50,
+        )
+        self.member.reconcile_growth()
+        nickname_response = self.client.post(
+            '/users/me/name',
+            data=json.dumps({'name': 'NextMember'}),
+            content_type='application/json',
+            **self.user_authorization(self.member),
+        )
+        self.assertEqual(nickname_response.status_code, 200, nickname_response.content)
+        nickname_cooldown = self.client.post(
+            '/users/me/name',
+            data=json.dumps({'name': 'ThirdMember'}),
+            content_type='application/json',
+            **self.user_authorization(self.member),
+        )
+        self.assertEqual(nickname_cooldown.status_code, 400)
+        self.assertEqual(nickname_cooldown.json()['identifier'], 'USER@NICKNAME_CHANGE_COOLDOWN')

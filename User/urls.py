@@ -23,6 +23,7 @@ from User.views import (
     PrivateAccountView,
     ContactUnbindView,
     UserGrowthEventView,
+    PlazaGreetingView,
 )
 
 urlpatterns = [
@@ -45,6 +46,7 @@ urlpatterns = [
     path('me/unbind-contact', ContactUnbindView.as_view(), name='contact unbind'),
     path('me/name', UserNameView.as_view(), name='user name'),
     path('me/welcome-message', WelcomeMessageView.as_view(), name='welcome message'),
+    path('me/plaza-greeting', PlazaGreetingView.as_view(), name='plaza greeting'),
     path('me/avatar/preset', AvatarPresetView.as_view(), name='avatar preset'),
     path('me/avatar/custom/upload', AvatarCustomUploadView.as_view(), name='avatar custom upload'),
     path('me/avatar/custom', AvatarCustomView.as_view(), name='avatar custom'),

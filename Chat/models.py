@@ -237,6 +237,7 @@ class Chat(models.Model):
 
     @classmethod
     def create_group(cls, creator: User, users: List[User], title: str = None):
+        creator.require_growth_capability('create_group')
         cls._require_verified_group_operator(creator)
         normalized = {creator.id: creator}
         for user in users:
@@ -273,15 +274,17 @@ class Chat(models.Model):
                 ChatMember.invite(chat=chat, user=user, invited_by=creator)
             return chat
 
-    def rename(self, title: str):
+    def rename(self, operator: User, title: str):
         if not self.group:
             raise ChatErrors.NOT_GROUP_CHAT(chat=self.id)
+        operator.require_growth_capability('rename_group')
         self.title = (title or '').strip() or self.title
         self.save(update_fields=['title'])
 
     def invite_member(self, inviter: User, user: User):
         if not self.group:
             raise ChatErrors.NOT_GROUP_CHAT(chat=self.id)
+        inviter.require_growth_capability('invite_group_member')
         self._require_verified_group_operator(inviter)
         if user.space_id != self.space_id:
             raise ChatErrors.UNALIGNED_SPACE

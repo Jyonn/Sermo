@@ -43,11 +43,37 @@ GROWTH_MILESTONES = [
 GROWTH_MILESTONE_LIMITS = {key: points for key, _, _, points in GROWTH_MILESTONES}
 GROWTH_UNLOCKS = {
     1: ['基础沟通'],
-    3: ['等级签'],
-    6: ['橱窗主题'],
+    2: ['发送图片'],
+    3: ['发送语音与位置', '等级签'],
+    4: ['自定义头像', '创建群聊'],
+    5: ['发送视频', '修改群名称', '昵称每年可改'],
+    6: ['自定义欢迎语', '广场招呼', '昵称每月可改', '橱窗主题'],
+    7: ['好友上线提醒', '昵称每周可改'],
+    8: ['下载语音'],
+    9: ['基础头像框'],
     10: ['广场光环'],
+    11: ['聊天气泡主题'],
+    12: ['个人名片主题'],
     14: ['动态轨迹'],
+    15: ['入场效果'],
+    16: ['成长报告'],
+    17: ['稀有头像框'],
     18: ['尽兴徽记'],
+}
+GROWTH_CAPABILITY_LEVELS = {
+    'send_image': 2,
+    'send_audio': 3,
+    'send_location': 3,
+    'custom_avatar': 4,
+    'create_group': 4,
+    'invite_group_member': 4,
+    'rename_nickname': 5,
+    'rename_group': 5,
+    'send_video': 5,
+    'welcome_message': 6,
+    'plaza_greeting': 6,
+    'online_reminder': 7,
+    'download_audio': 8,
 }
 
 
@@ -164,6 +190,8 @@ class User(models.Model):
         default='',
         validators=[vldt.welcome_message],
     )
+    plaza_greeting = models.CharField(max_length=vldt.PLAZA_GREETING_MAX_LENGTH, default='')
+    name_changed_at = models.DateTimeField(null=True, blank=True)
     avatar_type = models.CharField(
         max_length=16,
         choices=UserAvatarTypeChoice.to_choices(),
@@ -378,6 +406,10 @@ class User(models.Model):
         return self
 
     def set_name(self, name, save=True):
+        self.require_growth_capability('rename_nickname')
+        available_at = self.nickname_change_available_at()
+        if available_at and timezone.now() < available_at:
+            raise UserErrors.NICKNAME_CHANGE_COOLDOWN(available_at=available_at.isoformat())
         normalized = (name or '').strip()
         self.vldt.name(normalized)
         lower_name = normalized.lower()
@@ -389,8 +421,35 @@ class User(models.Model):
         self.lower_name = lower_name
         self.name_pinyin = self.build_name_pinyin(normalized)
         if save:
-            self.save(update_fields=['name', 'lower_name', 'name_pinyin'])
+            self.name_changed_at = timezone.now()
+            self.save(update_fields=['name', 'lower_name', 'name_pinyin', 'name_changed_at'])
         return self
+
+    def effective_growth_level(self):
+        score = GROWTH_THRESHOLDS[-1] if self.is_official else self.growth_score
+        return min(self._growth_level_for_score(score), self.growth_level_cap()[0])
+
+    def require_growth_capability(self, capability):
+        required_level = GROWTH_CAPABILITY_LEVELS[capability]
+        if self.effective_growth_level() < required_level:
+            raise UserErrors.GROWTH_LEVEL_REQUIRED(level=required_level)
+        return self
+
+    def nickname_change_interval_days(self):
+        level = self.effective_growth_level()
+        if level < 5:
+            return None
+        if level == 5:
+            return 365
+        if level == 6:
+            return 30
+        return 7
+
+    def nickname_change_available_at(self):
+        days = self.nickname_change_interval_days()
+        if days is None or self.name_changed_at is None:
+            return None
+        return self.name_changed_at + datetime.timedelta(days=days)
 
     @classmethod
     def default_welcome_message(cls, space, role, language):
@@ -416,10 +475,18 @@ class User(models.Model):
         return self
 
     def set_welcome_message(self, welcome_message, save=True):
+        self.require_growth_capability('welcome_message')
         normalized = self.vldt.welcome_message(welcome_message)
         self.welcome_message = normalized
         if save:
             self.save(update_fields=['welcome_message'])
+        return self
+
+    def set_plaza_greeting(self, plaza_greeting, save=True):
+        self.require_growth_capability('plaza_greeting')
+        self.plaza_greeting = self.vldt.plaza_greeting(plaza_greeting)
+        if save:
+            self.save(update_fields=['plaza_greeting'])
         return self
 
     def bind_contact(self, channel: int, target: str):
@@ -535,6 +602,7 @@ class User(models.Model):
         return self
 
     def set_custom_avatar(self, avatar_uri: str, save=True):
+        self.require_growth_capability('custom_avatar')
         previous_avatar_type = self.avatar_type
         previous_avatar_uri = self.avatar_uri
         self.avatar_type = UserAvatarTypeChoice.CUSTOM
@@ -821,6 +889,10 @@ class User(models.Model):
                 )
                 for index, threshold in enumerate(GROWTH_THRESHOLDS, start=1)
             ],
+            capabilities={
+                key: dict(required_level=required_level, available=level >= required_level)
+                for key, required_level in GROWTH_CAPABILITY_LEVELS.items()
+            },
         )
 
     def tiny_json(self):
@@ -834,6 +906,7 @@ class User(models.Model):
             'verified',
             'is_alive',
             'welcome_message',
+            'plaza_greeting',
             'growth_level',
             'avatar_type',
             'avatar_uri',
@@ -872,6 +945,7 @@ class User(models.Model):
             'has_password',
             'language',
             'welcome_message',
+            'plaza_greeting',
             'is_alive',
             'verified',
             'avatar_type',
@@ -889,6 +963,12 @@ class User(models.Model):
             'is_private_account',
         )
         payload['growth'] = self.calculate_growth()
+        payload['name_changed_at'] = self.name_changed_at.timestamp() if self.name_changed_at else None
+        available_at = self.nickname_change_available_at()
+        payload['nickname_change'] = dict(
+            interval_days=self.nickname_change_interval_days(),
+            available_at=available_at.timestamp() if available_at else None,
+        )
         return payload
 
 
