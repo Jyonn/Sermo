@@ -28,6 +28,19 @@ GROWTH_THRESHOLDS = [
     0, 20, 45, 80, 130, 200, 300, 440, 620,
     850, 1150, 1530, 2000, 2580, 3300, 4180, 5250, 6550,
 ]
+GROWTH_MILESTONES = [
+    ('explore:image', 'explore', '发送照片', 30),
+    ('explore:location', 'explore', '分享位置', 35),
+    ('explore:avatar', 'explore', '换一张头像', 20),
+    ('explore:install_webapp', 'explore', '安装 WebApp', 60),
+    ('social:plaza_friend', 'social', '从广场认识朋友', 30),
+    ('social:qr_friend', 'social', '二维码结识认证好友', 80),
+    ('security:password', 'security', '设置密码', 35),
+    ('security:email', 'security', '认证邮箱', 45),
+    ('security:phone', 'security', '绑定手机', 45),
+    ('security:bark', 'security', '绑定即时提醒', 25),
+]
+GROWTH_MILESTONE_LIMITS = {key: points for key, _, _, points in GROWTH_MILESTONES}
 
 
 def normalize_bark_endpoint(value):
@@ -684,11 +697,13 @@ class User(models.Model):
         event_key = f'{key}:{timezone.localdate().isoformat()}' if daily_limit else key
         with transaction.atomic():
             locked = User.objects.select_for_update().get(id=self.id)
-            event, _ = GrowthEvent.objects.get_or_create(
+            event, created = GrowthEvent.objects.get_or_create(
                 user=locked,
                 event_key=event_key,
                 defaults=dict(category=category, title=title, points=0),
             )
+            if daily_limit is None and not created and event.points > 0:
+                return 0
             available = points if daily_limit is None else max(0, daily_limit - event.points)
             awarded = min(points, available)
             if awarded <= 0:
@@ -701,6 +716,29 @@ class User(models.Model):
             self.growth_score = locked.growth_score
             self.growth_level = locked.growth_level
         return awarded
+
+    def reconcile_growth(self):
+        if self.is_official:
+            return GROWTH_THRESHOLDS[-1]
+        with transaction.atomic():
+            locked = User.objects.select_for_update().get(id=self.id)
+            events = list(locked.growth_events.select_for_update())
+            total = 0
+            for event in events:
+                limit = 20 if event.event_key.startswith('daily:chat:') else GROWTH_MILESTONE_LIMITS.get(event.event_key)
+                normalized_points = min(event.points, limit) if limit is not None else event.points
+                if normalized_points != event.points:
+                    event.points = normalized_points
+                    event.save(update_fields=['points'])
+                total += normalized_points
+            level = locked._growth_level_for_score(total)
+            if locked.growth_score != total or locked.growth_level != level:
+                locked.growth_score = total
+                locked.growth_level = level
+                locked.save(update_fields=['growth_score', 'growth_level'])
+            self.growth_score = total
+            self.growth_level = level
+        return total
 
     @staticmethod
     def _growth_level_for_score(score):
@@ -718,7 +756,7 @@ class User(models.Model):
                 self.award_growth('security:phone', 45, category='security', title='绑定手机')
             if self.bark_verified_at:
                 self.award_growth('security:bark', 25, category='security', title='绑定即时提醒')
-            score = self.growth_score
+            score = self.reconcile_growth()
         level = self._growth_level_for_score(score)
         if save and (self.growth_score != score or self.growth_level != level):
             self.growth_score = score
@@ -741,18 +779,6 @@ class User(models.Model):
             privileges.append('尽兴徽记')
         recent_events = list(self.growth_events.order_by('-updated_at')[:8])
         earned_keys = set(self.growth_events.values_list('event_key', flat=True))
-        milestone_definitions = [
-            ('explore:image', 'explore', '发送照片', 30),
-            ('explore:location', 'explore', '分享位置', 35),
-            ('explore:avatar', 'explore', '换一张头像', 20),
-            ('explore:install_webapp', 'explore', '安装 WebApp', 60),
-            ('social:plaza_friend', 'social', '从广场认识朋友', 30),
-            ('social:qr_friend', 'social', '二维码结识认证好友', 80),
-            ('security:password', 'security', '设置密码', 35),
-            ('security:email', 'security', '认证邮箱', 45),
-            ('security:phone', 'security', '绑定手机', 45),
-            ('security:bark', 'security', '绑定即时提醒', 25),
-        ]
         return dict(
             score=score,
             level=level,
@@ -767,7 +793,7 @@ class User(models.Model):
             ),
             milestones=[
                 dict(key=key, category=category, title=title, points=points, earned=self.is_official or key in earned_keys)
-                for key, category, title, points in milestone_definitions
+                for key, category, title, points in GROWTH_MILESTONES
             ],
         )
 

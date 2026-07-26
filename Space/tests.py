@@ -7,7 +7,7 @@ from Chat.models import Chat
 from Config.models import Config, ConfigInstance
 from Message.models import Message, MessageTypeChoice
 from Space.models import Space
-from User.models import NotificationPreference, User, UserNotificationChoice
+from User.models import GrowthEvent, NotificationPreference, User, UserNotificationChoice
 from utils import auth
 
 
@@ -188,3 +188,21 @@ class SpaceAdminApiTests(TestCase):
         self.assertTrue(
             next(item for item in growth['milestones'] if item['key'] == 'security:email')['earned']
         )
+
+    def test_one_time_growth_is_idempotent_and_repairs_inflated_points(self):
+        self.member.calculate_growth()
+        self.member.calculate_growth()
+        email_event = GrowthEvent.objects.get(user=self.member, event_key='security:email')
+        self.assertEqual(email_event.points, 45)
+
+        email_event.points = 450
+        email_event.save(update_fields=['points'])
+        self.member.growth_score = 450
+        self.member.save(update_fields=['growth_score'])
+
+        growth = self.member.calculate_growth()
+        email_event.refresh_from_db()
+        self.member.refresh_from_db()
+        self.assertEqual(email_event.points, 45)
+        self.assertEqual(growth['score'], 45)
+        self.assertEqual(self.member.growth_score, 45)
