@@ -19,7 +19,7 @@ from smartdjango import models, Choice
 
 from Chat.models import Chat
 from Message.validators import MessageErrors, MessageValidator
-from User.models import User
+from User.models import GrowthEvent, User
 from utils.qiniu import sign_private_download_url, avatar_uri_for_key, build_message_image_thumbnail_uri, build_message_video_thumbnail_uri, validate_message_media_key
 
 
@@ -448,6 +448,18 @@ class Message(models.Model):
                 VideoMetadata.queue_for_message(message)
             if message.type == MessageTypeChoice.TEXT:
                 LinkPreview.queue_for_text(message.content)
+            if message.type != MessageTypeChoice.SYSTEM:
+                user.award_growth(
+                    'daily:chat',
+                    4 if GrowthEvent.daily_points(user, 'daily:chat') == 0 else 2,
+                    category='daily',
+                    title='今日聊天',
+                    daily_limit=20,
+                )
+            if message.type == MessageTypeChoice.IMAGE:
+                user.award_growth('explore:image', 30, category='explore', title='发送照片')
+            elif message.type == MessageTypeChoice.LOCATION:
+                user.award_growth('explore:location', 35, category='explore', title='分享位置')
             return message
         raise MessageErrors.NOT_A_MEMBER
 

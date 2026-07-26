@@ -27,6 +27,7 @@ from User.params import (
     UserWebReminderPreferenceParams,
     WebPushSubscriptionParams,
     UserContactVerificationCodeParams,
+    UserGrowthEventParams,
     UserPrivateAccountParams,
     UserContactUnbindParams,
 )
@@ -73,6 +74,20 @@ class UserMeView(View):
         user.remove()
         RefreshToken.objects.filter(user=user, revoked_at__isnull=True).update(revoked_at=timezone.now())
         return OK
+
+
+class UserGrowthEventView(View):
+    EVENTS = {
+        'install_webapp': ('explore:install_webapp', 60, '安装 WebApp'),
+        'plaza_friend': ('social:plaza_friend', 30, '从广场认识朋友'),
+    }
+
+    @auth.require_user
+    @analyse.json(UserGrowthEventParams.event)
+    def post(self, request: Request):
+        key, points, title = self.EVENTS[request.json.event]
+        awarded = request.user.award_growth(key, points, category='explore', title=title)
+        return dict(awarded=awarded, growth=request.user.calculate_growth())
 
 
 class RefreshView(View):

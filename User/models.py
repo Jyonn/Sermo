@@ -24,6 +24,11 @@ FRONTEND_SPACE_HOST_SUFFIX = 'sermo.jyonn.space'
 BARK_ENDPOINT_PATTERN = re.compile(r'^https://api\.day\.app/([^/?#\s]+)', re.IGNORECASE)
 logger = logging.getLogger(__name__)
 
+GROWTH_THRESHOLDS = [
+    0, 20, 45, 80, 130, 200, 300, 440, 620,
+    850, 1150, 1530, 2000, 2580, 3300, 4180, 5250, 6550,
+]
+
 
 def normalize_bark_endpoint(value):
     target = (value or '').strip()
@@ -339,6 +344,7 @@ class User(models.Model):
         self.password = function.hash_password(password, self.salt)
         if save:
             self.save(update_fields=['password'])
+            self.award_growth('security:password', 35, category='security', title='设置密码')
         return self
 
     def set_language(self, language, save=True):
@@ -415,6 +421,7 @@ class User(models.Model):
                 self.email_verified_at = now
                 self.account_level = UserAccountLevelChoice.VERIFIED
                 self.save(update_fields=['email', 'email_verified_at', 'account_level'])
+            self.award_growth('security:email', 45, category='security', title='认证邮箱')
             return self
         if channel == UserNotificationChoice.SMS:
             with transaction.atomic():
@@ -430,11 +437,13 @@ class User(models.Model):
                 self.phone = target
                 self.phone_verified_at = now
                 self.save(update_fields=['phone', 'phone_verified_at'])
+            self.award_growth('security:phone', 45, category='security', title='绑定手机')
             return self
         if channel == UserNotificationChoice.BARK:
             self.bark = normalize_bark_endpoint(target)
             self.bark_verified_at = now
             self.save(update_fields=['bark', 'bark_verified_at'])
+            self.award_growth('security:bark', 25, category='security', title='绑定即时提醒')
             return self
         raise UserErrors.CONTACT_CHANNEL_INVALID
 
@@ -503,6 +512,7 @@ class User(models.Model):
         if save:
             self.save(update_fields=['avatar_type', 'avatar_uri'])
             self._delete_previous_custom_avatar(previous_avatar_type, previous_avatar_uri, self.avatar_uri)
+            self.award_growth('explore:avatar', 20, category='explore', title='换一张头像')
         return self
 
     def set_custom_avatar(self, avatar_uri: str, save=True):
@@ -513,6 +523,7 @@ class User(models.Model):
         if save:
             self.save(update_fields=['avatar_type', 'avatar_uri'])
             self._delete_previous_custom_avatar(previous_avatar_type, previous_avatar_uri, self.avatar_uri)
+            self.award_growth('explore:avatar', 20, category='explore', title='换一张头像')
         return self
 
     @staticmethod
@@ -667,52 +678,81 @@ class User(models.Model):
         index = max(0, min(len(names) - 1, self.growth_level - 1))
         return names[index] if names else ''
 
+    def award_growth(self, key, points, category='explore', title='', daily_limit=None):
+        if self.is_official or points <= 0:
+            return 0
+        event_key = f'{key}:{timezone.localdate().isoformat()}' if daily_limit else key
+        with transaction.atomic():
+            locked = User.objects.select_for_update().get(id=self.id)
+            event, _ = GrowthEvent.objects.get_or_create(
+                user=locked,
+                event_key=event_key,
+                defaults=dict(category=category, title=title, points=0),
+            )
+            available = points if daily_limit is None else max(0, daily_limit - event.points)
+            awarded = min(points, available)
+            if awarded <= 0:
+                return 0
+            event.points += awarded
+            event.save(update_fields=['points'])
+            locked.growth_score += awarded
+            locked.growth_level = locked._growth_level_for_score(locked.growth_score)
+            locked.save(update_fields=['growth_score', 'growth_level'])
+            self.growth_score = locked.growth_score
+            self.growth_level = locked.growth_level
+        return awarded
+
+    @staticmethod
+    def _growth_level_for_score(score):
+        return max(index + 1 for index, threshold in enumerate(GROWTH_THRESHOLDS) if score >= threshold)
+
     def calculate_growth(self, save=True):
         if self.is_official:
-            score = 120
+            score = GROWTH_THRESHOLDS[-1]
         else:
-            from Friendship.models import Friendship, FriendshipStatusChoice
-            from Message.models import Message
-
-            security_score = (
-                (8 if self.has_password else 0)
-                + (14 if self.email_verified_at else 0)
-                + (14 if self.phone_verified_at else 0)
-                + (6 if self.bark_verified_at else 0)
-            )
-            tenure_days = max(0, (timezone.now() - self.created_at).days)
-            tenure_score = min(18, tenure_days // 7)
-            friendship_count = Friendship.objects.filter(
-                Q(user_low=self) | Q(user_high=self),
-                status=FriendshipStatusChoice.ACCEPTED,
-            ).count()
-            friendship_score = min(24, friendship_count * 3)
-            active_days = Message.objects.filter(
-                user=self,
-                is_deleted=False,
-            ).values('created_at__date').distinct().count()
-            activity_score = min(40, active_days * 2)
-            score = min(120, security_score + tenure_score + friendship_score + activity_score)
-
-        thresholds = [0, 15, 35, 65, 100]
-        level = max(index + 1 for index, threshold in enumerate(thresholds) if score >= threshold)
+            if self.has_password:
+                self.award_growth('security:password', 35, category='security', title='设置密码')
+            if self.email_verified_at:
+                self.award_growth('security:email', 45, category='security', title='认证邮箱')
+            if self.phone_verified_at:
+                self.award_growth('security:phone', 45, category='security', title='绑定手机')
+            if self.bark_verified_at:
+                self.award_growth('security:bark', 25, category='security', title='绑定即时提醒')
+            score = self.growth_score
+        level = self._growth_level_for_score(score)
         if save and (self.growth_score != score or self.growth_level != level):
             self.growth_score = score
             self.growth_level = level
             self.save(update_fields=['growth_score', 'growth_level'])
         names = self.space.level_names or []
-        next_score = thresholds[level] if level < len(thresholds) else None
-        current_threshold = thresholds[level - 1]
+        next_score = GROWTH_THRESHOLDS[level] if level < len(GROWTH_THRESHOLDS) else None
+        current_threshold = GROWTH_THRESHOLDS[level - 1]
         progress = 1 if next_score is None else (score - current_threshold) / max(1, next_score - current_threshold)
-        privileges = ['基础沟通']
-        if level >= 2:
-            privileges.append('等级徽章')
+        privileges = ['成长等级']
         if level >= 3:
-            privileges.append('主题橱窗')
-        if level >= 4:
+            privileges.append('等级签')
+        if level >= 6:
+            privileges.append('橱窗主题')
+        if level >= 10:
             privileges.append('广场光环')
-        if level >= 5:
+        if level >= 14:
+            privileges.append('动态轨迹')
+        if level >= 18:
             privileges.append('尽兴徽记')
+        recent_events = list(self.growth_events.order_by('-updated_at')[:8])
+        earned_keys = set(self.growth_events.values_list('event_key', flat=True))
+        milestone_definitions = [
+            ('explore:image', 'explore', '发送照片', 30),
+            ('explore:location', 'explore', '分享位置', 35),
+            ('explore:avatar', 'explore', '换一张头像', 20),
+            ('explore:install_webapp', 'explore', '安装 WebApp', 60),
+            ('social:plaza_friend', 'social', '从广场认识朋友', 30),
+            ('social:qr_friend', 'social', '二维码结识认证好友', 80),
+            ('security:password', 'security', '设置密码', 35),
+            ('security:email', 'security', '认证邮箱', 45),
+            ('security:phone', 'security', '绑定手机', 45),
+            ('security:bark', 'security', '绑定即时提醒', 25),
+        ]
         return dict(
             score=score,
             level=level,
@@ -720,6 +760,15 @@ class User(models.Model):
             next_score=next_score,
             progress=round(max(0, min(1, progress)), 4),
             privileges=privileges,
+            recent_events=[event.jsonl() for event in recent_events],
+            daily_chat=dict(
+                earned=GrowthEvent.daily_points(self, 'daily:chat'),
+                limit=20,
+            ),
+            milestones=[
+                dict(key=key, category=category, title=title, points=points, earned=self.is_official or key in earned_keys)
+                for key, category, title, points in milestone_definitions
+            ],
         )
 
     def tiny_json(self):
@@ -789,6 +838,43 @@ class User(models.Model):
         )
         payload['growth'] = self.calculate_growth()
         return payload
+
+
+class GrowthEvent(models.Model):
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='growth_events',
+    )
+    event_key = models.CharField(max_length=100)
+    category = models.CharField(max_length=20)
+    title = models.CharField(max_length=40)
+    points = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['user', 'event_key'],
+                name='user_growth_event_unique',
+            ),
+        ]
+
+    @classmethod
+    def daily_points(cls, user, key):
+        event_key = f'{key}:{timezone.localdate().isoformat()}'
+        event = cls.objects.filter(user=user, event_key=event_key).first()
+        return event.points if event else 0
+
+    def jsonl(self):
+        return dict(
+            key=self.event_key.split(':20', 1)[0],
+            category=self.category,
+            title=self.title,
+            points=self.points,
+            created_at=self.updated_at.timestamp(),
+        )
 
 
 class RefreshToken(models.Model):

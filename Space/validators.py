@@ -37,7 +37,7 @@ class SpaceValidator:
     SLUG_MAX_LENGTH = 15
     SLUG_MIN_LENGTH = 3
     MEMBER_LIMIT_MAX = 10000
-    LEVEL_COUNT = 5
+    LEVEL_COUNT = 18
     LEVEL_NAME_MAX_LENGTH = 8
 
     @classmethod

@@ -5,7 +5,7 @@ from django.test import TestCase
 
 from Chat.models import Chat
 from Config.models import Config, ConfigInstance
-from Message.models import Message
+from Message.models import Message, MessageTypeChoice
 from Space.models import Space
 from User.models import NotificationPreference, User, UserNotificationChoice
 from utils import auth
@@ -141,7 +141,7 @@ class SpaceAdminApiTests(TestCase):
         self.assertEqual(email_pref['offline_threshold_minutes'], 12)
 
     def test_admin_can_name_space_growth_levels(self):
-        level_names = ['初见', '同路', '热场', '浪尖', '尽兴']
+        level_names = [f'阶段{index}' for index in range(1, 19)]
         response = self.client.post(
             '/spaces/admin/settings',
             data=json.dumps({
@@ -160,12 +160,31 @@ class SpaceAdminApiTests(TestCase):
         self.assertEqual(response.json()['body']['level_names'], level_names)
 
     def test_official_account_has_highest_growth_level(self):
-        self.space.level_names = ['初见', '同路', '热场', '浪尖', '尽兴']
+        self.space.level_names = [f'阶段{index}' for index in range(1, 19)]
         self.space.save(update_fields=['level_names'])
 
         growth = self.official.calculate_growth()
 
-        self.assertEqual(growth['score'], 120)
-        self.assertEqual(growth['level'], 5)
-        self.assertEqual(growth['name'], '尽兴')
+        self.assertEqual(growth['score'], 6550)
+        self.assertEqual(growth['level'], 18)
+        self.assertEqual(growth['name'], '阶段18')
         self.assertIn('广场光环', growth['privileges'])
+
+    def test_daily_chat_growth_is_capped(self):
+        chat = Chat.get_or_create_direct(self.official, self.member)
+        for index in range(20):
+            Message.create(
+                chat=chat,
+                user=self.member,
+                message_type=MessageTypeChoice.TEXT,
+                content=f'message {index}',
+                client_message_id=f'growth-{index}',
+            )
+
+        self.member.refresh_from_db()
+        growth = self.member.calculate_growth()
+        self.assertEqual(growth['daily_chat']['earned'], 20)
+        self.assertEqual(self.member.growth_score, 65)
+        self.assertTrue(
+            next(item for item in growth['milestones'] if item['key'] == 'security:email')['earned']
+        )

@@ -39,6 +39,7 @@ class Friendship(models.Model):
         default=FriendshipStatusChoice.PENDING,
         db_index=True,
     )
+    source = models.CharField(max_length=16, default='', blank=True)
     is_system_locked = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -156,7 +157,11 @@ class Friendship(models.Model):
         if payload['space'].id != requester.space_id:
             raise FriendshipErrors.INVITE_TOKEN_SPACE_MISMATCH
         inviter = payload['inviter']
-        return cls.create(from_user=requester, to_user=inviter, allow_unverified=True)
+        item = cls.create(from_user=requester, to_user=inviter, allow_unverified=True)
+        if item.source != 'qr':
+            item.source = 'qr'
+            item.save(update_fields=['source', 'updated_at'])
+        return item
 
     def _is_participant(self, user: User):
         return user.id in (self.user_low_id, self.user_high_id)
@@ -255,6 +260,15 @@ class Friendship(models.Model):
                     ),
                 )
             self._send_accept_welcome_message(responder=user)
+            if self.source == 'qr':
+                inviter = self._request_target()
+                if inviter and inviter.verified:
+                    inviter.award_growth(
+                        'social:qr_friend',
+                        80,
+                        category='social',
+                        title='二维码结识认证好友',
+                    )
         return self
 
     def _send_accept_welcome_message(self, responder: User):

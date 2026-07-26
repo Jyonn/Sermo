@@ -22,11 +22,13 @@ from User.views import (
     AccountSwitchExchangeView,
     PrivateAccountView,
     ContactUnbindView,
+    UserGrowthEventView,
 )
 
 urlpatterns = [
     path('heartbeat', HeartbeatView.as_view(), name='heartbeat'),
     path('me', UserMeView.as_view(), name='user me'),
+    path('me/growth-events', UserGrowthEventView.as_view(), name='user growth event'),
     path('refresh', RefreshView.as_view(), name='token refresh'),
     path('logout', LogoutView.as_view(), name='token revoke'),
     path('me/switch-accounts', AccountSwitchListView.as_view(), name='account switch list'),

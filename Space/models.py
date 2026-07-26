@@ -10,7 +10,11 @@ from Space.validators import SpaceValidator, SpaceErrors
 
 
 def default_level_names():
-    return ['初来', '同频', '热聊', '浪潮', '尽兴']
+    return [
+        '初见', '起言', '同频', '渐熟', '热聊', '成群',
+        '入浪', '逐潮', '回响', '共鸣', '风生', '云起',
+        '浪涌', '潮生', '星聚', '盛放', '无界', '尽兴',
+    ]
 
 
 class SpaceNormalizers:

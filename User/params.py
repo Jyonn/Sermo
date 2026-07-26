@@ -51,6 +51,13 @@ class UserPrivateAccountParams(metaclass=Params):
     enabled = Validator('enabled').to(int).bool(lambda x: x in (0, 1), message=_('enabled should be 0 or 1'))
 
 
+class UserGrowthEventParams(metaclass=Params):
+    event = Validator('event').to(str).bool(
+        lambda value: value in ('install_webapp', 'plaza_friend'),
+        message=_('Invalid growth event'),
+    )
+
+
 class UserPasswordParams(metaclass=Params):
     old_password = UserParams.password.copy().rename('old_password', final_name='old_password') \
         .null().default(None)
