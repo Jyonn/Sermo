@@ -2,6 +2,7 @@ import json
 from unittest.mock import patch
 
 from django.test import TestCase
+from django.utils import timezone
 
 from Chat.models import Chat
 from Config.models import Config, ConfigInstance
@@ -162,6 +163,9 @@ class SpaceAdminApiTests(TestCase):
     def test_official_account_has_highest_growth_level(self):
         self.space.level_names = [f'阶段{index}' for index in range(1, 19)]
         self.space.save(update_fields=['level_names'])
+        self.official.phone = '13800000000'
+        self.official.phone_verified_at = timezone.now()
+        self.official.save(update_fields=['phone', 'phone_verified_at'])
 
         growth = self.official.calculate_growth()
 
@@ -208,3 +212,44 @@ class SpaceAdminApiTests(TestCase):
         self.assertEqual(email_event.points, 45)
         self.assertEqual(growth['score'], 45)
         self.assertEqual(self.member.growth_score, 45)
+
+    def test_growth_level_is_capped_by_security_setup(self):
+        GrowthEvent.objects.create(
+            user=self.member,
+            event_key='test:large-growth',
+            category='test',
+            title='测试成长',
+            points=7000,
+        )
+
+        self.assertEqual(self.member.calculate_growth()['level'], 3)
+
+        self.member.set_password('safe-password')
+        self.member.email = None
+        self.member.email_verified_at = None
+        self.member.save(update_fields=['email', 'email_verified_at'])
+        self.assertEqual(self.member.calculate_growth()['level'], 6)
+
+        self.member.email = 'member@example.com'
+        self.member.email_verified_at = timezone.now()
+        self.member.save(update_fields=['email', 'email_verified_at'])
+        self.assertEqual(self.member.calculate_growth()['level'], 9)
+
+        self.member.phone = '13800000001'
+        self.member.phone_verified_at = timezone.now()
+        self.member.save(update_fields=['phone', 'phone_verified_at'])
+        growth = self.member.calculate_growth()
+        self.assertEqual(growth['level'], 18)
+        self.assertEqual(growth['level_cap'], 18)
+
+    def test_private_account_only_requires_verified_phone(self):
+        self.member.email = None
+        self.member.email_verified_at = None
+        self.member.phone = '13800000002'
+        self.member.phone_verified_at = timezone.now()
+        self.member.save(update_fields=['email', 'email_verified_at', 'phone', 'phone_verified_at'])
+
+        self.member.set_private_account(True)
+
+        self.member.refresh_from_db()
+        self.assertTrue(self.member.is_private_account)

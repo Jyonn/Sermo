@@ -470,9 +470,7 @@ class User(models.Model):
 
     def set_private_account(self, enabled: bool):
         if enabled and not self.is_official and not (
-            self.email
-            and self.email_verified_at is not None
-            and self.phone
+            self.phone
             and self.phone_verified_at is not None
         ):
             raise UserErrors.PRIVATE_ACCOUNT_CONTACTS_REQUIRED
@@ -719,7 +717,10 @@ class User(models.Model):
             event.points += awarded
             event.save(update_fields=['points'])
             locked.growth_score += awarded
-            locked.growth_level = locked._growth_level_for_score(locked.growth_score)
+            locked.growth_level = min(
+                locked._growth_level_for_score(locked.growth_score),
+                locked.growth_level_cap()[0],
+            )
             locked.save(update_fields=['growth_score', 'growth_level'])
             self.growth_score = locked.growth_score
             self.growth_level = locked.growth_level
@@ -739,7 +740,7 @@ class User(models.Model):
                     event.points = normalized_points
                     event.save(update_fields=['points'])
                 total += normalized_points
-            level = locked._growth_level_for_score(total)
+            level = min(locked._growth_level_for_score(total), locked.growth_level_cap()[0])
             if locked.growth_score != total or locked.growth_level != level:
                 locked.growth_score = total
                 locked.growth_level = level
@@ -751,6 +752,15 @@ class User(models.Model):
     @staticmethod
     def _growth_level_for_score(score):
         return max(index + 1 for index, threshold in enumerate(GROWTH_THRESHOLDS) if score >= threshold)
+
+    def growth_level_cap(self):
+        if not self.has_password:
+            return 3, '设置密码后继续升级'
+        if self.email_verified_at is None:
+            return 6, '认证邮箱后继续升级'
+        if self.phone_verified_at is None:
+            return 9, '绑定手机后继续升级'
+        return 18, ''
 
     def calculate_growth(self, save=True):
         if self.is_official:
@@ -765,7 +775,8 @@ class User(models.Model):
             if self.bark_verified_at:
                 self.award_growth('security:bark', 25, category='security', title='绑定即时提醒')
             score = self.reconcile_growth()
-        level = self._growth_level_for_score(score)
+        level_cap, level_cap_reason = self.growth_level_cap()
+        level = min(self._growth_level_for_score(score), level_cap)
         if save and (self.growth_score != score or self.growth_level != level):
             self.growth_score = score
             self.growth_level = level
@@ -789,6 +800,8 @@ class User(models.Model):
             next_score=next_score,
             progress=round(max(0, min(1, progress)), 4),
             privileges=privileges,
+            level_cap=level_cap,
+            level_cap_reason=level_cap_reason,
             recent_events=[event.jsonl() for event in recent_events],
             daily_chat=dict(
                 earned=GrowthEvent.daily_points(self, 'daily:chat'),
