@@ -169,6 +169,8 @@ class SpaceAdminApiTests(TestCase):
         self.assertEqual(growth['level'], 18)
         self.assertEqual(growth['name'], '阶段18')
         self.assertIn('广场光环', growth['privileges'])
+        self.assertEqual(len(growth['levels']), 18)
+        self.assertEqual(growth['levels'][9]['unlocks'], ['广场光环'])
 
     def test_daily_chat_growth_is_capped(self):
         chat = Chat.get_or_create_direct(self.official, self.member)

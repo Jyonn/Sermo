@@ -41,6 +41,14 @@ GROWTH_MILESTONES = [
     ('security:bark', 'security', '绑定即时提醒', 25),
 ]
 GROWTH_MILESTONE_LIMITS = {key: points for key, _, _, points in GROWTH_MILESTONES}
+GROWTH_UNLOCKS = {
+    1: ['基础沟通'],
+    3: ['等级签'],
+    6: ['橱窗主题'],
+    10: ['广场光环'],
+    14: ['动态轨迹'],
+    18: ['尽兴徽记'],
+}
 
 
 def normalize_bark_endpoint(value):
@@ -766,17 +774,12 @@ class User(models.Model):
         next_score = GROWTH_THRESHOLDS[level] if level < len(GROWTH_THRESHOLDS) else None
         current_threshold = GROWTH_THRESHOLDS[level - 1]
         progress = 1 if next_score is None else (score - current_threshold) / max(1, next_score - current_threshold)
-        privileges = ['成长等级']
-        if level >= 3:
-            privileges.append('等级签')
-        if level >= 6:
-            privileges.append('橱窗主题')
-        if level >= 10:
-            privileges.append('广场光环')
-        if level >= 14:
-            privileges.append('动态轨迹')
-        if level >= 18:
-            privileges.append('尽兴徽记')
+        privileges = [
+            privilege
+            for unlock_level, unlocks in GROWTH_UNLOCKS.items()
+            if level >= unlock_level
+            for privilege in unlocks
+        ]
         recent_events = list(self.growth_events.order_by('-updated_at')[:8])
         earned_keys = set(self.growth_events.values_list('event_key', flat=True))
         return dict(
@@ -794,6 +797,16 @@ class User(models.Model):
             milestones=[
                 dict(key=key, category=category, title=title, points=points, earned=self.is_official or key in earned_keys)
                 for key, category, title, points in GROWTH_MILESTONES
+            ],
+            levels=[
+                dict(
+                    level=index,
+                    name=names[index - 1] if len(names) >= index else f'Lv.{index}',
+                    score=threshold,
+                    unlocks=GROWTH_UNLOCKS.get(index, []),
+                    unlocked=level >= index,
+                )
+                for index, threshold in enumerate(GROWTH_THRESHOLDS, start=1)
             ],
         )
 
