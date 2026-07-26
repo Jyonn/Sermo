@@ -469,7 +469,7 @@ class User(models.Model):
         raise UserErrors.CONTACT_CHANNEL_INVALID
 
     def set_private_account(self, enabled: bool):
-        if enabled and not self.is_official and not (
+        if enabled and not (
             self.phone
             and self.phone_verified_at is not None
         ):
