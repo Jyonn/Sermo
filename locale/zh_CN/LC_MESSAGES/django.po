@@ -486,3 +486,27 @@ msgstr "{name} 刚刚上线。"
 
 msgid "Your friend"
 msgstr "你的好友"
+
+msgid "Password recovery is unavailable for this account"
+msgstr "暂时无法找回这个账号的密码"
+
+msgid "Invalid password recovery channel"
+msgstr "这个验证方式不可用"
+
+msgid "Please wait before requesting another recovery code"
+msgstr "请稍后再获取验证码"
+
+msgid "Invalid password recovery code"
+msgstr "验证码不正确"
+
+msgid "Password recovery code expired"
+msgstr "验证码已过期"
+
+msgid "Too many password recovery attempts"
+msgstr "验证码错误次数过多，请重新获取"
+
+msgid "Invalid password reset token"
+msgstr "密码重置凭证无效"
+
+msgid "Password reset token expired"
+msgstr "密码重置凭证已过期"

@@ -57,6 +57,14 @@ class UserErrors:
     GESTURE_LOCK_PAYLOAD_INVALID = Error(message=_('Invalid gesture lock payload'), code=Code.BadRequest)
     GROWTH_LEVEL_REQUIRED = Error(message=_('Level {level} is required for this feature'), code=Code.Forbidden)
     NICKNAME_CHANGE_COOLDOWN = Error(message=_('Nickname can be changed again at {available_at}'), code=Code.BadRequest)
+    PASSWORD_RECOVERY_UNAVAILABLE = Error(message=_('Password recovery is unavailable for this account'), code=Code.BadRequest)
+    PASSWORD_RECOVERY_CHANNEL_INVALID = Error(message=_('Invalid password recovery channel'), code=Code.BadRequest)
+    PASSWORD_RECOVERY_TOO_FREQUENT = Error(message=_('Please wait before requesting another recovery code'), code=Code.BadRequest)
+    PASSWORD_RECOVERY_CODE_INVALID = Error(message=_('Invalid password recovery code'), code=Code.BadRequest)
+    PASSWORD_RECOVERY_CODE_EXPIRED = Error(message=_('Password recovery code expired'), code=Code.BadRequest)
+    PASSWORD_RECOVERY_ATTEMPTS_EXCEEDED = Error(message=_('Too many password recovery attempts'), code=Code.BadRequest)
+    PASSWORD_RECOVERY_TOKEN_INVALID = Error(message=_('Invalid password reset token'), code=Code.BadRequest)
+    PASSWORD_RECOVERY_TOKEN_EXPIRED = Error(message=_('Password reset token expired'), code=Code.BadRequest)
 
 
 RESERVED_SPACE_SLUGS = {

@@ -66,6 +66,16 @@ class UserPasswordParams(metaclass=Params):
         .null().default(None)
 
 
+class UserPasswordRecoveryParams(metaclass=Params):
+    slug = Validator('slug').to(str).to(lambda value: value.strip().lower())
+    name = Validator('name').to(str).to(lambda value: value.strip())
+    channel = Validator('channel').to(int)
+    challenge_id = Validator('challenge_id').to(int)
+    code = Validator('code').to(str).to(lambda value: value.strip())
+    reset_token = Validator('reset_token').to(str).to(lambda value: value.strip())
+    new_password = UserParams.password.copy().rename('new_password', final_name='new_password')
+
+
 class UserDeleteParams(metaclass=Params):
     password = Validator('password') \
         .to(str) \

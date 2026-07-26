@@ -1227,6 +1227,131 @@ class UserContactVerificationCode(models.Model):
         return item
 
 
+class UserPasswordRecoveryChallenge(models.Model):
+    CODE_LENGTH = 6
+    CODE_EXPIRE_SECONDS = 10 * 60
+    RESET_EXPIRE_SECONDS = 10 * 60
+    SEND_COOLDOWN_SECONDS = 60
+    MAX_ATTEMPTS = 5
+
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='password_recovery_challenges')
+    channel = models.IntegerField(choices=UserNotificationChoice.to_choices(), db_index=True)
+    target = models.CharField(max_length=255)
+    code = models.CharField(max_length=CODE_LENGTH)
+    attempts = models.PositiveSmallIntegerField(default=0)
+    reset_token = models.CharField(max_length=96, null=True, blank=True, unique=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    code_expires_at = models.DateTimeField(db_index=True)
+    verified_at = models.DateTimeField(null=True, blank=True)
+    reset_expires_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    used_at = models.DateTimeField(null=True, blank=True)
+
+    @staticmethod
+    def recovery_channels(user):
+        channels = []
+        if user.email and user.email_verified_at:
+            channels.append(dict(channel=UserNotificationChoice.EMAIL, masked=UserPasswordRecoveryChallenge.mask_email(user.email)))
+        if user.phone and user.phone_verified_at:
+            channels.append(dict(channel=UserNotificationChoice.SMS, masked=UserPasswordRecoveryChallenge.mask_phone(user.phone)))
+        return channels
+
+    @staticmethod
+    def mask_email(value):
+        local, separator, domain = (value or '').partition('@')
+        if not separator:
+            return '***'
+        visible = local[:2] if len(local) > 2 else local[:1]
+        return f'{visible}***@{domain}'
+
+    @staticmethod
+    def mask_phone(value):
+        raw = (value or '').strip()
+        if len(raw) <= 7:
+            return f'{raw[:2]}***{raw[-2:]}'
+        return f'{raw[:3]}****{raw[-4:]}'
+
+    @classmethod
+    def find_user(cls, space, name):
+        user = User.objects.filter(
+            space=space,
+            lower_name=(name or '').strip().lower(),
+            role=UserRoleChoice.MEMBER,
+            is_deleted=False,
+        ).first()
+        if user is None or not user.has_password or not cls.recovery_channels(user):
+            raise UserErrors.PASSWORD_RECOVERY_UNAVAILABLE
+        return user
+
+    @classmethod
+    def issue(cls, user, channel):
+        if channel == UserNotificationChoice.EMAIL:
+            target = user.email if user.email_verified_at else None
+        elif channel == UserNotificationChoice.SMS:
+            target = user.phone if user.phone_verified_at else None
+        else:
+            target = None
+        if not target:
+            raise UserErrors.PASSWORD_RECOVERY_CHANNEL_INVALID
+
+        now = timezone.now()
+        latest = cls.objects.filter(user=user).order_by('-created_at').first()
+        if latest and latest.created_at > now - datetime.timedelta(seconds=cls.SEND_COOLDOWN_SECONDS):
+            raise UserErrors.PASSWORD_RECOVERY_TOO_FREQUENT
+        cls.objects.filter(user=user, used_at__isnull=True).update(used_at=now)
+        return cls.objects.create(
+            user=user,
+            channel=channel,
+            target=target,
+            code=get_random_string(cls.CODE_LENGTH, allowed_chars='0123456789'),
+            code_expires_at=now + datetime.timedelta(seconds=cls.CODE_EXPIRE_SECONDS),
+        )
+
+    @classmethod
+    def verify_code(cls, challenge_id, code):
+        now = timezone.now()
+        with transaction.atomic():
+            challenge = cls.objects.select_for_update().filter(id=challenge_id, used_at__isnull=True).first()
+            if challenge is None:
+                raise UserErrors.PASSWORD_RECOVERY_CODE_INVALID
+            if challenge.code_expires_at <= now:
+                challenge.used_at = now
+                challenge.save(update_fields=['used_at'])
+                raise UserErrors.PASSWORD_RECOVERY_CODE_EXPIRED
+            if challenge.attempts >= cls.MAX_ATTEMPTS:
+                raise UserErrors.PASSWORD_RECOVERY_ATTEMPTS_EXCEEDED
+            if challenge.code != (code or '').strip():
+                challenge.attempts += 1
+                challenge.save(update_fields=['attempts'])
+                if challenge.attempts >= cls.MAX_ATTEMPTS:
+                    raise UserErrors.PASSWORD_RECOVERY_ATTEMPTS_EXCEEDED
+                raise UserErrors.PASSWORD_RECOVERY_CODE_INVALID
+            challenge.verified_at = now
+            challenge.reset_token = get_random_string(64)
+            challenge.reset_expires_at = now + datetime.timedelta(seconds=cls.RESET_EXPIRE_SECONDS)
+            challenge.save(update_fields=['verified_at', 'reset_token', 'reset_expires_at'])
+            return challenge
+
+    @classmethod
+    def reset_password(cls, reset_token, new_password):
+        now = timezone.now()
+        with transaction.atomic():
+            challenge = cls.objects.select_for_update().select_related('user').filter(
+                reset_token=(reset_token or '').strip(),
+                used_at__isnull=True,
+                verified_at__isnull=False,
+            ).first()
+            if challenge is None:
+                raise UserErrors.PASSWORD_RECOVERY_TOKEN_INVALID
+            if not challenge.reset_expires_at or challenge.reset_expires_at <= now:
+                challenge.used_at = now
+                challenge.save(update_fields=['used_at'])
+                raise UserErrors.PASSWORD_RECOVERY_TOKEN_EXPIRED
+            challenge.user.set_password(new_password)
+            RefreshToken.objects.filter(user=challenge.user, revoked_at__isnull=True).update(revoked_at=now)
+            cls.objects.filter(user=challenge.user, used_at__isnull=True).update(used_at=now)
+            return challenge.user
+
+
 class NotificationEventTypeChoice(Choice):
     DIRECT_MESSAGE = 1
     GROUP_MESSAGE = 2
