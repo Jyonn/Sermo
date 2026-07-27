@@ -140,6 +140,8 @@ class User(models.Model):
     MEMBER_WELCOME_MESSAGE_EN = 'I accepted your friend request. Come chat with me!'
     OFFICIAL_WELCOME_MESSAGE_ZH = '欢迎加入{space}！'
     OFFICIAL_WELCOME_MESSAGE_EN = 'Welcome to {space}!'
+    DEFAULT_PLAZA_GREETING_ZH = '嗨，认识一下？'
+    DEFAULT_PLAZA_GREETING_EN = 'Hi, nice to meet you.'
     AVATAR_PRESET_BASE_URI = 'https://image.6-79.cn/sermo/assets/avatars'
     HANZI_PATTERN = re.compile(r'[\u4e00-\u9fff]')
 
@@ -494,6 +496,16 @@ class User(models.Model):
         if save:
             self.save(update_fields=['welcome_message'])
         return self
+
+    def display_plaza_greeting(self):
+        greeting = (self.plaza_greeting or '').strip()
+        if greeting:
+            return greeting
+        return (
+            self.DEFAULT_PLAZA_GREETING_ZH
+            if self.vldt.normalize_language(self.language) == 'zh-CN'
+            else self.DEFAULT_PLAZA_GREETING_EN
+        )
 
     def set_welcome_message(self, welcome_message, save=True):
         self.require_growth_capability('welcome_message')
@@ -920,7 +932,7 @@ class User(models.Model):
         return self.dictify('name', 'user_id', 'official', 'avatar_type', 'avatar_uri')
 
     def jsonl(self):
-        return self.dictify(
+        payload = self.dictify(
             'name',
             'user_id',
             'official',
@@ -932,6 +944,8 @@ class User(models.Model):
             'avatar_type',
             'avatar_uri',
         )
+        payload['plaza_greeting'] = self.display_plaza_greeting()
+        return payload
 
     def json_friend(self):
         return self.dictify(
@@ -990,6 +1004,7 @@ class User(models.Model):
             else ''
         )
         payload['growth'] = self.calculate_growth()
+        payload['plaza_greeting'] = self.display_plaza_greeting()
         payload['name_changed_at'] = self.name_changed_at.timestamp() if self.name_changed_at else None
         available_at = self.nickname_change_available_at()
         payload['nickname_change'] = dict(

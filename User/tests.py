@@ -2,7 +2,19 @@ from unittest.mock import patch
 
 from django.test import SimpleTestCase
 
-from User.models import NotificationEvent, NotificationEventTypeChoice, normalize_bark_endpoint
+from User.models import NotificationEvent, NotificationEventTypeChoice, User, normalize_bark_endpoint
+
+
+class UserPresentationTests(SimpleTestCase):
+    def test_plaza_greeting_has_language_aware_default(self):
+        self.assertEqual(User(language='zh-CN').display_plaza_greeting(), '嗨，认识一下？')
+        self.assertEqual(User(language='en').display_plaza_greeting(), 'Hi, nice to meet you.')
+
+    def test_custom_plaza_greeting_takes_precedence(self):
+        self.assertEqual(
+            User(language='zh-CN', plaza_greeting='  今天也要尽兴  ').display_plaza_greeting(),
+            '今天也要尽兴',
+        )
 
 
 class BarkEndpointNormalizationTests(SimpleTestCase):
