@@ -56,7 +56,7 @@ GROWTH_UNLOCKS = {
     7: ['好友上线提醒', '昵称每周可改'],
     8: ['下载语音', '自定义聊天背景'],
     9: ['基础头像框'],
-    10: ['广场光环'],
+    10: ['广场光环', '自定义消息提示'],
     11: ['聊天气泡主题'],
     12: ['个人名片主题'],
     14: ['动态轨迹'],
@@ -80,6 +80,7 @@ GROWTH_CAPABILITY_LEVELS = {
     'online_reminder': 7,
     'download_audio': 8,
     'chat_background': 8,
+    'custom_notification_message': 10,
 }
 
 

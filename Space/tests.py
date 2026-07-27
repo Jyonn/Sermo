@@ -344,6 +344,59 @@ class SpaceAdminApiTests(TestCase):
         self.assertEqual(self.member.chat_background_theme, 'paper')
         self.assertEqual(self.member.chat_background_uri, '')
 
+    def test_custom_notification_messages_require_level_ten(self):
+        self.member.set_password('safe-password')
+
+        basic_update = self.client.post(
+            '/users/me/notification-prefs',
+            data=json.dumps({
+                'channel': UserNotificationChoice.EMAIL,
+                'enabled': 1,
+                'hide_message_content': 1,
+            }),
+            content_type='application/json',
+            **self.user_authorization(self.member),
+        )
+        self.assertEqual(basic_update.status_code, 200, basic_update.content)
+
+        locked = self.client.post(
+            '/users/me/notification-prefs',
+            data=json.dumps({
+                'channel': UserNotificationChoice.EMAIL,
+                'hidden_direct_message_text': '有人找你',
+            }),
+            content_type='application/json',
+            **self.user_authorization(self.member),
+        )
+        self.assertEqual(locked.status_code, 403, locked.content)
+        self.assertEqual(locked.json()['identifier'], 'USER@GROWTH_LEVEL_REQUIRED')
+
+        self.member.phone = '13800000003'
+        self.member.phone_verified_at = timezone.now()
+        self.member.save(update_fields=['phone', 'phone_verified_at'])
+        self.member.reconcile_growth()
+        GrowthEvent.objects.create(
+            user=self.member,
+            event_key='test:reach-level-ten-for-notifications',
+            category='test',
+            title='达到十级',
+            points=850 - self.member.growth_score,
+        )
+        self.member.reconcile_growth()
+        self.assertEqual(self.member.effective_growth_level(), 10)
+
+        updated = self.client.post(
+            '/users/me/notification-prefs',
+            data=json.dumps({
+                'channel': UserNotificationChoice.EMAIL,
+                'hidden_direct_message_text': '有人找你',
+            }),
+            content_type='application/json',
+            **self.user_authorization(self.member),
+        )
+        self.assertEqual(updated.status_code, 200, updated.content)
+        self.assertEqual(updated.json()['body']['hidden_direct_message_text'], '有人找你')
+
     @patch('User.models.delete_chat_background_by_uri')
     def test_replacing_chat_background_removes_previous_image(self, delete_background):
         self.member.set_password('safe-password')

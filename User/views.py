@@ -179,6 +179,16 @@ class NotificationPreferenceView(View):
         enabled = request.json.enabled
         hide_message_content = request.json.hide_message_content
         open_chat_on_tap = request.json.open_chat_on_tap
+        custom_message_values = (
+            request.json.hidden_direct_message_title,
+            request.json.hidden_direct_message_text,
+            request.json.hidden_group_message_title,
+            request.json.hidden_group_message_text,
+            request.json.friend_online_message_title,
+            request.json.friend_online_message_text,
+        )
+        if any(value is not None for value in custom_message_values):
+            request.user.require_growth_capability('custom_notification_message')
         pref = NotificationPreference.set_preference(
             user=request.user,
             channel=request.json.channel,
