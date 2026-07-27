@@ -1154,19 +1154,11 @@ class AccountSwitchTicket(models.Model):
         if contact_filter:
             targets = User.objects.filter(
                 contact_filter,
-                role=UserRoleChoice.MEMBER,
                 is_deleted=False,
                 is_private_account=False,
             ).exclude(id=user.id)
 
-        admin_target = None
-        if user.email and user.email_verified_at is not None and user.email == user.space.email:
-            admin_target = user.space.official_user or user.space.ensure_official_user()
-
-        rows = list(targets.select_related('space').order_by('space__name', 'name'))
-        if admin_target and admin_target.id != user.id and not admin_target.is_private_account:
-            rows.insert(0, admin_target)
-        return rows
+        return list(targets.select_related('space').order_by('space__name', 'name'))
 
     @classmethod
     def issue(cls, source_user, target_user_id):

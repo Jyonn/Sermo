@@ -281,6 +281,40 @@ class SpaceAdminApiTests(TestCase):
         targets = response.json()['body']
         self.assertEqual([item['user']['user_id'] for item in targets], [target.id])
 
+    def test_account_switch_matches_official_account_by_verified_phone(self):
+        self.member.phone = '13800000005'
+        self.member.phone_verified_at = timezone.now()
+        self.member.save(update_fields=['phone', 'phone_verified_at'])
+        self.official.phone = '+8613800000005'
+        self.official.phone_verified_at = timezone.now()
+        self.official.is_private_account = False
+        self.official.save(update_fields=['phone', 'phone_verified_at', 'is_private_account'])
+
+        response = self.client.get(
+            '/users/me/switch-accounts',
+            **self.user_authorization(self.member),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        targets = response.json()['body']
+        self.assertEqual([item['user']['user_id'] for item in targets], [self.official.id])
+
+    def test_space_admin_email_does_not_bypass_contact_matching(self):
+        self.member.email = self.space.email
+        self.member.email_verified_at = timezone.now()
+        self.member.save(update_fields=['email', 'email_verified_at'])
+        self.official.email = 'official-other@example.com'
+        self.official.email_verified_at = timezone.now()
+        self.official.save(update_fields=['email', 'email_verified_at'])
+
+        response = self.client.get(
+            '/users/me/switch-accounts',
+            **self.user_authorization(self.member),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json()['body'], [])
+
     def test_message_and_profile_features_follow_growth_route(self):
         chat = Chat.get_or_create_direct(self.official, self.member)
         image_payload = json.dumps({
