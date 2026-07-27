@@ -1,11 +1,12 @@
 import json
+import math
 from unittest.mock import Mock, patch
 
 from django.test import SimpleTestCase
 
 from Message.image_metadata import _reverse_geocode_opencage, parse_image_info, reverse_geocode
 from Message.video_metadata import parse_avinfo
-from Message.models import Message, MessageTypeChoice
+from Message.models import Message, MessageTypeChoice, random_point_within_radius
 from utils.global_settings import Globals
 
 
@@ -161,3 +162,56 @@ class LocationMessageTests(SimpleTestCase):
             },
         )
         geocode.assert_called_once_with(1.283401, 103.860712)
+
+    @patch('Message.models.random_point_within_radius', return_value=(1.4, 103.9))
+    @patch('Message.image_metadata.reverse_geocode', return_value=('模糊位置', 'opencage'))
+    def test_normalize_obscured_location_uses_randomized_coordinates(self, geocode, randomize):
+        normalized = Message.normalize_content(
+            MessageTypeChoice.LOCATION,
+            json.dumps({
+                'latitude': 1.2834012,
+                'longitude': 103.8607123,
+                'obscure': True,
+            }),
+        )
+
+        self.assertEqual(
+            json.loads(normalized),
+            {
+                'kind': 'location',
+                'latitude': 1.4,
+                'longitude': 103.9,
+                'address': '模糊位置',
+                'geocoding_provider': 'opencage',
+                'obscured': True,
+                'obscure_radius_km': 50,
+            },
+        )
+        randomize.assert_called_once_with(1.283401, 103.860712)
+        geocode.assert_called_once_with(1.4, 103.9)
+
+    def test_randomized_location_stays_within_fifty_kilometers(self):
+        class FixedRandom:
+            values = iter((1.0, 0.25))
+
+            def random(self):
+                return next(self.values)
+
+        latitude, longitude = random_point_within_radius(
+            30.2741,
+            120.1551,
+            rng=FixedRandom(),
+        )
+
+        latitude_delta = math.radians(latitude - 30.2741)
+        longitude_delta = math.radians(longitude - 120.1551)
+        original_latitude = math.radians(30.2741)
+        randomized_latitude = math.radians(latitude)
+        haversine = (
+            math.sin(latitude_delta / 2) ** 2
+            + math.cos(original_latitude)
+            * math.cos(randomized_latitude)
+            * math.sin(longitude_delta / 2) ** 2
+        )
+        distance = 2 * 6371.0088 * math.asin(math.sqrt(haversine))
+        self.assertLessEqual(distance, 50.001)
