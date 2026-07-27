@@ -33,6 +33,21 @@ GROWTH_THRESHOLDS = [
     0, 20, 45, 80, 130, 200, 300, 440, 620,
     850, 1150, 1530, 2000, 2580, 3300, 4180, 5250, 6550,
 ]
+
+
+def account_switch_phone_variants(value):
+    phone = (value or '').strip()
+    if not phone:
+        return set()
+    if phone.startswith('+86') and len(phone) > 3:
+        return {phone, phone[3:]}
+    if phone.startswith('86') and len(phone) > 2:
+        return {phone, f'+{phone}', phone[2:]}
+    if phone.startswith('+'):
+        return {phone}
+    return {phone, f'+86{phone}'}
+
+
 GROWTH_MILESTONES = [
     ('explore:image', 'explore', '发送照片', 30),
     ('explore:location', 'explore', '分享位置', 35),
@@ -1130,7 +1145,10 @@ class AccountSwitchTicket(models.Model):
         if user.email and user.email_verified_at is not None:
             contact_filter |= Q(email=user.email, email_verified_at__isnull=False)
         if user.phone and user.phone_verified_at is not None:
-            contact_filter |= Q(phone=user.phone, phone_verified_at__isnull=False)
+            contact_filter |= Q(
+                phone__in=account_switch_phone_variants(user.phone),
+                phone_verified_at__isnull=False,
+            )
 
         targets = User.objects.none()
         if contact_filter:

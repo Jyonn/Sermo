@@ -254,6 +254,33 @@ class SpaceAdminApiTests(TestCase):
         self.member.refresh_from_db()
         self.assertTrue(self.member.is_private_account)
 
+    def test_account_switch_matches_mainland_phone_with_or_without_country_code(self):
+        other_space = Space.objects.create(
+            name='Other Space',
+            slug='other-space',
+            email='other-admin@example.com',
+        )
+        target = User.create(
+            space=other_space,
+            name='Other Member',
+            verified=False,
+        )
+        self.member.phone = '13800000004'
+        self.member.phone_verified_at = timezone.now()
+        self.member.save(update_fields=['phone', 'phone_verified_at'])
+        target.phone = '+8613800000004'
+        target.phone_verified_at = timezone.now()
+        target.save(update_fields=['phone', 'phone_verified_at'])
+
+        response = self.client.get(
+            '/users/me/switch-accounts',
+            **self.user_authorization(self.member),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        targets = response.json()['body']
+        self.assertEqual([item['user']['user_id'] for item in targets], [target.id])
+
     def test_message_and_profile_features_follow_growth_route(self):
         chat = Chat.get_or_create_direct(self.official, self.member)
         image_payload = json.dumps({

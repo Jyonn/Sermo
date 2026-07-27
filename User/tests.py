@@ -2,7 +2,13 @@ from unittest.mock import patch
 
 from django.test import SimpleTestCase
 
-from User.models import NotificationEvent, NotificationEventTypeChoice, User, normalize_bark_endpoint
+from User.models import (
+    NotificationEvent,
+    NotificationEventTypeChoice,
+    User,
+    account_switch_phone_variants,
+    normalize_bark_endpoint,
+)
 
 
 class UserPresentationTests(SimpleTestCase):
@@ -15,6 +21,21 @@ class UserPresentationTests(SimpleTestCase):
             User(language='zh-CN', plaza_greeting='  今天也要尽兴  ').display_plaza_greeting(),
             '今天也要尽兴',
         )
+
+
+class AccountSwitchPhoneNormalizationTests(SimpleTestCase):
+    def test_mainland_phone_variants_include_country_code(self):
+        self.assertEqual(
+            account_switch_phone_variants('13800000000'),
+            {'13800000000', '+8613800000000'},
+        )
+        self.assertEqual(
+            account_switch_phone_variants('+8613800000000'),
+            {'13800000000', '+8613800000000'},
+        )
+
+    def test_other_international_numbers_are_not_rewritten(self):
+        self.assertEqual(account_switch_phone_variants('+6591234567'), {'+6591234567'})
 
 
 class BarkEndpointNormalizationTests(SimpleTestCase):
