@@ -176,6 +176,33 @@ class SpaceAdminApiTests(TestCase):
         self.assertEqual(len(growth['levels']), 18)
         self.assertEqual(growth['levels'][9]['unlocks'], ['广场光环'])
 
+    def test_growth_level_acknowledgements_are_persisted_in_order(self):
+        growth = self.member.calculate_growth()
+        self.assertGreaterEqual(growth['level'], 2)
+        self.assertEqual(growth['acknowledged_level'], 0)
+        self.assertEqual(growth['pending_level'], 1)
+
+        skipped = self.client.post(
+            '/users/me/growth',
+            data=json.dumps({'level': 2}),
+            content_type='application/json',
+            **self.user_authorization(self.member),
+        )
+        self.assertEqual(skipped.status_code, 400)
+
+        acknowledged = self.client.post(
+            '/users/me/growth',
+            data=json.dumps({'level': 1}),
+            content_type='application/json',
+            **self.user_authorization(self.member),
+        )
+        self.assertEqual(acknowledged.status_code, 200, acknowledged.content)
+        self.assertEqual(acknowledged.json()['body']['acknowledged_level'], 1)
+        self.assertEqual(acknowledged.json()['body']['pending_level'], 2)
+
+        self.member.refresh_from_db()
+        self.assertEqual(self.member.growth_acknowledged_level, 1)
+
     def test_daily_chat_growth_is_capped(self):
         chat = Chat.get_or_create_direct(self.official, self.member)
         for index in range(20):

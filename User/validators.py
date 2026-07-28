@@ -59,6 +59,7 @@ class UserErrors:
     EMAIL_NOT_VERIFIED = Error(message=_('Email is not verified'), code=Code.Forbidden)
     GESTURE_LOCK_PAYLOAD_INVALID = Error(message=_('Invalid gesture lock payload'), code=Code.BadRequest)
     GROWTH_LEVEL_REQUIRED = Error(message=_('Level {level} is required for this feature'), code=Code.Forbidden)
+    GROWTH_ACKNOWLEDGEMENT_INVALID = Error(message=_('Growth level acknowledgement is out of sequence'), code=Code.BadRequest)
     NICKNAME_CHANGE_COOLDOWN = Error(message=_('Nickname can be changed again at {available_at}'), code=Code.BadRequest)
     PASSWORD_RECOVERY_UNAVAILABLE = Error(message=_('Password recovery is unavailable for this account'), code=Code.BadRequest)
     PASSWORD_RECOVERY_CHANNEL_INVALID = Error(message=_('Invalid password recovery channel'), code=Code.BadRequest)

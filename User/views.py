@@ -36,6 +36,7 @@ from User.params import (
     WebPushSubscriptionParams,
     UserContactVerificationCodeParams,
     UserGrowthEventParams,
+    UserGrowthAcknowledgementParams,
     UserPrivateAccountParams,
     UserContactUnbindParams,
     UserPasswordRecoveryParams,
@@ -104,6 +105,17 @@ class UserGrowthEventView(View):
         key, points, title = self.EVENTS[request.json.event]
         awarded = request.user.award_growth(key, points, category='explore', title=title)
         return dict(awarded=awarded, growth=request.user.calculate_growth())
+
+
+class UserGrowthAcknowledgementView(View):
+    @auth.require_user
+    def get(self, request: Request):
+        return request.user.calculate_growth()
+
+    @auth.require_user
+    @analyse.json(UserGrowthAcknowledgementParams.level)
+    def post(self, request: Request):
+        return request.user.acknowledge_growth_level(request.json.level)
 
 
 class RefreshView(View):

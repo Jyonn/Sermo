@@ -65,6 +65,13 @@ class UserGrowthEventParams(metaclass=Params):
     )
 
 
+class UserGrowthAcknowledgementParams(metaclass=Params):
+    level = Validator('level').to(int).bool(
+        lambda value: 1 <= value <= 18,
+        message=_('Invalid growth level'),
+    )
+
+
 class UserPasswordParams(metaclass=Params):
     old_password = UserParams.password.copy().rename('old_password', final_name='old_password') \
         .null().default(None)

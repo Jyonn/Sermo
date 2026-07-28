@@ -271,6 +271,7 @@ class User(models.Model):
     )
     growth_score = models.PositiveIntegerField(default=0)
     growth_level = models.PositiveSmallIntegerField(default=1)
+    growth_acknowledged_level = models.PositiveSmallIntegerField(default=0)
     chat_background_theme = models.CharField(max_length=16, default='default')
     chat_background_uri = models.CharField(max_length=255, default='')
 
@@ -956,6 +957,12 @@ class User(models.Model):
         return dict(
             score=score,
             level=level,
+            acknowledged_level=min(self.growth_acknowledged_level, level),
+            pending_level=(
+                self.growth_acknowledged_level + 1
+                if self.growth_acknowledged_level < level
+                else None
+            ),
             name=names[level - 1] if len(names) >= level else f'Lv.{level}',
             next_score=next_score,
             progress=round(max(0, min(1, progress)), 4),
@@ -986,6 +993,18 @@ class User(models.Model):
                 for key, required_level in GROWTH_CAPABILITY_LEVELS.items()
             },
         )
+
+    def acknowledge_growth_level(self, level):
+        self.calculate_growth()
+        with transaction.atomic():
+            locked = User.objects.select_for_update().get(id=self.id)
+            expected_level = locked.growth_acknowledged_level + 1
+            if level != expected_level or level > locked.growth_level:
+                raise UserErrors.GROWTH_ACKNOWLEDGEMENT_INVALID
+            locked.growth_acknowledged_level = level
+            locked.save(update_fields=['growth_acknowledged_level'])
+            self.growth_acknowledged_level = level
+        return self.calculate_growth(save=False)
 
     def tiny_json(self):
         return self.dictify('name', 'user_id', 'official', 'avatar_type', 'avatar_uri')
