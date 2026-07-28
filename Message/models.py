@@ -740,6 +740,7 @@ class Message(models.Model):
         except cls.DoesNotExist:
             raise MessageErrors.NOT_EXISTS
 
+
     @classmethod
     def latest(cls, chat: Chat, limit: int, request: HttpRequest = None):
         messages = cls.visible_in_chat(chat).select_related('user', 'reply_to', 'reply_to__user').order_by('-id')[:limit]
@@ -792,6 +793,55 @@ class Message(models.Model):
     def remove(self):
         self.is_deleted = True
         self.save(update_fields=['is_deleted'])
+
+
+class PinnedMessage(models.Model):
+    MAX_PER_CHAT = 20
+
+    chat = models.ForeignKey(Chat, on_delete=models.CASCADE, related_name='pinned_messages')
+    message = models.OneToOneField(Message, on_delete=models.CASCADE, related_name='pin')
+    pinned_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='pinned_messages')
+    pinned_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ['-pinned_at']
+
+    @classmethod
+    def require_manage_permission(cls, chat, user):
+        if not chat.has_active_member(user):
+            raise MessageErrors.NOT_A_MEMBER
+        if chat.group and not chat.is_owner(user):
+            raise MessageErrors.PIN_FORBIDDEN
+
+    @classmethod
+    def pin(cls, message, user):
+        cls.require_manage_permission(message.chat, user)
+        existing = cls.objects.filter(message=message).first()
+        if existing is not None:
+            return existing
+        if cls.objects.filter(chat=message.chat, message__is_deleted=False).count() >= cls.MAX_PER_CHAT:
+            raise MessageErrors.PIN_LIMIT_REACHED
+        return cls.objects.create(chat=message.chat, message=message, pinned_by=user)
+
+    @classmethod
+    def unpin(cls, message, user):
+        cls.require_manage_permission(message.chat, user)
+        cls.objects.filter(message=message).delete()
+
+    @classmethod
+    def list_for_chat(cls, chat):
+        return cls.objects.filter(
+            chat=chat,
+            message__is_deleted=False,
+        ).select_related('message', 'message__user', 'pinned_by')[:cls.MAX_PER_CHAT]
+
+    def jsonl(self, request=None):
+        return dict(
+            pin_id=self.id,
+            message=self.message.jsonl(request=request),
+            pinned_by=self.pinned_by.tiny_json(),
+            pinned_at=self.pinned_at.timestamp(),
+        )
 
 
 class ImageMetadata(models.Model):

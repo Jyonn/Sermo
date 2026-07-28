@@ -3,7 +3,7 @@ from django.http import HttpResponseRedirect
 from django.views import View
 from smartdjango import analyse, OK
 
-from Message.models import ImageMetadata, LinkPreview, Message, MessageTypeChoice, VideoMetadata
+from Message.models import ImageMetadata, LinkPreview, Message, MessageTypeChoice, PinnedMessage, VideoMetadata
 from Message.params import MessageParams
 from Message.validators import MessageErrors
 from utils.qiniu import issue_message_upload, build_message_image_thumbnail_uri, build_message_video_thumbnail_uri, sign_private_download_url
@@ -59,6 +59,26 @@ class MessageView(View):
     def delete(self, request: Request):
         message: Message = request.query.message
         message.remove()
+        return OK
+
+
+class PinnedMessageView(View):
+    @auth.require_user
+    @analyse.query(MessageParams.chat_id)
+    @auth.require_chat_member()
+    def get(self, request: Request):
+        return [pin.jsonl(request=request) for pin in PinnedMessage.list_for_chat(request.query.chat)]
+
+    @auth.require_user
+    @analyse.query(MessageParams.message_id)
+    def post(self, request: Request):
+        pin = PinnedMessage.pin(request.query.message, request.user)
+        return pin.jsonl(request=request)
+
+    @auth.require_user
+    @analyse.query(MessageParams.message_id)
+    def delete(self, request: Request):
+        PinnedMessage.unpin(request.query.message, request.user)
         return OK
 
 

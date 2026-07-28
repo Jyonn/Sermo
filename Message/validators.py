@@ -14,6 +14,8 @@ class MessageErrors:
     MEDIA_KIND_INVALID = Error(message=_('Invalid media kind'), code=Code.BadRequest)
     AUDIO_DURATION_INVALID = Error(message=_('Audio message cannot exceed 60 seconds'), code=Code.BadRequest)
     REPLY_TARGET_INVALID = Error(message=_('The replied message is not in this chat'), code=Code.BadRequest)
+    PIN_FORBIDDEN = Error(message=_('You cannot manage pinned messages in this chat'), code=Code.Forbidden)
+    PIN_LIMIT_REACHED = Error(message=_('This chat has reached the pinned message limit'), code=Code.BadRequest)
 
 
 class MessageValidator:

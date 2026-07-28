@@ -510,3 +510,9 @@ msgstr "密码重置凭证无效"
 
 msgid "Password reset token expired"
 msgstr "密码重置凭证已过期"
+
+msgid "You cannot manage pinned messages in this chat"
+msgstr "你没有权限管理这个聊天的置顶消息"
+
+msgid "This chat has reached the pinned message limit"
+msgstr "这个聊天最多置顶20条消息"

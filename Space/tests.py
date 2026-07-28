@@ -4,9 +4,9 @@ from unittest.mock import patch
 from django.test import TestCase
 from django.utils import timezone
 
-from Chat.models import Chat
+from Chat.models import Chat, ChatMember, ChatMemberRoleChoice, ChatMemberStatusChoice, ChatTypeChoice
 from Config.models import Config, ConfigInstance
-from Message.models import Message, MessageTypeChoice
+from Message.models import Message, MessageTypeChoice, PinnedMessage
 from Space.models import Space
 from User.models import GrowthEvent, NotificationPreference, User, UserEmojiUsage, UserNotificationChoice
 from utils import auth
@@ -319,6 +319,56 @@ class SpaceAdminApiTests(TestCase):
         self.assertEqual(response.status_code, 200, response.content)
         self.assertEqual(response.json()['body'][0]['emoji'], '👍')
         self.assertEqual(response.json()['body'][0]['use_count'], 2)
+
+    def test_direct_chat_members_can_share_pinned_messages(self):
+        chat = Chat.get_or_create_direct(self.official, self.member)
+        message = Message.create(chat, self.member, MessageTypeChoice.TEXT, 'Important')
+
+        response = self.client.post(
+            f'/messages/pins?message_id={message.id}',
+            **self.user_authorization(self.official),
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        response = self.client.get(
+            f'/messages/pins?chat_id={chat.id}',
+            **self.user_authorization(self.member),
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json()['body'][0]['message']['message_id'], message.id)
+
+        response = self.client.delete(
+            f'/messages/pins?message_id={message.id}',
+            **self.user_authorization(self.member),
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertFalse(PinnedMessage.objects.filter(message=message).exists())
+
+    def test_group_member_cannot_manage_pinned_messages(self):
+        chat = Chat.objects.create(
+            space=self.space,
+            chat_type=ChatTypeChoice.GROUP,
+            title='Group',
+            created_by=self.official,
+        )
+        ChatMember.objects.create(
+            chat=chat,
+            user=self.official,
+            role=ChatMemberRoleChoice.OWNER,
+            status=ChatMemberStatusChoice.ACTIVE,
+        )
+        ChatMember.objects.create(
+            chat=chat,
+            user=self.member,
+            role=ChatMemberRoleChoice.MEMBER,
+            status=ChatMemberStatusChoice.ACTIVE,
+        )
+        message = Message.create(chat, self.official, MessageTypeChoice.TEXT, 'Owner note')
+
+        response = self.client.post(
+            f'/messages/pins?message_id={message.id}',
+            **self.user_authorization(self.member),
+        )
+        self.assertEqual(response.status_code, 403, response.content)
 
     def test_space_admin_email_does_not_bypass_contact_matching(self):
         self.member.email = self.space.email
