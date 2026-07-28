@@ -335,10 +335,30 @@ class SpaceAdminApiTests(TestCase):
         )
         self.assertEqual(response.status_code, 200, response.content)
         self.assertEqual(response.json()['body'][0]['message']['message_id'], message.id)
+        self.assertEqual(
+            [item['user_id'] for item in response.json()['body'][0]['pinned_by_users']],
+            [self.official.id],
+        )
+
+        response = self.client.post(
+            f'/messages/pins?message_id={message.id}',
+            **self.user_authorization(self.member),
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(PinnedMessage.objects.filter(message=message).count(), 2)
+        self.assertEqual(len(response.json()['body']['pinned_by_users']), 2)
 
         response = self.client.delete(
             f'/messages/pins?message_id={message.id}',
             **self.user_authorization(self.member),
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertTrue(PinnedMessage.objects.filter(message=message, pinned_by=self.official).exists())
+        self.assertFalse(PinnedMessage.objects.filter(message=message, pinned_by=self.member).exists())
+
+        response = self.client.delete(
+            f'/messages/pins?message_id={message.id}',
+            **self.user_authorization(self.official),
         )
         self.assertEqual(response.status_code, 200, response.content)
         self.assertFalse(PinnedMessage.objects.filter(message=message).exists())

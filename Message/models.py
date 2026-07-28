@@ -799,12 +799,15 @@ class PinnedMessage(models.Model):
     MAX_PER_CHAT = 20
 
     chat = models.ForeignKey(Chat, on_delete=models.CASCADE, related_name='pinned_messages')
-    message = models.OneToOneField(Message, on_delete=models.CASCADE, related_name='pin')
+    message = models.ForeignKey(Message, on_delete=models.CASCADE, related_name='pins')
     pinned_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='pinned_messages')
     pinned_at = models.DateTimeField(auto_now_add=True, db_index=True)
 
     class Meta:
         ordering = ['-pinned_at']
+        constraints = [
+            models.UniqueConstraint(fields=['message', 'pinned_by'], name='unique_message_pin_user'),
+        ]
 
     @classmethod
     def require_manage_permission(cls, chat, user):
@@ -816,31 +819,67 @@ class PinnedMessage(models.Model):
     @classmethod
     def pin(cls, message, user):
         cls.require_manage_permission(message.chat, user)
-        existing = cls.objects.filter(message=message).first()
+        existing = cls.objects.filter(message=message, pinned_by=user).first()
         if existing is not None:
             return existing
-        if cls.objects.filter(chat=message.chat, message__is_deleted=False).count() >= cls.MAX_PER_CHAT:
+        pinned_message_count = cls.objects.filter(
+            chat=message.chat,
+            message__is_deleted=False,
+        ).values('message_id').distinct().count()
+        if pinned_message_count >= cls.MAX_PER_CHAT and not cls.objects.filter(message=message).exists():
             raise MessageErrors.PIN_LIMIT_REACHED
-        return cls.objects.create(chat=message.chat, message=message, pinned_by=user)
+        pin, _created = cls.objects.get_or_create(
+            message=message,
+            pinned_by=user,
+            defaults={'chat': message.chat},
+        )
+        return pin
 
     @classmethod
     def unpin(cls, message, user):
         cls.require_manage_permission(message.chat, user)
-        cls.objects.filter(message=message).delete()
+        cls.objects.filter(message=message, pinned_by=user).delete()
 
     @classmethod
     def list_for_chat(cls, chat):
-        return cls.objects.filter(
+        rows = cls.objects.filter(
             chat=chat,
             message__is_deleted=False,
-        ).select_related('message', 'message__user', 'pinned_by')[:cls.MAX_PER_CHAT]
+        ).select_related('message', 'message__user', 'pinned_by').order_by('-pinned_at')
+        return cls.aggregate_rows(rows, limit=cls.MAX_PER_CHAT)
 
-    def jsonl(self, request=None):
+    @classmethod
+    def aggregate_for_message(cls, message):
+        rows = cls.objects.filter(
+            message=message,
+            message__is_deleted=False,
+        ).select_related('message', 'message__user', 'pinned_by').order_by('-pinned_at')
+        aggregated = cls.aggregate_rows(rows, limit=1)
+        return aggregated[0] if aggregated else None
+
+    @classmethod
+    def aggregate_rows(cls, rows, limit):
+        grouped = {}
+        for pin in rows:
+            if pin.message_id not in grouped:
+                if len(grouped) >= limit:
+                    continue
+                grouped[pin.message_id] = dict(
+                    pin_id=pin.id,
+                    message=pin.message,
+                    pinned_by_users=[],
+                    pinned_at=pin.pinned_at,
+                )
+            grouped[pin.message_id]['pinned_by_users'].append(pin.pinned_by)
+        return list(grouped.values())
+
+    @classmethod
+    def aggregate_json(cls, payload, request=None):
         return dict(
-            pin_id=self.id,
-            message=self.message.jsonl(request=request),
-            pinned_by=self.pinned_by.tiny_json(),
-            pinned_at=self.pinned_at.timestamp(),
+            pin_id=payload['pin_id'],
+            message=payload['message'].jsonl(request=request),
+            pinned_by_users=[user.tiny_json() for user in payload['pinned_by_users']],
+            pinned_at=payload['pinned_at'].timestamp(),
         )
 
 

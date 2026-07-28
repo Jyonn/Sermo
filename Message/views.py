@@ -67,13 +67,17 @@ class PinnedMessageView(View):
     @analyse.query(MessageParams.chat_id)
     @auth.require_chat_member()
     def get(self, request: Request):
-        return [pin.jsonl(request=request) for pin in PinnedMessage.list_for_chat(request.query.chat)]
+        return [
+            PinnedMessage.aggregate_json(pin, request=request)
+            for pin in PinnedMessage.list_for_chat(request.query.chat)
+        ]
 
     @auth.require_user
     @analyse.query(MessageParams.message_id)
     def post(self, request: Request):
-        pin = PinnedMessage.pin(request.query.message, request.user)
-        return pin.jsonl(request=request)
+        PinnedMessage.pin(request.query.message, request.user)
+        pin = PinnedMessage.aggregate_for_message(request.query.message)
+        return PinnedMessage.aggregate_json(pin, request=request)
 
     @auth.require_user
     @analyse.query(MessageParams.message_id)
