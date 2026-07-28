@@ -2,12 +2,14 @@ import datetime
 import hashlib
 import ipaddress
 import logging
+import math
 import re
 import threading
+from collections import Counter
 
 from notificator import NotificatorAPIError
-from django.db import close_old_connections, transaction
-from django.db.models import Q
+from django.db import IntegrityError, close_old_connections, transaction
+from django.db.models import F, Q
 from django.utils import timezone
 from django.utils.crypto import get_random_string
 from django.utils.translation import gettext as _
@@ -33,6 +35,48 @@ GROWTH_THRESHOLDS = [
     0, 20, 45, 80, 130, 200, 300, 440, 620,
     850, 1150, 1530, 2000, 2580, 3300, 4180, 5250, 6550,
 ]
+
+
+def _is_emoji_base(char):
+    code = ord(char)
+    return (
+        0x1F000 <= code <= 0x1FAFF
+        or 0x2600 <= code <= 0x27BF
+        or 0x1F1E6 <= code <= 0x1F1FF
+        or code in (0x00A9, 0x00AE, 0x203C, 0x2049, 0x2122, 0x2139, 0x3030, 0x303D, 0x3297, 0x3299)
+    )
+
+
+def extract_emojis(text):
+    chars = list(text or '')
+    result = []
+    index = 0
+    while index < len(chars):
+        if not _is_emoji_base(chars[index]):
+            index += 1
+            continue
+        token = chars[index]
+        index += 1
+        if 0x1F1E6 <= ord(token) <= 0x1F1FF and index < len(chars) and 0x1F1E6 <= ord(chars[index]) <= 0x1F1FF:
+            token += chars[index]
+            index += 1
+        while index < len(chars):
+            code = ord(chars[index])
+            if code in (0xFE0E, 0xFE0F, 0x20E3) or 0x1F3FB <= code <= 0x1F3FF:
+                token += chars[index]
+                index += 1
+                continue
+            if code == 0x200D and index + 1 < len(chars) and _is_emoji_base(chars[index + 1]):
+                token += chars[index] + chars[index + 1]
+                index += 2
+                continue
+            break
+        result.append(token)
+    return result
+
+
+def extract_emoji_counts(text):
+    return Counter(extract_emojis(text))
 
 
 def account_switch_phone_variants(value):
@@ -1064,6 +1108,52 @@ class GrowthEvent(models.Model):
             points=self.points,
             created_at=self.updated_at.timestamp(),
         )
+
+
+class UserEmojiUsage(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='emoji_usages')
+    emoji = models.CharField(max_length=64)
+    use_count = models.PositiveIntegerField(default=0)
+    last_used_at = models.DateTimeField(default=timezone.now, db_index=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['user', 'emoji'], name='unique_user_emoji_usage'),
+        ]
+
+    @classmethod
+    def record_text(cls, user, text):
+        counts = extract_emoji_counts(text)
+        now = timezone.now()
+        for emoji, count in counts.items():
+            updated = cls.objects.filter(user=user, emoji=emoji).update(
+                use_count=F('use_count') + count,
+                last_used_at=now,
+            )
+            if not updated:
+                try:
+                    cls.objects.create(user=user, emoji=emoji, use_count=count, last_used_at=now)
+                except IntegrityError:
+                    cls.objects.filter(user=user, emoji=emoji).update(
+                        use_count=F('use_count') + count,
+                        last_used_at=now,
+                    )
+        return counts
+
+    @classmethod
+    def top_for_user(cls, user, limit=5):
+        now = timezone.now()
+        rows = list(cls.objects.filter(user=user).order_by('-last_used_at')[:200])
+        rows.sort(
+            key=lambda row: math.log1p(row.use_count) * math.exp(
+                -max(0, (now - row.last_used_at).total_seconds()) / (30 * 86400)
+            ),
+            reverse=True,
+        )
+        return [
+            dict(emoji=row.emoji, use_count=row.use_count, last_used_at=row.last_used_at.timestamp())
+            for row in rows[:limit]
+        ]
 
 
 class RefreshToken(models.Model):

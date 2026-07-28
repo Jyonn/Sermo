@@ -8,7 +8,7 @@ from Chat.models import Chat
 from Config.models import Config, ConfigInstance
 from Message.models import Message, MessageTypeChoice
 from Space.models import Space
-from User.models import GrowthEvent, NotificationPreference, User, UserNotificationChoice
+from User.models import GrowthEvent, NotificationPreference, User, UserEmojiUsage, UserNotificationChoice
 from utils import auth
 
 
@@ -298,6 +298,27 @@ class SpaceAdminApiTests(TestCase):
         self.assertEqual(response.status_code, 200, response.content)
         targets = response.json()['body']
         self.assertEqual([item['user']['user_id'] for item in targets], [self.official.id])
+
+    def test_text_message_emoji_usage_is_idempotent(self):
+        chat = Chat.get_or_create_direct(self.official, self.member)
+        for _index in range(2):
+            Message.create(
+                chat=chat,
+                user=self.member,
+                message_type=MessageTypeChoice.TEXT,
+                content='收到 👍👍',
+                client_message_id='emoji-idempotent',
+            )
+
+        usage = UserEmojiUsage.objects.get(user=self.member, emoji='👍')
+        self.assertEqual(usage.use_count, 2)
+        response = self.client.get(
+            '/users/me/emoji-usage',
+            **self.user_authorization(self.member),
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json()['body'][0]['emoji'], '👍')
+        self.assertEqual(response.json()['body'][0]['use_count'], 2)
 
     def test_space_admin_email_does_not_bypass_contact_matching(self):
         self.member.email = self.space.email

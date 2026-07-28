@@ -21,7 +21,7 @@ from smartdjango import models, Choice
 
 from Chat.models import Chat
 from Message.validators import MessageErrors, MessageValidator
-from User.models import GrowthEvent, User
+from User.models import GrowthEvent, User, UserEmojiUsage
 from utils.qiniu import sign_private_download_url, avatar_uri_for_key, build_message_image_thumbnail_uri, build_message_video_thumbnail_uri, validate_message_media_key
 
 
@@ -482,6 +482,7 @@ class Message(models.Model):
                 VideoMetadata.queue_for_message(message)
             if message.type == MessageTypeChoice.TEXT:
                 LinkPreview.queue_for_text(message.content)
+                UserEmojiUsage.record_text(user, message.content)
             if message.type != MessageTypeChoice.SYSTEM:
                 user.award_growth(
                     'daily:chat',

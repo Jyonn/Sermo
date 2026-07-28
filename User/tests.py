@@ -7,6 +7,7 @@ from User.models import (
     NotificationEventTypeChoice,
     User,
     account_switch_phone_variants,
+    extract_emojis,
     normalize_bark_endpoint,
 )
 
@@ -36,6 +37,14 @@ class AccountSwitchPhoneNormalizationTests(SimpleTestCase):
 
     def test_other_international_numbers_are_not_rewritten(self):
         self.assertEqual(account_switch_phone_variants('+6591234567'), {'+6591234567'})
+
+
+class EmojiExtractionTests(SimpleTestCase):
+    def test_extracts_compound_and_repeated_emoji(self):
+        self.assertEqual(
+            extract_emojis('好耶 👍👍🏽 家庭 👨‍👩‍👧‍👦'),
+            ['👍', '👍🏽', '👨‍👩‍👧‍👦'],
+        )
 
 
 class BarkEndpointNormalizationTests(SimpleTestCase):

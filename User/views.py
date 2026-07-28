@@ -23,6 +23,7 @@ from User.models import (
     UserNotificationChoice,
     UserWebReminderPreference,
     AccountSwitchTicket,
+    UserEmojiUsage,
 )
 from User.params import (
     AuthParams,
@@ -83,6 +84,12 @@ class UserMeView(View):
         user.remove()
         RefreshToken.objects.filter(user=user, revoked_at__isnull=True).update(revoked_at=timezone.now())
         return OK
+
+
+class UserEmojiUsageView(View):
+    @auth.require_user
+    def get(self, request: Request):
+        return UserEmojiUsage.top_for_user(request.user, limit=50)
 
 
 class UserGrowthEventView(View):

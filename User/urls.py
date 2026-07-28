@@ -3,6 +3,7 @@ from django.urls import path
 from User.views import (
     HeartbeatView,
     UserMeView,
+    UserEmojiUsageView,
     RefreshView,
     LogoutView,
     NotificationPreferenceView,
@@ -35,6 +36,7 @@ from User.views import (
 urlpatterns = [
     path('heartbeat', HeartbeatView.as_view(), name='heartbeat'),
     path('me', UserMeView.as_view(), name='user me'),
+    path('me/emoji-usage', UserEmojiUsageView.as_view(), name='user emoji usage'),
     path('me/growth-events', UserGrowthEventView.as_view(), name='user growth event'),
     path('refresh', RefreshView.as_view(), name='token refresh'),
     path('logout', LogoutView.as_view(), name='token revoke'),
