@@ -275,6 +275,12 @@ class User(models.Model):
     is_permanent_vip = models.BooleanField(default=False, db_index=True)
     chat_background_theme = models.CharField(max_length=16, default='default')
     chat_background_uri = models.CharField(max_length=255, default='')
+    chat_bubble_style = models.CharField(max_length=16, default='default')
+    avatar_frame_style = models.CharField(max_length=16, default='none')
+    square_outfit_style = models.CharField(max_length=16, default='sunset')
+    square_prop_style = models.CharField(max_length=16, default='none')
+    square_motion_style = models.CharField(max_length=16, default='walk')
+    square_limb_style = models.CharField(max_length=16, default='line')
 
     created_at = models.DateTimeField(auto_now_add=True)
     salt = models.CharField(max_length=vldt.SALT_MAX_LENGTH)
@@ -517,6 +523,13 @@ class User(models.Model):
         self.save(update_fields=['chat_background_theme', 'chat_background_uri'])
         if previous_uri and previous_uri != normalized_uri:
             delete_chat_background_by_uri(previous_uri)
+        return self
+
+    def set_personalization(self, **values):
+        fields = list(self.validators.PERSONALIZATION_OPTIONS)
+        for field in fields:
+            setattr(self, field, self.validators.personalization(field, values[field]))
+        self.save(update_fields=fields)
         return self
 
     def nickname_change_interval_days(self):
@@ -1008,7 +1021,11 @@ class User(models.Model):
         return self.calculate_growth(save=False)
 
     def tiny_json(self):
-        return self.dictify('name', 'user_id', 'official', 'avatar_type', 'avatar_uri', 'is_permanent_vip')
+        return self.dictify(
+            'name', 'user_id', 'official', 'avatar_type', 'avatar_uri', 'is_permanent_vip',
+            'chat_bubble_style', 'avatar_frame_style', 'square_outfit_style',
+            'square_prop_style', 'square_motion_style', 'square_limb_style',
+        )
 
     def jsonl(self):
         payload = self.dictify(
@@ -1021,6 +1038,12 @@ class User(models.Model):
             'plaza_greeting',
             'growth_level',
             'is_permanent_vip',
+            'chat_bubble_style',
+            'avatar_frame_style',
+            'square_outfit_style',
+            'square_prop_style',
+            'square_motion_style',
+            'square_limb_style',
             'avatar_type',
             'avatar_uri',
         )
@@ -1036,6 +1059,11 @@ class User(models.Model):
             'verified',
             'is_alive',
             'is_permanent_vip',
+            'avatar_frame_style',
+            'square_outfit_style',
+            'square_prop_style',
+            'square_motion_style',
+            'square_limb_style',
             'avatar_type',
             'avatar_uri',
             'last_heartbeat',
@@ -1079,6 +1107,12 @@ class User(models.Model):
             'is_private_account',
             'is_permanent_vip',
             'chat_background_theme',
+            'chat_bubble_style',
+            'avatar_frame_style',
+            'square_outfit_style',
+            'square_prop_style',
+            'square_motion_style',
+            'square_limb_style',
         )
         payload['chat_background_uri'] = (
             sign_private_download_url(self.chat_background_uri)

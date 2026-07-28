@@ -617,3 +617,25 @@ class ChatBackgroundView(View):
             uri = avatar_uri_for_key(key)
         request.user.set_chat_background(theme, uri)
         return request.user.json_me()
+
+
+class UserPersonalizationView(View):
+    @auth.require_user
+    @analyse.json(
+        UserParams.chat_bubble_style,
+        UserParams.avatar_frame_style,
+        UserParams.square_outfit_style,
+        UserParams.square_prop_style,
+        UserParams.square_motion_style,
+        UserParams.square_limb_style,
+    )
+    def post(self, request: Request):
+        request.user.set_personalization(
+            chat_bubble_style=request.json.chat_bubble_style,
+            avatar_frame_style=request.json.avatar_frame_style,
+            square_outfit_style=request.json.square_outfit_style,
+            square_prop_style=request.json.square_prop_style,
+            square_motion_style=request.json.square_motion_style,
+            square_limb_style=request.json.square_limb_style,
+        )
+        return request.user.json_me()

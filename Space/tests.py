@@ -241,6 +241,29 @@ class SpaceAdminApiTests(TestCase):
         self.assertEqual(repeated.status_code, 200, repeated.content)
         self.assertEqual(repeated.json()['body']['slot'], 1)
 
+    def test_user_personalization_is_persisted_and_serialized(self):
+        payload = {
+            'chat_bubble_style': 'comic',
+            'avatar_frame_style': 'blaze',
+            'square_outfit_style': 'noir',
+            'square_prop_style': 'flag',
+            'square_motion_style': 'float',
+            'square_limb_style': 'robot',
+        }
+        response = self.client.post(
+            '/users/me/personalization',
+            data=json.dumps(payload),
+            content_type='application/json',
+            **self.user_authorization(self.member),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.member.refresh_from_db()
+        for field, value in payload.items():
+            self.assertEqual(getattr(self.member, field), value)
+            self.assertEqual(response.json()['body'][field], value)
+            self.assertEqual(self.member.tiny_json()[field], value)
+
     def test_daily_chat_growth_is_capped(self):
         chat = Chat.get_or_create_direct(self.official, self.member)
         for index in range(20):

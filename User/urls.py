@@ -33,6 +33,7 @@ from User.views import (
     PlazaGreetingView,
     ChatBackgroundUploadView,
     ChatBackgroundView,
+    UserPersonalizationView,
 )
 
 urlpatterns = [
@@ -68,4 +69,5 @@ urlpatterns = [
     path('me/avatar/custom', AvatarCustomView.as_view(), name='avatar custom'),
     path('me/chat-background/upload', ChatBackgroundUploadView.as_view(), name='chat background upload'),
     path('me/chat-background', ChatBackgroundView.as_view(), name='chat background'),
+    path('me/personalization', UserPersonalizationView.as_view(), name='user personalization'),
 ]
