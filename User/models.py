@@ -272,6 +272,7 @@ class User(models.Model):
     growth_score = models.PositiveIntegerField(default=0)
     growth_level = models.PositiveSmallIntegerField(default=1)
     growth_acknowledged_level = models.PositiveSmallIntegerField(default=0)
+    is_permanent_vip = models.BooleanField(default=False, db_index=True)
     chat_background_theme = models.CharField(max_length=16, default='default')
     chat_background_uri = models.CharField(max_length=255, default='')
 
@@ -1007,7 +1008,7 @@ class User(models.Model):
         return self.calculate_growth(save=False)
 
     def tiny_json(self):
-        return self.dictify('name', 'user_id', 'official', 'avatar_type', 'avatar_uri')
+        return self.dictify('name', 'user_id', 'official', 'avatar_type', 'avatar_uri', 'is_permanent_vip')
 
     def jsonl(self):
         payload = self.dictify(
@@ -1019,6 +1020,7 @@ class User(models.Model):
             'welcome_message',
             'plaza_greeting',
             'growth_level',
+            'is_permanent_vip',
             'avatar_type',
             'avatar_uri',
         )
@@ -1033,6 +1035,7 @@ class User(models.Model):
             'official',
             'verified',
             'is_alive',
+            'is_permanent_vip',
             'avatar_type',
             'avatar_uri',
             'last_heartbeat',
@@ -1074,6 +1077,7 @@ class User(models.Model):
             'phone_unbound_at',
             'bark_unbound_at',
             'is_private_account',
+            'is_permanent_vip',
             'chat_background_theme',
         )
         payload['chat_background_uri'] = (
@@ -1082,6 +1086,7 @@ class User(models.Model):
             else ''
         )
         payload['growth'] = self.calculate_growth()
+        payload['permanent_vip_campaign'] = PermanentVipCampaign.status_for(self)
         payload['plaza_greeting'] = self.display_plaza_greeting()
         payload['name_changed_at'] = self.name_changed_at.timestamp() if self.name_changed_at else None
         available_at = self.nickname_change_available_at()
@@ -1127,6 +1132,62 @@ class GrowthEvent(models.Model):
             points=self.points,
             created_at=self.updated_at.timestamp(),
         )
+
+
+class PermanentVipCampaign(models.Model):
+    LIMIT = 100
+
+    key = models.CharField(max_length=32, primary_key=True, default='founding-100')
+    claimed_count = models.PositiveSmallIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    @classmethod
+    def status_for(cls, user):
+        campaign, _ = cls.objects.get_or_create(key='founding-100')
+        claim = PermanentVipClaim.objects.filter(user=user).first()
+        level = user.effective_growth_level()
+        requirements = dict(
+            email=bool(user.email_verified_at),
+            phone=bool(user.phone_verified_at),
+            level=level >= 6,
+        )
+        return dict(
+            limit=cls.LIMIT,
+            claimed=campaign.claimed_count,
+            remaining=max(0, cls.LIMIT - campaign.claimed_count),
+            eligible=all(requirements.values()),
+            requirements=requirements,
+            required_level=6,
+            claimed_by_user=claim is not None,
+            slot=claim.slot if claim else None,
+            active=claim is None and campaign.claimed_count < cls.LIMIT,
+        )
+
+    @classmethod
+    def claim_for(cls, user):
+        with transaction.atomic():
+            campaign, _ = cls.objects.select_for_update().get_or_create(key='founding-100')
+            existing = PermanentVipClaim.objects.filter(user=user).first()
+            if existing:
+                return cls.status_for(user)
+            if campaign.claimed_count >= cls.LIMIT:
+                raise UserErrors.PERMANENT_VIP_CAMPAIGN_FULL
+            if not user.email_verified_at or not user.phone_verified_at or user.effective_growth_level() < 6:
+                raise UserErrors.PERMANENT_VIP_NOT_ELIGIBLE
+
+            slot = campaign.claimed_count + 1
+            PermanentVipClaim.objects.create(user=user, slot=slot)
+            campaign.claimed_count = slot
+            campaign.save(update_fields=['claimed_count'])
+            User.objects.filter(id=user.id).update(is_permanent_vip=True)
+            user.is_permanent_vip = True
+        return cls.status_for(user)
+
+
+class PermanentVipClaim(models.Model):
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='permanent_vip_claim')
+    slot = models.PositiveSmallIntegerField(unique=True)
+    claimed_at = models.DateTimeField(auto_now_add=True)
 
 
 class UserEmojiUsage(models.Model):

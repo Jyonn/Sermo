@@ -24,6 +24,7 @@ from User.models import (
     UserWebReminderPreference,
     AccountSwitchTicket,
     UserEmojiUsage,
+    PermanentVipCampaign,
 )
 from User.params import (
     AuthParams,
@@ -116,6 +117,16 @@ class UserGrowthAcknowledgementView(View):
     @analyse.json(UserGrowthAcknowledgementParams.level)
     def post(self, request: Request):
         return request.user.acknowledge_growth_level(request.json.level)
+
+
+class PermanentVipCampaignView(View):
+    @auth.require_user
+    def get(self, request: Request):
+        return PermanentVipCampaign.status_for(request.user)
+
+    @auth.require_user
+    def post(self, request: Request):
+        return PermanentVipCampaign.claim_for(request.user)
 
 
 class RefreshView(View):

@@ -60,6 +60,8 @@ class UserErrors:
     GESTURE_LOCK_PAYLOAD_INVALID = Error(message=_('Invalid gesture lock payload'), code=Code.BadRequest)
     GROWTH_LEVEL_REQUIRED = Error(message=_('Level {level} is required for this feature'), code=Code.Forbidden)
     GROWTH_ACKNOWLEDGEMENT_INVALID = Error(message=_('Growth level acknowledgement is out of sequence'), code=Code.BadRequest)
+    PERMANENT_VIP_NOT_ELIGIBLE = Error(message=_('Permanent VIP requirements are not met'), code=Code.Forbidden)
+    PERMANENT_VIP_CAMPAIGN_FULL = Error(message=_('Permanent VIP campaign is full'), code=Code.BadRequest)
     NICKNAME_CHANGE_COOLDOWN = Error(message=_('Nickname can be changed again at {available_at}'), code=Code.BadRequest)
     PASSWORD_RECOVERY_UNAVAILABLE = Error(message=_('Password recovery is unavailable for this account'), code=Code.BadRequest)
     PASSWORD_RECOVERY_CHANNEL_INVALID = Error(message=_('Invalid password recovery channel'), code=Code.BadRequest)

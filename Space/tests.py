@@ -203,6 +203,44 @@ class SpaceAdminApiTests(TestCase):
         self.member.refresh_from_db()
         self.assertEqual(self.member.growth_acknowledged_level, 1)
 
+    def test_permanent_vip_requires_dual_verification_and_level_six(self):
+        ineligible = self.client.post(
+            '/users/me/permanent-vip',
+            **self.user_authorization(self.member),
+        )
+        self.assertEqual(ineligible.status_code, 403)
+
+        self.member.set_password('safe-password')
+        self.member.phone = '13800000006'
+        self.member.phone_verified_at = timezone.now()
+        self.member.save(update_fields=['phone', 'phone_verified_at'])
+        GrowthEvent.objects.create(
+            user=self.member,
+            event_key='test:vip-qualification',
+            category='test',
+            title='首批用户成长',
+            points=100,
+        )
+        self.assertGreaterEqual(self.member.calculate_growth()['level'], 6)
+
+        claimed = self.client.post(
+            '/users/me/permanent-vip',
+            **self.user_authorization(self.member),
+        )
+        self.assertEqual(claimed.status_code, 200, claimed.content)
+        self.assertEqual(claimed.json()['body']['slot'], 1)
+        self.assertTrue(claimed.json()['body']['claimed_by_user'])
+
+        self.member.refresh_from_db()
+        self.assertTrue(self.member.is_permanent_vip)
+
+        repeated = self.client.post(
+            '/users/me/permanent-vip',
+            **self.user_authorization(self.member),
+        )
+        self.assertEqual(repeated.status_code, 200, repeated.content)
+        self.assertEqual(repeated.json()['body']['slot'], 1)
+
     def test_daily_chat_growth_is_capped(self):
         chat = Chat.get_or_create_direct(self.official, self.member)
         for index in range(20):
