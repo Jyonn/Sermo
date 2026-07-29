@@ -141,6 +141,46 @@ class MapChatGrant(models.Model):
             ],
         )
 
+    @classmethod
+    def access_overview(cls, current_user):
+        shared_by_me = []
+        shared_with_me = []
+        for chat in Chat.get_user_chats(current_user):
+            members = ChatMember.objects.filter(
+                chat=chat,
+                status=ChatMemberStatusChoice.ACTIVE,
+                user__is_deleted=False,
+            ).select_related('user')
+            users = [member.user for member in members]
+            active_owner_ids = set(
+                cls.objects.filter(chat=chat, active=True).values_list('owner_id', flat=True)
+            )
+            peer_users = [user for user in users if user.id != current_user.id]
+            shared_users = [user for user in peer_users if user.id in active_owner_ids]
+            if chat.direct:
+                title = peer_users[0].name if peer_users else ''
+            else:
+                title = chat.title or ''
+            base = dict(
+                chat_id=chat.id,
+                chat_type='group' if chat.group else 'direct',
+                title=title,
+            )
+            if current_user.id in active_owner_ids:
+                shared_by_me.append({
+                    **base,
+                    'users': [user.tiny_json() for user in peer_users],
+                })
+            if shared_users:
+                shared_with_me.append({
+                    **base,
+                    'users': [user.tiny_json() for user in shared_users],
+                })
+        return dict(
+            shared_by_me=shared_by_me,
+            shared_with_me=shared_with_me,
+        )
+
 
 class MapAccessGrant(models.Model):
     owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name='map_grants_given')

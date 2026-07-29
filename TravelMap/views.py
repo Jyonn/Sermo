@@ -88,6 +88,12 @@ class MapAccessReciprocateView(View):
         return MapAccessGrant.status_between(request.user, request.query.target_user)
 
 
+class MapAccessOverviewView(View):
+    @auth.require_user
+    def get(self, request: Request):
+        return MapChatGrant.access_overview(request.user)
+
+
 class ChatMapAccessView(View):
     @auth.require_user
     @analyse.query(TravelMapParams.chat_id)
