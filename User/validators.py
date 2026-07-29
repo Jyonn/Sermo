@@ -111,7 +111,7 @@ class UserValidator:
     AVATAR_PRESET_MAX_ID = 80
     CHAT_BACKGROUND_THEMES = {'default', 'paper', 'mint', 'dusk', 'custom'}
     PERSONALIZATION_OPTIONS = {
-        'chat_bubble_style': {'default', 'tide', 'comic', 'neon'},
+        'chat_bubble_style': {'default', 'comic'},
         'avatar_frame_style': {'none', 'orbit', 'blaze', 'pixel'},
         'square_outfit_style': {'sunset', 'varsity', 'noir', 'cloud'},
         'square_prop_style': {'none', 'star', 'coffee', 'flag'},
