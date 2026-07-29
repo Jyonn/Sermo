@@ -10,7 +10,7 @@ from collections import Counter
 from notificator import NotificatorAPIError
 from django.db import IntegrityError, close_old_connections, transaction
 from django.db.models import F, Q
-from django.utils import timezone
+from django.utils import timezone, translation
 from django.utils.crypto import get_random_string
 from django.utils.translation import gettext as _
 from pypinyin import lazy_pinyin
@@ -229,6 +229,11 @@ class User(models.Model):
         max_length=vldt.LANGUAGE_MAX_LENGTH,
         default=vldt.DEFAULT_LANGUAGE,
         validators=[vldt.language],
+    )
+    language_preference = models.CharField(
+        max_length=vldt.LANGUAGE_MAX_LENGTH,
+        default='system',
+        validators=[vldt.language_preference],
     )
 
     offline_notification_interval = models.PositiveIntegerField(
@@ -476,11 +481,26 @@ class User(models.Model):
 
     def set_language(self, language, save=True):
         normalized = self.vldt.language(language)
+        if self.language_preference != 'system':
+            normalized = self.vldt.language(self.language_preference)
         if self.language == normalized:
             return self
         self.language = normalized
         if save:
             self.save(update_fields=['language'])
+        return self
+
+    def set_language_preference(self, preference, system_language=None, save=True):
+        normalized_preference = self.vldt.language_preference(preference)
+        effective_language = (
+            self.vldt.language(system_language)
+            if normalized_preference == 'system'
+            else self.vldt.language(normalized_preference)
+        )
+        self.language_preference = normalized_preference
+        self.language = effective_language
+        if save:
+            self.save(update_fields=['language_preference', 'language'])
         return self
 
     def set_name(self, name, save=True):
@@ -1088,6 +1108,7 @@ class User(models.Model):
             'official',
             'has_password',
             'language',
+            'language_preference',
             'welcome_message',
             'plaza_greeting',
             'is_alive',
@@ -1967,6 +1988,28 @@ class NotificationEvent(models.Model):
         friend_online_message_title='',
         friend_online_message_text='',
     ):
+        language = self.user.language if self.user_id else translation.get_language()
+        with translation.override(language):
+            return self._render_delivery_message(
+                hide_message_content=hide_message_content,
+                hidden_direct_message_title=hidden_direct_message_title,
+                hidden_direct_message_text=hidden_direct_message_text,
+                hidden_group_message_title=hidden_group_message_title,
+                hidden_group_message_text=hidden_group_message_text,
+                friend_online_message_title=friend_online_message_title,
+                friend_online_message_text=friend_online_message_text,
+            )
+
+    def _render_delivery_message(
+        self,
+        hide_message_content=False,
+        hidden_direct_message_title='',
+        hidden_direct_message_text='',
+        hidden_group_message_title='',
+        hidden_group_message_text='',
+        friend_online_message_title='',
+        friend_online_message_text='',
+    ):
         payload = self.payload or {}
         actor_name = self.actor.name if self.actor_id else None
 
@@ -2282,8 +2325,9 @@ class NotificationDelivery(models.Model):
         if not deliveries:
             return []
 
-        title = cls._render_email_batch_title(deliveries)
-        body = cls._render_email_batch_body(deliveries, pref)
+        with translation.override(user.language):
+            title = cls._render_email_batch_title(deliveries)
+            body = cls._render_email_batch_body(deliveries, pref)
         attempted_at = timezone.now()
         try:
             notificator.mail(

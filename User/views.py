@@ -639,3 +639,17 @@ class UserPersonalizationView(View):
             square_limb_style=request.json.square_limb_style,
         )
         return request.user.json_me()
+
+
+class UserLanguagePreferenceView(View):
+    @auth.require_user
+    @analyse.json(
+        UserParams.language_preference,
+        UserParams.system_language,
+    )
+    def post(self, request: Request):
+        request.user.set_language_preference(
+            request.json.language_preference,
+            system_language=request.json.system_language,
+        )
+        return request.user.json_me()

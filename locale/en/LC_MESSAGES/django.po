@@ -3,7 +3,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Sermo Backend\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-03-16 00:25+0800\n"
+"POT-Creation-Date: 2026-07-29 00:26+0000\n"
 "PO-Revision-Date: 2026-03-16 00:25+0800\n"
 "Last-Translator: Codex\n"
 "Language-Team: English\n"
@@ -13,430 +13,354 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
 
-#: Chat/models.py:233
-#, python-brace-format
-msgid "Group Chat ({num})"
-msgstr "Group Chat ({num})"
+#| msgid "Group Chat ({num})"
+msgid "Group Chat"
+msgstr "Group Chat"
 
-#: Chat/params.py:21 Chat/params.py:34
 msgid "duplicated users"
 msgstr "duplicated users"
 
-#: Chat/params.py:22
 msgid "group chat should have at least 1 invited member"
 msgstr "group chat should have at least 1 invited member"
 
-#: Chat/params.py:38 Friendship/params.py:21
 msgid "accept should be 0 or 1"
 msgstr "accept should be 0 or 1"
 
-#: Chat/validators.py:8
+msgid "pinned should be 0 or 1"
+msgstr "pinned should be 0 or 1"
+
+msgid "online_reminder_enabled should be 0 or 1"
+msgstr "online_reminder_enabled should be 0 or 1"
+
 #, python-brace-format
 msgid "Chat {chat} does not exist"
 msgstr "Chat {chat} does not exist"
 
-#: Chat/validators.py:9 Friendship/validators.py:9 User/validators.py:25
 msgid "Users are not in the same space"
 msgstr "Users are not in the same space"
 
-#: Chat/validators.py:10
 #, python-brace-format
 msgid "User {user} has been deleted"
 msgstr "User {user} has been deleted"
 
-#: Chat/validators.py:11
 msgid "You are not allowed to operate this chat"
 msgstr "You are not allowed to operate this chat"
 
-#: Chat/validators.py:12
 #, python-brace-format
 msgid "Chat {chat} is not a group chat"
 msgstr "Chat {chat} is not a group chat"
 
-#: Chat/validators.py:13 Friendship/validators.py:14
+#, python-brace-format
+msgid "Chat {chat} is not a direct chat"
+msgstr "Chat {chat} is not a direct chat"
+
 msgid "Users are not friends"
 msgstr "Users are not friends"
 
-#: Chat/validators.py:18
+msgid "Only verified users can create or invite members to group chats"
+msgstr "Only verified users can create or invite members to group chats"
+
+#, python-brace-format
+#| msgid "Users are not friends"
+msgid "User {user} is not your friend"
+msgstr "User {user} is not your friend"
+
 #, python-brace-format
 msgid "User {user} is not an active member of chat {chat}"
 msgstr "User {user} is not an active member of chat {chat}"
 
-#: Chat/validators.py:19
 #, python-brace-format
 msgid "User {user} is already a member of chat {chat}"
 msgstr "User {user} is already a member of chat {chat}"
 
-#: Chat/validators.py:20
 #, python-brace-format
 msgid "User {user} already has a pending invite in chat {chat}"
 msgstr "User {user} already has a pending invite in chat {chat}"
 
-#: Chat/validators.py:21
 #, python-brace-format
 msgid "Chat member {chat} does not exist"
 msgstr "Chat member {chat} does not exist"
 
-#: Chat/validators.py:22
 msgid "Invite not found for this chat"
 msgstr "Invite not found for this chat"
 
-#: Chat/validators.py:23
 msgid "Invite is not pending"
 msgstr "Invite is not pending"
 
-#: Chat/validators.py:24
 msgid "Owner cannot leave group chat directly"
 msgstr "Owner cannot leave group chat directly"
 
-#: Config/validators.py:7
 msgid "Failed to update config"
 msgstr "Failed to update config"
 
-#: Config/validators.py:8
 msgid "Config not found"
 msgstr "Config not found"
 
-#: Config/validators.py:9
 #, python-brace-format
 msgid "Config key too long, max length is {key_length}"
 msgstr "Config key too long, max length is {key_length}"
 
-#: Config/validators.py:10
 #, python-brace-format
 msgid "Config value too long, max length is {value_length}"
 msgstr "Config value too long, max length is {value_length}"
 
-#: Friendship/validators.py:7
+#| msgid "Space slug is required"
+msgid "token is required"
+msgstr "token is required"
+
+#| msgid "accept should be 0 or 1"
+msgid "permanent should be 0 or 1"
+msgstr "permanent should be 0 or 1"
+
 #, python-brace-format
 msgid "Friendship ({attr}={value}) does not exist"
 msgstr "Friendship ({attr}={value}) does not exist"
 
-#: Friendship/validators.py:8
 msgid "Invalid friendship target"
 msgstr "Invalid friendship target"
 
-#: Friendship/validators.py:10
 msgid "You are not allowed to request friendship"
 msgstr "You are not allowed to request friendship"
 
-#: Friendship/validators.py:11
 msgid "A pending friendship request already exists"
 msgstr "A pending friendship request already exists"
 
-#: Friendship/validators.py:12
 msgid "This friendship request is not pending"
 msgstr "This friendship request is not pending"
 
-#: Friendship/validators.py:13
 msgid "Users are already friends"
 msgstr "Users are already friends"
 
-#: Friendship/validators.py:15
 msgid "This friendship is locked and cannot be removed"
 msgstr "This friendship is locked and cannot be removed"
 
-#: Message/params.py:18
+#| msgid "Invalid friendship target"
+msgid "Invalid friend invite token"
+msgstr "Invalid friend invite token"
+
+#| msgid "Token expired"
+msgid "Friend invite token expired"
+msgstr "Friend invite token expired"
+
+#| msgid "User does not belong to this space"
+msgid "Invite token does not belong to your space"
+msgstr "Invite token does not belong to your space"
+
+msgid "Invite token secret key is not configured"
+msgstr "Invite token secret key is not configured"
+
 msgid "limit should be greater than 5"
 msgstr "limit should be greater than 5"
 
-#: Message/params.py:19
 msgid "limit should be less than 100"
 msgstr "limit should be less than 100"
 
-#: Message/validators.py:8 utils/auth.py:208
 msgid "You are not a member of this chat"
 msgstr "You are not a member of this chat"
 
-#: Message/validators.py:9
 msgid "Message does not exist"
 msgstr "Message does not exist"
 
-#: Space/params.py:30
+#| msgid "Invalid token type"
+msgid "Invalid message type"
+msgstr "Invalid message type"
+
+#| msgid "Name cannot be empty"
+msgid "Message content cannot be empty"
+msgstr "Message content cannot be empty"
+
+#| msgid "Message does not exist"
+msgid "Message content is too long"
+msgstr "Message content is too long"
+
+#| msgid "Invalid user role"
+msgid "Invalid message payload"
+msgstr "Invalid message payload"
+
+#| msgid "Invalid email verification code"
+msgid "Invalid media kind"
+msgstr "Invalid media kind"
+
+msgid "Audio message cannot exceed 60 seconds"
+msgstr "Audio message cannot exceed 60 seconds"
+
+msgid "The replied message is not in this chat"
+msgstr "The replied message is not in this chat"
+
+#| msgid "You are not a member of this chat"
+msgid "You cannot manage pinned messages in this chat"
+msgstr "You cannot manage pinned messages in this chat"
+
+msgid "This chat has reached the pinned message limit"
+msgstr "This chat has reached the pinned message limit"
+
+#| msgid "enabled should be 0 or 1"
+msgid "group_square_enabled should be 0 or 1"
+msgstr "group_square_enabled should be 0 or 1"
+
 msgid "online should be 0 or 1"
 msgstr "online should be 0 or 1"
 
-#: Space/params.py:34
 msgid "limit should be between 1 and 200"
 msgstr "limit should be between 1 and 200"
 
-#: Space/params.py:38
 msgid "offset should be greater than or equal to 0"
 msgstr "offset should be greater than or equal to 0"
 
-#: Space/validators.py:14
+#| msgid "Invalid contact channel"
+msgid "Invalid broadcast id"
+msgstr "Invalid broadcast id"
+
 #, python-brace-format
 msgid "Space ({attr}={value}) does not exist"
 msgstr "Space ({attr}={value}) does not exist"
 
-#: Space/validators.py:15 User/validators.py:17
+#| msgid "Name cannot be empty"
+msgid "Space name cannot be empty"
+msgstr "Space name cannot be empty"
+
+msgid "Space name is too long"
+msgstr "Space name is too long"
+
 #, python-brace-format
 msgid "Space slug should be at least {min_length} characters long"
 msgstr "Space slug should be at least {min_length} characters long"
 
-#: Space/validators.py:16 User/validators.py:18
 msgid "Space slug can only contain lowercase letters, numbers and hyphens"
 msgstr "Space slug can only contain lowercase letters, numbers and hyphens"
 
-#: Space/validators.py:17 User/validators.py:21
 msgid "Space slug is already taken"
 msgstr "Space slug is already taken"
 
-#: Space/validators.py:18 User/validators.py:22
 msgid "Space slug is reserved"
 msgstr "Space slug is reserved"
 
-#: Space/validators.py:19
+#| msgid "Space slug is required"
+msgid "Space email is required"
+msgstr "Space email is required"
+
 msgid "Space email is already taken"
 msgstr "Space email is already taken"
 
-#: Space/validators.py:20
 msgid "Invalid space email verification code"
 msgstr "Invalid space email verification code"
 
-#: Space/validators.py:21
 msgid "Space email verification code expired"
 msgstr "Space email verification code expired"
 
-#: Space/validators.py:22
 msgid "Failed to send space verification email"
 msgstr "Failed to send space verification email"
 
-#: Space/validators.py:23
 msgid "Space email does not match"
 msgstr "Space email does not match"
 
-#: Space/validators.py:24
+#| msgid "limit should be less than 100"
+msgid "Member limit should be at least 1"
+msgstr "Member limit should be at least 1"
+
+msgid "Member limit cannot be lower than current member count"
+msgstr "Member limit cannot be lower than current member count"
+
+msgid "This space has reached its member limit"
+msgstr "This space has reached its member limit"
+
+msgid "Space level names are invalid"
+msgstr "Space level names are invalid"
+
+msgid "Only the official account can access space administration"
+msgstr "Only the official account can access space administration"
+
 msgid "Failed to send notification"
 msgstr "Failed to send notification"
 
-#: User/models.py:87
 msgid "user id"
 msgstr "user id"
 
-#: User/models.py:492
 msgid "New direct message"
 msgstr "New direct message"
 
-#: User/models.py:493
+#| msgid "You have received a new direct message."
+msgid "You received a new direct message."
+msgstr "You received a new direct message."
+
 msgid "You have received a new direct message."
 msgstr "You have received a new direct message."
 
-#: User/models.py:495
 #, python-brace-format
 msgid "New message from {name}"
 msgstr "New message from {name}"
 
-#: User/models.py:499
 msgid "New group message"
 msgstr "New group message"
 
-#: User/models.py:500
+#| msgid "You have received a new group message."
+msgid "You received a new group message."
+msgstr "You received a new group message."
+
 msgid "You have received a new group message."
 msgstr "You have received a new group message."
 
-#: User/models.py:502
 #, python-brace-format
 msgid "New group message from {name}"
 msgstr "New group message from {name}"
 
-#: User/models.py:507
 msgid "New friend request"
 msgstr "New friend request"
 
-#: User/models.py:508
 msgid "You have received a new friend request."
 msgstr "You have received a new friend request."
 
-#: User/models.py:510
 #, python-brace-format
 msgid "{name} sent you a friend request."
 msgstr "{name} sent you a friend request."
 
-#: User/models.py:513
 msgid "Friend request accepted"
 msgstr "Friend request accepted"
 
-#: User/models.py:514
 msgid "Your friend request has been accepted."
 msgstr "Your friend request has been accepted."
 
-#: User/models.py:516
 #, python-brace-format
 msgid "{name} accepted your friend request."
 msgstr "{name} accepted your friend request."
 
-#: User/models.py:519
 msgid "Group invite"
 msgstr "Group invite"
 
-#: User/models.py:520
 msgid "a group"
 msgstr "a group"
 
-#: User/models.py:521
 #, python-brace-format
 msgid "You are invited to join {group}."
 msgstr "You are invited to join {group}."
 
-#: User/models.py:524
 msgid "Group invite response"
 msgstr "Group invite response"
 
-#: User/models.py:526
 msgid "A user responded to your invite."
 msgstr "A user responded to your invite."
 
-#: User/models.py:528
 msgid "A user accepted your group invite."
 msgstr "A user accepted your group invite."
 
-#: User/models.py:530
 msgid "A user rejected your group invite."
 msgstr "A user rejected your group invite."
 
-#: User/models.py:533
+msgid "Friend online"
+msgstr "Friend online"
+
+#, python-brace-format
+msgid "{name} is online now."
+msgstr "{name} is online now."
+
+msgid "Your friend"
+msgstr "Your friend"
+
 msgid "System notification"
 msgstr "System notification"
 
-#: User/models.py:533
 msgid "You have a new notification."
 msgstr "You have a new notification."
-
-#: User/params.py:27
-msgid "Empty refresh token"
-msgstr "Empty refresh token"
-
-#: User/params.py:41
-msgid "Invalid notification channel"
-msgstr "Invalid notification channel"
-
-#: User/params.py:46
-msgid "enabled should be 0 or 1"
-msgstr "enabled should be 0 or 1"
-
-#: User/params.py:52
-msgid "offline_threshold_minutes should be between 1 and 10080"
-msgstr "offline_threshold_minutes should be between 1 and 10080"
-
-#: User/params.py:66 User/validators.py:14
-#, python-brace-format
-msgid "Password should be at least {password_length} characters long"
-msgstr "Password should be at least {password_length} characters long"
-
-#: User/validators.py:10
-#, python-brace-format
-msgid "User ({attr}={value}) does not exist"
-msgstr "User ({attr}={value}) does not exist"
-
-#: User/validators.py:11
-msgid "User already exists"
-msgstr "User already exists"
-
-#: User/validators.py:12
-msgid "Name cannot be empty"
-msgstr "Name cannot be empty"
-
-#: User/validators.py:13
-#, python-brace-format
-msgid "Interval should be greater than {offline_interval} minutes"
-msgstr "Interval should be greater than {offline_interval} minutes"
-
-#: User/validators.py:15
-msgid "Password error"
-msgstr "Password error"
-
-#: User/validators.py:16
-msgid "Name cannot contain spaces"
-msgstr "Name cannot contain spaces"
-
-#: User/validators.py:19
-msgid "Nickname is already taken, password required"
-msgstr "Nickname is already taken, password required"
-
-#: User/validators.py:20
-msgid "Space slug is required"
-msgstr "Space slug is required"
-
-#: User/validators.py:23
-msgid "User has been deleted"
-msgstr "User has been deleted"
-
-#: User/validators.py:24
-msgid "User does not belong to this space"
-msgstr "User does not belong to this space"
-
-#: User/validators.py:26
-msgid "Invalid email verification code"
-msgstr "Invalid email verification code"
-
-#: User/validators.py:27
-msgid "Email verification code expired"
-msgstr "Email verification code expired"
-
-#: User/validators.py:28
-msgid "Invalid contact verification code"
-msgstr "Invalid contact verification code"
-
-#: User/validators.py:29
-msgid "Contact verification code expired"
-msgstr "Contact verification code expired"
-
-#: User/validators.py:30
-msgid "Invalid contact channel"
-msgstr "Invalid contact channel"
-
-#: User/validators.py:31
-msgid "Failed to send contact verification message"
-msgstr "Failed to send contact verification message"
-
-#: User/validators.py:32
-msgid "Failed to send verification email"
-msgstr "Failed to send verification email"
-
-#: utils/auth.py:28
-msgid "Token expired"
-msgstr "Token expired"
-
-#: utils/auth.py:29
-msgid "Incorrect format"
-msgstr "Incorrect format"
-
-#: utils/auth.py:30
-msgid "Token revoked"
-msgstr "Token revoked"
-
-#: utils/auth.py:67
-msgid "Invalid JWT expire"
-msgstr "Invalid JWT expire"
-
-#: utils/auth.py:68
-msgid "Invalid JWT time"
-msgstr "Invalid JWT time"
-
-#: utils/auth.py:75
-msgid "Invalid token type"
-msgstr "Invalid token type"
-
-#: utils/auth.py:82 utils/auth.py:87
-msgid "Missing authorization header"
-msgstr "Missing authorization header"
-
-#: utils/auth.py:101
-msgid "Invalid user role"
-msgstr "Invalid user role"
-
-#: utils/auth.py:161
-msgid "Missing refresh token id"
-msgstr "Missing refresh token id"
-
-#: utils/auth.py:203
-msgid "You are not the owner of this chat"
-msgstr "You are not the owner of this chat"
-
-#: utils/auth.py:212
-msgid "You are not the owner of this message"
-msgstr "You are not the owner of this message"
 
 msgid "New messages"
 msgstr "New messages"
@@ -469,20 +393,325 @@ msgstr "And {count} more messages."
 
 msgid "Open Sermo Yanlang to reply."
 msgstr "Open Sermo Yanlang to reply."
-msgid "Chat {chat} is not a direct chat"
-msgstr "Chat {chat} is not a direct chat"
 
-msgid "pinned should be 0 or 1"
-msgstr "pinned should be 0 or 1"
+#| msgid "Space slug is required"
+msgid "language is required"
+msgstr "language is required"
 
-msgid "online_reminder_enabled should be 0 or 1"
-msgstr "online_reminder_enabled should be 0 or 1"
+msgid "Empty refresh token"
+msgstr "Empty refresh token"
 
-msgid "Friend online"
-msgstr "Friend online"
+msgid "Empty account switch ticket"
+msgstr "Empty account switch ticket"
 
-msgid "{name} is online now."
-msgstr "{name} is online now."
+msgid "enabled should be 0 or 1"
+msgstr "enabled should be 0 or 1"
 
-msgid "Your friend"
-msgstr "Your friend"
+#| msgid "Invalid token type"
+msgid "Invalid growth event"
+msgstr "Invalid growth event"
+
+#| msgid "Invalid user role"
+msgid "Invalid growth level"
+msgstr "Invalid growth level"
+
+msgid "Invalid notification channel"
+msgstr "Invalid notification channel"
+
+msgid "offline_threshold_minutes should be between 1 and 10080"
+msgstr "offline_threshold_minutes should be between 1 and 10080"
+
+#| msgid "accept should be 0 or 1"
+msgid "hide_message_content should be 0 or 1"
+msgstr "hide_message_content should be 0 or 1"
+
+msgid "hidden_direct_message_title should be at most 80 characters"
+msgstr "hidden_direct_message_title should be at most 80 characters"
+
+msgid "hidden_direct_message_text should be at most 255 characters"
+msgstr "hidden_direct_message_text should be at most 255 characters"
+
+msgid "hidden_group_message_text should be at most 255 characters"
+msgstr "hidden_group_message_text should be at most 255 characters"
+
+msgid "hidden_group_message_title should be at most 80 characters"
+msgstr "hidden_group_message_title should be at most 80 characters"
+
+msgid "friend_online_message_title should be at most 80 characters"
+msgstr "friend_online_message_title should be at most 80 characters"
+
+msgid "friend_online_message_text should be at most 255 characters"
+msgstr "friend_online_message_text should be at most 255 characters"
+
+#| msgid "online should be 0 or 1"
+msgid "open_chat_on_tap should be 0 or 1"
+msgstr "open_chat_on_tap should be 0 or 1"
+
+#| msgid "online should be 0 or 1"
+msgid "bark_icon_mode should be 0, 1 or 2"
+msgstr "bark_icon_mode should be 0, 1 or 2"
+
+#| msgid "enabled should be 0 or 1"
+msgid "sound_enabled should be 0 or 1"
+msgstr "sound_enabled should be 0 or 1"
+
+#| msgid "enabled should be 0 or 1"
+msgid "title_enabled should be 0 or 1"
+msgstr "title_enabled should be 0 or 1"
+
+msgid "Invalid gesture lock payload"
+msgstr "Invalid gesture lock payload"
+
+#| msgid "limit should be between 1 and 200"
+msgid "lock_after_minutes should be between 1 and 30"
+msgstr "lock_after_minutes should be between 1 and 30"
+
+#| msgid "Invalid user role"
+msgid "Invalid push endpoint"
+msgstr "Invalid push endpoint"
+
+#| msgid "Invalid user role"
+msgid "Invalid push key"
+msgstr "Invalid push key"
+
+#| msgid "Invalid user role"
+msgid "Invalid push auth secret"
+msgstr "Invalid push auth secret"
+
+#| msgid "Invalid user role"
+msgid "Invalid push origin"
+msgstr "Invalid push origin"
+
+#, python-brace-format
+msgid "User ({attr}={value}) does not exist"
+msgstr "User ({attr}={value}) does not exist"
+
+msgid "User already exists"
+msgstr "User already exists"
+
+msgid "Name cannot be empty"
+msgstr "Name cannot be empty"
+
+#, python-brace-format
+msgid "Interval should be greater than {offline_interval} minutes"
+msgstr "Interval should be greater than {offline_interval} minutes"
+
+#, python-brace-format
+msgid "Password should be at least {password_length} characters long"
+msgstr "Password should be at least {password_length} characters long"
+
+msgid "Password error"
+msgstr "Password error"
+
+#| msgid "Space slug is required"
+msgid "old_password is required"
+msgstr "old_password is required"
+
+#| msgid "Password error"
+msgid "Password is not set"
+msgstr "Password is not set"
+
+msgid "Name cannot contain spaces"
+msgstr "Name cannot contain spaces"
+
+msgid "Nickname is already taken, password required"
+msgstr "Nickname is already taken, password required"
+
+msgid "Password is required to delete account"
+msgstr "Password is required to delete account"
+
+msgid "Name confirmation is required to delete account"
+msgstr "Name confirmation is required to delete account"
+
+#| msgid "Space email does not match"
+msgid "Name confirmation does not match"
+msgstr "Name confirmation does not match"
+
+msgid "Space slug is required"
+msgstr "Space slug is required"
+
+msgid "User has been deleted"
+msgstr "User has been deleted"
+
+#| msgid "This friendship is locked and cannot be removed"
+msgid "Official account cannot be removed"
+msgstr "Official account cannot be removed"
+
+msgid "User does not belong to this space"
+msgstr "User does not belong to this space"
+
+msgid "Unsupported language"
+msgstr "Unsupported language"
+
+#| msgid "Name cannot be empty"
+msgid "Welcome message cannot be empty"
+msgstr "Welcome message cannot be empty"
+
+msgid "Welcome message is too long"
+msgstr "Welcome message is too long"
+
+msgid "Invalid contact verification code"
+msgstr "Invalid contact verification code"
+
+msgid "Contact verification code expired"
+msgstr "Contact verification code expired"
+
+msgid "Invalid contact channel"
+msgstr "Invalid contact channel"
+
+msgid "Failed to send contact verification message"
+msgstr "Failed to send contact verification message"
+
+msgid "Contact is already bound in this space"
+msgstr "Contact is already bound in this space"
+
+#| msgid "Config not found"
+msgid "Contact is not bound"
+msgstr "Contact is not bound"
+
+msgid "Contact verification target does not match current binding"
+msgstr "Contact verification target does not match current binding"
+
+#, python-brace-format
+msgid "Contact cannot be unbound again until {available_at}"
+msgstr "Contact cannot be unbound again until {available_at}"
+
+msgid "Verified phone is required for a private account"
+msgstr "Verified phone is required for a private account"
+
+msgid "Account switch is not allowed"
+msgstr "Account switch is not allowed"
+
+#| msgid "Invalid contact channel"
+msgid "Invalid account switch ticket"
+msgstr "Invalid account switch ticket"
+
+msgid "Account switch ticket expired"
+msgstr "Account switch ticket expired"
+
+#| msgid "Invalid notification channel"
+msgid "Invalid official login ticket"
+msgstr "Invalid official login ticket"
+
+msgid "Official login ticket expired"
+msgstr "Official login ticket expired"
+
+msgid "Invalid avatar preset id"
+msgstr "Invalid avatar preset id"
+
+msgid "Avatar storage is not configured"
+msgstr "Avatar storage is not configured"
+
+#| msgid "Invalid token type"
+msgid "Invalid avatar image type"
+msgstr "Invalid avatar image type"
+
+#| msgid "Invalid token type"
+msgid "Invalid avatar key"
+msgstr "Invalid avatar key"
+
+msgid "Failed to delete previous avatar"
+msgstr "Failed to delete previous avatar"
+
+#| msgid "Invalid token type"
+msgid "Invalid chat background image type"
+msgstr "Invalid chat background image type"
+
+#| msgid "Invalid contact channel"
+msgid "Invalid chat background key"
+msgstr "Invalid chat background key"
+
+msgid "Invalid chat background theme"
+msgstr "Invalid chat background theme"
+
+#| msgid "Invalid email verification code"
+msgid "Invalid personalization option"
+msgstr "Invalid personalization option"
+
+msgid "Invalid web push subscription"
+msgstr "Invalid web push subscription"
+
+msgid "Email is not verified"
+msgstr "Email is not verified"
+
+#, python-brace-format
+msgid "Level {level} is required for this feature"
+msgstr "Level {level} is required for this feature"
+
+msgid "Growth level acknowledgement is out of sequence"
+msgstr "Growth level acknowledgement is out of sequence"
+
+msgid "Permanent VIP requirements are not met"
+msgstr "Permanent VIP requirements are not met"
+
+msgid "Permanent VIP campaign is full"
+msgstr "Permanent VIP campaign is full"
+
+#, python-brace-format
+msgid "Nickname can be changed again at {available_at}"
+msgstr "Nickname can be changed again at {available_at}"
+
+msgid "Password recovery is unavailable for this account"
+msgstr "Password recovery is unavailable for this account"
+
+#| msgid "Invalid contact channel"
+msgid "Invalid password recovery channel"
+msgstr "Invalid password recovery channel"
+
+msgid "Please wait before requesting another recovery code"
+msgstr "Please wait before requesting another recovery code"
+
+msgid "Invalid password recovery code"
+msgstr "Invalid password recovery code"
+
+msgid "Password recovery code expired"
+msgstr "Password recovery code expired"
+
+msgid "Too many password recovery attempts"
+msgstr "Too many password recovery attempts"
+
+#| msgid "Invalid user role"
+msgid "Invalid password reset token"
+msgstr "Invalid password reset token"
+
+msgid "Password reset token expired"
+msgstr "Password reset token expired"
+
+msgid "Token expired"
+msgstr "Token expired"
+
+msgid "Incorrect format"
+msgstr "Incorrect format"
+
+msgid "Token revoked"
+msgstr "Token revoked"
+
+msgid "Invalid JWT expire"
+msgstr "Invalid JWT expire"
+
+msgid "Invalid JWT time"
+msgstr "Invalid JWT time"
+
+msgid "Invalid token type"
+msgstr "Invalid token type"
+
+msgid "Missing authorization header"
+msgstr "Missing authorization header"
+
+msgid "Invalid user role"
+msgstr "Invalid user role"
+
+msgid "Missing refresh token id"
+msgstr "Missing refresh token id"
+
+msgid "You are not the owner of this chat"
+msgstr "You are not the owner of this chat"
+
+msgid "You are not the owner of this message"
+msgstr "You are not the owner of this message"
+
+#~ msgid "Email verification code expired"
+#~ msgstr "Email verification code expired"
+
+#~ msgid "Failed to send verification email"
+#~ msgstr "Failed to send verification email"

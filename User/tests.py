@@ -23,6 +23,16 @@ class UserPresentationTests(SimpleTestCase):
             '今天也要尽兴',
         )
 
+    def test_explicit_language_preference_is_not_overwritten_by_login_language(self):
+        user = User(language='zh-CN', language_preference='zh-CN')
+        user.set_language('en', save=False)
+        self.assertEqual(user.language, 'zh-CN')
+
+    def test_system_language_preference_tracks_device_language(self):
+        user = User(language='en', language_preference='system')
+        user.set_language('zh-CN', save=False)
+        self.assertEqual(user.language, 'zh-CN')
+
 
 class AccountSwitchPhoneNormalizationTests(SimpleTestCase):
     def test_mainland_phone_variants_include_country_code(self):
@@ -62,6 +72,18 @@ class BarkEndpointNormalizationTests(SimpleTestCase):
 
 
 class NotificationEventDeliveryTests(SimpleTestCase):
+    def test_delivery_uses_recipient_language(self):
+        event = NotificationEvent(
+            user=User(id=1, language='zh-CN'),
+            event_type=NotificationEventTypeChoice.DIRECT_MESSAGE,
+            payload={},
+        )
+
+        title, body = event.render_delivery_message()
+
+        self.assertEqual(title, '新私聊消息')
+        self.assertEqual(body, '你收到了一条新的私聊消息。')
+
     def test_hidden_message_uses_custom_title_and_body(self):
         event = NotificationEvent(
             event_type=NotificationEventTypeChoice.DIRECT_MESSAGE,

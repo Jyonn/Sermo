@@ -99,6 +99,7 @@ class UserValidator:
     LANGUAGE_MAX_LENGTH = 16
     DEFAULT_LANGUAGE = 'en'
     SUPPORTED_LANGUAGES = {'en', 'zh-CN'}
+    LANGUAGE_PREFERENCES = {'system', 'en', 'zh-CN'}
     LANGUAGE_ALIASES = {
         'en': 'en',
         'en-us': 'en',
@@ -159,6 +160,16 @@ class UserValidator:
     def language(cls, value):
         normalized = cls.normalize_language(value)
         if normalized not in cls.SUPPORTED_LANGUAGES:
+            raise UserErrors.LANGUAGE_INVALID
+        return normalized
+
+    @classmethod
+    def language_preference(cls, value):
+        raw = (value or 'system').strip()
+        if raw == 'system':
+            return raw
+        normalized = cls.normalize_language(raw)
+        if normalized not in cls.LANGUAGE_PREFERENCES:
             raise UserErrors.LANGUAGE_INVALID
         return normalized
 

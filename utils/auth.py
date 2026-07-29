@@ -5,6 +5,7 @@ import jwt
 
 from django.utils import timezone
 from django.utils.crypto import get_random_string
+from django.utils import translation
 from django.utils.translation import gettext_lazy as _
 from oba import Obj
 from smartdjango import Error, Code, Validator, DictValidator, analyse
@@ -98,6 +99,7 @@ def _require_user(func, checker: Optional[Callable[[User], bool]] = None):
 
         user = User.jwt_login(data['user_id'])
         request.user = user
+        translation.activate(user.language)
 
         if checker is not None and not checker(user):
             raise AuthErrors.FORMAT(details=_('Invalid user role'))

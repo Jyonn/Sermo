@@ -62,6 +62,13 @@ class UserParams(metaclass=Params):
         .bool(lambda x: x is not None, message=_('language is required')) \
         .to(User.normalizers.language) \
         .exception(User.validators.language)
+    language_preference = Validator('language_preference') \
+        .to(str) \
+        .to(User.validators.language_preference)
+    system_language = Validator('system_language') \
+        .to(str) \
+        .to(User.normalizers.language) \
+        .exception(User.validators.language)
 
 
 class AuthParams(metaclass=Params):

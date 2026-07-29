@@ -34,6 +34,7 @@ from User.views import (
     ChatBackgroundUploadView,
     ChatBackgroundView,
     UserPersonalizationView,
+    UserLanguagePreferenceView,
 )
 
 urlpatterns = [
@@ -70,4 +71,5 @@ urlpatterns = [
     path('me/chat-background/upload', ChatBackgroundUploadView.as_view(), name='chat background upload'),
     path('me/chat-background', ChatBackgroundView.as_view(), name='chat background'),
     path('me/personalization', UserPersonalizationView.as_view(), name='user personalization'),
+    path('me/language', UserLanguagePreferenceView.as_view(), name='user language preference'),
 ]
