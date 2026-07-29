@@ -4,6 +4,7 @@ from smartdjango import models
 
 from TravelMap.validators import TravelMapErrors, TravelMapValidator
 from User.models import User
+from Chat.models import Chat, ChatMember, ChatMemberStatusChoice
 
 
 class MapCheckIn(models.Model):
@@ -15,6 +16,10 @@ class MapCheckIn(models.Model):
     region_name = models.CharField(max_length=vldt.REGION_NAME_MAX_LENGTH)
     country_code = models.CharField(max_length=vldt.COUNTRY_CODE_MAX_LENGTH, db_index=True)
     country_name = models.CharField(max_length=vldt.COUNTRY_NAME_MAX_LENGTH)
+    latitude = models.FloatField(null=True, blank=True)
+    longitude = models.FloatField(null=True, blank=True)
+    accuracy_meters = models.FloatField(null=True, blank=True)
+    geocoding_provider = models.CharField(max_length=24, null=True, blank=True)
     checked_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -24,26 +29,39 @@ class MapCheckIn(models.Model):
         ]
 
     @classmethod
-    def set_checked(cls, user, region_code, region_name, country_code, country_name, checked):
+    def check_in(
+        cls,
+        user,
+        region_code,
+        region_name,
+        country_code,
+        country_name,
+        latitude,
+        longitude,
+        accuracy_meters,
+        geocoding_provider,
+    ):
         normalized_region_code = (region_code or '').strip()[:cls.vldt.REGION_CODE_MAX_LENGTH]
         normalized_region_name = (region_name or '').strip()[:cls.vldt.REGION_NAME_MAX_LENGTH]
         normalized_country_code = (country_code or '').strip().upper()[:cls.vldt.COUNTRY_CODE_MAX_LENGTH]
         normalized_country_name = (country_name or '').strip()[:cls.vldt.COUNTRY_NAME_MAX_LENGTH]
         if not all((normalized_region_code, normalized_region_name, normalized_country_code, normalized_country_name)):
             raise TravelMapErrors.REGION_INVALID
-        if checked:
-            item, _ = cls.objects.update_or_create(
-                user=user,
-                region_code=normalized_region_code,
-                defaults=dict(
-                    region_name=normalized_region_name,
-                    country_code=normalized_country_code,
-                    country_name=normalized_country_name,
-                ),
-            )
-            return item
-        cls.objects.filter(user=user, region_code=normalized_region_code).delete()
-        return None
+        item, _ = cls.objects.update_or_create(
+            user=user,
+            region_code=normalized_region_code,
+            defaults=dict(
+                region_name=normalized_region_name,
+                country_code=normalized_country_code,
+                country_name=normalized_country_name,
+                latitude=latitude,
+                longitude=longitude,
+                accuracy_meters=accuracy_meters,
+                geocoding_provider=geocoding_provider,
+                checked_at=timezone.now(),
+            ),
+        )
+        return item
 
     def json(self):
         return dict(
@@ -52,6 +70,76 @@ class MapCheckIn(models.Model):
             country_code=self.country_code,
             country_name=self.country_name,
             checked_at=self.checked_at.timestamp(),
+        )
+
+
+class MapChatGrant(models.Model):
+    chat = models.ForeignKey(Chat, on_delete=models.CASCADE, related_name='map_grants')
+    owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name='chat_map_grants')
+    active = models.BooleanField(default=True, db_index=True)
+    granted_at = models.DateTimeField(auto_now_add=True)
+    revoked_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['chat', 'owner'], name='travel_map_unique_chat_owner'),
+        ]
+
+    @classmethod
+    def _require_member(cls, chat, user):
+        if not chat.has_active_member(user):
+            raise TravelMapErrors.CHAT_ACCESS_DENIED
+
+    @classmethod
+    def grant(cls, chat, owner):
+        cls._require_member(chat, owner)
+        item, _ = cls.objects.update_or_create(
+            chat=chat,
+            owner=owner,
+            defaults=dict(active=True, revoked_at=None),
+        )
+        return item
+
+    @classmethod
+    def revoke(cls, chat, owner):
+        cls._require_member(chat, owner)
+        cls.objects.filter(chat=chat, owner=owner, active=True).update(
+            active=False,
+            revoked_at=timezone.now(),
+        )
+
+    @classmethod
+    def status(cls, chat, current_user):
+        cls._require_member(chat, current_user)
+        active_owner_ids = set(cls.objects.filter(chat=chat, active=True).values_list('owner_id', flat=True))
+        members = ChatMember.objects.filter(
+            chat=chat,
+            status=ChatMemberStatusChoice.ACTIVE,
+            user__is_deleted=False,
+        ).select_related('user')
+        shared_members = [member.user.tiny_json() for member in members if member.user_id in active_owner_ids]
+        return dict(
+            authorized_by_me=current_user.id in active_owner_ids,
+            shared_members=shared_members,
+        )
+
+    @classmethod
+    def maps(cls, chat, current_user):
+        status = cls.status(chat, current_user)
+        if not status['authorized_by_me']:
+            raise TravelMapErrors.ACCESS_DENIED
+        owner_ids = [item['user_id'] for item in status['shared_members']]
+        rows = MapCheckIn.objects.filter(user_id__in=owner_ids).select_related('user')
+        regions_by_user = {owner_id: [] for owner_id in owner_ids}
+        for row in rows:
+            regions_by_user.setdefault(row.user_id, []).append(row.json())
+        return dict(
+            chat_id=chat.id,
+            authorized_by_me=status['authorized_by_me'],
+            maps=[
+                dict(owner=member, regions=regions_by_user.get(member['user_id'], []))
+                for member in status['shared_members']
+            ],
         )
 
 

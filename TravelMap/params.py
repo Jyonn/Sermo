@@ -1,14 +1,15 @@
 from smartdjango import Params, Validator
 
 from User.models import User
+from Chat.models import Chat
 
 
 class TravelMapParams(metaclass=Params):
     user_id = Validator('user_id', final_name='target_user').to(int).to(User.index)
-    region_code = Validator('region_code').to(str)
-    region_name = Validator('region_name').to(str)
-    country_name = Validator('country_name').to(str)
-    checked = Validator('checked').to(int).bool(lambda value: value in (0, 1))
+    chat_id = Validator('chat_id', final_name='chat').to(int).to(Chat.index)
+    latitude = Validator('latitude').to(float).bool(lambda value: -90 <= value <= 90)
+    longitude = Validator('longitude').to(float).bool(lambda value: -180 <= value <= 180)
+    accuracy_meters = Validator('accuracy_meters').to(float).bool(lambda value: 0 <= value <= 50000)
     country_code = Validator('country_code').to(str).bool(
         lambda value: len(value.strip()) == 3 and value.strip().isalpha()
     )

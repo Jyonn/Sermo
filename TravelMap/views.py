@@ -3,7 +3,8 @@ from django.core.cache import cache
 from django.views import View
 from smartdjango import OK, analyse
 
-from TravelMap.models import MapAccessGrant, MapCheckIn, TravelMap
+from TravelMap.geocoding import reverse_geocode_check_in
+from TravelMap.models import MapAccessGrant, MapChatGrant, MapCheckIn, TravelMap
 from TravelMap.params import TravelMapParams
 from TravelMap.validators import TravelMapErrors
 from utils import auth
@@ -19,27 +20,35 @@ class MyTravelMapView(View):
             regions=[item.json() for item in regions],
         )
 
+class TravelMapCheckInView(View):
+    MAX_ACCURACY_METERS = 5000
+
     @auth.require_user
     @analyse.json(
-        TravelMapParams.region_code,
-        TravelMapParams.region_name,
-        TravelMapParams.country_code,
-        TravelMapParams.country_name,
-        TravelMapParams.checked,
+        TravelMapParams.latitude,
+        TravelMapParams.longitude,
+        TravelMapParams.accuracy_meters,
     )
     def post(self, request: Request):
-        MapCheckIn.set_checked(
+        if request.json.accuracy_meters > self.MAX_ACCURACY_METERS:
+            raise TravelMapErrors.LOCATION_TOO_INACCURATE
+        region = reverse_geocode_check_in(request.json.latitude, request.json.longitude)
+        checked = MapCheckIn.check_in(
             request.user,
-            request.json.region_code,
-            request.json.region_name,
-            request.json.country_code,
-            request.json.country_name,
-            bool(request.json.checked),
+            region['region_code'],
+            region['region_name'],
+            region['country_code'],
+            region['country_name'],
+            request.json.latitude,
+            request.json.longitude,
+            request.json.accuracy_meters,
+            region['provider'],
         )
         regions = MapCheckIn.objects.filter(user=request.user)
         return dict(
             owner=request.user.tiny_json(),
             regions=[item.json() for item in regions],
+            checked_region=checked.json(),
         )
 
 
@@ -75,6 +84,32 @@ class MapAccessReciprocateView(View):
     def post(self, request: Request):
         MapAccessGrant.reciprocate(request.user, request.query.target_user)
         return MapAccessGrant.status_between(request.user, request.query.target_user)
+
+
+class ChatMapAccessView(View):
+    @auth.require_user
+    @analyse.query(TravelMapParams.chat_id)
+    def get(self, request: Request):
+        return MapChatGrant.status(request.query.chat, request.user)
+
+    @auth.require_user
+    @analyse.query(TravelMapParams.chat_id)
+    def post(self, request: Request):
+        MapChatGrant.grant(request.query.chat, request.user)
+        return MapChatGrant.status(request.query.chat, request.user)
+
+    @auth.require_user
+    @analyse.query(TravelMapParams.chat_id)
+    def delete(self, request: Request):
+        MapChatGrant.revoke(request.query.chat, request.user)
+        return MapChatGrant.status(request.query.chat, request.user)
+
+
+class ChatTravelMapsView(View):
+    @auth.require_user
+    @analyse.query(TravelMapParams.chat_id)
+    def get(self, request: Request):
+        return MapChatGrant.maps(request.query.chat, request.user)
 
 
 class MapGeometryView(View):

@@ -10,6 +10,9 @@ class TravelMapErrors:
     SPACE_MISMATCH = Error(message=_('Map access is limited to the same space'), code=Code.Forbidden)
     REGION_INVALID = Error(message=_('Map region is invalid'), code=Code.BadRequest)
     GEOMETRY_UNAVAILABLE = Error(message=_('Map geometry is temporarily unavailable'), code=Code.ServiceUnavailable)
+    GEOCODING_UNAVAILABLE = Error(message=_('Your current region could not be identified'), code=Code.ServiceUnavailable)
+    LOCATION_TOO_INACCURATE = Error(message=_('Location accuracy is too low for check-in'), code=Code.BadRequest)
+    CHAT_ACCESS_DENIED = Error(message=_('You are not an active member of this chat'), code=Code.Forbidden)
 
 
 class TravelMapValidator:
