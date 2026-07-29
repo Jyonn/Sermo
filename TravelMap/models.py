@@ -47,7 +47,7 @@ class MapCheckIn(models.Model):
         normalized_country_name = (country_name or '').strip()[:cls.vldt.COUNTRY_NAME_MAX_LENGTH]
         if not all((normalized_region_code, normalized_region_name, normalized_country_code, normalized_country_name)):
             raise TravelMapErrors.REGION_INVALID
-        item, _ = cls.objects.update_or_create(
+        item, _ = cls.objects.get_or_create(
             user=user,
             region_code=normalized_region_code,
             defaults=dict(
@@ -58,7 +58,6 @@ class MapCheckIn(models.Model):
                 longitude=longitude,
                 accuracy_meters=accuracy_meters,
                 geocoding_provider=geocoding_provider,
-                checked_at=timezone.now(),
             ),
         )
         return item
