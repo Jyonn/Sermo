@@ -19,7 +19,7 @@ from django.utils import timezone
 
 from smartdjango import models, Choice
 
-from Chat.models import Chat
+from Chat.models import Chat, ChatMember, ChatMemberStatusChoice
 from Message.validators import MessageErrors, MessageValidator
 from User.models import GrowthEvent, User, UserEmojiUsage
 from utils.qiniu import sign_private_download_url, avatar_uri_for_key, build_message_image_thumbnail_uri, build_message_video_thumbnail_uri, validate_message_media_key
@@ -57,6 +57,7 @@ class MessageTypeChoice(Choice):
     VIDEO = 4
     AUDIO = 5
     LOCATION = 6
+    MAP_ACCESS = 7
 
 
 class LinkPreviewStatusChoice(Choice):
@@ -396,6 +397,7 @@ class Message(models.Model):
         MessageTypeChoice.AUDIO: '[语音]',
         MessageTypeChoice.FILE: '[文件]',
         MessageTypeChoice.LOCATION: '[位置]',
+        MessageTypeChoice.MAP_ACCESS: '[地图邀请]',
     }
 
     chat = models.ForeignKey(Chat, on_delete=models.CASCADE, db_index=True)
@@ -457,6 +459,24 @@ class Message(models.Model):
                     existing._was_created = False
                     return existing
             normalized_content = cls.normalize_content(message_type, content)
+            map_access_viewer = None
+            if message_type == MessageTypeChoice.MAP_ACCESS:
+                if not chat.direct:
+                    raise MessageErrors.MAP_ACCESS_DIRECT_ONLY
+                active_members = list(
+                    ChatMember.objects.filter(
+                        chat=chat,
+                        status=ChatMemberStatusChoice.ACTIVE,
+                    ).select_related('user')
+                )
+                peers = [member.user for member in active_members if member.user_id != user.id and not member.user.is_deleted]
+                if len(peers) != 1:
+                    raise MessageErrors.MAP_ACCESS_DIRECT_ONLY
+                map_access_viewer = peers[0]
+                payload = cls._parse_payload(normalized_content)
+                target_user_id = payload.get('target_user_id')
+                if target_user_id is not None and int(target_user_id) != map_access_viewer.id:
+                    raise MessageErrors.MAP_ACCESS_TARGET_INVALID
             try:
                 with transaction.atomic():
                     message = cls.objects.create(
@@ -474,6 +494,9 @@ class Message(models.Model):
                 message._was_created = False
                 return message
             message._was_created = True
+            if message.type == MessageTypeChoice.MAP_ACCESS and map_access_viewer is not None:
+                from TravelMap.models import MapAccessGrant
+                MapAccessGrant.grant(user, map_access_viewer)
             if message.type in cls.MEDIA_KIND_BY_TYPE:
                 message.ensure_blob_slug(save=True)
             if message.type == MessageTypeChoice.IMAGE:
@@ -600,6 +623,20 @@ class Message(models.Model):
                 raise MessageErrors.CONTENT_TOO_LONG
             return normalized
 
+        if message_type == MessageTypeChoice.MAP_ACCESS:
+            payload = cls._parse_payload(content)
+            try:
+                target_user_id = int(payload.get('target_user_id'))
+            except (TypeError, ValueError):
+                raise MessageErrors.MAP_ACCESS_TARGET_INVALID
+            normalized = json.dumps(
+                dict(kind='map_access', target_user_id=target_user_id),
+                separators=(',', ':'),
+            )
+            if len(normalized) > cls.vldt.MAX_CONTENT_LENGTH:
+                raise MessageErrors.CONTENT_TOO_LONG
+            return normalized
+
         raise MessageErrors.TYPE_INVALID
 
     @classmethod
@@ -646,6 +683,18 @@ class Message(models.Model):
             return dict(kind='system', text=self.content)
         if self.type == MessageTypeChoice.LOCATION:
             return self._parse_payload(self.content)
+        if self.type == MessageTypeChoice.MAP_ACCESS:
+            from TravelMap.models import MapAccessGrant
+            payload = self._parse_payload(self.content)
+            viewer = getattr(request, 'user', None) if request is not None else None
+            response = dict(
+                kind='map_access',
+                owner=self.user.tiny_json(),
+                target_user_id=payload.get('target_user_id'),
+            )
+            if viewer is not None and viewer.space_id == self.user.space_id:
+                response['access'] = MapAccessGrant.status_between(viewer, self.user)
+            return response
         if self.type == MessageTypeChoice.FILE and not self.content.lstrip().startswith('{'):
             return dict(kind='file', text=self.content)
         if self.type in self.MEDIA_KIND_BY_TYPE:

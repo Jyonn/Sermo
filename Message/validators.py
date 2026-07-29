@@ -16,6 +16,8 @@ class MessageErrors:
     REPLY_TARGET_INVALID = Error(message=_('The replied message is not in this chat'), code=Code.BadRequest)
     PIN_FORBIDDEN = Error(message=_('You cannot manage pinned messages in this chat'), code=Code.Forbidden)
     PIN_LIMIT_REACHED = Error(message=_('This chat has reached the pinned message limit'), code=Code.BadRequest)
+    MAP_ACCESS_DIRECT_ONLY = Error(message=_('Map access can only be shared in a direct chat'), code=Code.BadRequest)
+    MAP_ACCESS_TARGET_INVALID = Error(message=_('The map access recipient is invalid'), code=Code.BadRequest)
 
 
 class MessageValidator:

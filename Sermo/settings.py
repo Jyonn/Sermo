@@ -47,6 +47,7 @@ INSTALLED_APPS = [
     'Space',
     'User',
     'Friendship',
+    'TravelMap',
     'Chat',
     'Message',
 ]

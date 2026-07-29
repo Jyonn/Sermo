@@ -711,6 +711,30 @@ msgstr "你不是此聊天室的所有者"
 msgid "You are not the owner of this message"
 msgstr "你不是此消息的所有者"
 
+msgid "Map access can only be shared in a direct chat"
+msgstr "足迹地图只能在私聊中分享"
+
+msgid "The map access recipient is invalid"
+msgstr "地图分享对象无效"
+
+msgid "You do not have access to this map"
+msgstr "你还没有这张地图的查看权"
+
+msgid "The other user has not shared their map with you"
+msgstr "对方尚未向你分享足迹地图"
+
+msgid "You cannot grant map access to yourself"
+msgstr "不能向自己授予地图查看权"
+
+msgid "Map access is limited to the same space"
+msgstr "足迹地图只能在同一空间内分享"
+
+msgid "Map region is invalid"
+msgstr "地图区域无效"
+
+msgid "Map geometry is temporarily unavailable"
+msgstr "该地区地图暂时不可用"
+
 #~ msgid "Email verification code expired"
 #~ msgstr "邮箱验证码已过期"
 

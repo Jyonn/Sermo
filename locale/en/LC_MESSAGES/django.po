@@ -710,6 +710,30 @@ msgstr "You are not the owner of this chat"
 msgid "You are not the owner of this message"
 msgstr "You are not the owner of this message"
 
+msgid "Map access can only be shared in a direct chat"
+msgstr "Map access can only be shared in a direct chat"
+
+msgid "The map access recipient is invalid"
+msgstr "The map access recipient is invalid"
+
+msgid "You do not have access to this map"
+msgstr "You do not have access to this map"
+
+msgid "The other user has not shared their map with you"
+msgstr "The other user has not shared their map with you"
+
+msgid "You cannot grant map access to yourself"
+msgstr "You cannot grant map access to yourself"
+
+msgid "Map access is limited to the same space"
+msgstr "Map access is limited to the same space"
+
+msgid "Map region is invalid"
+msgstr "Map region is invalid"
+
+msgid "Map geometry is temporarily unavailable"
+msgstr "Map geometry is temporarily unavailable"
+
 #~ msgid "Email verification code expired"
 #~ msgstr "Email verification code expired"
 
