@@ -3,7 +3,6 @@ from django.core.cache import cache
 from django.views import View
 from smartdjango import OK, analyse
 
-from TravelMap.geocoding import reverse_geocode_check_in
 from TravelMap.models import MapAccessGrant, MapChatGrant, MapCheckIn, TravelMap
 from TravelMap.params import TravelMapParams
 from TravelMap.validators import TravelMapErrors
@@ -28,21 +27,24 @@ class TravelMapCheckInView(View):
         TravelMapParams.latitude,
         TravelMapParams.longitude,
         TravelMapParams.accuracy_meters,
+        TravelMapParams.region_code,
+        TravelMapParams.region_name,
+        TravelMapParams.country_code,
+        TravelMapParams.country_name,
     )
     def post(self, request: Request):
         if request.json.accuracy_meters > self.MAX_ACCURACY_METERS:
             raise TravelMapErrors.LOCATION_TOO_INACCURATE
-        region = reverse_geocode_check_in(request.json.latitude, request.json.longitude)
         checked = MapCheckIn.check_in(
             request.user,
-            region['region_code'],
-            region['region_name'],
-            region['country_code'],
-            region['country_name'],
+            request.json.region_code,
+            request.json.region_name,
+            request.json.country_code,
+            request.json.country_name,
             request.json.latitude,
             request.json.longitude,
             request.json.accuracy_meters,
-            region['provider'],
+            'frontend-boundary',
         )
         regions = MapCheckIn.objects.filter(user=request.user)
         return dict(

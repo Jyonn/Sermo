@@ -5,9 +5,7 @@ from unittest.mock import patch
 from django.test import SimpleTestCase
 
 from Message.models import Message, MessageTypeChoice
-from TravelMap.geocoding import reverse_geocode_check_in
 from TravelMap.models import MapAccessGrant, MapChatGrant
-from utils.global_settings import Globals
 
 
 class TravelMapMessageTests(SimpleTestCase):
@@ -41,31 +39,6 @@ class MapAccessGrantTests(SimpleTestCase):
 
         with self.assertRaises(Exception):
             MapAccessGrant._validate_pair(current, other)
-
-
-class CheckInGeocodingTests(SimpleTestCase):
-    @patch('TravelMap.geocoding.requests.get')
-    def test_opencage_subdivision_is_used_as_stable_region_code(self, get):
-        get.return_value.json.return_value = {
-            'results': [{
-                'components': {
-                    'ISO_3166-1_alpha-3': 'CHN',
-                    'ISO_3166-2': 'CN-ZJ',
-                    'country': '中国',
-                    'state': '浙江省',
-                },
-            }],
-        }
-        with patch.object(Globals, 'OPENCAGE_API_KEY', 'key', create=True), patch.object(
-            Globals,
-            'OPENCAGE_GEOCODING_URL',
-            'https://example.test/reverse',
-            create=True,
-        ):
-            result = reverse_geocode_check_in(30.2, 120.1)
-
-        self.assertEqual(result['region_code'], 'CHN:CN-ZJ')
-        self.assertEqual(result['region_name'], '浙江省')
 
 
 class ChatMapGrantTests(SimpleTestCase):

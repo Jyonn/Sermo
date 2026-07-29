@@ -10,6 +10,15 @@ class TravelMapParams(metaclass=Params):
     latitude = Validator('latitude').to(float).bool(lambda value: -90 <= value <= 90)
     longitude = Validator('longitude').to(float).bool(lambda value: -180 <= value <= 180)
     accuracy_meters = Validator('accuracy_meters').to(float).bool(lambda value: 0 <= value <= 50000)
+    region_code = Validator('region_code').to(str).bool(
+        lambda value: 2 <= len(value.strip()) <= 80
+    )
+    region_name = Validator('region_name').to(str).bool(
+        lambda value: 1 <= len(value.strip()) <= 120
+    )
     country_code = Validator('country_code').to(str).bool(
         lambda value: len(value.strip()) == 3 and value.strip().isalpha()
+    )
+    country_name = Validator('country_name').to(str).bool(
+        lambda value: 1 <= len(value.strip()) <= 120
     )
