@@ -27,7 +27,7 @@ from User.validators import UserValidator, UserErrors
 from utils import function
 
 
-FRONTEND_SPACE_HOST_SUFFIX = 'sermo.jyonn.space'
+FRONTEND_BASE_URL = 'https://sermo.jyonn.space'
 BARK_ENDPOINT_PATTERN = re.compile(r'^https://api\.day\.app/([^/?#\s]+)', re.IGNORECASE)
 logger = logging.getLogger(__name__)
 
@@ -2213,7 +2213,7 @@ class NotificationDelivery(models.Model):
         space_slug = getattr(self.event.space, 'slug', None)
         if not space_slug:
             return None
-        return f'https://{space_slug}.{FRONTEND_SPACE_HOST_SUFFIX}/app/chats/{chat_id}'
+        return f'{FRONTEND_BASE_URL}/{space_slug}/app/chats/{chat_id}'
 
     def _bark_icon_url(self, pref: NotificationPreference):
         if pref.bark_icon_mode == NotificationPreference.BARK_ICON_SPACE:
