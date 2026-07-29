@@ -1,0 +1,6 @@
+.gitignore
+.idea/
+mysql.local.conf
+.auth
+__pycache__/
+*.py[cod]
