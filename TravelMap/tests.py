@@ -20,6 +20,24 @@ class TravelMapMessageTests(SimpleTestCase):
             {'kind': 'map_access', 'target_user_id': 42},
         )
 
+    def test_chat_map_access_message_is_normalized(self):
+        normalized = Message.normalize_content(
+            MessageTypeChoice.MAP_ACCESS,
+            json.dumps({
+                'kind': 'map_access',
+                'chat_grant': True,
+                'message_key': 'travel_map_join',
+            }),
+        )
+
+        self.assertEqual(
+            json.loads(normalized),
+            {
+                'kind': 'map_access',
+                'chat_grant': True,
+                'message_key': 'travel_map_join',
+            },
+        )
 
 class MapAccessGrantTests(SimpleTestCase):
     @patch.object(MapAccessGrant, 'grant')

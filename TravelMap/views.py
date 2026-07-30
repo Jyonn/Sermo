@@ -1,11 +1,15 @@
+import json
 import requests
 from django.core.cache import cache
+from django.db import transaction
 from django.views import View
 from smartdjango import OK, analyse
 
 from TravelMap.models import MapAccessGrant, MapChatGrant, MapCheckIn, TravelMap
 from TravelMap.params import TravelMapParams
 from TravelMap.validators import TravelMapErrors
+from Message.models import Message, MessageTypeChoice
+from User.models import NotificationEvent
 from utils import auth
 from utils.auth import Request
 
@@ -103,8 +107,23 @@ class ChatMapAccessView(View):
     @auth.require_user
     @analyse.query(TravelMapParams.chat_id)
     def post(self, request: Request):
-        MapChatGrant.grant(request.query.chat, request.user)
-        return MapChatGrant.status(request.query.chat, request.user)
+        with transaction.atomic():
+            grant = MapChatGrant.grant(request.query.chat, request.user)
+            status = MapChatGrant.status(request.query.chat, request.user)
+            if grant._was_activated:
+                message = Message.create(
+                    request.query.chat,
+                    request.user,
+                    MessageTypeChoice.MAP_ACCESS,
+                    json.dumps({
+                    'kind': 'map_access',
+                    'chat_grant': True,
+                    'message_key': 'travel_map_join',
+                }, ensure_ascii=False),
+                )
+                NotificationEvent.emit_message_notifications(message, actor=request.user)
+                status['invitation_message'] = message.jsonl(request=request)
+        return status
 
     @auth.require_user
     @analyse.query(TravelMapParams.chat_id)

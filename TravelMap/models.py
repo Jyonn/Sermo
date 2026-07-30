@@ -92,11 +92,14 @@ class MapChatGrant(models.Model):
     @classmethod
     def grant(cls, chat, owner):
         cls._require_member(chat, owner)
+        existing = cls.objects.filter(chat=chat, owner=owner).first()
+        activated = existing is None or not existing.active
         item, _ = cls.objects.update_or_create(
             chat=chat,
             owner=owner,
             defaults=dict(active=True, revoked_at=None),
         )
+        item._was_activated = activated
         return item
 
     @classmethod

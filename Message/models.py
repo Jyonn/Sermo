@@ -461,22 +461,23 @@ class Message(models.Model):
             normalized_content = cls.normalize_content(message_type, content)
             map_access_viewer = None
             if message_type == MessageTypeChoice.MAP_ACCESS:
-                if not chat.direct:
-                    raise MessageErrors.MAP_ACCESS_DIRECT_ONLY
-                active_members = list(
-                    ChatMember.objects.filter(
-                        chat=chat,
-                        status=ChatMemberStatusChoice.ACTIVE,
-                    ).select_related('user')
-                )
-                peers = [member.user for member in active_members if member.user_id != user.id and not member.user.is_deleted]
-                if len(peers) != 1:
-                    raise MessageErrors.MAP_ACCESS_DIRECT_ONLY
-                map_access_viewer = peers[0]
                 payload = cls._parse_payload(normalized_content)
-                target_user_id = payload.get('target_user_id')
-                if target_user_id is not None and int(target_user_id) != map_access_viewer.id:
-                    raise MessageErrors.MAP_ACCESS_TARGET_INVALID
+                if not payload.get('chat_grant'):
+                    if not chat.direct:
+                        raise MessageErrors.MAP_ACCESS_DIRECT_ONLY
+                    active_members = list(
+                        ChatMember.objects.filter(
+                            chat=chat,
+                            status=ChatMemberStatusChoice.ACTIVE,
+                        ).select_related('user')
+                    )
+                    peers = [member.user for member in active_members if member.user_id != user.id and not member.user.is_deleted]
+                    if len(peers) != 1:
+                        raise MessageErrors.MAP_ACCESS_DIRECT_ONLY
+                    map_access_viewer = peers[0]
+                    target_user_id = payload.get('target_user_id')
+                    if target_user_id is not None and int(target_user_id) != map_access_viewer.id:
+                        raise MessageErrors.MAP_ACCESS_TARGET_INVALID
             try:
                 with transaction.atomic():
                     message = cls.objects.create(
@@ -625,6 +626,19 @@ class Message(models.Model):
 
         if message_type == MessageTypeChoice.MAP_ACCESS:
             payload = cls._parse_payload(content)
+            if payload.get('chat_grant') is True:
+                normalized = json.dumps(
+                    dict(
+                        kind='map_access',
+                        chat_grant=True,
+                        message_key='travel_map_join',
+                    ),
+                    separators=(',', ':'),
+                    ensure_ascii=False,
+                )
+                if len(normalized) > cls.vldt.MAX_CONTENT_LENGTH:
+                    raise MessageErrors.CONTENT_TOO_LONG
+                return normalized
             try:
                 target_user_id = int(payload.get('target_user_id'))
             except (TypeError, ValueError):
@@ -684,16 +698,19 @@ class Message(models.Model):
         if self.type == MessageTypeChoice.LOCATION:
             return self._parse_payload(self.content)
         if self.type == MessageTypeChoice.MAP_ACCESS:
-            from TravelMap.models import MapAccessGrant
+            from TravelMap.models import MapAccessGrant, MapChatGrant
             payload = self._parse_payload(self.content)
             viewer = getattr(request, 'user', None) if request is not None else None
             response = dict(
                 kind='map_access',
                 owner=self.user.tiny_json(),
                 target_user_id=payload.get('target_user_id'),
+                chat_grant=bool(payload.get('chat_grant')),
+                message_key=payload.get('message_key') or '',
             )
             if viewer is not None and viewer.space_id == self.user.space_id:
-                response['access'] = MapAccessGrant.status_between(viewer, self.user)
+                response['chat_access'] = MapChatGrant.status(self.chat, viewer) if response['chat_grant'] else None
+                response['access'] = None if response['chat_grant'] else MapAccessGrant.status_between(viewer, self.user)
             return response
         if self.type == MessageTypeChoice.FILE and not self.content.lstrip().startswith('{'):
             return dict(kind='file', text=self.content)
