@@ -547,6 +547,8 @@ class User(models.Model):
 
     def set_personalization(self, **values):
         fields = list(self.validators.PERSONALIZATION_OPTIONS)
+        if values['chat_bubble_style'] == 'vip' and not self.is_permanent_vip:
+            raise UserErrors.PERMANENT_VIP_NOT_ELIGIBLE
         for field in fields:
             setattr(self, field, self.validators.personalization(field, values[field]))
         self.save(update_fields=fields)

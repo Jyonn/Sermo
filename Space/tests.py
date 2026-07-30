@@ -264,6 +264,35 @@ class SpaceAdminApiTests(TestCase):
             self.assertEqual(response.json()['body'][field], value)
             self.assertEqual(self.member.tiny_json()[field], value)
 
+    def test_vip_bubble_requires_permanent_vip(self):
+        payload = {
+            'chat_bubble_style': 'vip',
+            'avatar_frame_style': 'none',
+            'square_outfit_style': 'sunset',
+            'square_prop_style': 'none',
+            'square_motion_style': 'walk',
+            'square_limb_style': 'line',
+        }
+        denied = self.client.post(
+            '/users/me/personalization',
+            data=json.dumps(payload),
+            content_type='application/json',
+            **self.user_authorization(self.member),
+        )
+        self.assertEqual(denied.status_code, 403, denied.content)
+
+        self.member.is_permanent_vip = True
+        self.member.save(update_fields=['is_permanent_vip'])
+        accepted = self.client.post(
+            '/users/me/personalization',
+            data=json.dumps(payload),
+            content_type='application/json',
+            **self.user_authorization(self.member),
+        )
+        self.assertEqual(accepted.status_code, 200, accepted.content)
+        self.member.refresh_from_db()
+        self.assertEqual(self.member.chat_bubble_style, 'vip')
+
     def test_daily_chat_growth_is_capped(self):
         chat = Chat.get_or_create_direct(self.official, self.member)
         for index in range(20):
