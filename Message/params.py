@@ -3,12 +3,26 @@ from smartdjango import Params, Validator
 
 from Chat.models import Chat
 from Message.models import Message
+from Message.validators import MessageErrors
+
+
+def validate_message_ids(values):
+    if not isinstance(values, list) or not 1 <= len(values) <= 50:
+        raise MessageErrors.PAYLOAD_INVALID
+    try:
+        normalized = list(dict.fromkeys(int(value) for value in values))
+    except (TypeError, ValueError):
+        raise MessageErrors.PAYLOAD_INVALID
+    if len(normalized) != len(values) or any(value <= 0 for value in normalized):
+        raise MessageErrors.PAYLOAD_INVALID
+    return normalized
 
 
 class MessageParams(metaclass=Params):
     model_class = Message
 
     message_id = Validator('message_id', final_name='message').to(int).to(Message.index)
+    message_ids = Validator('message_ids').to(validate_message_ids)
     reply_to_message_id = Validator('reply_to_message_id', final_name='reply_to').to(int).to(Message.index).null().default(None)
     client_message_id = Validator('client_message_id').to(str).null().default(None)
     chat_id = Validator('chat_id', final_name='chat').to(int).to(Chat.index)

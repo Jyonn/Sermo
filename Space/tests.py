@@ -293,6 +293,33 @@ class SpaceAdminApiTests(TestCase):
         self.member.refresh_from_db()
         self.assertEqual(self.member.chat_bubble_style, 'vip')
 
+    def test_batch_delete_only_removes_owned_messages_atomically(self):
+        chat = Chat.get_or_create_direct(self.official, self.member)
+        first = Message.create(chat, self.member, MessageTypeChoice.TEXT, 'First')
+        second = Message.create(chat, self.member, MessageTypeChoice.TEXT, 'Second')
+        other = Message.create(chat, self.official, MessageTypeChoice.TEXT, 'Other')
+
+        denied = self.client.delete(
+            '/messages/batch',
+            data=json.dumps({'message_ids': [first.id, other.id]}),
+            content_type='application/json',
+            **self.user_authorization(self.member),
+        )
+        self.assertEqual(denied.status_code, 404, denied.content)
+        self.assertFalse(Message.objects.get(id=first.id).is_deleted)
+
+        accepted = self.client.delete(
+            '/messages/batch',
+            data=json.dumps({'message_ids': [first.id, second.id]}),
+            content_type='application/json',
+            **self.user_authorization(self.member),
+        )
+        self.assertEqual(accepted.status_code, 200, accepted.content)
+        self.assertEqual(accepted.json()['body']['deleted_message_ids'], [first.id, second.id])
+        self.assertTrue(Message.objects.get(id=first.id).is_deleted)
+        self.assertTrue(Message.objects.get(id=second.id).is_deleted)
+        self.assertFalse(Message.objects.get(id=other.id).is_deleted)
+
     def test_daily_chat_growth_is_capped(self):
         chat = Chat.get_or_create_direct(self.official, self.member)
         for index in range(20):

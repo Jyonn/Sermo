@@ -62,6 +62,25 @@ class MessageView(View):
         return OK
 
 
+class MessageBatchView(View):
+    @auth.require_user
+    @analyse.json(MessageParams.message_ids)
+    def delete(self, request: Request):
+        message_ids = list(request.json.message_ids)
+        with transaction.atomic():
+            messages = list(
+                Message.objects.select_for_update().filter(
+                    id__in=message_ids,
+                    user=request.user,
+                    is_deleted=False,
+                )
+            )
+            if len(messages) != len(message_ids):
+                raise MessageErrors.NOT_EXISTS
+            Message.objects.filter(id__in=message_ids).update(is_deleted=True)
+        return dict(deleted_message_ids=message_ids)
+
+
 class PinnedMessageView(View):
     @auth.require_user
     @analyse.query(MessageParams.chat_id)
