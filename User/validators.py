@@ -109,7 +109,7 @@ class UserValidator:
     }
     AVATAR_PRESET_MIN_ID = 1
     AVATAR_PRESET_MAX_ID = 80
-    CHAT_BACKGROUND_THEMES = {'default', 'paper', 'mint', 'dusk', 'custom'}
+    CHAT_BACKGROUND_THEMES = {'default', 'paper', 'mint', 'dusk', 'comic', 'custom'}
     PERSONALIZATION_OPTIONS = {
         'chat_bubble_style': {'default', 'comic'},
         'avatar_frame_style': {'none', 'orbit', 'blaze', 'pixel'},

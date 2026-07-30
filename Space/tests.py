@@ -584,6 +584,16 @@ class SpaceAdminApiTests(TestCase):
         self.assertEqual(self.member.chat_background_theme, 'paper')
         self.assertEqual(self.member.chat_background_uri, '')
 
+        comic_update = self.client.post(
+            '/users/me/chat-background',
+            data=json.dumps({'theme': 'comic'}),
+            content_type='application/json',
+            **self.user_authorization(self.member),
+        )
+        self.assertEqual(comic_update.status_code, 200, comic_update.content)
+        self.member.refresh_from_db()
+        self.assertEqual(self.member.chat_background_theme, 'comic')
+
     def test_custom_notification_messages_require_level_ten(self):
         self.member.set_password('safe-password')
 
