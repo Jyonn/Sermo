@@ -703,6 +703,26 @@ class SpaceAdminApiTests(TestCase):
         self.assertEqual(updated.status_code, 200, updated.content)
         self.assertEqual(updated.json()['body']['hidden_direct_message_text'], '有人找你')
 
+    def test_permanent_vip_can_customize_notification_messages_below_level_ten(self):
+        self.member.set_password('safe-password')
+        self.member.is_permanent_vip = True
+        self.member.save(update_fields=['is_permanent_vip'])
+
+        updated = self.client.post(
+            '/users/me/notification-prefs',
+            data=json.dumps({
+                'channel': UserNotificationChoice.EMAIL,
+                'hidden_direct_message_text': 'VIP 自定义提醒',
+            }),
+            content_type='application/json',
+            **self.user_authorization(self.member),
+        )
+
+        self.assertLess(self.member.effective_growth_level(), 10)
+        self.assertEqual(updated.status_code, 200, updated.content)
+        self.assertEqual(updated.json()['body']['hidden_direct_message_text'], 'VIP 自定义提醒')
+        self.assertTrue(self.member.calculate_growth()['capabilities']['custom_notification_message']['available'])
+
     @patch('User.models.delete_chat_background_by_uri')
     def test_replacing_chat_background_removes_previous_image(self, delete_background):
         self.member.set_password('safe-password')

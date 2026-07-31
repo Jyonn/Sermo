@@ -527,9 +527,14 @@ class User(models.Model):
         score = GROWTH_THRESHOLDS[-1] if self.is_official else self.growth_score
         return min(self._growth_level_for_score(score), self.growth_level_cap()[0])
 
+    def has_growth_capability(self, capability):
+        if capability == 'custom_notification_message' and self.is_permanent_vip:
+            return True
+        return self.effective_growth_level() >= GROWTH_CAPABILITY_LEVELS[capability]
+
     def require_growth_capability(self, capability):
         required_level = GROWTH_CAPABILITY_LEVELS[capability]
-        if self.effective_growth_level() < required_level:
+        if not self.has_growth_capability(capability):
             raise UserErrors.GROWTH_LEVEL_REQUIRED(level=required_level)
         return self
 
@@ -1025,7 +1030,13 @@ class User(models.Model):
                 for index, threshold in enumerate(GROWTH_THRESHOLDS, start=1)
             ],
             capabilities={
-                key: dict(required_level=required_level, available=level >= required_level)
+                key: dict(
+                    required_level=required_level,
+                    available=(
+                        level >= required_level
+                        or (key == 'custom_notification_message' and self.is_permanent_vip)
+                    ),
+                )
                 for key, required_level in GROWTH_CAPABILITY_LEVELS.items()
             },
         )
