@@ -75,17 +75,18 @@ class MessageBatchView(View):
         message_ids = list(request.json.message_ids)
         with transaction.atomic():
             messages = list(
-                Message.objects.select_for_update().filter(
+                Message.objects.select_for_update().select_related('chat').filter(
                     id__in=message_ids,
-                    user=request.user,
                     is_deleted=False,
                 )
             )
             if len(messages) != len(message_ids):
                 raise MessageErrors.NOT_EXISTS
-            Message.objects.filter(id__in=message_ids).update(is_deleted=True)
             for message in messages:
-                MessageEvent.record_recalled(message)
+                if not message.chat.has_active_member(request.user):
+                    raise MessageErrors.NOT_A_MEMBER
+            for message in messages:
+                message.hide_for(request.user)
         return dict(deleted_message_ids=message_ids)
 
 
