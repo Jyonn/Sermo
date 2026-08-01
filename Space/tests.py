@@ -316,6 +316,36 @@ class SpaceAdminApiTests(TestCase):
         self.member.refresh_from_db()
         self.assertEqual(self.member.chat_bubble_style, 'vip')
 
+    def test_message_search_filters_keyword_type_and_hidden_records(self):
+        chat = Chat.get_or_create_direct(self.official, self.member)
+        visible_text = Message.create(chat, self.official, MessageTypeChoice.TEXT, '周末去海边散步')
+        hidden_text = Message.create(chat, self.official, MessageTypeChoice.TEXT, '海边旧计划')
+        image = Message.create(chat, self.official, MessageTypeChoice.IMAGE, json.dumps({
+            'key': 'sermo/messages/image/search-test.jpg',
+            'mime_type': 'image/jpeg',
+        }))
+        hidden_text.hide_for(self.member)
+
+        keyword_response = self.client.get(
+            '/messages/search',
+            {'chat_id': chat.id, 'keyword': '海边', 'limit': 20},
+            **self.user_authorization(self.member),
+        )
+        self.assertEqual(keyword_response.status_code, 200, keyword_response.content)
+        keyword_ids = [row['message_id'] for row in keyword_response.json()['body']['items']]
+        self.assertEqual(keyword_ids, [visible_text.id])
+
+        image_response = self.client.get(
+            '/messages/search',
+            {'chat_id': chat.id, 'type': MessageTypeChoice.IMAGE, 'limit': 20},
+            **self.user_authorization(self.member),
+        )
+        self.assertEqual(image_response.status_code, 200, image_response.content)
+        self.assertEqual(
+            [row['message_id'] for row in image_response.json()['body']['items']],
+            [image.id],
+        )
+
     def test_batch_delete_hides_messages_from_any_sender_for_actor(self):
         chat = Chat.get_or_create_direct(self.official, self.member)
         first = Message.create(chat, self.member, MessageTypeChoice.TEXT, 'First')

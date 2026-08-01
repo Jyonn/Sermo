@@ -68,6 +68,28 @@ class MessageView(View):
         return OK
 
 
+class MessageSearchView(View):
+    @auth.require_user
+    @analyse.query(
+        MessageParams.chat_id,
+        MessageParams.keyword,
+        MessageParams.search_type,
+        MessageParams.before,
+        MessageParams.limit,
+    )
+    @auth.require_chat_member()
+    def get(self, request: Request):
+        return Message.search(
+            chat=request.query.chat,
+            user=request.user,
+            keyword=request.query.keyword,
+            message_type=request.query.search_type,
+            before=request.query.before,
+            limit=request.query.limit,
+            request=request,
+        )
+
+
 class MessageBatchView(View):
     @auth.require_user
     @analyse.json(MessageParams.message_ids)

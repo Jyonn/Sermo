@@ -838,6 +838,25 @@ class Message(models.Model):
         return [message.jsonl(request=request) for message in messages]
 
     @classmethod
+    def search(cls, chat: Chat, user: User, keyword=None, message_type=None, before=None, limit=30, request=None):
+        queryset = cls.visible_for_user(chat, user).select_related('user', 'reply_to', 'reply_to__user')
+        normalized_keyword = (keyword or '').strip()
+        if normalized_keyword:
+            queryset = queryset.filter(content__icontains=normalized_keyword)
+        if message_type is not None:
+            queryset = queryset.filter(type=message_type)
+        if before is not None:
+            queryset = queryset.filter(id__lt=before)
+        messages = list(queryset.order_by('-id')[:limit + 1])
+        has_more = len(messages) > limit
+        messages = messages[:limit]
+        return dict(
+            items=[message.jsonl(request=request) for message in messages],
+            has_more=has_more,
+            next_before=messages[-1].id if has_more and messages else None,
+        )
+
+    @classmethod
     def sync_for_user(cls, user: User, after: int, limit: int, request: HttpRequest = None):
         from Chat.models import Chat
 
