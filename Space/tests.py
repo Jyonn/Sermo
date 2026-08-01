@@ -244,7 +244,7 @@ class SpaceAdminApiTests(TestCase):
     def test_user_personalization_is_persisted_and_serialized(self):
         payload = {
             'chat_bubble_style': 'comic',
-            'avatar_frame_style': 'blaze',
+            'avatar_frame_style': 'aurora',
             'square_outfit_style': 'noir',
             'square_prop_style': 'flag',
             'square_motion_style': 'float',
@@ -263,6 +263,29 @@ class SpaceAdminApiTests(TestCase):
             self.assertEqual(getattr(self.member, field), value)
             self.assertEqual(response.json()['body'][field], value)
             self.assertEqual(self.member.tiny_json()[field], value)
+
+    def test_cultural_bubble_styles_are_persisted_and_serialized(self):
+        for bubble_style in ('zen', 'hero', 'dragon', 'bauhaus', 'mosaic'):
+            payload = {
+                'chat_bubble_style': bubble_style,
+                'avatar_frame_style': 'none',
+                'square_outfit_style': 'sunset',
+                'square_prop_style': 'none',
+                'square_motion_style': 'walk',
+                'square_limb_style': 'line',
+            }
+            response = self.client.post(
+                '/users/me/personalization',
+                data=json.dumps(payload),
+                content_type='application/json',
+                **self.user_authorization(self.member),
+            )
+
+            self.assertEqual(response.status_code, 200, response.content)
+            self.member.refresh_from_db()
+            self.assertEqual(self.member.chat_bubble_style, bubble_style)
+            self.assertEqual(response.json()['body']['chat_bubble_style'], bubble_style)
+            self.assertEqual(self.member.tiny_json()['chat_bubble_style'], bubble_style)
 
     def test_vip_bubble_requires_permanent_vip(self):
         payload = {
