@@ -112,7 +112,9 @@ class UserValidator:
     CHAT_BACKGROUND_THEMES = {'default', 'paper', 'mint', 'dusk', 'comic', 'custom'}
     PERSONALIZATION_OPTIONS = {
         'chat_bubble_style': {'default', 'comic', 'vip'},
-        'avatar_frame_style': {'none', 'orbit', 'blaze', 'pixel'},
+        'avatar_frame_style': {
+            'none', 'orbit', 'pixel', 'aurora', 'polaroid', 'soundwave', 'lucky', 'portal',
+        },
         'square_outfit_style': {'sunset', 'varsity', 'noir', 'cloud'},
         'square_prop_style': {'none', 'star', 'coffee', 'flag'},
         'square_motion_style': {'walk', 'bounce', 'float', 'dash'},
