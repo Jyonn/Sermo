@@ -737,6 +737,17 @@ class SpaceAdminApiTests(TestCase):
         self.member.refresh_from_db()
         self.assertEqual(self.member.chat_background_theme, 'comic')
 
+        for theme in ('zen', 'hero', 'dragon', 'bauhaus', 'mosaic'):
+            cultural_update = self.client.post(
+                '/users/me/chat-background',
+                data=json.dumps({'theme': theme}),
+                content_type='application/json',
+                **self.user_authorization(self.member),
+            )
+            self.assertEqual(cultural_update.status_code, 200, cultural_update.content)
+            self.member.refresh_from_db()
+            self.assertEqual(self.member.chat_background_theme, theme)
+
     def test_custom_notification_messages_require_level_ten(self):
         self.member.set_password('safe-password')
 
