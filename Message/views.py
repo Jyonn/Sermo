@@ -3,7 +3,7 @@ from django.http import HttpResponseRedirect
 from django.views import View
 from smartdjango import analyse, OK
 
-from Message.models import ImageMetadata, LinkPreview, Message, MessageTypeChoice, PinnedMessage, VideoMetadata
+from Message.models import ImageMetadata, LinkPreview, Message, MessageEvent, MessageTypeChoice, PinnedMessage, VideoMetadata
 from Message.params import MessageParams
 from Message.validators import MessageErrors
 from utils.qiniu import issue_message_upload, build_message_image_thumbnail_uri, build_message_video_thumbnail_uri, sign_private_download_url
@@ -26,10 +26,10 @@ class MessageView(View):
         after = request.query.after
 
         if before is not None:
-            return Message.older(request.query.chat, before, request.query.limit, request=request)
+            return Message.older(request.query.chat, before, request.query.limit, request=request, user=request.user)
         if after is not None:
-            return Message.newer(request.query.chat, after, request.query.limit, request=request)
-        return Message.latest(request.query.chat, request.query.limit, request=request)
+            return Message.newer(request.query.chat, after, request.query.limit, request=request, user=request.user)
+        return Message.latest(request.query.chat, request.query.limit, request=request, user=request.user)
 
     @auth.require_user
     @analyse.query(MessageParams.chat_id)
@@ -54,11 +54,17 @@ class MessageView(View):
         return message.jsonl(request=request)
 
     @auth.require_user
-    @analyse.query(MessageParams.message_id)
-    @auth.require_message_owner()
+    @analyse.query(MessageParams.message_id, MessageParams.delete_scope)
     def delete(self, request: Request):
         message: Message = request.query.message
-        message.remove()
+        if not message.chat.has_active_member(request.user):
+            raise MessageErrors.NOT_A_MEMBER
+        if request.query.delete_scope == 'me':
+            message.hide_for(request.user)
+        else:
+            if message.user_id != request.user.id:
+                raise MessageErrors.NOT_OWNER
+            message.remove()
         return OK
 
 
@@ -78,7 +84,23 @@ class MessageBatchView(View):
             if len(messages) != len(message_ids):
                 raise MessageErrors.NOT_EXISTS
             Message.objects.filter(id__in=message_ids).update(is_deleted=True)
+            for message in messages:
+                MessageEvent.record_recalled(message)
         return dict(deleted_message_ids=message_ids)
+
+
+class MessageReconcileView(View):
+    @auth.require_user
+    @analyse.json(MessageParams.chat_id, MessageParams.message_ids)
+    @auth.require_chat_member()
+    def post(self, request: Request):
+        requested_ids = set(request.json.message_ids)
+        visible_ids = set(
+            Message.visible_for_user(request.json.chat, request.user)
+            .filter(id__in=requested_ids)
+            .values_list('id', flat=True)
+        )
+        return dict(deleted_message_ids=sorted(requested_ids - visible_ids))
 
 
 class PinnedMessageView(View):
@@ -139,6 +161,18 @@ class MessageSyncView(View):
         return Message.sync_for_user(
             user=request.user,
             after=after,
+            limit=request.query.limit,
+            request=request,
+        )
+
+
+class MessageEventSyncView(View):
+    @auth.require_user
+    @analyse.query(MessageParams.after, MessageParams.limit)
+    def get(self, request: Request):
+        return MessageEvent.sync_for_user(
+            user=request.user,
+            after=request.query.after or 0,
             limit=request.query.limit,
             request=request,
         )

@@ -39,3 +39,4 @@ class MessageParams(metaclass=Params):
 
     before = Validator('before').to(int).null().default(None)
     after = Validator('after').to(int).null().default(None)
+    delete_scope = Validator('scope', final_name='delete_scope').to(str).bool(lambda value: value in ('me', 'everyone')).default('everyone')

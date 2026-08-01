@@ -13,6 +13,7 @@ from urllib.parse import urljoin, urlparse, urlunparse
 
 import requests
 from django.db import IntegrityError, close_old_connections, transaction
+from django.db.models import Q
 from django.http import HttpRequest
 from django.urls import reverse
 from django.utils import timezone
@@ -58,6 +59,12 @@ class MessageTypeChoice(Choice):
     AUDIO = 5
     LOCATION = 6
     MAP_ACCESS = 7
+
+
+class MessageEventTypeChoice(Choice):
+    CREATED = 0
+    HIDDEN = 1
+    RECALLED = 2
 
 
 class LinkPreviewStatusChoice(Choice):
@@ -436,6 +443,10 @@ class Message(models.Model):
         return cls.visible_queryset().filter(chat=chat)
 
     @classmethod
+    def visible_for_user(cls, chat: Chat, user: User):
+        return cls.visible_in_chat(chat).exclude(hidden_states__user=user)
+
+    @classmethod
     def create(cls, chat: Chat, user: User, message_type, content, reply_to=None, client_message_id=None):
         if chat.has_active_member(user):
             capability = {
@@ -519,6 +530,7 @@ class Message(models.Model):
                 user.award_growth('explore:image', 30, category='explore', title='发送照片')
             elif message.type == MessageTypeChoice.LOCATION:
                 user.award_growth('explore:location', 35, category='explore', title='分享位置')
+            MessageEvent.record_created(message)
             return message
         raise MessageErrors.NOT_A_MEMBER
 
@@ -808,18 +820,21 @@ class Message(models.Model):
 
 
     @classmethod
-    def latest(cls, chat: Chat, limit: int, request: HttpRequest = None):
-        messages = cls.visible_in_chat(chat).select_related('user', 'reply_to', 'reply_to__user').order_by('-id')[:limit]
+    def latest(cls, chat: Chat, limit: int, request: HttpRequest = None, user: User = None):
+        queryset = cls.visible_for_user(chat, user) if user is not None else cls.visible_in_chat(chat)
+        messages = queryset.select_related('user', 'reply_to', 'reply_to__user').order_by('-id')[:limit]
         return [message.jsonl(request=request) for message in messages]
 
     @classmethod
-    def older(cls, chat: Chat, message_id, limit: int, request: HttpRequest = None):
-        messages = cls.visible_in_chat(chat).select_related('user', 'reply_to', 'reply_to__user').filter(id__lt=message_id).order_by('-id')[:limit]
+    def older(cls, chat: Chat, message_id, limit: int, request: HttpRequest = None, user: User = None):
+        queryset = cls.visible_for_user(chat, user) if user is not None else cls.visible_in_chat(chat)
+        messages = queryset.select_related('user', 'reply_to', 'reply_to__user').filter(id__lt=message_id).order_by('-id')[:limit]
         return [message.jsonl(request=request) for message in messages]
 
     @classmethod
-    def newer(cls, chat: Chat, message_id, limit: int, request: HttpRequest = None):
-        messages = cls.visible_in_chat(chat).select_related('user', 'reply_to', 'reply_to__user').filter(id__gt=message_id).order_by('id')[:limit]
+    def newer(cls, chat: Chat, message_id, limit: int, request: HttpRequest = None, user: User = None):
+        queryset = cls.visible_for_user(chat, user) if user is not None else cls.visible_in_chat(chat)
+        messages = queryset.select_related('user', 'reply_to', 'reply_to__user').filter(id__gt=message_id).order_by('id')[:limit]
         return [message.jsonl(request=request) for message in messages]
 
     @classmethod
@@ -857,8 +872,74 @@ class Message(models.Model):
         )
 
     def remove(self):
+        if self.is_deleted:
+            return
         self.is_deleted = True
         self.save(update_fields=['is_deleted'])
+        MessageEvent.record_recalled(self)
+
+    def hide_for(self, user: User):
+        state, created = MessageUserState.objects.get_or_create(message=self, user=user)
+        if created:
+            MessageEvent.record_hidden(self, user)
+        return state
+
+
+class MessageUserState(models.Model):
+    message = models.ForeignKey(Message, on_delete=models.CASCADE, related_name='hidden_states')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='hidden_message_states')
+    hidden_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['message', 'user'], name='message_user_hidden_unique'),
+        ]
+
+
+class MessageEvent(models.Model):
+    message = models.ForeignKey(Message, on_delete=models.CASCADE, related_name='sync_events')
+    chat = models.ForeignKey(Chat, on_delete=models.CASCADE, related_name='message_events')
+    actor = models.ForeignKey(User, on_delete=models.CASCADE, related_name='message_events')
+    target_user = models.ForeignKey(User, null=True, blank=True, on_delete=models.CASCADE, related_name='targeted_message_events')
+    type = models.IntegerField(choices=MessageEventTypeChoice.to_choices())
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    @classmethod
+    def record_created(cls, message):
+        return cls.objects.create(message=message, chat=message.chat, actor=message.user, type=MessageEventTypeChoice.CREATED)
+
+    @classmethod
+    def record_hidden(cls, message, user):
+        return cls.objects.create(message=message, chat=message.chat, actor=user, target_user=user, type=MessageEventTypeChoice.HIDDEN)
+
+    @classmethod
+    def record_recalled(cls, message):
+        return cls.objects.create(message=message, chat=message.chat, actor=message.user, type=MessageEventTypeChoice.RECALLED)
+
+    @classmethod
+    def sync_for_user(cls, user: User, after: int, limit: int, request: HttpRequest = None):
+        chat_ids = [chat.id for chat in Chat.get_user_chats(user)]
+        rows = list(
+            cls.objects.select_related('message', 'message__user', 'message__reply_to', 'message__reply_to__user')
+            .filter(id__gt=after)
+            .filter(Q(target_user=user) | Q(target_user__isnull=True, chat_id__in=chat_ids))
+            .order_by('id')[:limit + 1]
+        )
+        has_more = len(rows) > limit
+        rows = rows[:limit]
+        events = []
+        names = {
+            MessageEventTypeChoice.CREATED: 'message.created',
+            MessageEventTypeChoice.HIDDEN: 'message.hidden',
+            MessageEventTypeChoice.RECALLED: 'message.recalled',
+        }
+        for row in rows:
+            event = dict(event_id=row.id, type=names[row.type], chat_id=row.chat_id, message_id=row.message_id)
+            if row.type == MessageEventTypeChoice.CREATED and not row.message.is_deleted:
+                if not MessageUserState.objects.filter(message=row.message, user=user).exists():
+                    event['message'] = row.message.jsonl(request=request)
+            events.append(event)
+        return dict(events=events, has_more=has_more, next_after=rows[-1].id if rows else after)
 
 
 class PinnedMessage(models.Model):

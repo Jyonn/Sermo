@@ -12,7 +12,7 @@ class ChatListView(View):
     @staticmethod
     def build_chat_payload(chat, user, request):
         data = chat.jsonl()
-        last_message = Message.visible_in_chat(chat).order_by('-created_at').first()
+        last_message = Message.visible_for_user(chat, user).order_by('-created_at').first()
         if last_message is not None:
             data['last_message'] = last_message.jsonl(request=request)
         data['unread_count'] = ChatReadState.unread_count(chat, user)

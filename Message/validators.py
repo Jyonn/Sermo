@@ -7,6 +7,7 @@ from smartdjango import Error, Code
 class MessageErrors:
     NOT_A_MEMBER = Error(message=_('You are not a member of this chat'), code=Code.Forbidden)
     NOT_EXISTS = Error(message=_('Message does not exist'), code=Code.NotFound)
+    NOT_OWNER = Error(message=_('You are not the owner of this message'), code=Code.Forbidden)
     TYPE_INVALID = Error(message=_('Invalid message type'), code=Code.BadRequest)
     CONTENT_EMPTY = Error(message=_('Message content cannot be empty'), code=Code.BadRequest)
     CONTENT_TOO_LONG = Error(message=_('Message content is too long'), code=Code.BadRequest)

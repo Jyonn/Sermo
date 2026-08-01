@@ -6,7 +6,7 @@ from django.utils import timezone
 
 from Chat.models import Chat, ChatMember, ChatMemberRoleChoice, ChatMemberStatusChoice, ChatTypeChoice
 from Config.models import Config, ConfigInstance
-from Message.models import Message, MessageTypeChoice, PinnedMessage
+from Message.models import Message, MessageEvent, MessageTypeChoice, MessageUserState, PinnedMessage
 from Space.models import Space
 from User.models import GrowthEvent, NotificationPreference, User, UserEmojiUsage, UserNotificationChoice
 from utils import auth
@@ -319,6 +319,64 @@ class SpaceAdminApiTests(TestCase):
         self.assertTrue(Message.objects.get(id=first.id).is_deleted)
         self.assertTrue(Message.objects.get(id=second.id).is_deleted)
         self.assertFalse(Message.objects.get(id=other.id).is_deleted)
+
+    def test_message_can_be_hidden_for_one_member_without_recalling_it(self):
+        chat = Chat.get_or_create_direct(self.official, self.member)
+        message = Message.create(chat, self.official, MessageTypeChoice.TEXT, 'Only hide this copy')
+
+        hidden = self.client.delete(
+            f'/messages/?message_id={message.id}&scope=me',
+            **self.user_authorization(self.member),
+        )
+        self.assertEqual(hidden.status_code, 200, hidden.content)
+        self.assertTrue(MessageUserState.objects.filter(message=message, user=self.member).exists())
+        self.assertFalse(Message.objects.get(id=message.id).is_deleted)
+
+        member_rows = self.client.get(
+            f'/messages/?chat_id={chat.id}&limit=30',
+            **self.user_authorization(self.member),
+        ).json()['body']
+        official_rows = self.client.get(
+            f'/messages/?chat_id={chat.id}&limit=30',
+            **self.user_authorization(self.official),
+        ).json()['body']
+        self.assertNotIn(message.id, [row['message_id'] for row in member_rows])
+        self.assertIn(message.id, [row['message_id'] for row in official_rows])
+
+        reconciled = self.client.post(
+            '/messages/reconcile',
+            data=json.dumps({'chat_id': chat.id, 'message_ids': [message.id]}),
+            content_type='application/json',
+            **self.user_authorization(self.member),
+        )
+        self.assertEqual(reconciled.status_code, 200, reconciled.content)
+        self.assertEqual(reconciled.json()['body']['deleted_message_ids'], [message.id])
+
+    def test_message_event_sync_scopes_hidden_and_recalled_events(self):
+        chat = Chat.get_or_create_direct(self.official, self.member)
+        cursor = MessageEvent.objects.order_by('-id').values_list('id', flat=True).first() or 0
+        message = Message.create(chat, self.official, MessageTypeChoice.TEXT, 'Sync this')
+        message.hide_for(self.member)
+
+        member_events = self.client.get(
+            f'/messages/sync-v2?after={cursor}&limit=50',
+            **self.user_authorization(self.member),
+        ).json()['body']['events']
+        official_events = self.client.get(
+            f'/messages/sync-v2?after={cursor}&limit=50',
+            **self.user_authorization(self.official),
+        ).json()['body']['events']
+        self.assertEqual([event['type'] for event in member_events], ['message.created', 'message.hidden'])
+        self.assertEqual([event['type'] for event in official_events], ['message.created'])
+
+        message.remove()
+        recalled_events = self.client.get(
+            f'/messages/sync-v2?after={official_events[-1]["event_id"]}&limit=50',
+            **self.user_authorization(self.official),
+        ).json()['body']['events']
+        self.assertEqual(recalled_events[-1]['type'], 'message.recalled')
+        self.assertEqual(recalled_events[-1]['message_id'], message.id)
+        self.assertGreaterEqual(MessageEvent.objects.count(), 3)
 
     def test_daily_chat_growth_is_capped(self):
         chat = Chat.get_or_create_direct(self.official, self.member)

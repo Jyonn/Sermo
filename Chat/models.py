@@ -497,8 +497,8 @@ class ChatReadState(models.Model):
         from Message.models import Message
         last_read_at = cls.get_last_read_at(chat, user)
         if last_read_at is None:
-            return Message.visible_in_chat(chat).count()
-        return Message.visible_in_chat(chat).filter(created_at__gt=last_read_at).count()
+            return Message.visible_for_user(chat, user).count()
+        return Message.visible_for_user(chat, user).filter(created_at__gt=last_read_at).count()
 
 
 class ChatUserPreference(models.Model):
