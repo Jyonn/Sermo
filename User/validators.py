@@ -110,14 +110,23 @@ class UserValidator:
     AVATAR_PRESET_MIN_ID = 1
     AVATAR_PRESET_MAX_ID = 80
     CHAT_BACKGROUND_THEMES = {
-        'default', 'paper', 'mint', 'dusk', 'comic', 'zen', 'hero', 'dragon', 'bauhaus', 'mosaic', 'custom',
+        'default', 'paper', 'mint', 'dusk', 'comic', 'zen', 'hero', 'dragon', 'bauhaus', 'mosaic',
+        'tidepool', 'forest', 'desert', 'snowfield', 'sakura', 'sunrise', 'midnight', 'rain', 'galaxy',
+        'aurora-sky', 'linen', 'terrazzo', 'blueprint', 'newsprint', 'hologram', 'arcade', 'jazz',
+        'spaceport', 'candy', 'noir-film', 'custom',
     }
     PERSONALIZATION_OPTIONS = {
         'chat_bubble_style': {
             'default', 'comic', 'vip', 'zen', 'hero', 'dragon', 'bauhaus', 'mosaic',
+            'pebble', 'leaf', 'cloud', 'ice', 'lava', 'typewriter', 'newspaper', 'receipt', 'postcard',
+            'blueprint', 'terminal', 'hologram', 'mech', 'synthwave', 'orbital', 'sticker', 'candy',
+            'toybrick', 'doodle', 'plush',
         },
         'avatar_frame_style': {
             'none', 'orbit', 'pixel', 'aurora', 'polaroid', 'soundwave', 'lucky', 'portal',
+            'vine', 'blossom', 'butterfly', 'coral', 'moon', 'crown', 'headphones', 'cat-ears',
+            'ribbon-bow', 'camera', 'comet', 'radar', 'pulse', 'snowfall', 'firefly', 'stamp',
+            'embroidery', 'stainedglass', 'papercut', 'mechanical',
         },
         'square_outfit_style': {'sunset', 'varsity', 'noir', 'cloud'},
         'square_prop_style': {'none', 'star', 'coffee', 'flag'},
