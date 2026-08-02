@@ -246,10 +246,10 @@ class SpaceAdminApiTests(TestCase):
         payload = {
             'chat_bubble_style': 'comic',
             'avatar_frame_style': 'aurora',
-            'square_outfit_style': 'noir',
-            'square_prop_style': 'flag',
-            'square_motion_style': 'float',
-            'square_limb_style': 'robot',
+            'square_outfit_style': 'raincoat',
+            'square_prop_style': 'camera',
+            'square_motion_style': 'dance',
+            'square_limb_style': 'hinged',
         }
         response = self.client.post(
             '/users/me/personalization',

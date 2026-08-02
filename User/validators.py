@@ -124,10 +124,10 @@ class UserValidator:
             'none', 'orbit', 'aurora', 'polaroid', 'soundwave', 'portal', 'butterfly',
             'moon', 'camera', 'comet', 'snowfall', 'papercut', 'mechanical',
         },
-        'square_outfit_style': {'sunset', 'varsity', 'noir', 'cloud'},
-        'square_prop_style': {'none', 'star', 'coffee', 'flag'},
-        'square_motion_style': {'walk', 'bounce', 'float', 'dash'},
-        'square_limb_style': {'line', 'chunky', 'robot', 'ribbon'},
+        'square_outfit_style': {'sunset', 'varsity', 'noir', 'cloud', 'raincoat', 'hanfu', 'utility', 'sailor'},
+        'square_prop_style': {'none', 'star', 'coffee', 'flag', 'camera', 'bouquet', 'umbrella', 'skateboard'},
+        'square_motion_style': {'walk', 'bounce', 'float', 'dash', 'wave', 'dance', 'skate', 'tiptoe'},
+        'square_limb_style': {'line', 'chunky', 'robot', 'ribbon', 'hinged', 'wooden', 'spring', 'ink'},
     }
     GESTURE_LOCK_MIN_MINUTES = 1
     GESTURE_LOCK_MAX_MINUTES = 30
