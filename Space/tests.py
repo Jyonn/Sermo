@@ -1,4 +1,5 @@
 import json
+from datetime import timedelta
 from unittest.mock import patch
 
 from django.test import TestCase
@@ -410,6 +411,34 @@ class SpaceAdminApiTests(TestCase):
         )
         self.assertEqual(reconciled.status_code, 200, reconciled.content)
         self.assertEqual(reconciled.json()['body']['deleted_message_ids'], [message.id])
+
+    def test_regular_user_cannot_recall_message_after_two_minutes(self):
+        chat = Chat.get_or_create_direct(self.official, self.member)
+        message = Message.create(chat, self.member, MessageTypeChoice.TEXT, 'Too late')
+        Message.objects.filter(id=message.id).update(created_at=timezone.now() - timedelta(minutes=3))
+
+        response = self.client.delete(
+            f'/messages/?message_id={message.id}&scope=everyone',
+            **self.user_authorization(self.member),
+        )
+
+        self.assertEqual(response.status_code, 403, response.content)
+        self.assertFalse(Message.objects.get(id=message.id).is_deleted)
+
+    def test_vip_user_can_recall_message_within_seven_days(self):
+        self.member.is_permanent_vip = True
+        self.member.save(update_fields=['is_permanent_vip'])
+        chat = Chat.get_or_create_direct(self.official, self.member)
+        message = Message.create(chat, self.member, MessageTypeChoice.TEXT, 'VIP recall')
+        Message.objects.filter(id=message.id).update(created_at=timezone.now() - timedelta(days=6))
+
+        response = self.client.delete(
+            f'/messages/?message_id={message.id}&scope=everyone',
+            **self.user_authorization(self.member),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertTrue(Message.objects.get(id=message.id).is_deleted)
 
     def test_message_event_sync_scopes_hidden_and_recalled_events(self):
         chat = Chat.get_or_create_direct(self.official, self.member)

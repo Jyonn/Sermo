@@ -710,6 +710,9 @@ msgstr "You are not the owner of this chat"
 msgid "You are not the owner of this message"
 msgstr "You are not the owner of this message"
 
+msgid "The message recall window has expired"
+msgstr "The message recall window has expired"
+
 msgid "Map access can only be shared in a direct chat"
 msgstr "Map access can only be shared in a direct chat"
 

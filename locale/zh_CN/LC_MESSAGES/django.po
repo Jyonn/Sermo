@@ -711,6 +711,9 @@ msgstr "你不是此聊天室的所有者"
 msgid "You are not the owner of this message"
 msgstr "你不是此消息的所有者"
 
+msgid "The message recall window has expired"
+msgstr "这条消息已超过可撤回时间"
+
 msgid "Map access can only be shared in a direct chat"
 msgstr "足迹地图只能在私聊中分享"
 
