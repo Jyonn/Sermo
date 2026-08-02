@@ -118,9 +118,8 @@ class UserValidator:
     PERSONALIZATION_OPTIONS = {
         'chat_bubble_style': {
             'default', 'comic', 'vip', 'zen', 'hero', 'dragon', 'bauhaus', 'mosaic',
-            'pebble', 'leaf', 'cloud', 'ice', 'lava', 'typewriter', 'newspaper', 'receipt', 'postcard',
-            'blueprint', 'terminal', 'hologram', 'mech', 'synthwave', 'orbital', 'sticker', 'candy',
-            'toybrick', 'doodle', 'plush',
+            'typewriter', 'newspaper', 'receipt', 'terminal', 'hologram', 'mech', 'sticker',
+            'toybrick',
         },
         'avatar_frame_style': {
             'none', 'orbit', 'aurora', 'polaroid', 'soundwave', 'portal', 'butterfly',
