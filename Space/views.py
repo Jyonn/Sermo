@@ -290,7 +290,7 @@ class SpaceUserListView(View):
         if online is not None:
             threshold = timezone.now() - datetime.timedelta(minutes=User.vldt.OFFLINE_MIN_INTERVAL)
             if bool(online):
-                users = users.filter(last_heartbeat__gt=threshold)
+                users = users.filter(Q(last_heartbeat__gt=threshold) | Q(role=UserRoleChoice.OFFICIAL))
             else:
                 users = users.filter(last_heartbeat__lte=threshold)
 

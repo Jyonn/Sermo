@@ -40,6 +40,19 @@ class SpaceAdminApiTests(TestCase):
         token = auth.get_login_token(user)['auth']
         return dict(HTTP_AUTHORIZATION=f'Bearer {token}')
 
+    def test_online_square_always_includes_official_user(self):
+        self.official.last_heartbeat = timezone.now() - timedelta(days=30)
+        self.official.save(update_fields=['last_heartbeat'])
+
+        response = self.client.get(
+            '/spaces/users/online?limit=80&offset=0',
+            **self.user_authorization(self.member),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        user_ids = [item['user_id'] for item in response.json()['body']]
+        self.assertIn(self.official.id, user_ids)
+
     def test_official_user_can_exchange_admin_session(self):
         response = self.client.post(
             '/spaces/admin/session',
