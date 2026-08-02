@@ -123,10 +123,9 @@ class UserValidator:
             'toybrick', 'doodle', 'plush',
         },
         'avatar_frame_style': {
-            'none', 'orbit', 'pixel', 'aurora', 'polaroid', 'soundwave', 'lucky', 'portal',
-            'vine', 'blossom', 'butterfly', 'coral', 'moon', 'crown', 'headphones', 'cat-ears',
-            'ribbon-bow', 'camera', 'comet', 'radar', 'pulse', 'snowfall', 'firefly', 'stamp',
-            'embroidery', 'stainedglass', 'papercut', 'mechanical',
+            'none', 'orbit', 'aurora', 'polaroid', 'soundwave', 'lucky', 'portal', 'blossom',
+            'butterfly', 'moon', 'crown', 'headphones', 'cat-ears', 'ribbon-bow', 'camera',
+            'comet', 'snowfall', 'firefly', 'papercut', 'mechanical',
         },
         'square_outfit_style': {'sunset', 'varsity', 'noir', 'cloud'},
         'square_prop_style': {'none', 'star', 'coffee', 'flag'},
