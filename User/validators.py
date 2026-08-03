@@ -118,11 +118,11 @@ class UserValidator:
     PERSONALIZATION_OPTIONS = {
         'chat_bubble_style': {
             'default', 'comic', 'vip', 'zen', 'hero', 'dragon', 'bauhaus', 'mosaic',
-            'typewriter', 'newspaper', 'receipt', 'sticker', 'toybrick', 'niko',
+            'typewriter', 'newspaper', 'receipt', 'sticker', 'toybrick', 'niko', 'fufu',
         },
         'avatar_frame_style': {
             'none', 'orbit', 'aurora', 'polaroid', 'soundwave', 'portal', 'butterfly',
-            'moon', 'camera', 'comet', 'snowfall', 'papercut', 'mechanical', 'niko-run',
+            'moon', 'camera', 'comet', 'snowfall', 'papercut', 'mechanical', 'niko-run', 'fufu-wave',
         },
         'square_outfit_style': {'sunset', 'varsity', 'noir', 'cloud', 'raincoat', 'hanfu', 'utility', 'sailor'},
         'square_prop_style': {'none', 'star', 'coffee', 'flag', 'camera', 'bouquet', 'umbrella', 'skateboard'},
