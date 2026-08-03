@@ -106,21 +106,21 @@ GROWTH_MILESTONES = [
 ]
 GROWTH_MILESTONE_LIMITS = {key: points for key, _, _, points in GROWTH_MILESTONES}
 GROWTH_UNLOCKS = {
-    1: ['基础沟通'],
+    1: ['基础沟通', '基础背景、气泡与头像框'],
     2: ['发送图片'],
     3: ['发送语音与位置', '等级签'],
-    4: ['自定义头像', '创建群聊'],
+    4: ['自定义头像', '创建群聊', '第一组个性化主题'],
     5: ['发送视频', '修改群名称', '昵称每年可改'],
-    6: ['自定义欢迎语', '广场招呼', '昵称每月可改', '橱窗主题'],
+    6: ['自定义欢迎语', '广场招呼', '昵称每月可改', '进阶个性化主题'],
     7: ['好友上线提醒', '昵称每周可改'],
-    8: ['下载语音', '自定义聊天背景'],
-    9: ['基础头像框'],
-    10: ['广场光环', '自定义消息提示'],
-    11: ['聊天气泡主题'],
-    12: ['个人名片主题'],
+    8: ['下载语音', '上传自定义聊天背景', '更多个性化主题'],
+    9: [],
+    10: ['广场光环', '自定义消息提示', '高阶个性化主题'],
+    11: [],
+    12: ['个人名片主题', '典藏个性化主题'],
     14: ['动态轨迹'],
     15: ['入场效果'],
-    16: ['成长报告'],
+    16: ['成长报告', 'Niko 与 Fufu IP 主题'],
     17: ['稀有头像框'],
     18: ['尽兴徽记'],
 }
@@ -138,8 +138,46 @@ GROWTH_CAPABILITY_LEVELS = {
     'plaza_greeting': 6,
     'online_reminder': 7,
     'download_audio': 8,
-    'chat_background': 8,
+    'chat_background': 1,
+    'custom_chat_background': 8,
     'custom_notification_message': 10,
+}
+
+CHAT_BACKGROUND_LEVELS = {
+    'default': 1, 'paper': 1, 'mint': 1, 'dusk': 1,
+    'comic': 4, 'zen': 4,
+    'hero': 6, 'dragon': 6, 'bauhaus': 6, 'mosaic': 6,
+    'tidepool': 8, 'forest': 8, 'desert': 8, 'snowfield': 8, 'sakura': 8,
+    'sunrise': 10, 'midnight': 10, 'rain': 10, 'galaxy': 10, 'aurora-sky': 10,
+    'linen': 10, 'terrazzo': 10, 'blueprint': 10, 'newsprint': 10, 'hologram': 10,
+    'arcade': 12, 'jazz': 12, 'spaceport': 12, 'candy': 12, 'noir-film': 12,
+    'custom': 8,
+}
+
+PERSONALIZATION_LEVELS = {
+    'chat_bubble_style': {
+        'default': 1, 'comic': 1,
+        'typewriter': 4, 'sticker': 4,
+        'zen': 6, 'newspaper': 6, 'toybrick': 6,
+        'hero': 8, 'bauhaus': 8, 'receipt': 8,
+        'dragon': 10, 'mosaic': 10,
+        'niko': 16, 'fufu': 16,
+    },
+    'avatar_frame_style': {
+        'none': 1, 'orbit': 1, 'polaroid': 1,
+        'camera': 4, 'soundwave': 4,
+        'aurora': 6, 'butterfly': 6,
+        'moon': 8, 'snowfall': 8, 'papercut': 8,
+        'portal': 10, 'comet': 10, 'mechanical': 10,
+        'niko-run': 16, 'fufu-wave': 16,
+    },
+}
+
+VIP_OR_LEVEL_PERSONALIZATION = {
+    ('chat_bubble_style', 'niko'),
+    ('chat_bubble_style', 'fufu'),
+    ('avatar_frame_style', 'niko-run'),
+    ('avatar_frame_style', 'fufu-wave'),
 }
 
 
@@ -539,8 +577,10 @@ class User(models.Model):
         return self
 
     def set_chat_background(self, theme, uri=''):
-        self.require_growth_capability('chat_background')
         normalized_theme = self.validators.chat_background_theme(theme)
+        required_level = CHAT_BACKGROUND_LEVELS[normalized_theme]
+        if normalized_theme != self.chat_background_theme and self.effective_growth_level() < required_level:
+            raise UserErrors.GROWTH_LEVEL_REQUIRED(level=required_level)
         normalized_uri = (uri or '').strip() if normalized_theme == 'custom' else ''
         previous_uri = self.chat_background_uri
         self.chat_background_theme = normalized_theme
@@ -555,7 +595,13 @@ class User(models.Model):
         if values['chat_bubble_style'] == 'vip' and not self.is_permanent_vip:
             raise UserErrors.PERMANENT_VIP_NOT_ELIGIBLE
         for field in fields:
-            setattr(self, field, self.validators.personalization(field, values[field]))
+            normalized = self.validators.personalization(field, values[field])
+            if field in PERSONALIZATION_LEVELS and normalized in PERSONALIZATION_LEVELS[field] and normalized != getattr(self, field):
+                required_level = PERSONALIZATION_LEVELS[field][normalized]
+                vip_override = (field, normalized) in VIP_OR_LEVEL_PERSONALIZATION and self.is_permanent_vip
+                if not vip_override and self.effective_growth_level() < required_level:
+                    raise UserErrors.GROWTH_LEVEL_REQUIRED(level=required_level)
+            setattr(self, field, normalized)
         self.save(update_fields=fields)
         return self
 

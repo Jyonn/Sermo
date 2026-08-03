@@ -596,7 +596,7 @@ class ChatBackgroundUploadView(View):
         UserParams.avatar_content_type,
     )
     def post(self, request: Request):
-        request.user.require_growth_capability('chat_background')
+        request.user.require_growth_capability('custom_chat_background')
         return issue_chat_background_upload(
             file_name=request.json.file_name,
             content_type=request.json.content_type,

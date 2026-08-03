@@ -258,7 +258,7 @@ class SpaceAdminApiTests(TestCase):
     def test_user_personalization_is_persisted_and_serialized(self):
         payload = {
             'chat_bubble_style': 'comic',
-            'avatar_frame_style': 'aurora',
+            'avatar_frame_style': 'orbit',
             'square_outfit_style': 'raincoat',
             'square_prop_style': 'camera',
             'square_motion_style': 'dance',
@@ -279,6 +279,19 @@ class SpaceAdminApiTests(TestCase):
             self.assertEqual(self.member.tiny_json()[field], value)
 
     def test_cultural_bubble_styles_are_persisted_and_serialized(self):
+        self.member.set_password('safe-password')
+        self.member.phone = '13800000008'
+        self.member.phone_verified_at = timezone.now()
+        self.member.save(update_fields=['password', 'phone', 'phone_verified_at'])
+        GrowthEvent.objects.create(
+            user=self.member,
+            event_key='test:reach-level-ten',
+            category='test',
+            title='达到十级',
+            points=850,
+        )
+        self.member.reconcile_growth()
+        self.assertEqual(self.member.effective_growth_level(), 10)
         for bubble_style in ('zen', 'hero', 'dragon', 'bauhaus', 'mosaic'):
             payload = {
                 'chat_bubble_style': bubble_style,
@@ -329,6 +342,64 @@ class SpaceAdminApiTests(TestCase):
         self.assertEqual(accepted.status_code, 200, accepted.content)
         self.member.refresh_from_db()
         self.assertEqual(self.member.chat_bubble_style, 'vip')
+
+    def test_niko_and_fufu_require_level_sixteen_or_permanent_vip(self):
+        payload = {
+            'chat_bubble_style': 'niko',
+            'avatar_frame_style': 'fufu-wave',
+            'square_outfit_style': 'sunset',
+            'square_prop_style': 'none',
+            'square_motion_style': 'walk',
+            'square_limb_style': 'line',
+        }
+        denied = self.client.post(
+            '/users/me/personalization',
+            data=json.dumps(payload),
+            content_type='application/json',
+            **self.user_authorization(self.member),
+        )
+        self.assertEqual(denied.status_code, 403, denied.content)
+        self.assertEqual(denied.json()['identifier'], 'USER@GROWTH_LEVEL_REQUIRED')
+
+        self.member.is_permanent_vip = True
+        self.member.save(update_fields=['is_permanent_vip'])
+        accepted = self.client.post(
+            '/users/me/personalization',
+            data=json.dumps(payload),
+            content_type='application/json',
+            **self.user_authorization(self.member),
+        )
+        self.assertEqual(accepted.status_code, 200, accepted.content)
+        self.member.refresh_from_db()
+        self.assertEqual(self.member.chat_bubble_style, 'niko')
+        self.assertEqual(self.member.avatar_frame_style, 'fufu-wave')
+
+        self.member.chat_bubble_style = 'default'
+        self.member.avatar_frame_style = 'none'
+        self.member.is_permanent_vip = False
+        self.member.set_password('safe-password')
+        self.member.phone = '13800000016'
+        self.member.phone_verified_at = timezone.now()
+        self.member.save(update_fields=[
+            'chat_bubble_style', 'avatar_frame_style', 'is_permanent_vip',
+            'password', 'phone', 'phone_verified_at',
+        ])
+        GrowthEvent.objects.create(
+            user=self.member,
+            event_key='test:reach-level-sixteen',
+            category='test',
+            title='达到十六级',
+            points=4180,
+        )
+        self.member.reconcile_growth()
+        self.assertEqual(self.member.effective_growth_level(), 16)
+        level_sixteen = self.client.post(
+            '/users/me/personalization',
+            data=json.dumps(payload),
+            content_type='application/json',
+            **self.user_authorization(self.member),
+        )
+        self.assertEqual(level_sixteen.status_code, 200, level_sixteen.content)
 
     def test_message_search_filters_keyword_type_and_hidden_records(self):
         chat = Chat.get_or_create_direct(self.official, self.member)
@@ -767,58 +838,47 @@ class SpaceAdminApiTests(TestCase):
         self.assertEqual(nickname_cooldown.status_code, 400)
         self.assertEqual(nickname_cooldown.json()['identifier'], 'USER@NICKNAME_CHANGE_COOLDOWN')
 
-    def test_chat_background_requires_level_eight(self):
+    def test_chat_background_has_free_and_levelled_presets(self):
+        free = self.client.post(
+            '/users/me/chat-background',
+            data=json.dumps({'theme': 'paper'}),
+            content_type='application/json',
+            **self.user_authorization(self.member),
+        )
+        self.assertEqual(free.status_code, 200, free.content)
+
         locked = self.client.post(
-            '/users/me/chat-background',
-            data=json.dumps({'theme': 'paper'}),
-            content_type='application/json',
-            **self.user_authorization(self.member),
-        )
-        self.assertEqual(locked.status_code, 403)
-        self.assertEqual(locked.json()['identifier'], 'USER@GROWTH_LEVEL_REQUIRED')
-
-        self.member.set_password('safe-password')
-        GrowthEvent.objects.create(
-            user=self.member,
-            event_key='test:reach-level-eight',
-            category='test',
-            title='达到八级',
-            points=405,
-        )
-        self.member.reconcile_growth()
-        self.assertEqual(self.member.effective_growth_level(), 8)
-
-        updated = self.client.post(
-            '/users/me/chat-background',
-            data=json.dumps({'theme': 'paper'}),
-            content_type='application/json',
-            **self.user_authorization(self.member),
-        )
-        self.assertEqual(updated.status_code, 200, updated.content)
-        self.member.refresh_from_db()
-        self.assertEqual(self.member.chat_background_theme, 'paper')
-        self.assertEqual(self.member.chat_background_uri, '')
-
-        comic_update = self.client.post(
             '/users/me/chat-background',
             data=json.dumps({'theme': 'comic'}),
             content_type='application/json',
             **self.user_authorization(self.member),
         )
-        self.assertEqual(comic_update.status_code, 200, comic_update.content)
+        self.assertEqual(locked.status_code, 403, locked.content)
+        self.assertEqual(locked.json()['identifier'], 'USER@GROWTH_LEVEL_REQUIRED')
+
+        self.member.set_password('safe-password')
+        self.member.growth_score = 80
+        self.member.save(update_fields=['growth_score'])
+        self.assertEqual(self.member.effective_growth_level(), 4)
+
+        updated = self.client.post(
+            '/users/me/chat-background',
+            data=json.dumps({'theme': 'comic'}),
+            content_type='application/json',
+            **self.user_authorization(self.member),
+        )
+        self.assertEqual(updated.status_code, 200, updated.content)
         self.member.refresh_from_db()
         self.assertEqual(self.member.chat_background_theme, 'comic')
+        self.assertEqual(self.member.chat_background_uri, '')
 
-        for theme in ('zen', 'hero', 'dragon', 'bauhaus', 'mosaic'):
-            cultural_update = self.client.post(
-                '/users/me/chat-background',
-                data=json.dumps({'theme': theme}),
-                content_type='application/json',
-                **self.user_authorization(self.member),
-            )
-            self.assertEqual(cultural_update.status_code, 200, cultural_update.content)
-            self.member.refresh_from_db()
-            self.assertEqual(self.member.chat_background_theme, theme)
+        higher_locked = self.client.post(
+            '/users/me/chat-background',
+            data=json.dumps({'theme': 'hero'}),
+            content_type='application/json',
+            **self.user_authorization(self.member),
+        )
+        self.assertEqual(higher_locked.status_code, 403, higher_locked.content)
 
     def test_custom_notification_messages_require_level_ten(self):
         self.member.set_password('safe-password')
