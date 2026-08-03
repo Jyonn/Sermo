@@ -263,12 +263,13 @@ class Friendship(models.Model):
             if self.source == 'qr':
                 inviter = self._request_target()
                 if inviter and inviter.verified:
-                    inviter.award_growth(
-                        'social:qr_friend',
-                        80,
-                        category='social',
-                        title='二维码结识认证好友',
-                    )
+                    month = timezone.localdate().strftime('%Y-%m')
+                    awarded_count = inviter.growth_events.filter(
+                        event_key__startswith=f'social:qr_friend:{month}:',
+                        points__gt=0,
+                    ).count()
+                    if awarded_count < 2:
+                        inviter.award_growth(f'social:qr_friend:{month}:{awarded_count + 1}')
         return self
 
     def _send_accept_welcome_message(self, responder: User):

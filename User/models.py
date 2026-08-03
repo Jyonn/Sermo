@@ -24,18 +24,25 @@ from utils.qiniu import (
     delete_chat_background_by_uri,
 )
 from User.validators import UserValidator, UserErrors
+from User.growth import (
+    CHAT_BACKGROUND_LEVELS,
+    DAILY_GROWTH_LIMIT,
+    EVENT_RULES,
+    GROWTH_CAPABILITY_LEVELS,
+    GROWTH_THRESHOLDS,
+    LEVEL_REWARDS,
+    PERSONALIZATION_LEVELS,
+    VIP_OR_LEVEL_PERSONALIZATION,
+    WEEKLY_GROWTH_LIMIT,
+    level_unlock_titles,
+    resolve_event_rule,
+)
 from utils import function
 
 
 FRONTEND_BASE_URL = 'https://sermo.jyonn.space'
 BARK_ENDPOINT_PATTERN = re.compile(r'^https://api\.day\.app/([^/?#\s]+)', re.IGNORECASE)
 logger = logging.getLogger(__name__)
-
-GROWTH_THRESHOLDS = [
-    0, 20, 45, 80, 130, 200, 300, 440, 620,
-    850, 1150, 1530, 2000, 2580, 3300, 4180, 5250, 6550,
-]
-
 
 def _is_emoji_base(char):
     code = ord(char)
@@ -90,95 +97,6 @@ def account_switch_phone_variants(value):
     if phone.startswith('+'):
         return {phone}
     return {phone, f'+86{phone}'}
-
-
-GROWTH_MILESTONES = [
-    ('explore:image', 'explore', '发送照片', 30),
-    ('explore:location', 'explore', '分享位置', 35),
-    ('explore:avatar', 'explore', '换一张头像', 20),
-    ('explore:install_webapp', 'explore', '安装 WebApp', 60),
-    ('social:plaza_friend', 'social', '从广场认识朋友', 30),
-    ('social:qr_friend', 'social', '二维码结识认证好友', 80),
-    ('security:password', 'security', '设置密码', 35),
-    ('security:email', 'security', '认证邮箱', 45),
-    ('security:phone', 'security', '绑定手机', 45),
-    ('security:bark', 'security', '绑定即时提醒', 25),
-]
-GROWTH_MILESTONE_LIMITS = {key: points for key, _, _, points in GROWTH_MILESTONES}
-GROWTH_UNLOCKS = {
-    1: ['基础沟通', '基础背景、气泡与头像框'],
-    2: ['发送图片'],
-    3: ['发送语音与位置', '等级签'],
-    4: ['自定义头像', '创建群聊', '第一组个性化主题'],
-    5: ['发送视频', '修改群名称', '昵称每年可改'],
-    6: ['自定义欢迎语', '广场招呼', '昵称每月可改', '进阶个性化主题'],
-    7: ['好友上线提醒', '昵称每周可改'],
-    8: ['下载语音', '上传自定义聊天背景', '更多个性化主题'],
-    9: [],
-    10: ['广场光环', '自定义消息提示', '高阶个性化主题'],
-    11: [],
-    12: ['个人名片主题', '典藏个性化主题'],
-    14: ['动态轨迹'],
-    15: ['入场效果'],
-    16: ['成长报告', 'Niko 与 Fufu IP 主题'],
-    17: ['稀有头像框'],
-    18: ['尽兴徽记'],
-}
-GROWTH_CAPABILITY_LEVELS = {
-    'send_image': 2,
-    'send_audio': 3,
-    'send_location': 3,
-    'custom_avatar': 4,
-    'create_group': 4,
-    'invite_group_member': 4,
-    'rename_nickname': 5,
-    'rename_group': 5,
-    'send_video': 5,
-    'welcome_message': 6,
-    'plaza_greeting': 6,
-    'online_reminder': 7,
-    'download_audio': 8,
-    'chat_background': 1,
-    'custom_chat_background': 8,
-    'custom_notification_message': 10,
-}
-
-CHAT_BACKGROUND_LEVELS = {
-    'default': 1, 'paper': 1, 'mint': 1, 'dusk': 1,
-    'comic': 4, 'zen': 4,
-    'hero': 6, 'dragon': 6, 'bauhaus': 6, 'mosaic': 6,
-    'tidepool': 8, 'forest': 8, 'desert': 8, 'snowfield': 8, 'sakura': 8,
-    'sunrise': 10, 'midnight': 10, 'rain': 10, 'galaxy': 10, 'aurora-sky': 10,
-    'linen': 10, 'terrazzo': 10, 'blueprint': 10, 'newsprint': 10, 'hologram': 10,
-    'arcade': 12, 'jazz': 12, 'spaceport': 12, 'candy': 12, 'noir-film': 12,
-    'custom': 8,
-}
-
-PERSONALIZATION_LEVELS = {
-    'chat_bubble_style': {
-        'default': 1, 'comic': 1,
-        'typewriter': 4, 'sticker': 4,
-        'zen': 6, 'newspaper': 6, 'toybrick': 6,
-        'hero': 8, 'bauhaus': 8, 'receipt': 8,
-        'dragon': 10, 'mosaic': 10,
-        'niko': 16, 'fufu': 16,
-    },
-    'avatar_frame_style': {
-        'none': 1, 'orbit': 1, 'polaroid': 1,
-        'camera': 4, 'soundwave': 4,
-        'aurora': 6, 'butterfly': 6,
-        'moon': 8, 'snowfall': 8, 'papercut': 8,
-        'portal': 10, 'comet': 10, 'mechanical': 10,
-        'niko-run': 16, 'fufu-wave': 16,
-    },
-}
-
-VIP_OR_LEVEL_PERSONALIZATION = {
-    ('chat_bubble_style', 'niko'),
-    ('chat_bubble_style', 'fufu'),
-    ('avatar_frame_style', 'niko-run'),
-    ('avatar_frame_style', 'fufu-wave'),
-}
 
 
 def normalize_bark_endpoint(value):
@@ -514,7 +432,7 @@ class User(models.Model):
         self.password = function.hash_password(password, self.salt)
         if save:
             self.save(update_fields=['password'])
-            self.award_growth('security:password', 35, category='security', title='设置密码')
+            self.award_growth('security:password')
         return self
 
     def set_language(self, language, save=True):
@@ -586,12 +504,15 @@ class User(models.Model):
         self.chat_background_theme = normalized_theme
         self.chat_background_uri = normalized_uri
         self.save(update_fields=['chat_background_theme', 'chat_background_uri'])
+        if normalized_theme == 'custom' and normalized_uri:
+            self.award_growth('explore:custom_background')
         if previous_uri and previous_uri != normalized_uri:
             delete_chat_background_by_uri(previous_uri)
         return self
 
     def set_personalization(self, **values):
         fields = list(self.validators.PERSONALIZATION_OPTIONS)
+        changed = any(values[field] != getattr(self, field) for field in fields)
         if values['chat_bubble_style'] == 'vip' and not self.is_permanent_vip:
             raise UserErrors.PERMANENT_VIP_NOT_ELIGIBLE
         if values['avatar_frame_style'] == 'vip' and not self.is_permanent_vip:
@@ -605,6 +526,8 @@ class User(models.Model):
                     raise UserErrors.GROWTH_LEVEL_REQUIRED(level=required_level)
             setattr(self, field, normalized)
         self.save(update_fields=fields)
+        if changed:
+            self.award_growth('explore:first_personalization')
         return self
 
     def nickname_change_interval_days(self):
@@ -613,7 +536,7 @@ class User(models.Model):
             return None
         if level == 5:
             return 365
-        if level == 6:
+        if level < 12:
             return 30
         return 7
 
@@ -644,6 +567,7 @@ class User(models.Model):
         )
         if save:
             self.save(update_fields=['welcome_message'])
+            self.award_growth('explore:welcome')
         return self
 
     def display_plaza_greeting(self):
@@ -691,7 +615,7 @@ class User(models.Model):
                 self.email_verified_at = now
                 self.account_level = UserAccountLevelChoice.VERIFIED
                 self.save(update_fields=['email', 'email_verified_at', 'account_level'])
-            self.award_growth('security:email', 45, category='security', title='认证邮箱')
+            self.award_growth('security:email')
             return self
         if channel == UserNotificationChoice.SMS:
             with transaction.atomic():
@@ -707,13 +631,13 @@ class User(models.Model):
                 self.phone = target
                 self.phone_verified_at = now
                 self.save(update_fields=['phone', 'phone_verified_at'])
-            self.award_growth('security:phone', 45, category='security', title='绑定手机')
+            self.award_growth('security:phone')
             return self
         if channel == UserNotificationChoice.BARK:
             self.bark = normalize_bark_endpoint(target)
             self.bark_verified_at = now
             self.save(update_fields=['bark', 'bark_verified_at'])
-            self.award_growth('security:bark', 25, category='security', title='绑定即时提醒')
+            self.award_growth('security:bark')
             return self
         raise UserErrors.CONTACT_CHANNEL_INVALID
 
@@ -780,7 +704,7 @@ class User(models.Model):
         if save:
             self.save(update_fields=['avatar_type', 'avatar_uri'])
             self._delete_previous_custom_avatar(previous_avatar_type, previous_avatar_uri, self.avatar_uri)
-            self.award_growth('explore:avatar', 20, category='explore', title='换一张头像')
+            self.award_growth('explore:avatar')
         return self
 
     def set_custom_avatar(self, avatar_uri: str, save=True):
@@ -792,7 +716,7 @@ class User(models.Model):
         if save:
             self.save(update_fields=['avatar_type', 'avatar_uri'])
             self._delete_previous_custom_avatar(previous_avatar_type, previous_avatar_uri, self.avatar_uri)
-            self.award_growth('explore:avatar', 20, category='explore', title='换一张头像')
+            self.award_growth('explore:avatar')
         return self
 
     @staticmethod
@@ -947,25 +871,35 @@ class User(models.Model):
         index = max(0, min(len(names) - 1, self.growth_level - 1))
         return names[index] if names else ''
 
-    def award_growth(self, key, points, category='explore', title='', daily_limit=None):
-        if self.is_official or points <= 0:
+    def award_growth(self, key, points=None, category=None, title=None, daily_limit=None):
+        rule = resolve_event_rule(key)
+        if self.is_official or rule is None:
             return 0
-        event_key = f'{key}:{timezone.localdate().isoformat()}' if daily_limit else key
+        event_key = key
         with transaction.atomic():
             locked = User.objects.select_for_update().get(id=self.id)
             event, created = GrowthEvent.objects.get_or_create(
                 user=locked,
                 event_key=event_key,
-                defaults=dict(category=category, title=title, points=0),
+                defaults=dict(category=rule.category, title=rule.title, points=0),
             )
-            if daily_limit is None and not created and event.points > 0:
+            if not created and event.points > 0:
                 return 0
-            available = points if daily_limit is None else max(0, daily_limit - event.points)
-            awarded = min(points, available)
+            awarded = rule.points
+            if rule.period == 'daily':
+                period_key = event_key.split(':')[2]
+                earned = GrowthEvent.period_points(locked, 'daily', period_key)
+                awarded = min(awarded, max(0, DAILY_GROWTH_LIMIT - earned))
+            elif rule.period == 'weekly':
+                period_key = next((part for part in event_key.split(':') if re.fullmatch(r'\d{4}-W\d{2}', part)), '')
+                earned = GrowthEvent.period_points(locked, 'weekly', period_key)
+                awarded = min(awarded, max(0, WEEKLY_GROWTH_LIMIT - earned))
             if awarded <= 0:
                 return 0
-            event.points += awarded
-            event.save(update_fields=['points'])
+            event.category = rule.category
+            event.title = rule.title
+            event.points = awarded
+            event.save(update_fields=['category', 'title', 'points'])
             locked.growth_score += awarded
             locked.growth_level = min(
                 locked._growth_level_for_score(locked.growth_score),
@@ -981,14 +915,33 @@ class User(models.Model):
             return GROWTH_THRESHOLDS[-1]
         with transaction.atomic():
             locked = User.objects.select_for_update().get(id=self.id)
-            events = list(locked.growth_events.select_for_update())
+            events = list(locked.growth_events.select_for_update().order_by('created_at', 'id'))
             total = 0
+            daily_totals = {}
+            weekly_totals = {}
             for event in events:
-                limit = 20 if event.event_key.startswith('daily:chat:') else GROWTH_MILESTONE_LIMITS.get(event.event_key)
-                normalized_points = min(event.points, limit) if limit is not None else event.points
-                if normalized_points != event.points:
-                    event.points = normalized_points
-                    event.save(update_fields=['points'])
+                rule = resolve_event_rule(event.event_key)
+                if rule is None:
+                    event.delete()
+                    continue
+                normalized_points = rule.points
+                if rule.period == 'daily':
+                    period_key = event.event_key.split(':')[2]
+                    available = max(0, DAILY_GROWTH_LIMIT - daily_totals.get(period_key, 0))
+                    normalized_points = min(normalized_points, available)
+                    daily_totals[period_key] = daily_totals.get(period_key, 0) + normalized_points
+                elif rule.period == 'weekly':
+                    period_key = next((part for part in event.event_key.split(':') if re.fullmatch(r'\d{4}-W\d{2}', part)), '')
+                    available = max(0, WEEKLY_GROWTH_LIMIT - weekly_totals.get(period_key, 0))
+                    normalized_points = min(normalized_points, available)
+                    weekly_totals[period_key] = weekly_totals.get(period_key, 0) + normalized_points
+                changed_fields = []
+                for field, value in (('category', rule.category), ('title', rule.title), ('points', normalized_points)):
+                    if getattr(event, field) != value:
+                        setattr(event, field, value)
+                        changed_fields.append(field)
+                if changed_fields:
+                    event.save(update_fields=changed_fields)
                 total += normalized_points
             level = min(locked._growth_level_for_score(total), locked.growth_level_cap()[0])
             if locked.growth_score != total or locked.growth_level != level:
@@ -1016,14 +969,6 @@ class User(models.Model):
         if self.is_official:
             score = GROWTH_THRESHOLDS[-1]
         else:
-            if self.has_password:
-                self.award_growth('security:password', 35, category='security', title='设置密码')
-            if self.email_verified_at:
-                self.award_growth('security:email', 45, category='security', title='认证邮箱')
-            if self.phone_verified_at:
-                self.award_growth('security:phone', 45, category='security', title='绑定手机')
-            if self.bark_verified_at:
-                self.award_growth('security:bark', 25, category='security', title='绑定即时提醒')
             score = self.reconcile_growth()
         level_cap, level_cap_reason = self.growth_level_cap()
         level = min(self._growth_level_for_score(score), level_cap)
@@ -1035,12 +980,7 @@ class User(models.Model):
         next_score = GROWTH_THRESHOLDS[level] if level < len(GROWTH_THRESHOLDS) else None
         current_threshold = GROWTH_THRESHOLDS[level - 1]
         progress = 1 if next_score is None else (score - current_threshold) / max(1, next_score - current_threshold)
-        privileges = [
-            privilege
-            for unlock_level, unlocks in GROWTH_UNLOCKS.items()
-            if level >= unlock_level
-            for privilege in unlocks
-        ]
+        privileges = [title for unlock_level in range(1, level + 1) for title in level_unlock_titles(unlock_level)]
         recent_events = list(self.growth_events.order_by('-updated_at')[:8])
         earned_keys = set(self.growth_events.values_list('event_key', flat=True))
         return dict(
@@ -1059,20 +999,26 @@ class User(models.Model):
             level_cap=level_cap,
             level_cap_reason=level_cap_reason,
             recent_events=[event.jsonl() for event in recent_events],
-            daily_chat=dict(
-                earned=GrowthEvent.daily_points(self, 'daily:chat'),
-                limit=20,
+            daily=dict(
+                earned=GrowthEvent.period_points(self, 'daily', timezone.localdate().isoformat()),
+                limit=DAILY_GROWTH_LIMIT,
+            ),
+            weekly=dict(
+                earned=GrowthEvent.period_points(self, 'weekly', timezone.localdate().strftime('%G-W%V')),
+                limit=WEEKLY_GROWTH_LIMIT,
             ),
             milestones=[
-                dict(key=key, category=category, title=title, points=points, earned=self.is_official or key in earned_keys)
-                for key, category, title, points in GROWTH_MILESTONES
+                dict(key=rule.key, category=rule.category, title=rule.title, points=rule.points, earned=self.is_official or rule.key in earned_keys)
+                for rule in EVENT_RULES.values()
+                if rule.category in {'explore', 'security'}
             ],
             levels=[
                 dict(
                     level=index,
                     name=names[index - 1] if len(names) >= index else f'Lv.{index}',
                     score=threshold,
-                    unlocks=GROWTH_UNLOCKS.get(index, []),
+                    unlocks=level_unlock_titles(index),
+                    rewards=LEVEL_REWARDS.get(index, []),
                     unlocked=level >= index,
                 )
                 for index, threshold in enumerate(GROWTH_THRESHOLDS, start=1)
@@ -1235,10 +1181,11 @@ class GrowthEvent(models.Model):
         ]
 
     @classmethod
-    def daily_points(cls, user, key):
-        event_key = f'{key}:{timezone.localdate().isoformat()}'
-        event = cls.objects.filter(user=user, event_key=event_key).first()
-        return event.points if event else 0
+    def period_points(cls, user, prefix, period_key):
+        return sum(
+            cls.objects.filter(user=user, event_key__startswith=f'{prefix}:', event_key__contains=period_key)
+            .values_list('points', flat=True)
+        )
 
     def jsonl(self):
         return dict(

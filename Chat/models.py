@@ -272,6 +272,7 @@ class Chat(models.Model):
                 if user.id == creator.id:
                     continue
                 ChatMember.invite(chat=chat, user=user, invited_by=creator)
+            creator.award_growth('explore:create_group')
             return chat
 
     def rename(self, operator: User, title: str):

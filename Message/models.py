@@ -1,3 +1,4 @@
+import datetime
 import hashlib
 import json
 import ipaddress
@@ -22,7 +23,7 @@ from smartdjango import models, Choice
 
 from Chat.models import Chat, ChatMember, ChatMemberStatusChoice
 from Message.validators import MessageErrors, MessageValidator
-from User.models import GrowthEvent, User, UserEmojiUsage
+from User.models import User, UserEmojiUsage
 from utils.qiniu import sign_private_download_url, avatar_uri_for_key, build_message_image_thumbnail_uri, build_message_video_thumbnail_uri, validate_message_media_key
 
 
@@ -518,21 +519,69 @@ class Message(models.Model):
             if message.type == MessageTypeChoice.TEXT:
                 LinkPreview.queue_for_text(message.content)
                 UserEmojiUsage.record_text(user, message.content)
-            if message.type != MessageTypeChoice.SYSTEM:
-                user.award_growth(
-                    'daily:chat',
-                    4 if GrowthEvent.daily_points(user, 'daily:chat') == 0 else 2,
-                    category='daily',
-                    title='今日聊天',
-                    daily_limit=20,
-                )
             if message.type == MessageTypeChoice.IMAGE:
-                user.award_growth('explore:image', 30, category='explore', title='发送照片')
+                user.award_growth('explore:image')
+            elif message.type == MessageTypeChoice.AUDIO:
+                user.award_growth('explore:audio')
+            elif message.type == MessageTypeChoice.VIDEO:
+                user.award_growth('explore:video')
             elif message.type == MessageTypeChoice.LOCATION:
-                user.award_growth('explore:location', 35, category='explore', title='分享位置')
+                user.award_growth('explore:location')
+            if message.type != MessageTypeChoice.SYSTEM:
+                message._award_interaction_growth()
             MessageEvent.record_created(message)
             return message
         raise MessageErrors.NOT_A_MEMBER
+
+    def _award_interaction_growth(self):
+        if not self.user.verified:
+            return
+        day = timezone.localdate().isoformat()
+        week = timezone.localdate().strftime('%G-W%V')
+        user = self.user
+        user.award_growth(f'daily:first_verified_communication:{day}')
+
+        media_kind = self.MEDIA_KIND_BY_TYPE.get(self.type)
+        if media_kind in {'image', 'audio', 'video'} or self.type == MessageTypeChoice.LOCATION:
+            normalized_kind = media_kind or 'location'
+            user.award_growth(f'daily:verified_media:{day}:user-{user.id}:{normalized_kind}')
+
+        if self.chat.direct:
+            peer = User.objects.filter(
+                chat_memberships__chat=self.chat,
+                chat_memberships__status=ChatMemberStatusChoice.ACTIVE,
+                is_deleted=False,
+            ).exclude(id=user.id).first()
+            if peer is not None and peer.verified:
+                user.award_growth(f'daily:different_contact:{day}:user-{peer.id}')
+                prior_peer_message = Message.objects.filter(
+                    chat=self.chat,
+                    user=peer,
+                    created_at__date=timezone.localdate(),
+                    is_deleted=False,
+                ).exclude(id=self.id).exists()
+                if prior_peer_message:
+                    user.award_growth(f'daily:verified_conversation:{day}:user-{peer.id}')
+                    user.award_growth(f'daily:verified_reply:{day}:user-{peer.id}')
+        elif self.chat.group:
+            user.award_growth(f'daily:verified_group:{day}:chat-{self.chat_id}')
+
+        week_start = timezone.localdate() - datetime.timedelta(days=timezone.localdate().weekday())
+        events = list(
+            user.growth_events.filter(category='daily', created_at__date__gte=week_start)
+            .values_list('event_key', flat=True)
+        )
+        week_days = {key.split(':')[2] for key in events if key.startswith('daily:first_verified_communication:')}
+        if len(week_days) >= 3:
+            user.award_growth(f'weekly:active_3_days:{week}')
+        if len(week_days) >= 5:
+            user.award_growth(f'weekly:active_5_days:{week}')
+        if len({key.rsplit(':', 1)[-1] for key in events if key.startswith('daily:different_contact:')}) >= 3:
+            user.award_growth(f'weekly:contacts_3:{week}')
+        if len({key.rsplit(':', 1)[-1] for key in events if key.startswith('daily:verified_group:')}) >= 2:
+            user.award_growth(f'weekly:groups_2:{week}')
+        if len({key.rsplit(':', 1)[-1] for key in events if key.startswith('daily:verified_media:')}) >= 3:
+            user.award_growth(f'weekly:media_3:{week}')
 
     @classmethod
     def _parse_payload(cls, content):

@@ -1,0 +1,83 @@
+from django.test import SimpleTestCase, TestCase
+
+from Space.models import Space
+from User.growth import (
+    EVENT_RULES,
+    GROWTH_THRESHOLDS,
+    LEVEL_REWARDS,
+    resolve_event_rule,
+)
+from User.models import GrowthEvent, User
+
+
+class GrowthRuleTests(SimpleTestCase):
+    def test_growth_curve_and_every_level_reward_are_complete(self):
+        self.assertEqual(GROWTH_THRESHOLDS[-1], 5300)
+        self.assertEqual(set(LEVEL_REWARDS), set(range(1, 19)))
+        self.assertTrue(all(LEVEL_REWARDS[level] for level in range(1, 19)))
+
+    def test_unknown_and_retired_events_are_invalid(self):
+        self.assertIsNone(resolve_event_rule('daily:chat:2026-08-04'))
+        self.assertIsNone(resolve_event_rule('social:plaza_friend'))
+        self.assertIsNone(resolve_event_rule('made-up:event'))
+
+    def test_valid_events_always_use_current_points(self):
+        self.assertEqual(EVENT_RULES['security:email'].points, 30)
+        self.assertEqual(EVENT_RULES['explore:image'].points, 20)
+        self.assertEqual(resolve_event_rule('daily:verified_reply:2026-08-04:user-7').points, 3)
+        self.assertEqual(resolve_event_rule('weekly:active_5_days:2026-W32').points, 25)
+
+
+class GrowthReconciliationTests(TestCase):
+    def setUp(self):
+        space = Space.objects.create(name='Growth Space', slug='growth-space', email='admin@example.com')
+        self.user = User.create(space=space, name='Member')
+
+    def test_reconciliation_removes_unknown_events_and_repairs_points(self):
+        valid = GrowthEvent.objects.create(
+            user=self.user,
+            event_key='explore:image',
+            category='legacy',
+            title='旧分值',
+            points=300,
+        )
+        invalid = GrowthEvent.objects.create(
+            user=self.user,
+            event_key='daily:chat:2026-08-04',
+            category='daily',
+            title='旧聊天事件',
+            points=20,
+        )
+
+        self.assertEqual(self.user.reconcile_growth(), 20)
+        valid.refresh_from_db()
+        self.assertEqual((valid.category, valid.title, valid.points), ('explore', '首次发送图片', 20))
+        self.assertFalse(GrowthEvent.objects.filter(id=invalid.id).exists())
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.growth_score, 20)
+
+    def test_daily_events_share_the_global_daily_cap(self):
+        day = '2026-08-04'
+        keys = [
+            f'daily:first_verified_communication:{day}',
+            f'daily:verified_conversation:{day}:user-2',
+            f'daily:verified_conversation:{day}:user-3',
+            f'daily:verified_group:{day}:chat-2',
+            f'daily:verified_media:{day}:user-{self.user.id}:image',
+            f'daily:different_contact:{day}:user-2',
+            f'daily:different_contact:{day}:user-3',
+            f'daily:verified_reply:{day}:user-2',
+            f'daily:verified_reply:{day}:user-3',
+        ]
+        for key in keys:
+            rule = resolve_event_rule(key)
+            GrowthEvent.objects.create(
+                user=self.user,
+                event_key=key,
+                category=rule.category,
+                title=rule.title,
+                points=rule.points,
+            )
+
+        self.assertEqual(self.user.reconcile_growth(), 40)
+        self.assertEqual(GrowthEvent.period_points(self.user, 'daily', day), 40)

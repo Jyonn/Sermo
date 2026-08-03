@@ -85,7 +85,7 @@ class UserPrivateAccountParams(metaclass=Params):
 
 class UserGrowthEventParams(metaclass=Params):
     event = Validator('event').to(str).bool(
-        lambda value: value in ('install_webapp', 'plaza_friend'),
+        lambda value: value == 'install_webapp',
         message=_('Invalid growth event'),
     )
 

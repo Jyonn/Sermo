@@ -96,15 +96,14 @@ class UserEmojiUsageView(View):
 
 class UserGrowthEventView(View):
     EVENTS = {
-        'install_webapp': ('explore:install_webapp', 60, '安装 WebApp'),
-        'plaza_friend': ('social:plaza_friend', 30, '从广场认识朋友'),
+        'install_webapp': 'explore:install_webapp',
     }
 
     @auth.require_user
     @analyse.json(UserGrowthEventParams.event)
     def post(self, request: Request):
-        key, points, title = self.EVENTS[request.json.event]
-        awarded = request.user.award_growth(key, points, category='explore', title=title)
+        key = self.EVENTS[request.json.event]
+        awarded = request.user.award_growth(key)
         return dict(awarded=awarded, growth=request.user.calculate_growth())
 
 

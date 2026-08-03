@@ -10,6 +10,7 @@ from Config.models import Config, ConfigInstance
 from Message.models import Message, MessageEvent, MessageTypeChoice, MessageUserState, PinnedMessage
 from Space.models import Space
 from User.models import GrowthEvent, NotificationPreference, User, UserEmojiUsage, UserNotificationChoice
+from User.growth import GROWTH_THRESHOLDS
 from utils import auth
 
 
@@ -39,6 +40,16 @@ class SpaceAdminApiTests(TestCase):
     def user_authorization(self, user):
         token = auth.get_login_token(user)['auth']
         return dict(HTTP_AUTHORIZATION=f'Bearer {token}')
+
+    def grant_growth_level(self, user, level):
+        target = GROWTH_THRESHOLDS[level - 1]
+        for index in range((target + 59) // 60):
+            GrowthEvent.objects.get_or_create(
+                user=user,
+                event_key=f'social:active_4_weeks:{2000 + index // 99}-W{index % 99:02d}',
+                defaults=dict(category='social', title='连续活跃 4 周', points=60),
+            )
+        user.reconcile_growth()
 
     def test_online_square_always_includes_official_user(self):
         self.official.last_heartbeat = timezone.now() - timedelta(days=30)
@@ -183,14 +194,15 @@ class SpaceAdminApiTests(TestCase):
 
         growth = self.official.calculate_growth()
 
-        self.assertEqual(growth['score'], 6550)
+        self.assertEqual(growth['score'], 5300)
         self.assertEqual(growth['level'], 18)
         self.assertEqual(growth['name'], '阶段18')
-        self.assertIn('广场光环', growth['privileges'])
+        self.assertIn('自定义消息通知', growth['privileges'])
         self.assertEqual(len(growth['levels']), 18)
-        self.assertEqual(growth['levels'][9]['unlocks'], ['广场光环'])
+        self.assertTrue(any(reward['id'] == 'capability.notification' for reward in growth['levels'][9]['rewards']))
 
     def test_growth_level_acknowledgements_are_persisted_in_order(self):
+        self.grant_growth_level(self.member, 2)
         growth = self.member.calculate_growth()
         self.assertGreaterEqual(growth['level'], 2)
         self.assertEqual(growth['acknowledged_level'], 0)
@@ -228,13 +240,7 @@ class SpaceAdminApiTests(TestCase):
         self.member.phone = '13800000006'
         self.member.phone_verified_at = timezone.now()
         self.member.save(update_fields=['phone', 'phone_verified_at'])
-        GrowthEvent.objects.create(
-            user=self.member,
-            event_key='test:vip-qualification',
-            category='test',
-            title='首批用户成长',
-            points=100,
-        )
+        self.grant_growth_level(self.member, 6)
         self.assertGreaterEqual(self.member.calculate_growth()['level'], 6)
 
         claimed = self.client.post(
@@ -256,6 +262,7 @@ class SpaceAdminApiTests(TestCase):
         self.assertEqual(repeated.json()['body']['slot'], 1)
 
     def test_user_personalization_is_persisted_and_serialized(self):
+        self.grant_growth_level(self.member, 2)
         payload = {
             'chat_bubble_style': 'comic',
             'avatar_frame_style': 'orbit',
@@ -283,15 +290,8 @@ class SpaceAdminApiTests(TestCase):
         self.member.phone = '13800000008'
         self.member.phone_verified_at = timezone.now()
         self.member.save(update_fields=['password', 'phone', 'phone_verified_at'])
-        GrowthEvent.objects.create(
-            user=self.member,
-            event_key='test:reach-level-ten',
-            category='test',
-            title='达到十级',
-            points=850,
-        )
-        self.member.reconcile_growth()
-        self.assertEqual(self.member.effective_growth_level(), 10)
+        self.grant_growth_level(self.member, 13)
+        self.assertEqual(self.member.effective_growth_level(), 13)
         for bubble_style in ('zen', 'hero', 'dragon', 'bauhaus', 'mosaic'):
             payload = {
                 'chat_bubble_style': bubble_style,
@@ -385,15 +385,8 @@ class SpaceAdminApiTests(TestCase):
             'chat_bubble_style', 'avatar_frame_style', 'is_permanent_vip',
             'password', 'phone', 'phone_verified_at',
         ])
-        GrowthEvent.objects.create(
-            user=self.member,
-            event_key='test:reach-level-sixteen',
-            category='test',
-            title='达到十六级',
-            points=4180,
-        )
-        self.member.reconcile_growth()
-        self.assertEqual(self.member.effective_growth_level(), 16)
+        self.grant_growth_level(self.member, 17)
+        self.assertEqual(self.member.effective_growth_level(), 17)
         level_sixteen = self.client.post(
             '/users/me/personalization',
             data=json.dumps(payload),
@@ -564,17 +557,15 @@ class SpaceAdminApiTests(TestCase):
 
         self.member.refresh_from_db()
         growth = self.member.calculate_growth()
-        self.assertEqual(growth['daily_chat']['earned'], 20)
-        self.assertEqual(self.member.growth_score, 65)
-        self.assertTrue(
-            next(item for item in growth['milestones'] if item['key'] == 'security:email')['earned']
-        )
+        self.assertEqual(growth['daily']['earned'], 20)
+        self.assertEqual(self.member.growth_score, 20)
+        self.assertFalse(next(item for item in growth['milestones'] if item['key'] == 'security:email')['earned'])
 
     def test_one_time_growth_is_idempotent_and_repairs_inflated_points(self):
-        self.member.calculate_growth()
+        self.member.award_growth('security:email')
         self.member.calculate_growth()
         email_event = GrowthEvent.objects.get(user=self.member, event_key='security:email')
-        self.assertEqual(email_event.points, 45)
+        self.assertEqual(email_event.points, 30)
 
         email_event.points = 450
         email_event.save(update_fields=['points'])
@@ -584,18 +575,12 @@ class SpaceAdminApiTests(TestCase):
         growth = self.member.calculate_growth()
         email_event.refresh_from_db()
         self.member.refresh_from_db()
-        self.assertEqual(email_event.points, 45)
-        self.assertEqual(growth['score'], 45)
-        self.assertEqual(self.member.growth_score, 45)
+        self.assertEqual(email_event.points, 30)
+        self.assertEqual(growth['score'], 30)
+        self.assertEqual(self.member.growth_score, 30)
 
     def test_growth_level_is_capped_by_security_setup(self):
-        GrowthEvent.objects.create(
-            user=self.member,
-            event_key='test:large-growth',
-            category='test',
-            title='测试成长',
-            points=7000,
-        )
+        self.grant_growth_level(self.member, 18)
 
         self.assertEqual(self.member.calculate_growth()['level'], 3)
 
@@ -797,7 +782,7 @@ class SpaceAdminApiTests(TestCase):
         self.assertEqual(locked_image.json()['identifier'], 'USER@GROWTH_LEVEL_REQUIRED')
 
         self.member.set_password('safe-password')
-        self.member.calculate_growth()
+        self.grant_growth_level(self.member, 4)
         self.assertEqual(self.member.effective_growth_level(), 4)
         image_response = self.client.post(
             f'/messages/?chat_id={chat.id}',
@@ -815,14 +800,7 @@ class SpaceAdminApiTests(TestCase):
         )
         self.assertEqual(nickname_locked.status_code, 403)
 
-        GrowthEvent.objects.create(
-            user=self.member,
-            event_key='test:reach-level-five',
-            category='test',
-            title='达到五级',
-            points=50,
-        )
-        self.member.reconcile_growth()
+        self.grant_growth_level(self.member, 5)
         nickname_response = self.client.post(
             '/users/me/name',
             data=json.dumps({'name': 'NextMember'}),
@@ -840,6 +818,7 @@ class SpaceAdminApiTests(TestCase):
         self.assertEqual(nickname_cooldown.json()['identifier'], 'USER@NICKNAME_CHANGE_COOLDOWN')
 
     def test_chat_background_has_free_and_levelled_presets(self):
+        self.grant_growth_level(self.member, 2)
         free = self.client.post(
             '/users/me/chat-background',
             data=json.dumps({'theme': 'paper'}),
@@ -858,9 +837,8 @@ class SpaceAdminApiTests(TestCase):
         self.assertEqual(locked.json()['identifier'], 'USER@GROWTH_LEVEL_REQUIRED')
 
         self.member.set_password('safe-password')
-        self.member.growth_score = 80
-        self.member.save(update_fields=['growth_score'])
-        self.assertEqual(self.member.effective_growth_level(), 4)
+        self.grant_growth_level(self.member, 5)
+        self.assertEqual(self.member.effective_growth_level(), 5)
 
         updated = self.client.post(
             '/users/me/chat-background',
@@ -911,15 +889,7 @@ class SpaceAdminApiTests(TestCase):
         self.member.phone = '13800000003'
         self.member.phone_verified_at = timezone.now()
         self.member.save(update_fields=['phone', 'phone_verified_at'])
-        self.member.reconcile_growth()
-        GrowthEvent.objects.create(
-            user=self.member,
-            event_key='test:reach-level-ten-for-notifications',
-            category='test',
-            title='达到十级',
-            points=850 - self.member.growth_score,
-        )
-        self.member.reconcile_growth()
+        self.grant_growth_level(self.member, 10)
         self.assertEqual(self.member.effective_growth_level(), 10)
 
         updated = self.client.post(
@@ -957,14 +927,7 @@ class SpaceAdminApiTests(TestCase):
     @patch('User.models.delete_chat_background_by_uri')
     def test_replacing_chat_background_removes_previous_image(self, delete_background):
         self.member.set_password('safe-password')
-        GrowthEvent.objects.create(
-            user=self.member,
-            event_key='test:reach-level-eight-for-background',
-            category='test',
-            title='达到八级',
-            points=405,
-        )
-        self.member.reconcile_growth()
+        self.grant_growth_level(self.member, 8)
         self.member.chat_background_theme = 'custom'
         self.member.chat_background_uri = 'https://resource.example.com/sermo/chat-background/old.jpg'
         self.member.save(update_fields=['chat_background_theme', 'chat_background_uri'])
