@@ -594,6 +594,8 @@ class User(models.Model):
         fields = list(self.validators.PERSONALIZATION_OPTIONS)
         if values['chat_bubble_style'] == 'vip' and not self.is_permanent_vip:
             raise UserErrors.PERMANENT_VIP_NOT_ELIGIBLE
+        if values['avatar_frame_style'] == 'vip' and not self.is_permanent_vip:
+            raise UserErrors.PERMANENT_VIP_NOT_ELIGIBLE
         for field in fields:
             normalized = self.validators.personalization(field, values[field])
             if field in PERSONALIZATION_LEVELS and normalized in PERSONALIZATION_LEVELS[field] and normalized != getattr(self, field):

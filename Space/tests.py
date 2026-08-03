@@ -317,7 +317,7 @@ class SpaceAdminApiTests(TestCase):
     def test_vip_bubble_requires_permanent_vip(self):
         payload = {
             'chat_bubble_style': 'vip',
-            'avatar_frame_style': 'none',
+            'avatar_frame_style': 'vip',
             'square_outfit_style': 'sunset',
             'square_prop_style': 'none',
             'square_motion_style': 'walk',
@@ -342,6 +342,7 @@ class SpaceAdminApiTests(TestCase):
         self.assertEqual(accepted.status_code, 200, accepted.content)
         self.member.refresh_from_db()
         self.assertEqual(self.member.chat_bubble_style, 'vip')
+        self.assertEqual(self.member.avatar_frame_style, 'vip')
 
     def test_niko_and_fufu_require_level_sixteen_or_permanent_vip(self):
         payload = {

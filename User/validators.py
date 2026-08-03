@@ -122,7 +122,7 @@ class UserValidator:
         },
         'avatar_frame_style': {
             'none', 'orbit', 'aurora', 'polaroid', 'soundwave', 'portal', 'butterfly',
-            'moon', 'camera', 'comet', 'snowfall', 'papercut', 'mechanical', 'niko-run', 'fufu-wave',
+            'moon', 'camera', 'comet', 'snowfall', 'papercut', 'mechanical', 'niko-run', 'fufu-wave', 'vip',
         },
         'square_outfit_style': {'sunset', 'varsity', 'noir', 'cloud', 'raincoat', 'hanfu', 'utility', 'sailor'},
         'square_prop_style': {'none', 'star', 'coffee', 'flag', 'camera', 'bouquet', 'umbrella', 'skateboard'},
