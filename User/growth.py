@@ -38,6 +38,7 @@ EVENT_RULES = {
         GrowthEventRule('security:email', 'security', '认证邮箱', 30),
         GrowthEventRule('security:phone', 'security', '绑定手机', 30),
         GrowthEventRule('security:bark', 'security', '绑定即时提醒', 15),
+        GrowthEventRule('vip:permanent', 'vip', '获得永久 VIP', 500),
         GrowthEventRule('achievement:conversations_100', 'achievement', '完成 100 次有效会话', 80),
         GrowthEventRule('achievement:contacts_10', 'achievement', '与 10 位联系人有效互动', 60),
         GrowthEventRule('achievement:active_months_5', 'achievement', '连续活跃 5 个月', 120),

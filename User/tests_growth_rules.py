@@ -52,6 +52,7 @@ class GrowthRuleTests(SimpleTestCase):
     def test_valid_events_always_use_current_points(self):
         self.assertEqual(EVENT_RULES['security:email'].points, 30)
         self.assertEqual(EVENT_RULES['explore:image'].points, 20)
+        self.assertEqual(EVENT_RULES['vip:permanent'].points, 500)
         self.assertEqual(resolve_event_rule('daily:verified_reply:2026-08-04:user-7').points, 3)
         self.assertEqual(resolve_event_rule('weekly:active_5_days:2026-W32').points, 25)
 
@@ -109,3 +110,13 @@ class GrowthReconciliationTests(TestCase):
 
         self.assertEqual(self.user.reconcile_growth(), 40)
         self.assertEqual(GrowthEvent.period_points(self.user, 'daily', day), 40)
+
+    def test_permanent_vip_reward_is_retained_during_reconciliation(self):
+        self.user.award_growth('vip:permanent')
+        self.user.award_growth('vip:permanent')
+
+        self.assertEqual(self.user.reconcile_growth(), 500)
+        self.assertEqual(
+            GrowthEvent.objects.filter(user=self.user, event_key='vip:permanent').count(),
+            1,
+        )

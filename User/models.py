@@ -1236,19 +1236,19 @@ class PermanentVipCampaign(models.Model):
         with transaction.atomic():
             campaign, _ = cls.objects.select_for_update().get_or_create(key='founding-100')
             existing = PermanentVipClaim.objects.filter(user=user).first()
-            if existing:
-                return cls.status_for(user)
-            if campaign.claimed_count >= cls.LIMIT:
-                raise UserErrors.PERMANENT_VIP_CAMPAIGN_FULL
-            if not user.email_verified_at or not user.phone_verified_at or user.effective_growth_level() < 6:
-                raise UserErrors.PERMANENT_VIP_NOT_ELIGIBLE
+            if not existing:
+                if campaign.claimed_count >= cls.LIMIT:
+                    raise UserErrors.PERMANENT_VIP_CAMPAIGN_FULL
+                if not user.email_verified_at or not user.phone_verified_at or user.effective_growth_level() < 6:
+                    raise UserErrors.PERMANENT_VIP_NOT_ELIGIBLE
 
-            slot = campaign.claimed_count + 1
-            PermanentVipClaim.objects.create(user=user, slot=slot)
-            campaign.claimed_count = slot
-            campaign.save(update_fields=['claimed_count'])
-            User.objects.filter(id=user.id).update(is_permanent_vip=True)
-            user.is_permanent_vip = True
+                slot = campaign.claimed_count + 1
+                PermanentVipClaim.objects.create(user=user, slot=slot)
+                campaign.claimed_count = slot
+                campaign.save(update_fields=['claimed_count'])
+                User.objects.filter(id=user.id).update(is_permanent_vip=True)
+                user.is_permanent_vip = True
+        user.award_growth('vip:permanent')
         return cls.status_for(user)
 
 

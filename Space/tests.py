@@ -253,6 +253,9 @@ class SpaceAdminApiTests(TestCase):
 
         self.member.refresh_from_db()
         self.assertTrue(self.member.is_permanent_vip)
+        vip_event = self.member.growth_events.get(event_key='vip:permanent')
+        self.assertEqual(vip_event.points, 500)
+        score_after_claim = self.member.growth_score
 
         repeated = self.client.post(
             '/users/me/permanent-vip',
@@ -260,6 +263,9 @@ class SpaceAdminApiTests(TestCase):
         )
         self.assertEqual(repeated.status_code, 200, repeated.content)
         self.assertEqual(repeated.json()['body']['slot'], 1)
+        self.member.refresh_from_db()
+        self.assertEqual(self.member.growth_score, score_after_claim)
+        self.assertEqual(self.member.growth_events.filter(event_key='vip:permanent').count(), 1)
 
     def test_user_personalization_is_persisted_and_serialized(self):
         self.grant_growth_level(self.member, 2)
