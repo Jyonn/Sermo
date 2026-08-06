@@ -582,7 +582,10 @@ class SpaceAdminApiTests(TestCase):
     def test_growth_level_is_capped_by_security_setup(self):
         self.grant_growth_level(self.member, 18)
 
-        self.assertEqual(self.member.calculate_growth()['level'], 3)
+        growth = self.member.calculate_growth()
+        self.assertEqual(growth['level'], 3)
+        self.assertEqual(growth['score_level'], 18)
+        self.assertEqual(growth['effective_level'], 3)
 
         self.member.set_password('safe-password')
         self.member.email = None
@@ -601,6 +604,21 @@ class SpaceAdminApiTests(TestCase):
         growth = self.member.calculate_growth()
         self.assertEqual(growth['level'], 18)
         self.assertEqual(growth['level_cap'], 18)
+
+    def test_nickname_cooldown_improves_at_levels_eight_and_twelve(self):
+        self.member.set_password('safe-password')
+        self.grant_growth_level(self.member, 5)
+        self.assertEqual(self.member.nickname_change_interval_days(), 365)
+        self.grant_growth_level(self.member, 7)
+        self.assertEqual(self.member.nickname_change_interval_days(), 365)
+        self.grant_growth_level(self.member, 8)
+        self.assertEqual(self.member.nickname_change_interval_days(), 30)
+        self.member.email_verified_at = timezone.now()
+        self.member.phone = '13800000009'
+        self.member.phone_verified_at = timezone.now()
+        self.member.save(update_fields=['email_verified_at', 'phone', 'phone_verified_at'])
+        self.grant_growth_level(self.member, 12)
+        self.assertEqual(self.member.nickname_change_interval_days(), 7)
 
     def test_private_account_only_requires_verified_phone(self):
         self.member.email = None

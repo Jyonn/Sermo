@@ -5,6 +5,7 @@ from User.growth import (
     EVENT_RULES,
     GROWTH_THRESHOLDS,
     LEVEL_REWARDS,
+    PERSONALIZATION_LEVELS,
     resolve_event_rule,
 )
 from User.models import GrowthEvent, User
@@ -15,6 +16,33 @@ class GrowthRuleTests(SimpleTestCase):
         self.assertEqual(GROWTH_THRESHOLDS[-1], 5300)
         self.assertEqual(set(LEVEL_REWARDS), set(range(1, 19)))
         self.assertTrue(all(LEVEL_REWARDS[level] for level in range(1, 19)))
+
+    def test_reward_rarity_follows_the_product_reward_audit(self):
+        rewards = {reward['id']: reward for items in LEVEL_REWARDS.values() for reward in items}
+        self.assertEqual(rewards['capability.image']['rarity'], 'rare')
+        self.assertEqual(rewards['frame.butterfly']['rarity'], 'legendary')
+        self.assertEqual(rewards['frame.comet']['rarity'], 'legendary')
+        self.assertEqual(rewards['background.arcade']['rarity'], 'epic')
+        self.assertEqual(rewards['background.jazz']['rarity'], 'rare')
+        self.assertEqual(rewards['bubble.niko']['rarity'], 'epic')
+        self.assertEqual(rewards['frame.niko']['rarity'], 'legendary')
+        self.assertEqual(rewards['background.noir']['rarity'], 'epic')
+
+    def test_every_reward_has_structured_display_metadata(self):
+        for rewards in LEVEL_REWARDS.values():
+            for reward in rewards:
+                self.assertTrue(reward['title_key'])
+                self.assertTrue(reward['description_key'])
+                self.assertIn(reward['preview_kind'], {'live', 'image', 'before_after', 'collection'})
+                self.assertIn(reward['implementation_status'], {'live', 'partial', 'planned'})
+                self.assertTrue(reward['destination'])
+
+    def test_personalization_catalog_has_one_reward_per_unlock(self):
+        rewards = {(reward['category'], reward['asset_key']): reward['level'] for items in LEVEL_REWARDS.values() for reward in items}
+        for style, level in PERSONALIZATION_LEVELS['chat_bubble_style'].items():
+            self.assertEqual(rewards[('bubble', style)], level)
+        for style, level in PERSONALIZATION_LEVELS['avatar_frame_style'].items():
+            self.assertEqual(rewards[('frame', style)], level)
 
     def test_unknown_and_retired_events_are_invalid(self):
         self.assertIsNone(resolve_event_rule('daily:chat:2026-08-04'))

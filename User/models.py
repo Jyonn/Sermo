@@ -536,6 +536,8 @@ class User(models.Model):
             return None
         if level == 5:
             return 365
+        if level < 8:
+            return 365
         if level < 12:
             return 30
         return 7
@@ -971,7 +973,8 @@ class User(models.Model):
         else:
             score = self.reconcile_growth()
         level_cap, level_cap_reason = self.growth_level_cap()
-        level = min(self._growth_level_for_score(score), level_cap)
+        score_level = self._growth_level_for_score(score)
+        level = min(score_level, level_cap)
         if save and (self.growth_score != score or self.growth_level != level):
             self.growth_score = score
             self.growth_level = level
@@ -985,6 +988,8 @@ class User(models.Model):
         earned_keys = set(self.growth_events.values_list('event_key', flat=True))
         return dict(
             score=score,
+            score_level=score_level,
+            effective_level=level,
             level=level,
             acknowledged_level=min(self.growth_acknowledged_level, level),
             pending_level=(
