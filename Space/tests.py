@@ -350,10 +350,10 @@ class SpaceAdminApiTests(TestCase):
         self.assertEqual(self.member.chat_bubble_style, 'vip')
         self.assertEqual(self.member.avatar_frame_style, 'vip')
 
-    def test_niko_and_fufu_require_level_sixteen_or_permanent_vip(self):
+    def test_ip_styles_require_their_level_or_permanent_vip(self):
         payload = {
-            'chat_bubble_style': 'niko',
-            'avatar_frame_style': 'fufu-wave',
+            'chat_bubble_style': 'xiaobai',
+            'avatar_frame_style': 'xiaobai-run',
             'square_outfit_style': 'sunset',
             'square_prop_style': 'none',
             'square_motion_style': 'walk',
@@ -378,8 +378,8 @@ class SpaceAdminApiTests(TestCase):
         )
         self.assertEqual(accepted.status_code, 200, accepted.content)
         self.member.refresh_from_db()
-        self.assertEqual(self.member.chat_bubble_style, 'niko')
-        self.assertEqual(self.member.avatar_frame_style, 'fufu-wave')
+        self.assertEqual(self.member.chat_bubble_style, 'xiaobai')
+        self.assertEqual(self.member.avatar_frame_style, 'xiaobai-run')
 
         self.member.chat_bubble_style = 'default'
         self.member.avatar_frame_style = 'none'
@@ -391,15 +391,15 @@ class SpaceAdminApiTests(TestCase):
             'chat_bubble_style', 'avatar_frame_style', 'is_permanent_vip',
             'password', 'phone', 'phone_verified_at',
         ])
-        self.grant_growth_level(self.member, 17)
-        self.assertEqual(self.member.effective_growth_level(), 17)
-        level_sixteen = self.client.post(
+        self.grant_growth_level(self.member, 18)
+        self.assertEqual(self.member.effective_growth_level(), 18)
+        level_eighteen = self.client.post(
             '/users/me/personalization',
             data=json.dumps(payload),
             content_type='application/json',
             **self.user_authorization(self.member),
         )
-        self.assertEqual(level_sixteen.status_code, 200, level_sixteen.content)
+        self.assertEqual(level_eighteen.status_code, 200, level_eighteen.content)
 
     def test_message_search_filters_keyword_type_and_hidden_records(self):
         chat = Chat.get_or_create_direct(self.official, self.member)

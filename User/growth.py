@@ -111,19 +111,19 @@ PERSONALIZATION_LEVELS = {
         'default': 1, 'comic': 2, 'typewriter': 4, 'sticker': 5,
         'zen': 6, 'newspaper': 7, 'toybrick': 8, 'hero': 9,
         'bauhaus': 10, 'receipt': 11, 'dragon': 12, 'mosaic': 13,
-        'niko': 16, 'fufu': 17,
+        'niko': 16, 'fufu': 17, 'xiaobai': 18,
     },
     'avatar_frame_style': {
         'none': 1, 'orbit': 2, 'polaroid': 3, 'camera': 4,
         'soundwave': 5, 'butterfly': 6, 'aurora': 7, 'moon': 8,
         'papercut': 9, 'comet': 10, 'snowfall': 11, 'portal': 12,
-        'mechanical': 13, 'niko-run': 16, 'fufu-wave': 17,
+        'mechanical': 13, 'niko-run': 16, 'fufu-wave': 17, 'xiaobai-run': 18,
     },
 }
 
 VIP_OR_LEVEL_PERSONALIZATION = {
-    ('chat_bubble_style', 'niko'), ('chat_bubble_style', 'fufu'),
-    ('avatar_frame_style', 'niko-run'), ('avatar_frame_style', 'fufu-wave'),
+    ('chat_bubble_style', 'niko'), ('chat_bubble_style', 'fufu'), ('chat_bubble_style', 'xiaobai'),
+    ('avatar_frame_style', 'niko-run'), ('avatar_frame_style', 'fufu-wave'), ('avatar_frame_style', 'xiaobai-run'),
 }
 
 
@@ -151,8 +151,8 @@ def _reward(reward_id, level, category, title, rarity, asset_key=None, capabilit
         'destination': destination,
         'vip_exclusive': False,
         'vip_access': 'level_or_vip' if (category, asset_key) in {
-            ('bubble', 'niko'), ('bubble', 'fufu'),
-            ('frame', 'niko-run'), ('frame', 'fufu-wave'),
+            ('bubble', 'niko'), ('bubble', 'fufu'), ('bubble', 'xiaobai'),
+            ('frame', 'niko-run'), ('frame', 'fufu-wave'), ('frame', 'xiaobai-run'),
         } else None,
     }
 
@@ -175,7 +175,7 @@ LEVEL_REWARDS = {
     15: [_reward('background.blueprint', 15, 'background', '蓝图背景', 'rare', 'blueprint'), _reward('background.newsprint', 15, 'background', '新闻纸背景', 'rare', 'newsprint'), _reward('background.hologram', 15, 'background', '全息背景', 'epic', 'hologram')],
     16: [_reward('background.arcade', 16, 'background', '街机背景', 'epic', 'arcade'), _reward('background.jazz', 16, 'background', '爵士背景', 'rare', 'jazz'), _reward('bubble.niko', 16, 'bubble', 'Niko 气泡', 'epic', 'niko'), _reward('frame.niko', 16, 'frame', 'Niko Run 头像框', 'legendary', 'niko-run'), _reward('growth.report', 16, 'identity', '成长报告', 'epic', status='planned')],
     17: [_reward('background.spaceport', 17, 'background', '太空港背景', 'epic', 'spaceport'), _reward('background.candy', 17, 'background', '糖果背景', 'rare', 'candy'), _reward('bubble.fufu', 17, 'bubble', 'Fufu 气泡', 'epic', 'fufu'), _reward('frame.fufu', 17, 'frame', 'Fufu Wave 头像框', 'legendary', 'fufu-wave'), _reward('frame.collection', 17, 'identity', '稀有头像框系列入口', 'epic', status='planned')],
-    18: [_reward('background.noir', 18, 'background', '黑色电影背景', 'epic', 'noir-film'), _reward('identity.final_badge', 18, 'identity', '“尽兴”永久成长徽记', 'legendary', status='planned'), _reward('profile.final_slot', 18, 'identity', '满级个人名片展示位', 'legendary', status='planned')],
+    18: [_reward('background.noir', 18, 'background', '黑色电影背景', 'epic', 'noir-film'), _reward('bubble.xiaobai', 18, 'bubble', 'Xiaobai 气泡', 'epic', 'xiaobai'), _reward('frame.xiaobai', 18, 'frame', 'Xiaobai 迎接头像框', 'legendary', 'xiaobai-run'), _reward('identity.final_badge', 18, 'identity', '“尽兴”永久成长徽记', 'legendary', status='planned'), _reward('profile.final_slot', 18, 'identity', '满级个人名片展示位', 'legendary', status='planned')],
 }
 
 
