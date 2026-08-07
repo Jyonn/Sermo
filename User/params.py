@@ -44,18 +44,6 @@ class UserParams(metaclass=Params):
     avatar_frame_style = Validator('avatar_frame_style').to(str).to(
         lambda value: User.validators.personalization('avatar_frame_style', value)
     )
-    square_outfit_style = Validator('square_outfit_style').to(str).to(
-        lambda value: User.validators.personalization('square_outfit_style', value)
-    )
-    square_prop_style = Validator('square_prop_style').to(str).to(
-        lambda value: User.validators.personalization('square_prop_style', value)
-    )
-    square_motion_style = Validator('square_motion_style').to(str).to(
-        lambda value: User.validators.personalization('square_motion_style', value)
-    )
-    square_limb_style = Validator('square_limb_style').to(str).to(
-        lambda value: User.validators.personalization('square_limb_style', value)
-    )
     language = Validator('language') \
         .to(str) \
         .null().default(None) \

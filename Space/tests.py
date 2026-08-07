@@ -272,10 +272,6 @@ class SpaceAdminApiTests(TestCase):
         payload = {
             'chat_bubble_style': 'comic',
             'avatar_frame_style': 'orbit',
-            'square_outfit_style': 'raincoat',
-            'square_prop_style': 'camera',
-            'square_motion_style': 'dance',
-            'square_limb_style': 'hinged',
         }
         response = self.client.post(
             '/users/me/personalization',
@@ -302,10 +298,6 @@ class SpaceAdminApiTests(TestCase):
             payload = {
                 'chat_bubble_style': bubble_style,
                 'avatar_frame_style': 'none',
-                'square_outfit_style': 'sunset',
-                'square_prop_style': 'none',
-                'square_motion_style': 'walk',
-                'square_limb_style': 'line',
             }
             response = self.client.post(
                 '/users/me/personalization',
@@ -324,10 +316,6 @@ class SpaceAdminApiTests(TestCase):
         payload = {
             'chat_bubble_style': 'vip',
             'avatar_frame_style': 'vip',
-            'square_outfit_style': 'sunset',
-            'square_prop_style': 'none',
-            'square_motion_style': 'walk',
-            'square_limb_style': 'line',
         }
         denied = self.client.post(
             '/users/me/personalization',
@@ -354,10 +342,6 @@ class SpaceAdminApiTests(TestCase):
         payload = {
             'chat_bubble_style': 'xiaobai',
             'avatar_frame_style': 'xiaobai-run',
-            'square_outfit_style': 'sunset',
-            'square_prop_style': 'none',
-            'square_motion_style': 'walk',
-            'square_limb_style': 'line',
         }
         denied = self.client.post(
             '/users/me/personalization',
