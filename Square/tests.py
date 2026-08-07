@@ -95,3 +95,41 @@ class StatementApiTests(TestCase):
             }],
         })
         self.assertEqual(long_audio.status_code, 400, long_audio.content)
+
+    def test_verified_user_can_comment_on_visible_statement(self):
+        statement = Statement.create_statement(self.author, '公开发言', 'public', [])
+        created = self.client.post(
+            f'/square/statements/{statement.id}/comments',
+            data=json.dumps({'text': '第一条评论'}),
+            content_type='application/json',
+            **self.authorization(self.friend),
+        )
+        self.assertEqual(created.status_code, 200, created.content)
+        self.assertEqual(created.json()['body']['text'], '第一条评论')
+
+        comments = self.client.get(
+            f'/square/statements/{statement.id}/comments?limit=30',
+            **self.authorization(self.stranger),
+        )
+        self.assertEqual(comments.status_code, 200, comments.content)
+        self.assertEqual(comments.json()['body'][0]['user']['user_id'], self.friend.id)
+
+        feed = self.client.get('/square/statements?limit=20', **self.authorization(self.author))
+        self.assertEqual(feed.json()['body'][0]['comment_count'], 1)
+
+    def test_unverified_user_cannot_comment_or_read_hidden_statement_comments(self):
+        public_statement = Statement.create_statement(self.author, '公开发言', 'public', [])
+        denied = self.client.post(
+            f'/square/statements/{public_statement.id}/comments',
+            data=json.dumps({'text': '不能评论'}),
+            content_type='application/json',
+            **self.authorization(self.stranger),
+        )
+        self.assertEqual(denied.status_code, 403, denied.content)
+
+        hidden_statement = Statement.create_statement(self.author, '朋友可见', 'friends', [])
+        hidden = self.client.get(
+            f'/square/statements/{hidden_statement.id}/comments?limit=30',
+            **self.authorization(self.stranger),
+        )
+        self.assertEqual(hidden.status_code, 404, hidden.content)

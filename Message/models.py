@@ -905,40 +905,6 @@ class Message(models.Model):
             next_before=messages[-1].id if has_more and messages else None,
         )
 
-    @classmethod
-    def sync_for_user(cls, user: User, after: int, limit: int, request: HttpRequest = None):
-        from Chat.models import Chat
-
-        chats = Chat.get_user_chats(user)
-        chat_ids = [chat.id for chat in chats]
-        if not chat_ids:
-            return dict(items=[], has_more=False, next_after=after)
-
-        rows = list(
-            cls.visible_queryset()
-            .select_related('user', 'reply_to', 'reply_to__user')
-            .filter(chat_id__in=chat_ids, id__gt=after)
-            .order_by('id')[:limit + 1]
-        )
-        has_more = len(rows) > limit
-        rows = rows[:limit]
-
-        items = []
-        for message in rows:
-            payload = message.jsonl(request=request)
-            payload['chat_id'] = message.chat_id
-            items.append(payload)
-
-        next_after = after
-        if rows:
-            next_after = rows[-1].id
-
-        return dict(
-            items=items,
-            has_more=has_more,
-            next_after=next_after,
-        )
-
     def remove(self):
         if self.is_deleted:
             return

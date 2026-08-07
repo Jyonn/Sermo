@@ -1,6 +1,6 @@
 import secrets
 
-from django.db.models import Q
+from django.db.models import Count, Q
 from django.urls import reverse
 from smartdjango import Choice, models
 
@@ -51,7 +51,9 @@ class Statement(models.Model):
 
     @classmethod
     def feed(cls, user, before=None, limit=20, request=None):
-        queryset = cls.visible_for(user).select_related('user').prefetch_related('media')
+        queryset = cls.visible_for(user).select_related('user').prefetch_related('media').annotate(
+            visible_comment_count=Count('comments', filter=Q(comments__is_deleted=False)),
+        )
         if before:
             queryset = queryset.filter(id__lt=before)
         return [item.jsonl(request=request) for item in queryset[:limit]]
@@ -92,6 +94,54 @@ class Statement(models.Model):
             text=self.text,
             visibility='friends' if self.visibility == StatementVisibilityChoice.FRIENDS else 'public',
             media=[item.jsonl(request=request) for item in self.media.all()],
+            comment_count=getattr(self, 'visible_comment_count', self.comments.filter(is_deleted=False).count()),
+            created_at=self.created_at.timestamp(),
+        )
+
+
+class StatementComment(models.Model):
+    statement = models.ForeignKey(Statement, on_delete=models.CASCADE, related_name='comments', db_index=True)
+    user = models.ForeignKey('User.User', on_delete=models.CASCADE, related_name='statement_comments')
+    text = models.CharField(max_length=140)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    is_deleted = models.BooleanField(default=False, db_index=True)
+
+    class Meta:
+        ordering = ['-id']
+
+    @classmethod
+    def statement_for_user(cls, user, statement_id):
+        try:
+            return Statement.visible_for(user).get(id=statement_id)
+        except Statement.DoesNotExist:
+            raise SquareErrors.NOT_EXISTS
+
+    @classmethod
+    def feed(cls, user, statement_id, before=None, limit=30):
+        statement = cls.statement_for_user(user, statement_id)
+        queryset = cls.objects.filter(statement=statement, is_deleted=False).select_related('user')
+        if before:
+            queryset = queryset.filter(id__lt=before)
+        return [comment.jsonl() for comment in queryset[:limit]]
+
+    @classmethod
+    def create_comment(cls, user, statement_id, text):
+        if not user.verified:
+            raise SquareErrors.PUBLISH_REQUIRES_VERIFICATION
+        normalized_text = (text or '').strip()
+        if not normalized_text:
+            raise SquareErrors.COMMENT_REQUIRED
+        if len(normalized_text) > 140:
+            raise SquareErrors.COMMENT_TOO_LONG
+        statement = cls.statement_for_user(user, statement_id)
+        return cls.objects.create(statement=statement, user=user, text=normalized_text)
+
+    def jsonl(self):
+        return dict(
+            comment_id=self.id,
+            statement_id=self.statement_id,
+            user=self.user.tiny_json(),
+            text=self.text,
             created_at=self.created_at.timestamp(),
         )
 

@@ -26,6 +26,15 @@ def validate_media(value):
     return value
 
 
+def validate_comment_text(value):
+    normalized = str(value or '').strip()
+    if not normalized:
+        raise SquareErrors.COMMENT_REQUIRED
+    if len(normalized) > 140:
+        raise SquareErrors.COMMENT_TOO_LONG
+    return normalized
+
+
 class SquareParams(metaclass=Params):
     text = Validator('text').to(validate_text).null().default('')
     visibility = Validator('visibility').to(validate_visibility).default('public')
@@ -38,3 +47,4 @@ class SquareParams(metaclass=Params):
     kind = Validator('kind').to(str)
     file_name = Validator('file_name').to(str)
     content_type = Validator('content_type').to(str).null().default(None)
+    comment_text = Validator('text').to(validate_comment_text)

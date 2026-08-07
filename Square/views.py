@@ -4,7 +4,7 @@ from django.views import View
 from oba import raw
 from smartdjango import analyse
 
-from Square.models import Statement, StatementMedia, StatementMediaKindChoice
+from Square.models import Statement, StatementComment, StatementMedia, StatementMediaKindChoice
 from Square.params import SquareParams
 from Square.validators import SquareErrors
 from utils import auth
@@ -53,6 +53,24 @@ class StatementUploadView(View):
             file_name=request.json.file_name,
             content_type=request.json.content_type,
         )
+
+
+class StatementCommentView(View):
+    @auth.require_user
+    @analyse.query(SquareParams.before, SquareParams.limit)
+    def get(self, request: Request, statement_id: int):
+        return StatementComment.feed(
+            request.user,
+            statement_id=statement_id,
+            before=request.query.before,
+            limit=request.query.limit,
+        )
+
+    @auth.require_user
+    @analyse.json(SquareParams.comment_text)
+    def post(self, request: Request, statement_id: int):
+        comment = StatementComment.create_comment(request.user, statement_id, request.json.text)
+        return comment.jsonl()
 
 
 class StatementMediaView(View):

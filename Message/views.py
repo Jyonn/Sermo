@@ -179,22 +179,6 @@ class MessageUploadView(View):
         )
 
 
-class MessageSyncView(View):
-    @auth.require_user
-    @analyse.query(
-        MessageParams.after,
-        MessageParams.limit,
-    )
-    def get(self, request: Request):
-        after = request.query.after or 0
-        return Message.sync_for_user(
-            user=request.user,
-            after=after,
-            limit=request.query.limit,
-            request=request,
-        )
-
-
 class MessageEventSyncView(View):
     @auth.require_user
     @analyse.query(MessageParams.after, MessageParams.limit)
