@@ -4,13 +4,14 @@ from django.views import View
 from oba import raw
 from smartdjango import analyse
 
-from Square.models import Statement, StatementComment, StatementMedia, StatementMediaKindChoice
+from Square.models import Statement, StatementComment, StatementCommentLike, StatementLike, StatementMedia, StatementMediaKindChoice
 from Square.params import SquareParams
 from Square.validators import SquareErrors
 from utils import auth
 from utils.auth import Request
 from utils.qiniu import (
     build_message_image_thumbnail_uri,
+    build_message_video_thumbnail_uri,
     issue_message_upload,
     sign_private_download_url,
 )
@@ -46,13 +47,70 @@ class StatementUploadView(View):
     def post(self, request: Request):
         if not request.user.verified:
             raise SquareErrors.PUBLISH_REQUIRES_VERIFICATION
-        if request.json.kind not in {'image', 'audio'}:
+        if request.json.kind not in {'image', 'audio', 'video'}:
             raise SquareErrors.MEDIA_INVALID
         return issue_message_upload(
             kind=request.json.kind,
             file_name=request.json.file_name,
             content_type=request.json.content_type,
         )
+
+
+class StatementDetailView(View):
+    @auth.require_user
+    def delete(self, request: Request, statement_id: int):
+        try:
+            statement = Statement.objects.get(id=statement_id, space=request.user.space, is_deleted=False)
+        except Statement.DoesNotExist:
+            raise SquareErrors.NOT_EXISTS
+        statement.delete_for(request.user)
+        return dict(statement_id=statement.id, deleted=True)
+
+
+class StatementLikeView(View):
+    @auth.require_user
+    def post(self, request: Request, statement_id: int):
+        if not request.user.verified:
+            raise SquareErrors.PUBLISH_REQUIRES_VERIFICATION
+        try:
+            statement = Statement.visible_for(request.user).get(id=statement_id)
+        except Statement.DoesNotExist:
+            raise SquareErrors.NOT_EXISTS
+        StatementLike.objects.get_or_create(statement=statement, user=request.user)
+        return dict(liked=True, like_count=statement.likes.count())
+
+    @auth.require_user
+    def delete(self, request: Request, statement_id: int):
+        try:
+            statement = Statement.visible_for(request.user).get(id=statement_id)
+        except Statement.DoesNotExist:
+            raise SquareErrors.NOT_EXISTS
+        StatementLike.objects.filter(statement=statement, user=request.user).delete()
+        return dict(liked=False, like_count=statement.likes.count())
+
+
+class StatementCommentLikeView(View):
+    @auth.require_user
+    def post(self, request: Request, comment_id: int):
+        if not request.user.verified:
+            raise SquareErrors.PUBLISH_REQUIRES_VERIFICATION
+        try:
+            comment = StatementComment.objects.select_related('statement').get(id=comment_id, is_deleted=False)
+        except StatementComment.DoesNotExist:
+            raise SquareErrors.NOT_EXISTS
+        StatementComment.statement_for_user(request.user, comment.statement_id)
+        StatementCommentLike.objects.get_or_create(comment=comment, user=request.user)
+        return dict(liked=True, like_count=comment.likes.count())
+
+    @auth.require_user
+    def delete(self, request: Request, comment_id: int):
+        try:
+            comment = StatementComment.objects.select_related('statement').get(id=comment_id, is_deleted=False)
+        except StatementComment.DoesNotExist:
+            raise SquareErrors.NOT_EXISTS
+        StatementComment.statement_for_user(request.user, comment.statement_id)
+        StatementCommentLike.objects.filter(comment=comment, user=request.user).delete()
+        return dict(liked=False, like_count=comment.likes.count())
 
 
 class StatementCommentView(View):
@@ -84,8 +142,9 @@ class StatementMediaView(View):
 class StatementMediaThumbnailView(View):
     def get(self, request: Request, blob_slug: str):
         media = StatementMedia.index_by_blob_slug(blob_slug)
-        if media.kind != StatementMediaKindChoice.IMAGE:
+        if media.kind not in {StatementMediaKindChoice.IMAGE, StatementMediaKindChoice.VIDEO}:
             raise SquareErrors.NOT_EXISTS
-        response = HttpResponseRedirect(build_message_image_thumbnail_uri(media.source_uri(), width=480))
+        thumbnail_uri = build_message_image_thumbnail_uri(media.source_uri(), width=480) if media.kind == StatementMediaKindChoice.IMAGE else build_message_video_thumbnail_uri(media.source_uri(), width=480)
+        response = HttpResponseRedirect(thumbnail_uri)
         response['Cache-Control'] = 'private, max-age=86400'
         return response

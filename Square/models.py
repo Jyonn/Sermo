@@ -1,6 +1,10 @@
 import secrets
+import threading
+from datetime import timedelta
 
-from django.db.models import Count, Q
+from django.db import close_old_connections, transaction
+from django.db.models import Count, Exists, OuterRef, Q
+from django.utils import timezone
 from django.urls import reverse
 from smartdjango import Choice, models
 
@@ -18,6 +22,30 @@ class StatementVisibilityChoice(Choice):
 class StatementMediaKindChoice(Choice):
     IMAGE = 0
     AUDIO = 1
+    VIDEO = 2
+
+
+def _frequency_limits(level):
+    if level <= 5:
+        return 1, 5
+    if level <= 9:
+        return 2, 10
+    if level <= 13:
+        return 2, 12
+    if level <= 17:
+        return 3, 18
+    return 3, 21
+
+
+def _enforce_frequency(queryset, user, multiplier=1):
+    if user.is_official:
+        return
+    daily, weekly = _frequency_limits(user.effective_growth_level())
+    now = timezone.now()
+    if queryset.filter(user=user, created_at__gte=now - timedelta(days=1)).count() >= daily * multiplier:
+        raise SquareErrors.DAILY_LIMIT_REACHED
+    if queryset.filter(user=user, created_at__gte=now - timedelta(days=7)).count() >= weekly * multiplier:
+        raise SquareErrors.WEEKLY_LIMIT_REACHED
 
 
 class Statement(models.Model):
@@ -52,7 +80,9 @@ class Statement(models.Model):
     @classmethod
     def feed(cls, user, before=None, limit=20, request=None):
         queryset = cls.visible_for(user).select_related('user').prefetch_related('media').annotate(
-            visible_comment_count=Count('comments', filter=Q(comments__is_deleted=False)),
+            visible_comment_count=Count('comments', filter=Q(comments__is_deleted=False), distinct=True),
+            visible_like_count=Count('likes', distinct=True),
+            viewer_liked=Exists(StatementLike.objects.filter(statement_id=OuterRef('pk'), user=user)),
         )
         if before:
             queryset = queryset.filter(id__lt=before)
@@ -62,6 +92,7 @@ class Statement(models.Model):
     def create_statement(cls, user, text, visibility, media):
         if not user.verified:
             raise SquareErrors.PUBLISH_REQUIRES_VERIFICATION
+        _enforce_frequency(cls.objects.filter(space=user.space, is_deleted=False), user)
         normalized_text = (text or '').strip()
         if len(normalized_text) > 140:
             raise SquareErrors.TEXT_TOO_LONG
@@ -73,6 +104,11 @@ class Statement(models.Model):
             raise SquareErrors.VISIBILITY_INVALID
 
         normalized_media = StatementMedia.normalize_payload(media)
+        level = user.effective_growth_level()
+        if any(item['kind'] == StatementMediaKindChoice.AUDIO for item in normalized_media) and level < 6 and not user.is_official:
+            raise SquareErrors.AUDIO_LEVEL_REQUIRED
+        if any(item['kind'] == StatementMediaKindChoice.VIDEO for item in normalized_media) and level < 8 and not user.is_official:
+            raise SquareErrors.VIDEO_LEVEL_REQUIRED
         if not normalized_text and not normalized_media:
             raise SquareErrors.CONTENT_REQUIRED
         statement = cls.objects.create(
@@ -85,9 +121,12 @@ class Statement(models.Model):
             StatementMedia(statement=statement, position=index, **item)
             for index, item in enumerate(normalized_media)
         ])
+        media_ids = list(statement.media.values_list('id', flat=True))
+        transaction.on_commit(lambda: [StatementMedia.fetch_metadata_async(media_id) for media_id in media_ids])
         return cls.objects.select_related('user').prefetch_related('media').get(id=statement.id)
 
     def jsonl(self, request=None):
+        viewer = getattr(request, 'user', None) if request else None
         return dict(
             statement_id=self.id,
             user=self.user.tiny_json(),
@@ -95,8 +134,17 @@ class Statement(models.Model):
             visibility='friends' if self.visibility == StatementVisibilityChoice.FRIENDS else 'public',
             media=[item.jsonl(request=request) for item in self.media.all()],
             comment_count=getattr(self, 'visible_comment_count', self.comments.filter(is_deleted=False).count()),
+            like_count=getattr(self, 'visible_like_count', self.likes.count()),
+            liked=bool(getattr(self, 'viewer_liked', viewer and self.likes.filter(user=viewer).exists())),
+            can_delete=bool(viewer and (viewer.id == self.user_id or viewer.is_official and viewer.space_id == self.space_id)),
             created_at=self.created_at.timestamp(),
         )
+
+    def delete_for(self, user):
+        if user.id != self.user_id and not (user.is_official and user.space_id == self.space_id):
+            raise SquareErrors.DELETE_FORBIDDEN
+        self.is_deleted = True
+        self.save(update_fields=['is_deleted'])
 
 
 class StatementComment(models.Model):
@@ -119,7 +167,10 @@ class StatementComment(models.Model):
     @classmethod
     def feed(cls, user, statement_id, before=None, limit=30):
         statement = cls.statement_for_user(user, statement_id)
-        queryset = cls.objects.filter(statement=statement, is_deleted=False).select_related('user')
+        queryset = cls.objects.filter(statement=statement, is_deleted=False).select_related('user').annotate(
+            visible_like_count=Count('likes'),
+            viewer_liked=Exists(StatementCommentLike.objects.filter(comment_id=OuterRef('pk'), user=user)),
+        ).order_by('-visible_like_count', '-created_at', '-id')
         if before:
             queryset = queryset.filter(id__lt=before)
         return [comment.jsonl() for comment in queryset[:limit]]
@@ -128,13 +179,17 @@ class StatementComment(models.Model):
     def create_comment(cls, user, statement_id, text):
         if not user.verified:
             raise SquareErrors.PUBLISH_REQUIRES_VERIFICATION
+        _enforce_frequency(cls.objects.filter(statement__space=user.space, is_deleted=False), user, multiplier=5)
         normalized_text = (text or '').strip()
         if not normalized_text:
             raise SquareErrors.COMMENT_REQUIRED
         if len(normalized_text) > 140:
             raise SquareErrors.COMMENT_TOO_LONG
         statement = cls.statement_for_user(user, statement_id)
-        return cls.objects.create(statement=statement, user=user, text=normalized_text)
+        comment = cls.objects.create(statement=statement, user=user, text=normalized_text)
+        comment.visible_like_count = 0
+        comment.viewer_liked = False
+        return comment
 
     def jsonl(self):
         return dict(
@@ -142,11 +197,33 @@ class StatementComment(models.Model):
             statement_id=self.statement_id,
             user=self.user.tiny_json(),
             text=self.text,
+            like_count=getattr(self, 'visible_like_count', self.likes.count()),
+            liked=bool(getattr(self, 'viewer_liked', False)),
             created_at=self.created_at.timestamp(),
         )
 
 
+class StatementLike(models.Model):
+    statement = models.ForeignKey(Statement, on_delete=models.CASCADE, related_name='likes')
+    user = models.ForeignKey('User.User', on_delete=models.CASCADE, related_name='statement_likes')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['statement', 'user'], name='unique_statement_like')]
+
+
+class StatementCommentLike(models.Model):
+    comment = models.ForeignKey(StatementComment, on_delete=models.CASCADE, related_name='likes')
+    user = models.ForeignKey('User.User', on_delete=models.CASCADE, related_name='statement_comment_likes')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['comment', 'user'], name='unique_statement_comment_like')]
+
+
 class StatementMedia(models.Model):
+    _FETCHING_IDS = set()
+    _FETCHING_LOCK = threading.Lock()
     statement = models.ForeignKey(Statement, on_delete=models.CASCADE, related_name='media')
     kind = models.IntegerField(choices=StatementMediaKindChoice.to_choices())
     position = models.PositiveSmallIntegerField(default=0)
@@ -157,6 +234,9 @@ class StatementMedia(models.Model):
     latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
     longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
     address = models.CharField(max_length=255, blank=True, default='')
+    metadata_status = models.IntegerField(default=0, db_index=True)
+    metadata = models.JSONField(default=dict, blank=True)
+    metadata_error = models.CharField(max_length=500, blank=True, default='')
 
     class Meta:
         ordering = ['position', 'id']
@@ -167,6 +247,7 @@ class StatementMedia(models.Model):
             raise SquareErrors.MEDIA_INVALID
         images = 0
         audio = 0
+        video = 0
         normalized = []
         for item in media:
             if not hasattr(item, 'get'):
@@ -178,14 +259,21 @@ class StatementMedia(models.Model):
             elif kind == 'audio':
                 audio += 1
                 kind_value = StatementMediaKindChoice.AUDIO
+            elif kind == 'video':
+                video += 1
+                kind_value = StatementMediaKindChoice.VIDEO
             else:
                 raise SquareErrors.MEDIA_INVALID
             if images > 9:
                 raise SquareErrors.IMAGE_LIMIT_EXCEEDED
             if audio > 1:
                 raise SquareErrors.AUDIO_LIMIT_EXCEEDED
+            if video > 1:
+                raise SquareErrors.VIDEO_LIMIT_EXCEEDED
+            if video and (images or audio):
+                raise SquareErrors.MEDIA_INVALID
             key = validate_message_media_key(kind, str(item.get('key') or ''))
-            duration = item.get('duration_seconds') if kind == 'audio' else None
+            duration = item.get('duration_seconds') if kind in {'audio', 'video'} else None
             if duration is not None:
                 try:
                     duration = max(1, int(round(float(duration))))
@@ -220,6 +308,48 @@ class StatementMedia(models.Model):
         return normalized
 
     @classmethod
+    def fetch_metadata_async(cls, media_id):
+        with cls._FETCHING_LOCK:
+            if media_id in cls._FETCHING_IDS:
+                return
+            cls._FETCHING_IDS.add(media_id)
+        threading.Thread(target=cls._refresh_metadata, args=(media_id,), daemon=True).start()
+
+    @classmethod
+    def _refresh_metadata(cls, media_id):
+        close_old_connections()
+        try:
+            media = cls.objects.get(id=media_id)
+            if media.kind == StatementMediaKindChoice.IMAGE:
+                from Message.image_metadata import fetch_qiniu_exif, fetch_qiniu_image_info, parse_exif, parse_image_info, reverse_geocode
+                parsed = parse_image_info(fetch_qiniu_image_info(media.source_uri()))
+                try:
+                    parsed.update(parse_exif(fetch_qiniu_exif(media.source_uri())))
+                except Exception:
+                    # Images without EXIF still retain dimensions and file size.
+                    pass
+                if parsed.get('latitude') is not None and parsed.get('longitude') is not None:
+                    parsed['address'], parsed['geocoding_provider'] = reverse_geocode(parsed['latitude'], parsed['longitude'])
+            elif media.kind == StatementMediaKindChoice.VIDEO:
+                from Message.video_metadata import fetch_qiniu_avinfo, parse_avinfo
+                parsed = parse_avinfo(fetch_qiniu_avinfo(media.source_uri()))
+            else:
+                return
+            media.metadata = {
+                key: value.timestamp() if hasattr(value, 'timestamp') else value
+                for key, value in parsed.items()
+            }
+            media.metadata_status = 1
+            media.metadata_error = ''
+            media.save(update_fields=['metadata', 'metadata_status', 'metadata_error'])
+        except Exception as error:
+            cls.objects.filter(id=media_id).update(metadata_status=2, metadata_error=str(error)[:500])
+        finally:
+            with cls._FETCHING_LOCK:
+                cls._FETCHING_IDS.discard(media_id)
+            close_old_connections()
+
+    @classmethod
     def index_by_blob_slug(cls, blob_slug):
         try:
             return cls.objects.select_related('statement', 'statement__user').get(
@@ -236,7 +366,7 @@ class StatementMedia(models.Model):
         path = reverse('square media', kwargs={'blob_slug': self.blob_slug})
         uri = request.build_absolute_uri(path) if request else path
         thumbnail_uri = None
-        if self.kind == StatementMediaKindChoice.IMAGE:
+        if self.kind in (StatementMediaKindChoice.IMAGE, StatementMediaKindChoice.VIDEO):
             thumbnail_path = reverse('square media thumbnail', kwargs={'blob_slug': self.blob_slug})
             thumbnail_uri = request.build_absolute_uri(thumbnail_path) if request else thumbnail_path
         location = None
@@ -248,10 +378,12 @@ class StatementMedia(models.Model):
             )
         return dict(
             media_id=self.id,
-            kind='image' if self.kind == StatementMediaKindChoice.IMAGE else 'audio',
+            kind={StatementMediaKindChoice.IMAGE: 'image', StatementMediaKindChoice.AUDIO: 'audio', StatementMediaKindChoice.VIDEO: 'video'}[self.kind],
             uri=uri,
             thumbnail_uri=thumbnail_uri,
             mime_type=self.mime_type,
             duration_seconds=self.duration_seconds,
             location=location,
+            metadata_status=self.metadata_status,
+            metadata=self.metadata,
         )

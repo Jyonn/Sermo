@@ -4,7 +4,7 @@ from django.test import TestCase
 
 from Friendship.models import Friendship
 from Space.models import Space
-from Square.models import Statement
+from Square.models import Statement, StatementComment
 from User.models import User
 from utils import auth
 
@@ -133,3 +133,26 @@ class StatementApiTests(TestCase):
             **self.authorization(self.stranger),
         )
         self.assertEqual(hidden.status_code, 404, hidden.content)
+
+    def test_statement_like_and_official_delete(self):
+        statement = Statement.create_statement(self.author, '可互动', 'public', [])
+        liked = self.client.post(f'/square/statements/{statement.id}/like', **self.authorization(self.friend))
+        self.assertEqual(liked.status_code, 200, liked.content)
+        self.assertEqual(liked.json()['body']['like_count'], 1)
+
+        official = self.space.official_user or self.space.ensure_official_user()
+        deleted = self.client.delete(f'/square/statements/{statement.id}', **self.authorization(official))
+        self.assertEqual(deleted.status_code, 200, deleted.content)
+        statement.refresh_from_db()
+        self.assertTrue(statement.is_deleted)
+
+    def test_comment_like_and_frequency_limit(self):
+        statement = Statement.create_statement(self.author, '评论区', 'public', [])
+        comment = StatementComment.create_comment(self.friend, statement.id, '值得点赞')
+        liked = self.client.post(f'/square/comments/{comment.id}/like', **self.authorization(self.author))
+        self.assertEqual(liked.status_code, 200, liked.content)
+        self.assertEqual(liked.json()['body']['like_count'], 1)
+
+        limited = self.post_statement(self.author, {'text': '当天第二条', 'visibility': 'public', 'media': []})
+        self.assertEqual(limited.status_code, 403, limited.content)
+        self.assertEqual(limited.json()['identifier'], 'SQUARE@DAILY_LIMIT_REACHED')
