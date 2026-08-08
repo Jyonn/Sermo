@@ -20,14 +20,14 @@ from utils.qiniu import (
 
 class StatementView(View):
     @auth.require_user
-    @analyse.query(SquareParams.before, SquareParams.limit, SquareParams.friends_only)
+    @analyse.query(SquareParams.before, SquareParams.limit, SquareParams.scope)
     def get(self, request: Request):
         return Statement.feed(
             request.user,
             before=request.query.before,
             limit=request.query.limit,
             request=request,
-            friends_only=bool(request.query.friends_only),
+            scope=request.query.scope,
         )
 
     @auth.require_user

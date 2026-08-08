@@ -78,19 +78,21 @@ class Statement(models.Model):
         )
 
     @classmethod
-    def feed(cls, user, before=None, limit=20, request=None, friends_only=False):
+    def feed(cls, user, before=None, limit=20, request=None, scope='all'):
         queryset = cls.visible_for(user).select_related('user').prefetch_related('media').annotate(
             visible_comment_count=Count('comments', filter=Q(comments__is_deleted=False), distinct=True),
             visible_like_count=Count('likes', distinct=True),
             viewer_liked=Exists(StatementLike.objects.filter(statement_id=OuterRef('pk'), user=user)),
         )
-        if friends_only:
+        if scope == 'friends':
             friendships = Friendship.objects.filter(
                 space=user.space,
                 status=FriendshipStatusChoice.ACCEPTED,
             ).filter(Q(user_low=user) | Q(user_high=user)).values_list('user_low_id', 'user_high_id')
             friend_ids = [high_id if low_id == user.id else low_id for low_id, high_id in friendships]
             queryset = queryset.filter(user_id__in=[user.id, *friend_ids])
+        elif scope == 'mine':
+            queryset = queryset.filter(user=user)
         if before:
             queryset = queryset.filter(id__lt=before)
         return [item.jsonl(request=request) for item in queryset.order_by('-created_at', '-id')[:limit]]
