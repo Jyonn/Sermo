@@ -737,6 +737,9 @@ msgstr "Map region is invalid"
 msgid "Map geometry is temporarily unavailable"
 msgstr "Map geometry is temporarily unavailable"
 
+msgid "Only the official account can pin its own statement"
+msgstr "Only the official account can pin its own statement"
+
 #~ msgid "Email verification code expired"
 #~ msgstr "Email verification code expired"
 

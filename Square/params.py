@@ -39,6 +39,7 @@ class SquareParams(metaclass=Params):
     text = Validator('text').to(validate_text).null().default('')
     visibility = Validator('visibility').to(validate_visibility).default('public')
     media = Validator('media').to(validate_media).default([])
+    pin = Validator('pin').to(int).bool(lambda value: value in (0, 1)).default(0)
     before = Validator('before').to(int).null().default(None)
     offset = Validator('offset').to(int).bool(lambda value: 0 <= value <= 5000).default(0)
     scope = Validator('scope').to(str).bool(lambda value: value in ('all', 'friends', 'mine')).default('all')

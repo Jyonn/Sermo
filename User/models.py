@@ -239,6 +239,7 @@ class User(models.Model):
     chat_bubble_style = models.CharField(max_length=16, default='default')
     avatar_frame_style = models.CharField(max_length=16, default='none')
     statement_card_style = models.CharField(max_length=16, default='default')
+    pinned_square_statement_id = models.PositiveIntegerField(null=True, blank=True)
     square_outfit_style = models.CharField(max_length=16, default='sunset')
     square_prop_style = models.CharField(max_length=16, default='none')
     square_motion_style = models.CharField(max_length=16, default='walk')

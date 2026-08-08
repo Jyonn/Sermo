@@ -160,6 +160,8 @@ class Statement(models.Model):
             like_count=getattr(self, 'visible_like_count', self.likes.count()),
             liked=bool(getattr(self, 'viewer_liked', viewer and self.likes.filter(user=viewer).exists())),
             can_delete=bool(viewer and (viewer.id == self.user_id or viewer.is_official and viewer.space_id == self.space_id)),
+            can_pin=bool(viewer and viewer.id == self.user_id and viewer.is_official),
+            is_pinned=bool(self.user.is_official and self.user.pinned_square_statement_id == self.id),
             created_at=self.created_at.timestamp(),
         )
 

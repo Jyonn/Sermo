@@ -747,6 +747,9 @@ msgstr "当前定位精度不足，暂时无法打卡"
 msgid "You are not an active member of this chat"
 msgstr "你已不在这个会话中"
 
+msgid "Only the official account can pin its own statement"
+msgstr "只有官方账号可以置顶自己的发言"
+
 #~ msgid "Email verification code expired"
 #~ msgstr "邮箱验证码已过期"
 

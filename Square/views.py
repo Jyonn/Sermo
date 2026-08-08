@@ -33,7 +33,7 @@ class StatementView(View):
         )
 
     @auth.require_user
-    @analyse.json(SquareParams.text, SquareParams.visibility, SquareParams.media)
+    @analyse.json(SquareParams.text, SquareParams.visibility, SquareParams.media, SquareParams.pin)
     def post(self, request: Request):
         with transaction.atomic():
             statement = Statement.create_statement(
@@ -42,6 +42,42 @@ class StatementView(View):
                 visibility=request.json.visibility,
                 media=raw(request.json.media),
             )
+            if request.json.pin:
+                if not request.user.is_official:
+                    raise SquareErrors.PIN_FORBIDDEN
+                request.user.pinned_square_statement_id = statement.id
+                request.user.save(update_fields=['pinned_square_statement_id'])
+        return statement.jsonl(request=request)
+
+
+class PinnedStatementView(View):
+    @auth.require_user
+    def get(self, request: Request):
+        official = request.user.space.official_user
+        if not official or not official.pinned_square_statement_id:
+            return None
+        if not Statement.objects.filter(id=official.pinned_square_statement_id, space=request.user.space, is_deleted=False).exists():
+            return None
+        return Statement.detail(request.user, official.pinned_square_statement_id, request=request)
+
+
+class StatementPinView(View):
+    @auth.require_user
+    @analyse.json(SquareParams.pin)
+    def post(self, request: Request, statement_id: int):
+        if not request.user.is_official:
+            raise SquareErrors.PIN_FORBIDDEN
+        try:
+            statement = Statement.objects.select_related('user').prefetch_related('media').get(
+                id=statement_id,
+                user=request.user,
+                space=request.user.space,
+                is_deleted=False,
+            )
+        except Statement.DoesNotExist:
+            raise SquareErrors.NOT_EXISTS
+        request.user.pinned_square_statement_id = statement.id if request.json.pin else None
+        request.user.save(update_fields=['pinned_square_statement_id'])
         return statement.jsonl(request=request)
 
 
