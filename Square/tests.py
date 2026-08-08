@@ -4,7 +4,7 @@ from django.test import TestCase
 
 from Friendship.models import Friendship
 from Space.models import Space
-from Square.models import Statement, StatementComment
+from Square.models import Statement, StatementComment, StatementLike
 from User.models import User
 from utils import auth
 
@@ -156,6 +156,22 @@ class StatementApiTests(TestCase):
         limited = self.post_statement(self.author, {'text': '当天第二条', 'visibility': 'public', 'media': []})
         self.assertEqual(limited.status_code, 403, limited.content)
         self.assertEqual(limited.json()['identifier'], 'SQUARE@DAILY_LIMIT_REACHED')
+
+    def test_quota_reports_current_rolling_usage(self):
+        Statement.create_statement(self.author, '今日发言', 'public', [])
+        statement = Statement.objects.get(user=self.author)
+        StatementComment.create_comment(self.author, statement.id, '今日评论')
+        StatementLike.objects.create(statement=statement, user=self.author)
+
+        response = self.client.get('/square/quota', **self.authorization(self.author))
+        self.assertEqual(response.status_code, 200, response.content)
+        quota = response.json()['body']
+        self.assertEqual(quota['statements']['daily_used'], 1)
+        self.assertEqual(quota['statements']['daily_limit'], 1)
+        self.assertEqual(quota['comments']['daily_used'], 1)
+        self.assertEqual(quota['comments']['daily_limit'], 5)
+        self.assertEqual(quota['likes']['daily_used'], 1)
+        self.assertFalse(quota['media']['audio'])
 
     def test_friends_feed_and_threaded_comments(self):
         public = Statement.create_statement(self.author, '好友动态', 'public', [])

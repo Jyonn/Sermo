@@ -6,6 +6,7 @@ from smartdjango import analyse
 
 from Square.models import Statement, StatementComment, StatementCommentLike, StatementLike, StatementMedia, StatementMediaKindChoice
 from Square.params import SquareParams
+from Square.quota import quota_for_user
 from Square.validators import SquareErrors
 from User.models import NotificationEvent, NotificationEventTypeChoice
 from utils import auth
@@ -41,6 +42,12 @@ class StatementView(View):
                 media=raw(request.json.media),
             )
         return statement.jsonl(request=request)
+
+
+class SquareQuotaView(View):
+    @auth.require_user
+    def get(self, request: Request):
+        return quota_for_user(request.user)
 
 
 class StatementUploadView(View):
