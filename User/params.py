@@ -5,6 +5,7 @@ from User.models import (
     User,
     UserNotificationChoice,
     NotificationPreference,
+    NotificationAudienceChoice,
     UserGestureLockPreference,
     UserWebReminderPreference,
     UserContactVerificationCode,
@@ -198,6 +199,26 @@ class NotificationPreferenceParams(metaclass=Params):
         .to(int) \
         .null().default(None) \
         .bool(lambda x: x is None or x in (0, 1, 2), message=_('bark_icon_mode should be 0, 1 or 2'))
+
+
+class NotificationTopicPreferenceParams(metaclass=Params):
+    channel = Validator('channel').to(int).bool(
+        lambda value: value in range(4), message=_('Invalid notification channel'),
+    )
+    topic = Validator('topic').to(int).bool(
+        lambda value: value in range(1, 7), message=_('Invalid notification topic'),
+    )
+    audience = Validator('audience').to(int).bool(
+        lambda value: value in (
+            NotificationAudienceChoice.ANY,
+            NotificationAudienceChoice.FRIEND,
+            NotificationAudienceChoice.OTHER,
+        ),
+        message=_('Invalid notification audience'),
+    )
+    enabled = Validator('enabled').to(int).bool(
+        lambda value: value in (0, 1), message=_('enabled should be 0 or 1'),
+    )
 
 
 class UserWebReminderPreferenceParams(metaclass=Params):

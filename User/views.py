@@ -15,6 +15,9 @@ from utils.qiniu import (
 from utils.global_settings import notificator
 from User.models import (
     NotificationPreference,
+    NotificationEvent,
+    NotificationEventTypeChoice,
+    NotificationTopicPreference,
     WebPushSubscription,
     RefreshToken,
     UserGestureLockPreference,
@@ -32,6 +35,7 @@ from User.params import (
     UserDeleteParams,
     UserPasswordParams,
     NotificationPreferenceParams,
+    NotificationTopicPreferenceParams,
     UserGestureLockPreferenceParams,
     UserWebReminderPreferenceParams,
     WebPushSubscriptionParams,
@@ -234,6 +238,56 @@ class NotificationPreferenceView(View):
             bark_icon_mode=request.json.bark_icon_mode,
         )
         return pref.json()
+
+
+class NotificationTopicPreferenceView(View):
+    @auth.require_user
+    def get(self, request: Request):
+        return NotificationTopicPreference.matrix(request.user)
+
+    @auth.require_user
+    @analyse.json(
+        NotificationTopicPreferenceParams.channel,
+        NotificationTopicPreferenceParams.topic,
+        NotificationTopicPreferenceParams.audience,
+        NotificationTopicPreferenceParams.enabled,
+    )
+    def post(self, request: Request):
+        pref = NotificationTopicPreference.set_enabled(
+            request.user,
+            request.json.channel,
+            request.json.topic,
+            request.json.audience,
+            bool(request.json.enabled),
+        )
+        return dict(channel=pref.channel, topic=pref.topic, audience=pref.audience, enabled=pref.enabled)
+
+
+class NotificationEventView(View):
+    SQUARE_TYPES = (
+        NotificationEventTypeChoice.SQUARE_STATEMENT_LIKE,
+        NotificationEventTypeChoice.SQUARE_STATEMENT_COMMENT,
+        NotificationEventTypeChoice.SQUARE_COMMENT_LIKE,
+        NotificationEventTypeChoice.SQUARE_COMMENT_REPLY,
+    )
+
+    @auth.require_user
+    def get(self, request: Request):
+        queryset = NotificationEvent.objects.filter(user=request.user).select_related('actor').order_by('-id')
+        if request.GET.get('category') == 'square':
+            queryset = queryset.filter(event_type__in=self.SQUARE_TYPES)
+        try:
+            limit = min(50, max(1, int(request.GET.get('limit', 30))))
+        except (TypeError, ValueError):
+            limit = 30
+        rows = list(queryset[:limit])
+        return dict(events=[event.json() for event in rows], unread_count=queryset.filter(is_read=False).count())
+
+    @auth.require_user
+    def post(self, request: Request):
+        queryset = NotificationEvent.objects.filter(user=request.user, is_read=False)
+        queryset = queryset.filter(event_type__in=self.SQUARE_TYPES)
+        return dict(updated=queryset.update(is_read=True))
 
 
 class UserWebReminderPreferenceView(View):

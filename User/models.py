@@ -1642,6 +1642,32 @@ class NotificationEventTypeChoice(Choice):
     GROUP_MESSAGE = 2
     GROUP_INVITE = 3
     SYSTEM = 4
+    SQUARE_STATEMENT_LIKE = 5
+    SQUARE_STATEMENT_COMMENT = 6
+    SQUARE_COMMENT_LIKE = 7
+    SQUARE_COMMENT_REPLY = 8
+
+
+class NotificationRouteChannelChoice(Choice):
+    WEB = 0
+    EMAIL = 1
+    SMS = 2
+    BARK = 3
+
+
+class NotificationTopicChoice(Choice):
+    CHAT = 1
+    SQUARE_STATEMENT_LIKE = 2
+    SQUARE_STATEMENT_COMMENT = 3
+    SQUARE_COMMENT_LIKE = 4
+    SQUARE_COMMENT_REPLY = 5
+    ONLINE = 6
+
+
+class NotificationAudienceChoice(Choice):
+    ANY = 0
+    FRIEND = 1
+    OTHER = 2
 
 
 class NotificationDeliveryStatusChoice(Choice):
@@ -1746,6 +1772,7 @@ class NotificationPreference(models.Model):
             UserNotificationChoice.SMS,
             UserNotificationChoice.BARK,
         )
+
 
     @classmethod
     def _default_enabled(cls, user: User, channel: int):
@@ -1860,6 +1887,67 @@ class NotificationPreference(models.Model):
             'open_chat_on_tap',
             'bark_icon_mode',
         )
+
+
+class NotificationTopicPreference(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notification_topic_preferences')
+    channel = models.IntegerField(choices=NotificationRouteChannelChoice.to_choices())
+    topic = models.IntegerField(choices=NotificationTopicChoice.to_choices())
+    audience = models.IntegerField(choices=NotificationAudienceChoice.to_choices(), default=NotificationAudienceChoice.ANY)
+    enabled = models.BooleanField(default=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(
+            fields=['user', 'channel', 'topic', 'audience'],
+            name='unique_notification_topic_pref',
+        )]
+
+    @classmethod
+    def default_enabled(cls, channel, topic):
+        return channel != NotificationRouteChannelChoice.SMS and topic != NotificationTopicChoice.ONLINE
+
+    @classmethod
+    def is_enabled_for_event(cls, event, channel):
+        topic = event.topic()
+        if topic is None:
+            return True
+        audience = event.audience()
+        pref = cls.objects.filter(user=event.user, channel=channel, topic=topic, audience=audience).first()
+        if pref is None and audience != NotificationAudienceChoice.ANY:
+            pref = cls.objects.filter(
+                user=event.user, channel=channel, topic=topic, audience=NotificationAudienceChoice.ANY,
+            ).first()
+        return pref.enabled if pref else cls.default_enabled(channel, topic)
+
+    @classmethod
+    def matrix(cls, user):
+        existing = {(item.channel, item.topic, item.audience): item.enabled for item in cls.objects.filter(user=user)}
+        square_topics = {
+            NotificationTopicChoice.SQUARE_STATEMENT_LIKE,
+            NotificationTopicChoice.SQUARE_STATEMENT_COMMENT,
+            NotificationTopicChoice.SQUARE_COMMENT_LIKE,
+            NotificationTopicChoice.SQUARE_COMMENT_REPLY,
+        }
+        rows = []
+        for channel in range(4):
+            for topic in range(1, 7):
+                audiences = (NotificationAudienceChoice.FRIEND, NotificationAudienceChoice.OTHER) if topic in square_topics else (NotificationAudienceChoice.ANY,)
+                for audience in audiences:
+                    rows.append(dict(
+                        channel=channel,
+                        topic=topic,
+                        audience=audience,
+                        enabled=existing.get((channel, topic, audience), cls.default_enabled(channel, topic)),
+                    ))
+        return rows
+
+    @classmethod
+    def set_enabled(cls, user, channel, topic, audience, enabled):
+        pref, _ = cls.objects.update_or_create(
+            user=user, channel=channel, topic=topic, audience=audience, defaults=dict(enabled=enabled),
+        )
+        return pref
 
 
 class UserWebReminderPreference(models.Model):
@@ -1978,6 +2066,48 @@ class NotificationEvent(models.Model):
     def _dictify_created_at(self):
         return self.created_at.timestamp()
 
+    def topic(self):
+        return {
+            NotificationEventTypeChoice.DIRECT_MESSAGE: NotificationTopicChoice.CHAT,
+            NotificationEventTypeChoice.GROUP_MESSAGE: NotificationTopicChoice.CHAT,
+            NotificationEventTypeChoice.SQUARE_STATEMENT_LIKE: NotificationTopicChoice.SQUARE_STATEMENT_LIKE,
+            NotificationEventTypeChoice.SQUARE_STATEMENT_COMMENT: NotificationTopicChoice.SQUARE_STATEMENT_COMMENT,
+            NotificationEventTypeChoice.SQUARE_COMMENT_LIKE: NotificationTopicChoice.SQUARE_COMMENT_LIKE,
+            NotificationEventTypeChoice.SQUARE_COMMENT_REPLY: NotificationTopicChoice.SQUARE_COMMENT_REPLY,
+        }.get(self.event_type, NotificationTopicChoice.ONLINE if (self.payload or {}).get('kind') == 'peer_online' else None)
+
+    def audience(self):
+        if not self.actor_id:
+            return NotificationAudienceChoice.ANY
+        if self.topic() not in {
+            NotificationTopicChoice.SQUARE_STATEMENT_LIKE,
+            NotificationTopicChoice.SQUARE_STATEMENT_COMMENT,
+            NotificationTopicChoice.SQUARE_COMMENT_LIKE,
+            NotificationTopicChoice.SQUARE_COMMENT_REPLY,
+        }:
+            return NotificationAudienceChoice.ANY
+        from Friendship.models import Friendship, FriendshipStatusChoice
+        is_friend = Friendship.objects.filter(
+            space_id=self.space_id,
+            status=FriendshipStatusChoice.ACCEPTED,
+        ).filter(
+            Q(user_low_id=self.user_id, user_high_id=self.actor_id)
+            | Q(user_low_id=self.actor_id, user_high_id=self.user_id)
+        ).exists()
+        return NotificationAudienceChoice.FRIEND if is_friend else NotificationAudienceChoice.OTHER
+
+    def json(self):
+        return dict(
+            notification_event_id=self.id,
+            event_type=self.event_type,
+            topic=self.topic(),
+            audience=self.audience(),
+            actor=self.actor.tiny_json() if self.actor_id else None,
+            payload=self.payload or {},
+            is_read=self.is_read,
+            created_at=self.created_at.timestamp(),
+        )
+
     def render_delivery_message(
         self,
         hide_message_content=False,
@@ -2067,6 +2197,16 @@ class NotificationEvent(models.Model):
             body = friend_online_message_text.strip() or _('{name} is online now.').format(name=actor_name or _('Your friend'))
             return str(title), str(body)
 
+        square_messages = {
+            NotificationEventTypeChoice.SQUARE_STATEMENT_LIKE: (_('New like'), _('{name} liked your statement.')),
+            NotificationEventTypeChoice.SQUARE_STATEMENT_COMMENT: (_('New comment'), _('{name} commented on your statement.')),
+            NotificationEventTypeChoice.SQUARE_COMMENT_LIKE: (_('Comment liked'), _('{name} liked your comment.')),
+            NotificationEventTypeChoice.SQUARE_COMMENT_REPLY: (_('New reply'), _('{name} replied to your comment.')),
+        }
+        if self.event_type in square_messages:
+            title, template = square_messages[self.event_type]
+            return str(title), str(template.format(name=actor_name or _('Someone')))
+
         return str(_('System notification')), str(_('You have a new notification.'))
 
     @classmethod
@@ -2149,6 +2289,20 @@ class NotificationEvent(models.Model):
             actor=actor,
             event_type=NotificationEventTypeChoice.SYSTEM,
             payload=payload or {},
+        )
+        cls._enqueue_deliveries_after_commit([event.id])
+        return event
+
+    @classmethod
+    def emit_square_event(cls, user, actor, event_type, statement_id, comment_id=None):
+        if user.id == actor.id:
+            return None
+        event = cls.objects.create(
+            space_id=user.space_id,
+            user=user,
+            actor=actor,
+            event_type=event_type,
+            payload=dict(statement_id=statement_id, comment_id=comment_id),
         )
         cls._enqueue_deliveries_after_commit([event.id])
         return event
@@ -2423,7 +2577,11 @@ class NotificationDelivery(models.Model):
             detail = None
             attempted_at = None
 
-            if not pref.enabled:
+            if not NotificationTopicPreference.is_enabled_for_event(event, pref.channel):
+                status = NotificationDeliveryStatusChoice.SKIPPED
+                detail = 'topic_disabled'
+                attempted_at = timezone.now()
+            elif not pref.enabled:
                 status = NotificationDeliveryStatusChoice.SKIPPED
                 detail = 'channel_disabled'
                 attempted_at = timezone.now()
@@ -2471,6 +2629,12 @@ class NotificationDelivery(models.Model):
                 delivery.attempted_at = timezone.now()
                 delivery.save(update_fields=['status', 'detail', 'attempted_at'])
                 continue
+            if not NotificationTopicPreference.is_enabled_for_event(delivery.event, delivery.channel):
+                delivery.status = NotificationDeliveryStatusChoice.SKIPPED
+                delivery.detail = 'topic_disabled'
+                delivery.attempted_at = timezone.now()
+                delivery.save(update_fields=['status', 'detail', 'attempted_at'])
+                continue
             if not pref.enabled:
                 delivery.status = NotificationDeliveryStatusChoice.SKIPPED
                 delivery.detail = 'channel_disabled'
@@ -2512,6 +2676,8 @@ class WebPushDelivery(models.Model):
     @classmethod
     def enqueue_for_event(cls, event: NotificationEvent):
         deliveries = []
+        if not NotificationTopicPreference.is_enabled_for_event(event, NotificationRouteChannelChoice.WEB):
+            return deliveries
         subscriptions = list(WebPushSubscription.active_for_user(event.user))
         for subscription in subscriptions:
             delivery = cls.objects.create(event=event, subscription=subscription)

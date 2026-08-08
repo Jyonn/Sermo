@@ -7,6 +7,7 @@ from smartdjango import analyse
 from Square.models import Statement, StatementComment, StatementCommentLike, StatementLike, StatementMedia, StatementMediaKindChoice
 from Square.params import SquareParams
 from Square.validators import SquareErrors
+from User.models import NotificationEvent, NotificationEventTypeChoice
 from utils import auth
 from utils.auth import Request
 from utils.qiniu import (
@@ -81,7 +82,11 @@ class StatementLikeView(View):
             statement = Statement.visible_for(request.user).get(id=statement_id)
         except Statement.DoesNotExist:
             raise SquareErrors.NOT_EXISTS
-        StatementLike.objects.get_or_create(statement=statement, user=request.user)
+        _like, created = StatementLike.objects.get_or_create(statement=statement, user=request.user)
+        if created:
+            NotificationEvent.emit_square_event(
+                statement.user, request.user, NotificationEventTypeChoice.SQUARE_STATEMENT_LIKE, statement.id,
+            )
         return dict(liked=True, like_count=statement.likes.count())
 
     @auth.require_user
@@ -104,7 +109,12 @@ class StatementCommentLikeView(View):
         except StatementComment.DoesNotExist:
             raise SquareErrors.NOT_EXISTS
         StatementComment.statement_for_user(request.user, comment.statement_id)
-        StatementCommentLike.objects.get_or_create(comment=comment, user=request.user)
+        _like, created = StatementCommentLike.objects.get_or_create(comment=comment, user=request.user)
+        if created:
+            NotificationEvent.emit_square_event(
+                comment.user, request.user, NotificationEventTypeChoice.SQUARE_COMMENT_LIKE,
+                comment.statement_id, comment.id,
+            )
         return dict(liked=True, like_count=comment.likes.count())
 
     @auth.require_user
@@ -138,6 +148,16 @@ class StatementCommentView(View):
             request.json.text,
             parent_id=request.json.parent_id,
         )
+        if comment.parent_id:
+            NotificationEvent.emit_square_event(
+                comment.parent.user, request.user, NotificationEventTypeChoice.SQUARE_COMMENT_REPLY,
+                comment.statement_id, comment.id,
+            )
+        else:
+            NotificationEvent.emit_square_event(
+                comment.statement.user, request.user, NotificationEventTypeChoice.SQUARE_STATEMENT_COMMENT,
+                comment.statement_id, comment.id,
+            )
         return comment.jsonl(viewer=request.user)
 
 
