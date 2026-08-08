@@ -19,13 +19,14 @@ from utils.qiniu import (
 
 class StatementView(View):
     @auth.require_user
-    @analyse.query(SquareParams.before, SquareParams.limit)
+    @analyse.query(SquareParams.before, SquareParams.limit, SquareParams.friends_only)
     def get(self, request: Request):
         return Statement.feed(
             request.user,
             before=request.query.before,
             limit=request.query.limit,
             request=request,
+            friends_only=bool(request.query.friends_only),
         )
 
     @auth.require_user
@@ -57,6 +58,10 @@ class StatementUploadView(View):
 
 
 class StatementDetailView(View):
+    @auth.require_user
+    def get(self, request: Request, statement_id: int):
+        return Statement.detail(request.user, statement_id, request=request)
+
     @auth.require_user
     def delete(self, request: Request, statement_id: int):
         try:
@@ -115,20 +120,25 @@ class StatementCommentLikeView(View):
 
 class StatementCommentView(View):
     @auth.require_user
-    @analyse.query(SquareParams.before, SquareParams.limit)
+    @analyse.query(SquareParams.offset, SquareParams.limit)
     def get(self, request: Request, statement_id: int):
         return StatementComment.feed(
             request.user,
             statement_id=statement_id,
-            before=request.query.before,
+            offset=request.query.offset,
             limit=request.query.limit,
         )
 
     @auth.require_user
-    @analyse.json(SquareParams.comment_text)
+    @analyse.json(SquareParams.comment_text, SquareParams.parent_id)
     def post(self, request: Request, statement_id: int):
-        comment = StatementComment.create_comment(request.user, statement_id, request.json.text)
-        return comment.jsonl()
+        comment = StatementComment.create_comment(
+            request.user,
+            statement_id,
+            request.json.text,
+            parent_id=request.json.parent_id,
+        )
+        return comment.jsonl(viewer=request.user)
 
 
 class StatementMediaView(View):

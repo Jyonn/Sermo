@@ -40,6 +40,9 @@ class SquareParams(metaclass=Params):
     visibility = Validator('visibility').to(validate_visibility).default('public')
     media = Validator('media').to(validate_media).default([])
     before = Validator('before').to(int).null().default(None)
+    offset = Validator('offset').to(int).bool(lambda value: 0 <= value <= 5000).default(0)
+    friends_only = Validator('friends_only').to(int).bool(lambda value: value in (0, 1)).default(0)
+    parent_id = Validator('parent_id').to(int).null().default(None)
     limit = Validator('limit').to(int).bool(
         lambda value: 5 <= value <= 50,
         message=_('limit should be between 5 and 50'),

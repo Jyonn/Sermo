@@ -127,7 +127,7 @@ class StatementApiTests(TestCase):
         )
         self.assertEqual(denied.status_code, 403, denied.content)
 
-        hidden_statement = Statement.create_statement(self.author, '朋友可见', 'friends', [])
+        hidden_statement = Statement.objects.create(space=self.space, user=self.author, text='朋友可见', visibility=1)
         hidden = self.client.get(
             f'/square/statements/{hidden_statement.id}/comments?limit=30',
             **self.authorization(self.stranger),
@@ -156,3 +156,28 @@ class StatementApiTests(TestCase):
         limited = self.post_statement(self.author, {'text': '当天第二条', 'visibility': 'public', 'media': []})
         self.assertEqual(limited.status_code, 403, limited.content)
         self.assertEqual(limited.json()['identifier'], 'SQUARE@DAILY_LIMIT_REACHED')
+
+    def test_friends_feed_and_threaded_comments(self):
+        public = Statement.create_statement(self.author, '好友动态', 'public', [])
+        Statement.create_statement(self.friend, '朋友动态', 'public', [])
+        reply = StatementComment.create_comment(self.friend, public.id, '一级评论')
+        StatementComment.create_comment(self.author, public.id, '二级回复', parent_id=reply.id)
+
+        feed = self.client.get('/square/statements?friends_only=1&limit=20', **self.authorization(self.author))
+        self.assertEqual([item['text'] for item in feed.json()['body']], ['朋友动态'])
+
+        comments = self.client.get(f'/square/statements/{public.id}/comments?offset=0&limit=30', **self.authorization(self.author))
+        body = comments.json()['body'][0]
+        self.assertEqual(body['reply_count'], 1)
+        self.assertEqual(body['replies'][0]['text'], '二级回复')
+
+    def test_statement_rejects_mixed_media_types(self):
+        response = self.post_statement(self.author, {
+            'text': '混合媒体',
+            'visibility': 'public',
+            'media': [
+                {'kind': 'image', 'key': 'sermo/messages/image/photo.jpg'},
+                {'kind': 'audio', 'key': 'sermo/messages/audio/voice.m4a', 'duration_seconds': 3},
+            ],
+        })
+        self.assertEqual(response.status_code, 400, response.content)

@@ -3,7 +3,7 @@ import threading
 from datetime import timedelta
 
 from django.db import close_old_connections, transaction
-from django.db.models import Count, Exists, OuterRef, Q
+from django.db.models import Count, Exists, OuterRef, Prefetch, Q
 from django.utils import timezone
 from django.urls import reverse
 from smartdjango import Choice, models
@@ -78,15 +78,34 @@ class Statement(models.Model):
         )
 
     @classmethod
-    def feed(cls, user, before=None, limit=20, request=None):
+    def feed(cls, user, before=None, limit=20, request=None, friends_only=False):
         queryset = cls.visible_for(user).select_related('user').prefetch_related('media').annotate(
             visible_comment_count=Count('comments', filter=Q(comments__is_deleted=False), distinct=True),
             visible_like_count=Count('likes', distinct=True),
             viewer_liked=Exists(StatementLike.objects.filter(statement_id=OuterRef('pk'), user=user)),
         )
+        if friends_only:
+            friendships = Friendship.objects.filter(
+                space=user.space,
+                status=FriendshipStatusChoice.ACCEPTED,
+            ).filter(Q(user_low=user) | Q(user_high=user)).values_list('user_low_id', 'user_high_id')
+            friend_ids = [high_id if low_id == user.id else low_id for low_id, high_id in friendships]
+            queryset = queryset.filter(user_id__in=friend_ids)
         if before:
             queryset = queryset.filter(id__lt=before)
-        return [item.jsonl(request=request) for item in queryset[:limit]]
+        return [item.jsonl(request=request) for item in queryset.order_by('-created_at', '-id')[:limit]]
+
+    @classmethod
+    def detail(cls, user, statement_id, request=None):
+        try:
+            statement = cls.visible_for(user).select_related('user').prefetch_related('media').annotate(
+                visible_comment_count=Count('comments', filter=Q(comments__is_deleted=False), distinct=True),
+                visible_like_count=Count('likes', distinct=True),
+                viewer_liked=Exists(StatementLike.objects.filter(statement_id=OuterRef('pk'), user=user)),
+            ).get(id=statement_id)
+        except cls.DoesNotExist:
+            raise SquareErrors.NOT_EXISTS
+        return statement.jsonl(request=request)
 
     @classmethod
     def create_statement(cls, user, text, visibility, media):
@@ -150,6 +169,7 @@ class Statement(models.Model):
 class StatementComment(models.Model):
     statement = models.ForeignKey(Statement, on_delete=models.CASCADE, related_name='comments', db_index=True)
     user = models.ForeignKey('User.User', on_delete=models.CASCADE, related_name='statement_comments')
+    parent = models.ForeignKey('self', null=True, blank=True, on_delete=models.CASCADE, related_name='replies')
     text = models.CharField(max_length=140)
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
     is_deleted = models.BooleanField(default=False, db_index=True)
@@ -165,18 +185,23 @@ class StatementComment(models.Model):
             raise SquareErrors.NOT_EXISTS
 
     @classmethod
-    def feed(cls, user, statement_id, before=None, limit=30):
+    def feed(cls, user, statement_id, offset=0, limit=30):
         statement = cls.statement_for_user(user, statement_id)
-        queryset = cls.objects.filter(statement=statement, is_deleted=False).select_related('user').annotate(
-            visible_like_count=Count('likes'),
+        reply_queryset = cls.objects.filter(is_deleted=False).select_related('user').annotate(
+            visible_like_count=Count('likes', distinct=True),
             viewer_liked=Exists(StatementCommentLike.objects.filter(comment_id=OuterRef('pk'), user=user)),
-        ).order_by('-visible_like_count', '-created_at', '-id')
-        if before:
-            queryset = queryset.filter(id__lt=before)
-        return [comment.jsonl() for comment in queryset[:limit]]
+        ).order_by('created_at', 'id')
+        queryset = cls.objects.filter(statement=statement, parent__isnull=True, is_deleted=False).select_related('user').prefetch_related(
+            Prefetch('replies', queryset=reply_queryset, to_attr='visible_replies'),
+        ).annotate(
+            visible_like_count=Count('likes', distinct=True),
+            visible_reply_count=Count('replies', filter=Q(replies__is_deleted=False), distinct=True),
+            viewer_liked=Exists(StatementCommentLike.objects.filter(comment_id=OuterRef('pk'), user=user)),
+        ).order_by('-visible_like_count', '-visible_reply_count', '-created_at', '-id')
+        return [comment.jsonl(viewer=user, include_replies=True) for comment in queryset[offset:offset + limit]]
 
     @classmethod
-    def create_comment(cls, user, statement_id, text):
+    def create_comment(cls, user, statement_id, text, parent_id=None):
         if not user.verified:
             raise SquareErrors.PUBLISH_REQUIRES_VERIFICATION
         _enforce_frequency(cls.objects.filter(statement__space=user.space, is_deleted=False), user, multiplier=5)
@@ -186,21 +211,39 @@ class StatementComment(models.Model):
         if len(normalized_text) > 140:
             raise SquareErrors.COMMENT_TOO_LONG
         statement = cls.statement_for_user(user, statement_id)
-        comment = cls.objects.create(statement=statement, user=user, text=normalized_text)
+        parent = None
+        if parent_id is not None:
+            try:
+                parent = cls.objects.get(id=parent_id, statement=statement, parent__isnull=True, is_deleted=False)
+            except cls.DoesNotExist:
+                raise SquareErrors.NOT_EXISTS
+        comment = cls.objects.create(statement=statement, user=user, text=normalized_text, parent=parent)
         comment.visible_like_count = 0
         comment.viewer_liked = False
         return comment
 
-    def jsonl(self):
-        return dict(
+    def jsonl(self, viewer=None, include_replies=False):
+        like_count = self.visible_like_count if hasattr(self, 'visible_like_count') else self.likes.count()
+        reply_count = 0 if self.parent_id else (
+            self.visible_reply_count if hasattr(self, 'visible_reply_count') else self.replies.filter(is_deleted=False).count()
+        )
+        payload = dict(
             comment_id=self.id,
             statement_id=self.statement_id,
+            parent_id=self.parent_id,
             user=self.user.tiny_json(),
             text=self.text,
-            like_count=getattr(self, 'visible_like_count', self.likes.count()),
-            liked=bool(getattr(self, 'viewer_liked', False)),
+            like_count=like_count,
+            reply_count=reply_count,
+            liked=bool(getattr(self, 'viewer_liked', viewer and self.likes.filter(user=viewer).exists())),
             created_at=self.created_at.timestamp(),
         )
+        if include_replies:
+            payload['replies'] = [
+                reply.jsonl(viewer=viewer)
+                for reply in getattr(self, 'visible_replies', [])
+            ]
+        return payload
 
 
 class StatementLike(models.Model):
@@ -270,7 +313,7 @@ class StatementMedia(models.Model):
                 raise SquareErrors.AUDIO_LIMIT_EXCEEDED
             if video > 1:
                 raise SquareErrors.VIDEO_LIMIT_EXCEEDED
-            if video and (images or audio):
+            if sum(bool(count) for count in (images, audio, video)) > 1:
                 raise SquareErrors.MEDIA_INVALID
             key = validate_message_media_key(kind, str(item.get('key') or ''))
             duration = item.get('duration_seconds') if kind in {'audio', 'video'} else None
