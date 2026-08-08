@@ -21,7 +21,7 @@ from utils.qiniu import (
 
 class StatementView(View):
     @auth.require_user
-    @analyse.query(SquareParams.before, SquareParams.limit, SquareParams.scope)
+    @analyse.query(SquareParams.before, SquareParams.limit, SquareParams.scope, SquareParams.user_id)
     def get(self, request: Request):
         return Statement.feed(
             request.user,
@@ -29,6 +29,7 @@ class StatementView(View):
             limit=request.query.limit,
             request=request,
             scope=request.query.scope,
+            user_id=request.query.user_id,
         )
 
     @auth.require_user

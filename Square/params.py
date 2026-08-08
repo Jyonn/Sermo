@@ -42,6 +42,7 @@ class SquareParams(metaclass=Params):
     before = Validator('before').to(int).null().default(None)
     offset = Validator('offset').to(int).bool(lambda value: 0 <= value <= 5000).default(0)
     scope = Validator('scope').to(str).bool(lambda value: value in ('all', 'friends', 'mine')).default('all')
+    user_id = Validator('user_id').to(int).null().default(None)
     parent_id = Validator('parent_id').to(int).null().default(None)
     limit = Validator('limit').to(int).bool(
         lambda value: 5 <= value <= 50,

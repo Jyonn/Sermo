@@ -78,7 +78,7 @@ class Statement(models.Model):
         )
 
     @classmethod
-    def feed(cls, user, before=None, limit=20, request=None, scope='all'):
+    def feed(cls, user, before=None, limit=20, request=None, scope='all', user_id=None):
         queryset = cls.visible_for(user).select_related('user').prefetch_related('media').annotate(
             visible_comment_count=Count('comments', filter=Q(comments__is_deleted=False), distinct=True),
             visible_like_count=Count('likes', distinct=True),
@@ -93,6 +93,8 @@ class Statement(models.Model):
             queryset = queryset.filter(user_id__in=[user.id, *friend_ids])
         elif scope == 'mine':
             queryset = queryset.filter(user=user)
+        if user_id is not None:
+            queryset = queryset.filter(user_id=user_id)
         if before:
             queryset = queryset.filter(id__lt=before)
         return [item.jsonl(request=request) for item in queryset.order_by('-created_at', '-id')[:limit]]
