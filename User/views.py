@@ -677,11 +677,13 @@ class UserPersonalizationView(View):
     @analyse.json(
         UserParams.chat_bubble_style,
         UserParams.avatar_frame_style,
+        UserParams.statement_card_style,
     )
     def post(self, request: Request):
         request.user.set_personalization(
             chat_bubble_style=request.json.chat_bubble_style,
             avatar_frame_style=request.json.avatar_frame_style,
+            statement_card_style=request.json.statement_card_style,
         )
         return request.user.json_me()
 

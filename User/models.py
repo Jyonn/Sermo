@@ -238,6 +238,7 @@ class User(models.Model):
     chat_background_uri = models.CharField(max_length=255, default='')
     chat_bubble_style = models.CharField(max_length=16, default='default')
     avatar_frame_style = models.CharField(max_length=16, default='none')
+    statement_card_style = models.CharField(max_length=16, default='default')
     square_outfit_style = models.CharField(max_length=16, default='sunset')
     square_prop_style = models.CharField(max_length=16, default='none')
     square_motion_style = models.CharField(max_length=16, default='walk')
@@ -512,6 +513,8 @@ class User(models.Model):
 
     def set_personalization(self, **values):
         fields = ['chat_bubble_style', 'avatar_frame_style']
+        if values.get('statement_card_style') is not None:
+            fields.append('statement_card_style')
         changed = any(values[field] != getattr(self, field) for field in fields)
         if values['chat_bubble_style'] == 'vip' and not self.is_permanent_vip:
             raise UserErrors.PERMANENT_VIP_NOT_ELIGIBLE
@@ -1058,7 +1061,7 @@ class User(models.Model):
     def tiny_json(self):
         return self.dictify(
             'name', 'user_id', 'official', 'avatar_type', 'avatar_uri', 'is_permanent_vip',
-            'chat_bubble_style', 'avatar_frame_style', 'growth_level',
+            'chat_bubble_style', 'avatar_frame_style', 'statement_card_style', 'growth_level',
         )
 
     def jsonl(self):
@@ -1074,6 +1077,7 @@ class User(models.Model):
             'is_permanent_vip',
             'chat_bubble_style',
             'avatar_frame_style',
+            'statement_card_style',
             'avatar_type',
             'avatar_uri',
         )
@@ -1136,6 +1140,7 @@ class User(models.Model):
             'chat_background_theme',
             'chat_bubble_style',
             'avatar_frame_style',
+            'statement_card_style',
         )
         payload['chat_background_uri'] = (
             sign_private_download_url(self.chat_background_uri)

@@ -124,6 +124,9 @@ class UserValidator:
             'none', 'orbit', 'aurora', 'polaroid', 'soundwave', 'portal', 'butterfly',
             'moon', 'camera', 'comet', 'snowfall', 'papercut', 'mechanical', 'niko-run', 'fufu-wave', 'xiaobai-run', 'vip',
         },
+        'statement_card_style': {
+            'default', 'editorial', 'aurora', 'pixel', 'lacquer', 'collage',
+        },
     }
     GESTURE_LOCK_MIN_MINUTES = 1
     GESTURE_LOCK_MAX_MINUTES = 30

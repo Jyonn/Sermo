@@ -45,6 +45,9 @@ class UserParams(metaclass=Params):
     avatar_frame_style = Validator('avatar_frame_style').to(str).to(
         lambda value: User.validators.personalization('avatar_frame_style', value)
     )
+    statement_card_style = Validator('statement_card_style').to(str).null().default(None).to(
+        lambda value: User.validators.personalization('statement_card_style', value)
+    )
     language = Validator('language') \
         .to(str) \
         .null().default(None) \
