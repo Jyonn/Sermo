@@ -507,6 +507,7 @@ class ChatUserPreference(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='chat_preferences', db_index=True)
     pinned = models.BooleanField(default=False)
     online_reminder_enabled = models.BooleanField(default=False)
+    notifications_muted = models.BooleanField(default=False)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
@@ -518,7 +519,7 @@ class ChatUserPreference(models.Model):
         return preference
 
     @classmethod
-    def update(cls, chat: Chat, user: User, pinned=None, online_reminder_enabled=None):
+    def update(cls, chat: Chat, user: User, pinned=None, online_reminder_enabled=None, notifications_muted=None):
         preference = cls.ensure(chat, user)
         updates = []
         if pinned is not None:
@@ -529,12 +530,17 @@ class ChatUserPreference(models.Model):
                 raise ChatErrors.NOT_DIRECT_CHAT(chat=chat.id)
             preference.online_reminder_enabled = bool(online_reminder_enabled)
             updates.append('online_reminder_enabled')
+        if notifications_muted is not None:
+            if not chat.group and bool(notifications_muted):
+                raise ChatErrors.NOT_GROUP_CHAT(chat=chat.id)
+            preference.notifications_muted = bool(notifications_muted)
+            updates.append('notifications_muted')
         if updates:
             preference.save(update_fields=[*updates, 'updated_at'])
         return preference
 
     def json(self):
-        return self.dictify('pinned', 'online_reminder_enabled')
+        return self.dictify('pinned', 'online_reminder_enabled', 'notifications_muted')
 
     @classmethod
     def emit_peer_online_events(cls, peer: User):

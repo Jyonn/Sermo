@@ -2211,7 +2211,7 @@ class NotificationEvent(models.Model):
 
     @classmethod
     def _message_recipients(cls, chat, actor: User):
-        from Chat.models import ChatMember, ChatMemberStatusChoice
+        from Chat.models import ChatMember, ChatMemberStatusChoice, ChatUserPreference
 
         users = [
             item.user for item in ChatMember.objects.filter(
@@ -2219,7 +2219,14 @@ class NotificationEvent(models.Model):
                 status=ChatMemberStatusChoice.ACTIVE,
             ).select_related('user')
         ]
-        return [user for user in users if user.id != actor.id and not user.is_deleted]
+        muted_user_ids = set(ChatUserPreference.objects.filter(
+            chat=chat,
+            notifications_muted=True,
+        ).values_list('user_id', flat=True)) if chat.group else set()
+        return [
+            user for user in users
+            if user.id != actor.id and not user.is_deleted and user.id not in muted_user_ids
+        ]
 
     @classmethod
     def _message_event_type(cls, chat):
