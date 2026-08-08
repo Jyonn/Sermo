@@ -90,7 +90,7 @@ class Statement(models.Model):
                 status=FriendshipStatusChoice.ACCEPTED,
             ).filter(Q(user_low=user) | Q(user_high=user)).values_list('user_low_id', 'user_high_id')
             friend_ids = [high_id if low_id == user.id else low_id for low_id, high_id in friendships]
-            queryset = queryset.filter(user_id__in=friend_ids)
+            queryset = queryset.filter(user_id__in=[user.id, *friend_ids])
         if before:
             queryset = queryset.filter(id__lt=before)
         return [item.jsonl(request=request) for item in queryset.order_by('-created_at', '-id')[:limit]]

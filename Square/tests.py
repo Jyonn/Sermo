@@ -164,7 +164,8 @@ class StatementApiTests(TestCase):
         StatementComment.create_comment(self.author, public.id, '二级回复', parent_id=reply.id)
 
         feed = self.client.get('/square/statements?friends_only=1&limit=20', **self.authorization(self.author))
-        self.assertEqual([item['text'] for item in feed.json()['body']], ['朋友动态'])
+        self.assertEqual([item['text'] for item in feed.json()['body']], ['朋友动态', '好友动态'])
+        self.assertEqual(feed.json()['body'][0]['user']['growth_level'], self.friend.growth_level)
 
         comments = self.client.get(f'/square/statements/{public.id}/comments?offset=0&limit=30', **self.authorization(self.author))
         body = comments.json()['body'][0]

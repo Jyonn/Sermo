@@ -1055,7 +1055,7 @@ class User(models.Model):
     def tiny_json(self):
         return self.dictify(
             'name', 'user_id', 'official', 'avatar_type', 'avatar_uri', 'is_permanent_vip',
-            'chat_bubble_style', 'avatar_frame_style',
+            'chat_bubble_style', 'avatar_frame_style', 'growth_level',
         )
 
     def jsonl(self):
