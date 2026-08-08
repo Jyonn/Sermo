@@ -1,7 +1,10 @@
+from datetime import timedelta
 from unittest.mock import patch
 
-from django.test import SimpleTestCase
+from django.test import SimpleTestCase, TestCase
+from django.utils import timezone
 
+from Space.models import Space
 from User.models import (
     NotificationEvent,
     NotificationEventTypeChoice,
@@ -33,6 +36,20 @@ class UserPresentationTests(SimpleTestCase):
         user.set_language('zh-CN', save=False)
         self.assertEqual(user.language, 'zh-CN')
 
+
+class UserHeartbeatTests(TestCase):
+    def test_regular_model_save_does_not_refresh_heartbeat(self):
+        space = Space.objects.create(name='Presence Space', slug='presence-space', email='presence@example.com')
+        user = User.create(space=space, name='Presence Test')
+        previous = timezone.now() - timedelta(minutes=10)
+        User.objects.filter(id=user.id).update(last_heartbeat=previous)
+        user.refresh_from_db()
+
+        user.welcome_message = 'hello'
+        user.save()
+        user.refresh_from_db()
+
+        self.assertEqual(user.last_heartbeat, previous)
 
 class AccountSwitchPhoneNormalizationTests(SimpleTestCase):
     def test_mainland_phone_variants_include_country_code(self):

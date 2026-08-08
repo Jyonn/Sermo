@@ -202,7 +202,7 @@ class User(models.Model):
     )
 
     is_online = models.BooleanField(default=False)
-    last_heartbeat = models.DateTimeField(auto_now=True)
+    last_heartbeat = models.DateTimeField(default=timezone.now)
 
     email = models.EmailField(null=True, blank=True)
     email_verified_at = models.DateTimeField(null=True, blank=True)
@@ -743,9 +743,12 @@ class User(models.Model):
         return bool((self.password or '').strip())
 
     def heartbeat(self):
-        was_alive = self.is_alive
-        self.last_heartbeat = timezone.now()
-        self.save(update_fields=['last_heartbeat'])
+        now = timezone.now()
+        with transaction.atomic():
+            locked = User.objects.select_for_update().get(id=self.id)
+            was_alive = (now - locked.last_heartbeat).total_seconds() < self.vldt.OFFLINE_MIN_INTERVAL * 60
+            User.objects.filter(id=self.id).update(last_heartbeat=now)
+        self.last_heartbeat = now
         if not was_alive:
             from Chat.models import ChatUserPreference
             ChatUserPreference.emit_peer_online_events(self)
