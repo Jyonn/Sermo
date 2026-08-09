@@ -11,7 +11,12 @@ from utils import auth
 
 class StatementApiTests(TestCase):
     def setUp(self):
-        self.space = Space.objects.create(name='Square Test', slug='square-test', email='owner@example.com')
+        self.space = Space.objects.create(
+            name='Square Test',
+            slug='square-test',
+            email='owner@example.com',
+            group_square_enabled=True,
+        )
         self.author = User.create(
             space=self.space,
             name='Author',
@@ -39,6 +44,23 @@ class StatementApiTests(TestCase):
             content_type='application/json',
             **self.authorization(user),
         )
+
+    def test_pinned_statement_returns_empty_success_when_none_exists(self):
+        response = self.client.get('/square/statements/pinned', **self.authorization(self.stranger))
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertIsNone(response.json()['body'])
+
+    def test_pinned_statement_returns_empty_success_when_reference_is_stale(self):
+        self.author.pinned_square_statement_id = 999999
+        self.author.save(update_fields=['pinned_square_statement_id'])
+        self.space.official_user = self.author
+        self.space.save(update_fields=['official_user'])
+
+        response = self.client.get('/square/statements/pinned', **self.authorization(self.stranger))
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertIsNone(response.json()['body'])
 
     def test_unverified_user_can_read_but_cannot_publish(self):
         Statement.create_statement(self.author, '公开发言', 'public', [])

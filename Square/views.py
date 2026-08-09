@@ -2,7 +2,7 @@ from django.db import transaction
 from django.http import HttpResponseRedirect
 from django.views import View
 from oba import raw
-from smartdjango import analyse
+from smartdjango import OK, analyse
 
 from Square.models import Statement, StatementComment, StatementCommentLike, StatementLike, StatementMedia, StatementMediaKindChoice
 from Square.params import SquareParams
@@ -58,9 +58,9 @@ class PinnedStatementView(View):
         request.user.space.require_square_enabled()
         official = request.user.space.official_user
         if not official or not official.pinned_square_statement_id:
-            return None
+            return OK
         if not Statement.objects.filter(id=official.pinned_square_statement_id, space=request.user.space, is_deleted=False).exists():
-            return None
+            return OK
         return Statement.detail(request.user, official.pinned_square_statement_id, request=request)
 
 
