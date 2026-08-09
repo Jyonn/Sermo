@@ -513,6 +513,8 @@ class User(models.Model):
         return self
 
     def set_personalization(self, **values):
+        from TravelMap.unlocks import CITY_BUBBLE_RULES, city_bubble_requirement, unlocked_city_bubble_styles
+
         fields = ['chat_bubble_style', 'avatar_frame_style']
         if values.get('statement_card_style') is not None:
             fields.append('statement_card_style')
@@ -521,6 +523,9 @@ class User(models.Model):
             raise UserErrors.PERMANENT_VIP_NOT_ELIGIBLE
         if values['avatar_frame_style'] == 'vip' and not self.is_permanent_vip:
             raise UserErrors.PERMANENT_VIP_NOT_ELIGIBLE
+        requested_bubble = values['chat_bubble_style']
+        if requested_bubble in CITY_BUBBLE_RULES and requested_bubble not in unlocked_city_bubble_styles(self):
+            raise UserErrors.CITY_BUBBLE_CHECKIN_REQUIRED(region=city_bubble_requirement(requested_bubble))
         for field in fields:
             normalized = self.validators.personalization(field, values[field])
             if field in PERSONALIZATION_LEVELS and normalized in PERSONALIZATION_LEVELS[field] and normalized != getattr(self, field):
@@ -1149,6 +1154,8 @@ class User(models.Model):
             else ''
         )
         payload['growth'] = self.calculate_growth()
+        from TravelMap.unlocks import unlocked_city_bubble_styles
+        payload['city_bubble_styles'] = unlocked_city_bubble_styles(self)
         payload['permanent_vip_campaign'] = PermanentVipCampaign.status_for(self)
         payload['plaza_greeting'] = self.display_plaza_greeting()
         payload['name_changed_at'] = self.name_changed_at.timestamp() if self.name_changed_at else None

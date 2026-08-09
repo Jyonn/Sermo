@@ -56,6 +56,7 @@ class UserErrors:
     CHAT_BACKGROUND_KEY_INVALID = Error(message=_('Invalid chat background key'), code=Code.BadRequest)
     CHAT_BACKGROUND_THEME_INVALID = Error(message=_('Invalid chat background theme'), code=Code.BadRequest)
     PERSONALIZATION_INVALID = Error(message=_('Invalid personalization option'), code=Code.BadRequest)
+    CITY_BUBBLE_CHECKIN_REQUIRED = Error(message=_('Check in to {region} to unlock this city bubble'), code=Code.Forbidden)
     WEB_PUSH_SUBSCRIPTION_INVALID = Error(message=_('Invalid web push subscription'), code=Code.BadRequest)
     EMAIL_NOT_VERIFIED = Error(message=_('Email is not verified'), code=Code.Forbidden)
     GESTURE_LOCK_PAYLOAD_INVALID = Error(message=_('Invalid gesture lock payload'), code=Code.BadRequest)
@@ -119,6 +120,7 @@ class UserValidator:
         'chat_bubble_style': {
             'default', 'comic', 'vip', 'zen', 'hero', 'dragon', 'bauhaus', 'mosaic',
             'typewriter', 'newspaper', 'receipt', 'sticker', 'toybrick', 'niko', 'fufu', 'xiaobai',
+            'city-jdz', 'city-shanghai', 'city-nyc', 'city-beijing',
         },
         'avatar_frame_style': {
             'none', 'orbit', 'aurora', 'polaroid', 'soundwave', 'portal', 'butterfly',

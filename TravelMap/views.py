@@ -8,6 +8,7 @@ from smartdjango import OK, analyse
 from TravelMap.models import MapAccessGrant, MapChatGrant, MapCheckIn, TravelMap
 from TravelMap.params import TravelMapParams
 from TravelMap.validators import TravelMapErrors
+from TravelMap.unlocks import unlocked_city_bubble_styles
 from Message.models import Message, MessageTypeChoice
 from User.models import NotificationEvent
 from utils import auth
@@ -55,6 +56,7 @@ class TravelMapCheckInView(View):
             owner=request.user.tiny_json(),
             regions=[item.json() for item in regions],
             checked_region=checked.json(),
+            city_bubble_styles=unlocked_city_bubble_styles(request.user),
         )
 
 

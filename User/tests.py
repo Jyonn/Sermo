@@ -13,12 +13,37 @@ from User.models import (
     extract_emojis,
     normalize_bark_endpoint,
 )
+from TravelMap.models import MapCheckIn
+from User.validators import UserErrors
 
 
 class UserPresentationTests(SimpleTestCase):
     def test_plaza_greeting_has_language_aware_default(self):
         self.assertEqual(User(language='zh-CN').display_plaza_greeting(), '嗨，认识一下？')
         self.assertEqual(User(language='en').display_plaza_greeting(), 'Hi, nice to meet you.')
+
+
+class CityBubbleUnlockTests(TestCase):
+    def setUp(self):
+        self.space = Space.objects.create(name='City Collection', slug='city-collection', email='city@example.com')
+        self.user = User.create(space=self.space, name='Traveler')
+
+    def test_city_bubble_requires_matching_checkin(self):
+        with self.assertRaises(UserErrors.CITY_BUBBLE_CHECKIN_REQUIRED.__class__):
+            self.user.set_personalization(chat_bubble_style='city-jdz', avatar_frame_style='none')
+
+    def test_jiangxi_checkin_unlocks_jingdezhen_bubble(self):
+        MapCheckIn.objects.create(
+            user=self.user,
+            region_code='CN-JX',
+            region_name='Jiangxi Province',
+            country_code='CHN',
+            country_name='China',
+        )
+        self.user.set_personalization(chat_bubble_style='city-jdz', avatar_frame_style='none')
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.chat_bubble_style, 'city-jdz')
+        self.assertIn('city-jdz', self.user.json_me()['city_bubble_styles'])
 
     def test_custom_plaza_greeting_takes_precedence(self):
         self.assertEqual(
