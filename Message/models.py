@@ -60,6 +60,7 @@ class MessageTypeChoice(Choice):
     AUDIO = 5
     LOCATION = 6
     MAP_ACCESS = 7
+    STATEMENT = 8
 
 
 class MessageEventTypeChoice(Choice):
@@ -406,6 +407,7 @@ class Message(models.Model):
         MessageTypeChoice.FILE: '[文件]',
         MessageTypeChoice.LOCATION: '[位置]',
         MessageTypeChoice.MAP_ACCESS: '[地图邀请]',
+        MessageTypeChoice.STATEMENT: '[发言]',
     }
 
     chat = models.ForeignKey(Chat, on_delete=models.CASCADE, db_index=True)
@@ -450,6 +452,11 @@ class Message(models.Model):
     @classmethod
     def create(cls, chat: Chat, user: User, message_type, content, reply_to=None, client_message_id=None):
         if chat.has_active_member(user):
+            if message_type == MessageTypeChoice.TEXT:
+                statement_reference = cls.statement_reference_from_text(content, user)
+                if statement_reference is not None:
+                    message_type = MessageTypeChoice.STATEMENT
+                    content = json.dumps(statement_reference, separators=(',', ':'), ensure_ascii=False)
             capability = {
                 MessageTypeChoice.IMAGE: 'send_image',
                 MessageTypeChoice.AUDIO: 'send_audio',
@@ -629,6 +636,35 @@ class Message(models.Model):
         return json.dumps(normalized, separators=(',', ':'), ensure_ascii=False)
 
     @classmethod
+    def statement_reference_from_text(cls, content, user):
+        from Square.models import Statement
+
+        for match in LinkPreview.URL_RE.finditer(content or ''):
+            raw_url = match.group(0).rstrip(LinkPreview.TRAILING_PUNCTUATION)
+            parsed = urlparse(raw_url)
+            hostname = (parsed.hostname or '').lower()
+            trusted_host = (
+                hostname in {'sermo.jyonn.space', 'localhost', '127.0.0.1'}
+                or hostname.endswith('.sermo.jyonn.space')
+                or hostname.endswith('.localhost')
+            )
+            if not trusted_host:
+                continue
+            path_match = re.fullmatch(r'/(?:([^/]+)/)?app/square/statements/(\d+)/?', parsed.path)
+            if path_match is None:
+                continue
+            path_slug, statement_id = path_match.groups()
+            host_slug = hostname.removesuffix('.sermo.jyonn.space') if hostname.endswith('.sermo.jyonn.space') else ''
+            referenced_slug = (path_slug or host_slug or user.space.slug).lower()
+            if referenced_slug != user.space.slug:
+                continue
+            statement = Statement.visible_for(user).filter(id=int(statement_id)).first()
+            if statement is None:
+                continue
+            return dict(kind='statement', statement_id=statement.id, url=raw_url, text=(content or '').strip())
+        return None
+
+    @classmethod
     def normalize_content(cls, message_type, content):
         if message_type in (MessageTypeChoice.TEXT, MessageTypeChoice.SYSTEM):
             normalized = (content or '').strip()
@@ -712,6 +748,26 @@ class Message(models.Model):
                 raise MessageErrors.CONTENT_TOO_LONG
             return normalized
 
+        if message_type == MessageTypeChoice.STATEMENT:
+            payload = cls._parse_payload(content)
+            try:
+                statement_id = int(payload.get('statement_id'))
+            except (TypeError, ValueError):
+                raise MessageErrors.PAYLOAD_INVALID
+            normalized = json.dumps(
+                dict(
+                    kind='statement',
+                    statement_id=statement_id,
+                    url=(str(payload.get('url') or '').strip())[:280],
+                    text=(str(payload.get('text') or '').strip())[:100],
+                ),
+                separators=(',', ':'),
+                ensure_ascii=False,
+            )
+            if len(normalized) > cls.vldt.MAX_CONTENT_LENGTH:
+                raise MessageErrors.CONTENT_TOO_LONG
+            return normalized
+
         raise MessageErrors.TYPE_INVALID
 
     @classmethod
@@ -772,6 +828,20 @@ class Message(models.Model):
             if viewer is not None and viewer.space_id == self.user.space_id:
                 response['chat_access'] = MapChatGrant.status(self.chat, viewer) if response['chat_grant'] else None
                 response['access'] = None if response['chat_grant'] else MapAccessGrant.status_between(viewer, self.user)
+            return response
+        if self.type == MessageTypeChoice.STATEMENT:
+            from Square.models import Statement
+            reference = self._parse_payload(self.content)
+            viewer = getattr(request, 'user', None) if request is not None else None
+            response = dict(
+                kind='statement',
+                statement_id=reference.get('statement_id'),
+                url=reference.get('url') or '',
+                text=reference.get('text') or '',
+                statement=None,
+            )
+            if viewer is not None and Statement.visible_for(viewer).filter(id=reference.get('statement_id')).exists():
+                response['statement'] = Statement.detail(viewer, reference.get('statement_id'), request=request)
             return response
         if self.type == MessageTypeChoice.FILE and not self.content.lstrip().startswith('{'):
             return dict(kind='file', text=self.content)
