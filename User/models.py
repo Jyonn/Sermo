@@ -157,7 +157,7 @@ class User(models.Model):
     OFFICIAL_WELCOME_MESSAGE_EN = 'Welcome to {space}!'
     DEFAULT_PLAZA_GREETING_ZH = '嗨，认识一下？'
     DEFAULT_PLAZA_GREETING_EN = 'Hi, nice to meet you.'
-    AVATAR_PRESET_BASE_URI = 'https://image.6-79.cn/sermo/assets/avatars'
+    AVATAR_PRESET_BASE_URI = 'https://sermo.jyonn.space/assets/avatars/v2'
     HANZI_PATTERN = re.compile(r'[\u4e00-\u9fff]')
 
     space = models.ForeignKey('Space.Space', on_delete=models.CASCADE, related_name='users', db_index=True)
@@ -322,7 +322,7 @@ class User(models.Model):
     @classmethod
     def build_preset_avatar_uri(cls, preset_id: int):
         validated = cls.vldt.avatar_preset_id(preset_id)
-        return f'{cls.AVATAR_PRESET_BASE_URI}/{validated:02d}.svg'
+        return f'{cls.AVATAR_PRESET_BASE_URI}/{validated:02d}.png'
 
     @classmethod
     def _default_avatar_preset_id(cls, salt: str):

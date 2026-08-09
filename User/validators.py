@@ -110,7 +110,7 @@ class UserValidator:
         'zh_cn': 'zh-CN',
     }
     AVATAR_PRESET_MIN_ID = 1
-    AVATAR_PRESET_MAX_ID = 80
+    AVATAR_PRESET_MAX_ID = 36
     CHAT_BACKGROUND_THEMES = {
         'default', 'paper', 'mint', 'dusk', 'comic', 'zen', 'hero', 'dragon', 'bauhaus', 'mosaic',
         'tidepool', 'forest', 'desert', 'snowfield', 'sakura', 'sunrise', 'midnight', 'rain', 'galaxy',

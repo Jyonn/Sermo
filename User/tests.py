@@ -18,6 +18,12 @@ from User.validators import UserErrors
 
 
 class UserPresentationTests(SimpleTestCase):
+    def test_preset_avatar_uses_webapp_png_collection(self):
+        self.assertEqual(
+            User.build_preset_avatar_uri(36),
+            'https://sermo.jyonn.space/assets/avatars/v2/36.png',
+        )
+
     def test_plaza_greeting_has_language_aware_default(self):
         self.assertEqual(User(language='zh-CN').display_plaza_greeting(), '嗨，认识一下？')
         self.assertEqual(User(language='en').display_plaza_greeting(), 'Hi, nice to meet you.')
