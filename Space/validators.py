@@ -30,6 +30,12 @@ class SpaceErrors:
     LEVEL_NAMES_INVALID = Error(message=_('Space level names are invalid'), code=Code.BadRequest)
     ADMIN_ACCESS_FORBIDDEN = Error(message=_('Only the official account can access space administration'), code=Code.Forbidden)
     NOTIFICATOR_FAILED = Error(message=_('Failed to send notification'), code=Code.InternalServerError)
+    MODULES_REQUIRED = Error(message=_('Chat and square cannot both be disabled'), code=Code.BadRequest)
+    CHAT_DISABLED = Error(message=_('Chat is disabled in this space'), code=Code.Forbidden)
+    SQUARE_DISABLED = Error(message=_('Square is disabled in this space'), code=Code.Forbidden)
+    SQUARE_EXPLORE_DISABLED = Error(message=_('Square exploration is disabled in this space'), code=Code.Forbidden)
+    UNVERIFIED_GROUP_JOIN_DISABLED = Error(message=_('Unverified members cannot join group chats in this space'), code=Code.Forbidden)
+    UNVERIFIED_GROUP_SEND_DISABLED = Error(message=_('Unverified members cannot send messages in group chats in this space'), code=Code.Forbidden)
 
 
 class SpaceValidator:
@@ -39,6 +45,8 @@ class SpaceValidator:
     MEMBER_LIMIT_MAX = 10000
     LEVEL_COUNT = 18
     LEVEL_NAME_MAX_LENGTH = 8
+    UNVERIFIED_GROUP_POLICY_MIN = 0
+    UNVERIFIED_GROUP_POLICY_MAX = 2
 
     @classmethod
     def name(cls, value):
@@ -79,4 +87,11 @@ class SpaceValidator:
             raise SpaceErrors.LEVEL_NAMES_INVALID
         if len(set(normalized)) != cls.LEVEL_COUNT:
             raise SpaceErrors.LEVEL_NAMES_INVALID
+        return normalized
+
+    @classmethod
+    def unverified_group_policy(cls, value):
+        normalized = int(value)
+        if not cls.UNVERIFIED_GROUP_POLICY_MIN <= normalized <= cls.UNVERIFIED_GROUP_POLICY_MAX:
+            raise SpaceErrors.UNVERIFIED_GROUP_JOIN_DISABLED
         return normalized

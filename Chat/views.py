@@ -26,6 +26,7 @@ class ChatListView(View):
 
     @auth.require_user
     def get(self, request):
+        request.user.space.require_chat_enabled()
         chats = Chat.get_user_chats(request.user)
         payloads = [self.build_chat_payload(chat, request.user, request) for chat in chats]
         payloads.sort(key=lambda item: (bool(item['pinned']), item['last_chat_at']), reverse=True)
@@ -36,6 +37,7 @@ class DirectChatView(View):
     @auth.require_user
     @analyse.json(ChatParams.peer_user_id)
     def post(self, request):
+        request.user.space.require_chat_enabled()
         chat = Chat.get_or_create_direct(request.user, request.json.peer_user)
         return chat.json()
 
@@ -44,6 +46,7 @@ class GroupChatView(View):
     @auth.require_user
     @analyse.json(ChatParams.users, ChatParams.title.copy().null().default(None))
     def post(self, request):
+        request.user.space.require_chat_enabled()
         chat = Chat.create_group(request.user, request.json.users, request.json.title)
         return chat.json()
 

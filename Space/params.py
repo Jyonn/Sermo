@@ -3,6 +3,7 @@ from smartdjango import Params, Validator
 
 from Message.validators import MessageValidator
 from Space.models import Space, SpaceEmailVerificationCode
+from Space.validators import SpaceValidator
 from Message.params import MessageParams
 from User.params import UserParams
 
@@ -21,6 +22,11 @@ class SpaceParams(metaclass=Params):
         .to(int) \
         .null().default(None) \
         .bool(lambda x: x is None or x in (0, 1), message=_('group_square_enabled should be 0 or 1'))
+    chat_enabled = Validator('chat_enabled').to(int).null().default(1).bool(
+        lambda x: x in (0, 1), message=_('chat_enabled should be 0 or 1'))
+    square_explore_enabled = Validator('square_explore_enabled').to(int).null().default(1).bool(
+        lambda x: x in (0, 1), message=_('square_explore_enabled should be 0 or 1'))
+    unverified_group_policy = Validator('unverified_group_policy').to(int).null().default(2).to(SpaceValidator.unverified_group_policy)
 
 
 class SpaceEmailVerificationCodeParams(metaclass=Params):

@@ -134,7 +134,11 @@ class Chat(models.Model):
                 chat_members__status=ChatMemberStatusChoice.ACTIVE,
             ).distinct()
         )
-        return [chat for chat in chats if chat.has_active_member(user)]
+        return [
+            chat for chat in chats
+            if chat.has_active_member(user)
+            and not (chat.group and not user.verified and user.space.unverified_group_policy < 1)
+        ]
 
     @classmethod
     def _pair(cls, self_user: User, peer_user: User):
@@ -237,6 +241,7 @@ class Chat(models.Model):
 
     @classmethod
     def create_group(cls, creator: User, users: List[User], title: str = None):
+        creator.space.require_chat_enabled()
         creator.require_growth_capability('create_group')
         cls._require_verified_group_operator(creator)
         normalized = {creator.id: creator}
@@ -247,6 +252,7 @@ class Chat(models.Model):
                 raise ChatErrors.USER_DELETED(user=user.name)
             if user.id != creator.id:
                 cls._require_friend_of(creator, user)
+                creator.space.require_group_join_allowed(user)
             normalized[user.id] = user
 
         final_title = (title or '').strip()
@@ -293,6 +299,7 @@ class Chat(models.Model):
             raise ChatErrors.USER_DELETED(user=user.name)
         if user.id != inviter.id:
             self._require_friend_of(inviter, user)
+            self.space.require_group_join_allowed(user)
         return ChatMember.invite(chat=self, user=user, invited_by=inviter)
 
     def respond_invite(self, user: User, accept: bool):

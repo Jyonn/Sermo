@@ -23,6 +23,7 @@ class StatementView(View):
     @auth.require_user
     @analyse.query(SquareParams.before, SquareParams.limit, SquareParams.scope, SquareParams.user_id)
     def get(self, request: Request):
+        request.user.space.require_square_enabled(scope=request.query.scope)
         return Statement.feed(
             request.user,
             before=request.query.before,
@@ -35,6 +36,7 @@ class StatementView(View):
     @auth.require_user
     @analyse.json(SquareParams.text, SquareParams.visibility, SquareParams.media, SquareParams.pin)
     def post(self, request: Request):
+        request.user.space.require_square_enabled()
         with transaction.atomic():
             statement = Statement.create_statement(
                 user=request.user,
@@ -53,6 +55,7 @@ class StatementView(View):
 class PinnedStatementView(View):
     @auth.require_user
     def get(self, request: Request):
+        request.user.space.require_square_enabled()
         official = request.user.space.official_user
         if not official or not official.pinned_square_statement_id:
             return None
@@ -65,6 +68,7 @@ class StatementPinView(View):
     @auth.require_user
     @analyse.json(SquareParams.pin)
     def post(self, request: Request, statement_id: int):
+        request.user.space.require_square_enabled()
         if not request.user.is_official:
             raise SquareErrors.PIN_FORBIDDEN
         try:
@@ -84,6 +88,7 @@ class StatementPinView(View):
 class SquareQuotaView(View):
     @auth.require_user
     def get(self, request: Request):
+        request.user.space.require_square_enabled()
         return quota_for_user(request.user)
 
 
@@ -91,6 +96,7 @@ class StatementUploadView(View):
     @auth.require_user
     @analyse.json(SquareParams.kind, SquareParams.file_name, SquareParams.content_type)
     def post(self, request: Request):
+        request.user.space.require_square_enabled()
         if not request.user.verified:
             raise SquareErrors.PUBLISH_REQUIRES_VERIFICATION
         if request.json.kind not in {'image', 'audio', 'video'}:
@@ -105,10 +111,12 @@ class StatementUploadView(View):
 class StatementDetailView(View):
     @auth.require_user
     def get(self, request: Request, statement_id: int):
+        request.user.space.require_square_enabled()
         return Statement.detail(request.user, statement_id, request=request)
 
     @auth.require_user
     def delete(self, request: Request, statement_id: int):
+        request.user.space.require_square_enabled()
         try:
             statement = Statement.objects.get(id=statement_id, space=request.user.space, is_deleted=False)
         except Statement.DoesNotExist:
@@ -131,6 +139,7 @@ class StatementDetailView(View):
 class StatementLikeView(View):
     @auth.require_user
     def post(self, request: Request, statement_id: int):
+        request.user.space.require_square_enabled()
         if not request.user.verified:
             raise SquareErrors.PUBLISH_REQUIRES_VERIFICATION
         try:
@@ -146,6 +155,7 @@ class StatementLikeView(View):
 
     @auth.require_user
     def delete(self, request: Request, statement_id: int):
+        request.user.space.require_square_enabled()
         try:
             statement = Statement.visible_for(request.user).get(id=statement_id)
         except Statement.DoesNotExist:
@@ -157,6 +167,7 @@ class StatementLikeView(View):
 class StatementCommentLikeView(View):
     @auth.require_user
     def post(self, request: Request, comment_id: int):
+        request.user.space.require_square_enabled()
         if not request.user.verified:
             raise SquareErrors.PUBLISH_REQUIRES_VERIFICATION
         try:
@@ -174,6 +185,7 @@ class StatementCommentLikeView(View):
 
     @auth.require_user
     def delete(self, request: Request, comment_id: int):
+        request.user.space.require_square_enabled()
         try:
             comment = StatementComment.objects.select_related('statement').get(id=comment_id, is_deleted=False)
         except StatementComment.DoesNotExist:
@@ -187,6 +199,7 @@ class StatementCommentView(View):
     @auth.require_user
     @analyse.query(SquareParams.offset, SquareParams.limit)
     def get(self, request: Request, statement_id: int):
+        request.user.space.require_square_enabled()
         return StatementComment.feed(
             request.user,
             statement_id=statement_id,
@@ -197,6 +210,7 @@ class StatementCommentView(View):
     @auth.require_user
     @analyse.json(SquareParams.comment_text, SquareParams.parent_id)
     def post(self, request: Request, statement_id: int):
+        request.user.space.require_square_enabled()
         comment = StatementComment.create_comment(
             request.user,
             statement_id,

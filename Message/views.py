@@ -25,6 +25,9 @@ class MessageView(View):
     )
     @auth.require_chat_member()
     def get(self, request: Request):
+        request.user.space.require_chat_enabled()
+        if request.query.chat.group:
+            request.user.space.require_group_join_allowed(request.user)
         before = request.query.before
         after = request.query.after
 
@@ -44,6 +47,9 @@ class MessageView(View):
         MessageParams.client_message_id,
     )
     def post(self, request: Request):
+        request.user.space.require_chat_enabled()
+        if request.query.chat.group:
+            request.user.space.require_group_send_allowed(request.user)
         with transaction.atomic():
             message = Message.create(
                 chat=request.query.chat,
@@ -164,6 +170,7 @@ class MessageUploadView(View):
         MessageParams.content_type,
     )
     def post(self, request: Request):
+        request.user.space.require_chat_enabled()
         capability = {
             'image': 'send_image',
             'audio': 'send_audio',

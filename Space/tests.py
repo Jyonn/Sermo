@@ -185,6 +185,48 @@ class SpaceAdminApiTests(TestCase):
         self.assertEqual(self.space.level_names, level_names)
         self.assertEqual(response.json()['body']['level_names'], level_names)
 
+    def test_admin_feature_settings_preserve_valid_module_combination(self):
+        response = self.client.post(
+            '/spaces/admin/settings',
+            data=json.dumps({
+                'name': self.space.name,
+                'group_square_enabled': 1,
+                'chat_enabled': 0,
+                'square_explore_enabled': 0,
+                'unverified_group_policy': 1,
+                'member_limit': 100,
+                'level_names': self.space.level_names,
+            }),
+            content_type='application/json',
+            **self.authorization(),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.space.refresh_from_db()
+        self.assertFalse(self.space.chat_enabled)
+        self.assertTrue(self.space.group_square_enabled)
+        self.assertFalse(self.space.square_explore_enabled)
+        self.assertEqual(self.space.unverified_group_policy, 1)
+
+    def test_admin_cannot_disable_chat_and_square_together(self):
+        response = self.client.post(
+            '/spaces/admin/settings',
+            data=json.dumps({
+                'name': self.space.name,
+                'group_square_enabled': 0,
+                'chat_enabled': 0,
+                'square_explore_enabled': 0,
+                'unverified_group_policy': 2,
+                'member_limit': 100,
+                'level_names': self.space.level_names,
+            }),
+            content_type='application/json',
+            **self.authorization(),
+        )
+
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertEqual(response.json()['identifier'], 'SPACE@MODULES_REQUIRED')
+
     def test_official_account_has_highest_growth_level(self):
         self.space.level_names = [f'阶段{index}' for index in range(1, 19)]
         self.space.save(update_fields=['level_names'])

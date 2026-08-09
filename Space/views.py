@@ -205,6 +205,9 @@ class SpaceAdminSettingsView(View):
     @analyse.json(
         SpaceParams.name,
         SpaceParams.group_square_enabled,
+        SpaceParams.chat_enabled,
+        SpaceParams.square_explore_enabled,
+        SpaceParams.unverified_group_policy,
         SpaceParams.member_limit,
         SpaceParams.level_names,
     )
@@ -212,6 +215,9 @@ class SpaceAdminSettingsView(View):
         space = request.space.set_admin_settings(
             name=request.json.name,
             group_square_enabled=request.json.group_square_enabled,
+            chat_enabled=request.json.chat_enabled,
+            square_explore_enabled=request.json.square_explore_enabled,
+            unverified_group_policy=request.json.unverified_group_policy,
             member_limit=request.json.member_limit,
             level_names=request.json.level_names() if request.json.level_names is not None else None,
         )

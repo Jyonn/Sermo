@@ -55,6 +55,9 @@ class Space(models.Model):
         related_name='official_space',
     )
     group_square_enabled = models.BooleanField(default=False)
+    chat_enabled = models.BooleanField(default=True)
+    square_explore_enabled = models.BooleanField(default=True)
+    unverified_group_policy = models.PositiveSmallIntegerField(default=2)
     member_limit = models.PositiveIntegerField(null=True, blank=True, default=None)
     level_names = models.JSONField(default=default_level_names)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -182,20 +185,50 @@ class Space(models.Model):
             raise SpaceErrors.MEMBER_LIMIT_REACHED
         return self
 
-    def set_admin_settings(self, name, group_square_enabled, member_limit, level_names=None):
+    def set_admin_settings(
+            self, name, group_square_enabled, chat_enabled, square_explore_enabled,
+            unverified_group_policy, member_limit, level_names=None):
         normalized_name = self.vldt.name(name)
         normalized_member_limit = self.vldt.member_limit(member_limit)
         normalized_level_names = self.vldt.level_names(level_names or self.level_names)
         current_member_count = self.active_member_count()
         if normalized_member_limit is not None and normalized_member_limit < current_member_count:
             raise SpaceErrors.MEMBER_LIMIT_TOO_LOW
+        normalized_chat_enabled = bool(chat_enabled)
+        normalized_square_enabled = bool(group_square_enabled)
+        if not normalized_chat_enabled and not normalized_square_enabled:
+            raise SpaceErrors.MODULES_REQUIRED
 
         self.name = normalized_name
-        self.group_square_enabled = bool(group_square_enabled)
+        self.group_square_enabled = normalized_square_enabled
+        self.chat_enabled = normalized_chat_enabled
+        self.square_explore_enabled = bool(square_explore_enabled) and normalized_square_enabled
+        self.unverified_group_policy = self.vldt.unverified_group_policy(unverified_group_policy)
         self.member_limit = normalized_member_limit
         self.level_names = normalized_level_names
-        self.save(update_fields=['name', 'group_square_enabled', 'member_limit', 'level_names'])
+        self.save(update_fields=[
+            'name', 'group_square_enabled', 'chat_enabled', 'square_explore_enabled',
+            'unverified_group_policy', 'member_limit', 'level_names',
+        ])
         return self
+
+    def require_chat_enabled(self):
+        if not self.chat_enabled:
+            raise SpaceErrors.CHAT_DISABLED
+
+    def require_square_enabled(self, scope=None):
+        if not self.group_square_enabled:
+            raise SpaceErrors.SQUARE_DISABLED
+        if scope == 'all' and not self.square_explore_enabled:
+            raise SpaceErrors.SQUARE_EXPLORE_DISABLED
+
+    def require_group_join_allowed(self, user):
+        if not user.verified and self.unverified_group_policy < 1:
+            raise SpaceErrors.UNVERIFIED_GROUP_JOIN_DISABLED
+
+    def require_group_send_allowed(self, user):
+        if not user.verified and self.unverified_group_policy < 2:
+            raise SpaceErrors.UNVERIFIED_GROUP_SEND_DISABLED
 
     def json(self):
         return self.jsonl()
@@ -207,6 +240,9 @@ class Space(models.Model):
             'slug',
             'official_user',
             'group_square_enabled',
+            'chat_enabled',
+            'square_explore_enabled',
+            'unverified_group_policy',
             'member_limit',
             'level_names',
             'created_at',
@@ -221,6 +257,9 @@ class Space(models.Model):
             'email_verified_at',
             'official_user',
             'group_square_enabled',
+            'chat_enabled',
+            'square_explore_enabled',
+            'unverified_group_policy',
             'member_limit',
             'level_names',
             'created_at',
