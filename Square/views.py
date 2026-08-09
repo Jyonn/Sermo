@@ -113,7 +113,18 @@ class StatementDetailView(View):
             statement = Statement.objects.get(id=statement_id, space=request.user.space, is_deleted=False)
         except Statement.DoesNotExist:
             raise SquareErrors.NOT_EXISTS
+        removed_by_admin = request.user.id != statement.user_id
+        owner = statement.user
+        excerpt = (statement.text or '').strip()[:80]
         statement.delete_for(request.user)
+        if removed_by_admin:
+            NotificationEvent.objects.create(
+                space=request.user.space,
+                user=owner,
+                actor=request.user,
+                event_type=NotificationEventTypeChoice.SQUARE_STATEMENT_REMOVED,
+                payload=dict(statement_id=statement.id, statement_excerpt=excerpt, removed_by_admin=True),
+            )
         return dict(statement_id=statement.id, deleted=True)
 
 

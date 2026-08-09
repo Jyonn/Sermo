@@ -1655,6 +1655,7 @@ class NotificationEventTypeChoice(Choice):
     SQUARE_STATEMENT_COMMENT = 6
     SQUARE_COMMENT_LIKE = 7
     SQUARE_COMMENT_REPLY = 8
+    SQUARE_STATEMENT_REMOVED = 9
 
 
 class NotificationRouteChannelChoice(Choice):

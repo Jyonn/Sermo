@@ -269,6 +269,7 @@ class NotificationEventView(View):
         NotificationEventTypeChoice.SQUARE_STATEMENT_COMMENT,
         NotificationEventTypeChoice.SQUARE_COMMENT_LIKE,
         NotificationEventTypeChoice.SQUARE_COMMENT_REPLY,
+        NotificationEventTypeChoice.SQUARE_STATEMENT_REMOVED,
     )
 
     @auth.require_user
