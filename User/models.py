@@ -519,6 +519,13 @@ class User(models.Model):
         if values.get('statement_card_style') is not None:
             fields.append('statement_card_style')
         changed = any(values[field] != getattr(self, field) for field in fields)
+        discontinued = {
+            'chat_bubble_style': {'xiaobai'},
+            'avatar_frame_style': {'xiaobai-run'},
+        }
+        for field, unavailable_values in discontinued.items():
+            if values[field] in unavailable_values and values[field] != getattr(self, field):
+                raise UserErrors.PERSONALIZATION_UNAVAILABLE
         if values['chat_bubble_style'] == 'vip' and not self.is_permanent_vip:
             raise UserErrors.PERMANENT_VIP_NOT_ELIGIBLE
         if values['avatar_frame_style'] == 'vip' and not self.is_permanent_vip:

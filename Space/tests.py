@@ -382,8 +382,8 @@ class SpaceAdminApiTests(TestCase):
 
     def test_ip_styles_require_their_level_or_permanent_vip(self):
         payload = {
-            'chat_bubble_style': 'xiaobai',
-            'avatar_frame_style': 'xiaobai-run',
+            'chat_bubble_style': 'niko',
+            'avatar_frame_style': 'niko-run',
         }
         denied = self.client.post(
             '/users/me/personalization',
@@ -404,8 +404,8 @@ class SpaceAdminApiTests(TestCase):
         )
         self.assertEqual(accepted.status_code, 200, accepted.content)
         self.member.refresh_from_db()
-        self.assertEqual(self.member.chat_bubble_style, 'xiaobai')
-        self.assertEqual(self.member.avatar_frame_style, 'xiaobai-run')
+        self.assertEqual(self.member.chat_bubble_style, 'niko')
+        self.assertEqual(self.member.avatar_frame_style, 'niko-run')
 
         self.member.chat_bubble_style = 'default'
         self.member.avatar_frame_style = 'none'
@@ -426,6 +426,19 @@ class SpaceAdminApiTests(TestCase):
             **self.user_authorization(self.member),
         )
         self.assertEqual(level_eighteen.status_code, 200, level_eighteen.content)
+
+    def test_discontinued_xiaobai_styles_cannot_be_newly_enabled(self):
+        denied = self.client.post(
+            '/users/me/personalization',
+            data=json.dumps({
+                'chat_bubble_style': 'xiaobai',
+                'avatar_frame_style': 'xiaobai-run',
+            }),
+            content_type='application/json',
+            **self.user_authorization(self.member),
+        )
+        self.assertEqual(denied.status_code, 403, denied.content)
+        self.assertEqual(denied.json()['identifier'], 'USER@PERSONALIZATION_UNAVAILABLE')
 
     def test_message_search_filters_keyword_type_and_hidden_records(self):
         chat = Chat.get_or_create_direct(self.official, self.member)
