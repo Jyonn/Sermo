@@ -41,7 +41,7 @@ class MessageParams(metaclass=Params):
     after = Validator('after').to(int).null().default(None)
     keyword = Validator('keyword').to(str).null().default(None)
     search_type = Validator('type', final_name='search_type').to(int).bool(
-        lambda value: value in (0, 1, 2, 4, 5, 6, 7, 8),
+        lambda value: value in (0, 1, 2, 4, 5, 6, 7, 8, 9),
         message=_('Unsupported message type'),
     ).null().default(None)
     delete_scope = Validator('scope', final_name='delete_scope').to(str).bool(lambda value: value in ('me', 'everyone')).default('everyone')

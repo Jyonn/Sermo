@@ -30,6 +30,7 @@ MESSAGE_MEDIA_MAX_FILE_SIZE = {
     'video': 500 * 1024 * 1024,
     'audio': 20 * 1024 * 1024,
     'file': 100 * 1024 * 1024,
+    'sticker': 10 * 1024 * 1024,
 }
 MESSAGE_MEDIA_ALLOWED_EXTENSIONS = {
     'image': {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.svg'},
@@ -39,6 +40,7 @@ MESSAGE_MEDIA_ALLOWED_EXTENSIONS = {
         '.pdf', '.txt', '.md', '.doc', '.docx', '.xls', '.xlsx', '.csv',
         '.ppt', '.pptx', '.zip', '.rar', '.7z', '.tar', '.gz', '.json',
     },
+    'sticker': {'.jpg', '.jpeg', '.png', '.gif', '.webp'},
 }
 ALLOWED_IMAGE_EXTENSIONS = {
     '.jpg',
@@ -354,4 +356,18 @@ def issue_message_upload(kind: str, file_name: str, content_type: str = None):
         resource_uri=sign_private_download_url(resource_uri),
         expires_in=QINIU_TOKEN_EXPIRE_SECONDS,
         max_file_size=MESSAGE_MEDIA_MAX_FILE_SIZE[normalized_kind],
+    )
+
+
+def issue_sticker_upload(content_hash: str, file_name: str, content_type: str = None):
+    extension = _guess_extension_by_kind('sticker', file_name, content_type)
+    key = f'{MESSAGE_MEDIA_PREFIX}/sticker/{content_hash}{extension}'
+    return dict(
+        kind='sticker',
+        upload_token=build_upload_token(key, max_file_size=MESSAGE_MEDIA_MAX_FILE_SIZE['sticker']),
+        upload_url=QINIU_UPLOAD_URL,
+        key=key,
+        resource_uri=sign_private_download_url(avatar_uri_for_key(key)),
+        expires_in=QINIU_TOKEN_EXPIRE_SECONDS,
+        max_file_size=MESSAGE_MEDIA_MAX_FILE_SIZE['sticker'],
     )

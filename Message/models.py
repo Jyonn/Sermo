@@ -61,6 +61,7 @@ class MessageTypeChoice(Choice):
     LOCATION = 6
     MAP_ACCESS = 7
     STATEMENT = 8
+    STICKER = 9
 
 
 class MessageEventTypeChoice(Choice):
@@ -408,6 +409,7 @@ class Message(models.Model):
         MessageTypeChoice.LOCATION: '[位置]',
         MessageTypeChoice.MAP_ACCESS: '[地图邀请]',
         MessageTypeChoice.STATEMENT: '[发言]',
+        MessageTypeChoice.STICKER: '[表情包]',
     }
 
     chat = models.ForeignKey(Chat, on_delete=models.CASCADE, db_index=True)
@@ -478,6 +480,19 @@ class Message(models.Model):
                     existing._was_created = False
                     return existing
             normalized_content = cls.normalize_content(message_type, content)
+            if message_type == MessageTypeChoice.STICKER:
+                from Sticker.models import UserSticker
+                sticker_payload = cls._parse_payload(content)
+                sticker = UserSticker.objects.filter(
+                    id=sticker_payload.get('sticker_id'),
+                    user=user,
+                ).select_related('asset').first()
+                if sticker is None:
+                    raise MessageErrors.PAYLOAD_INVALID
+                normalized_content = json.dumps(
+                    dict(kind='sticker', asset_id=sticker.asset_id),
+                    separators=(',', ':'),
+                )
             map_access_viewer = None
             if message_type == MessageTypeChoice.MAP_ACCESS:
                 payload = cls._parse_payload(normalized_content)
@@ -768,6 +783,17 @@ class Message(models.Model):
                 raise MessageErrors.CONTENT_TOO_LONG
             return normalized
 
+        if message_type == MessageTypeChoice.STICKER:
+            payload = cls._parse_payload(content)
+            try:
+                asset_id = int(payload.get('asset_id') or payload.get('sticker_id'))
+            except (TypeError, ValueError):
+                raise MessageErrors.PAYLOAD_INVALID
+            normalized = json.dumps(dict(kind='sticker', asset_id=asset_id), separators=(',', ':'))
+            if len(normalized) > cls.vldt.MAX_CONTENT_LENGTH:
+                raise MessageErrors.CONTENT_TOO_LONG
+            return normalized
+
         raise MessageErrors.TYPE_INVALID
 
     @classmethod
@@ -842,6 +868,15 @@ class Message(models.Model):
             )
             if viewer is not None and Statement.visible_for(viewer).filter(id=reference.get('statement_id')).exists():
                 response['statement'] = Statement.detail(viewer, reference.get('statement_id'), request=request)
+            return response
+        if self.type == MessageTypeChoice.STICKER:
+            from Sticker.models import StickerAsset
+            reference = self._parse_payload(self.content)
+            asset = StickerAsset.objects.filter(id=reference.get('asset_id')).first()
+            if asset is None:
+                return dict(kind='sticker', unavailable=True)
+            response = asset.jsonl(request=request)
+            response['kind'] = 'sticker'
             return response
         if self.type == MessageTypeChoice.FILE and not self.content.lstrip().startswith('{'):
             return dict(kind='file', text=self.content)

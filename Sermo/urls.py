@@ -22,6 +22,7 @@ urlpatterns = [
     path('friends/', include('Friendship.urls')),
     path('chats/', include('Chat.urls')),
     path('messages/', include('Message.urls')),
+    path('stickers/', include('Sticker.urls')),
     path('maps/', include('TravelMap.urls')),
     path('square/', include('Square.urls')),
 ]
