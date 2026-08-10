@@ -229,6 +229,29 @@ class StatementApiTests(TestCase):
         self.assertEqual(comments[0]['replies'][1]['reply_to_user']['user_id'], self.author.id)
         self.assertNotIn('replies', comments[0]['replies'][1])
 
+    def test_square_exploration_growth_is_awarded_once(self):
+        response = self.post_statement(self.author, {
+            'text': '好友圈图片发言',
+            'visibility': 'friends',
+            'media': [{'kind': 'image', 'key': 'sermo/messages/image/growth.jpg'}],
+        })
+        self.assertEqual(response.status_code, 200, response.content)
+        statement_id = response.json()['body']['statement_id']
+        root = StatementComment.create_comment(self.friend, statement_id, '评论')
+        StatementComment.create_comment(self.author, statement_id, '回复', parent_id=root.id)
+
+        self.client.post(f'/square/statements/{statement_id}/like', **self.authorization(self.friend))
+        self.client.post(f'/square/statements/{statement_id}/like', **self.authorization(self.friend))
+        self.client.post(f'/square/comments/{root.id}/like', **self.authorization(self.author))
+
+        self.assertTrue(self.author.growth_events.filter(event_key='explore:square_statement').exists())
+        self.assertTrue(self.author.growth_events.filter(event_key='explore:square_friends').exists())
+        self.assertTrue(self.author.growth_events.filter(event_key='explore:square_image').exists())
+        self.assertTrue(self.author.growth_events.filter(event_key='explore:square_reply').exists())
+        self.assertTrue(self.friend.growth_events.filter(event_key='explore:square_comment').exists())
+        self.assertEqual(self.friend.growth_events.filter(event_key='explore:square_like').count(), 1)
+        self.assertTrue(self.author.growth_events.filter(event_key='explore:square_comment_like').exists())
+
     def test_statement_rejects_mixed_media_types(self):
         response = self.post_statement(self.author, {
             'text': '混合媒体',

@@ -33,6 +33,7 @@ class StickerView(View):
         except Exception:
             raise StickerErrors.DOWNLOAD_FAILED
         sticker, _ = UserSticker.collect(request.user, asset)
+        request.user.award_growth('explore:sticker_create')
         return sticker.jsonl(request=request)
 
     @auth.require_user
@@ -84,6 +85,7 @@ class StickerPrepareView(View):
         asset = StickerAsset.objects.filter(content_hash=request.json.content_hash).first()
         if asset is not None:
             sticker, _ = UserSticker.collect(request.user, asset)
+            request.user.award_growth('explore:sticker_create')
             return dict(upload_required=False, sticker=sticker.jsonl(request=request))
         return dict(
             upload_required=True,
@@ -117,6 +119,7 @@ class StickerCompleteView(View):
             ),
         )
         sticker, _ = UserSticker.collect(request.user, asset)
+        request.user.award_growth('explore:sticker_create')
         return sticker.jsonl(request=request)
 
 

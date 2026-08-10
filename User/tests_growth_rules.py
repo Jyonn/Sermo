@@ -56,6 +56,32 @@ class GrowthRuleTests(SimpleTestCase):
         self.assertEqual(resolve_event_rule('daily:verified_reply:2026-08-04:user-7').points, 3)
         self.assertEqual(resolve_event_rule('weekly:active_5_days:2026-W32').points, 25)
 
+    def test_chat_and_square_exploration_events_are_registered(self):
+        expected_points = {
+            'explore:file': 15,
+            'explore:link': 10,
+            'explore:sticker_collect': 10,
+            'explore:sticker_create': 20,
+            'explore:sticker_send': 10,
+            'explore:message_reply': 10,
+            'explore:map_access': 20,
+            'explore:share_statement': 15,
+            'explore:pin_message': 10,
+            'explore:square_statement': 20,
+            'explore:square_image': 15,
+            'explore:square_audio': 20,
+            'explore:square_video': 25,
+            'explore:square_friends': 10,
+            'explore:square_comment': 15,
+            'explore:square_reply': 15,
+            'explore:square_like': 5,
+            'explore:square_comment_like': 5,
+        }
+        self.assertEqual(
+            {key: EVENT_RULES[key].points for key in expected_points},
+            expected_points,
+        )
+
 
 class GrowthReconciliationTests(TestCase):
     def setUp(self):

@@ -86,7 +86,10 @@ class UserSticker(models.Model):
 
     @classmethod
     def collect(cls, user: User, asset: StickerAsset):
-        return cls.objects.get_or_create(user=user, asset=asset)
+        sticker, created = cls.objects.get_or_create(user=user, asset=asset)
+        if created:
+            user.award_growth('explore:sticker_collect')
+        return sticker, created
 
     def jsonl(self, request: HttpRequest = None):
         payload = self.asset.jsonl(request=request)

@@ -144,6 +144,17 @@ class Statement(models.Model):
             StatementMedia(statement=statement, position=index, **item)
             for index, item in enumerate(normalized_media)
         ])
+        user.award_growth('explore:square_statement')
+        if visibility_value == StatementVisibilityChoice.FRIENDS:
+            user.award_growth('explore:square_friends')
+        media_events = {
+            StatementMediaKindChoice.IMAGE: 'explore:square_image',
+            StatementMediaKindChoice.AUDIO: 'explore:square_audio',
+            StatementMediaKindChoice.VIDEO: 'explore:square_video',
+        }
+        for kind in {item['kind'] for item in normalized_media}:
+            if kind in media_events:
+                user.award_growth(media_events[kind])
         media_ids = list(statement.media.values_list('id', flat=True))
         transaction.on_commit(lambda: [StatementMedia.fetch_metadata_async(media_id) for media_id in media_ids])
         return cls.objects.select_related('user').prefetch_related('media').get(id=statement.id)
@@ -253,6 +264,7 @@ class StatementComment(models.Model):
             comment.thread_root_id = root.id
         comment.visible_like_count = 0
         comment.viewer_liked = False
+        user.award_growth('explore:square_reply' if parent is not None else 'explore:square_comment')
         return comment
 
     def jsonl(self, viewer=None, include_replies=False):

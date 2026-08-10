@@ -148,6 +148,7 @@ class StatementLikeView(View):
             raise SquareErrors.NOT_EXISTS
         _like, created = StatementLike.objects.get_or_create(statement=statement, user=request.user)
         if created:
+            request.user.award_growth('explore:square_like')
             NotificationEvent.emit_square_event(
                 statement.user, request.user, NotificationEventTypeChoice.SQUARE_STATEMENT_LIKE, statement.id,
             )
@@ -177,6 +178,7 @@ class StatementCommentLikeView(View):
         StatementComment.statement_for_user(request.user, comment.statement_id)
         _like, created = StatementCommentLike.objects.get_or_create(comment=comment, user=request.user)
         if created:
+            request.user.award_growth('explore:square_comment_like')
             NotificationEvent.emit_square_event(
                 comment.user, request.user, NotificationEventTypeChoice.SQUARE_COMMENT_LIKE,
                 comment.statement_id, comment.id,

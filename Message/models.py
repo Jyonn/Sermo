@@ -559,16 +559,24 @@ class Message(models.Model):
             elif message.type == MessageTypeChoice.VIDEO:
                 VideoMetadata.queue_for_message(message)
             if message.type == MessageTypeChoice.TEXT:
-                LinkPreview.queue_for_text(message.content)
+                link_preview = LinkPreview.queue_for_text(message.content)
                 UserEmojiUsage.record_text(user, message.content)
-            if message.type == MessageTypeChoice.IMAGE:
-                user.award_growth('explore:image')
-            elif message.type == MessageTypeChoice.AUDIO:
-                user.award_growth('explore:audio')
-            elif message.type == MessageTypeChoice.VIDEO:
-                user.award_growth('explore:video')
-            elif message.type == MessageTypeChoice.LOCATION:
-                user.award_growth('explore:location')
+                if link_preview is not None:
+                    user.award_growth('explore:link')
+            exploration_event = {
+                MessageTypeChoice.IMAGE: 'explore:image',
+                MessageTypeChoice.AUDIO: 'explore:audio',
+                MessageTypeChoice.VIDEO: 'explore:video',
+                MessageTypeChoice.LOCATION: 'explore:location',
+                MessageTypeChoice.FILE: 'explore:file',
+                MessageTypeChoice.STICKER: 'explore:sticker_send',
+                MessageTypeChoice.MAP_ACCESS: 'explore:map_access',
+                MessageTypeChoice.STATEMENT: 'explore:share_statement',
+            }.get(message.type)
+            if exploration_event:
+                user.award_growth(exploration_event)
+            if reply_to is not None:
+                user.award_growth('explore:message_reply')
             if message.type != MessageTypeChoice.SYSTEM:
                 message._award_interaction_growth()
             MessageEvent.record_created(message)
@@ -1167,6 +1175,7 @@ class PinnedMessage(models.Model):
             pinned_by=user,
             defaults={'chat': message.chat},
         )
+        user.award_growth('explore:pin_message')
         return pin
 
     @classmethod
