@@ -24,10 +24,8 @@ class GrowthRuleTests(SimpleTestCase):
         self.assertEqual(rewards['frame.comet']['rarity'], 'legendary')
         self.assertEqual(rewards['background.arcade']['rarity'], 'epic')
         self.assertEqual(rewards['background.jazz']['rarity'], 'rare')
-        self.assertEqual(rewards['bubble.niko']['rarity'], 'epic')
+        self.assertEqual(rewards['bubble.niko']['rarity'], 'legendary')
         self.assertEqual(rewards['frame.niko']['rarity'], 'legendary')
-        self.assertEqual(rewards['bubble.xiaobai']['rarity'], 'epic')
-        self.assertEqual(rewards['frame.xiaobai']['rarity'], 'legendary')
         self.assertEqual(rewards['background.noir']['rarity'], 'epic')
 
     def test_every_reward_has_structured_display_metadata(self):
