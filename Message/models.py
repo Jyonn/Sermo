@@ -481,16 +481,21 @@ class Message(models.Model):
                     return existing
             normalized_content = cls.normalize_content(message_type, content)
             if message_type == MessageTypeChoice.STICKER:
-                from Sticker.models import UserSticker
+                from Sticker.models import StickerAsset, UserSticker
                 sticker_payload = cls._parse_payload(content)
-                sticker = UserSticker.objects.filter(
-                    id=sticker_payload.get('sticker_id'),
-                    user=user,
-                ).select_related('asset').first()
-                if sticker is None:
+                asset = None
+                if sticker_payload.get('sticker_id'):
+                    sticker = UserSticker.objects.filter(
+                        id=sticker_payload.get('sticker_id'),
+                        user=user,
+                    ).select_related('asset').first()
+                    asset = sticker.asset if sticker is not None else None
+                elif sticker_payload.get('asset_id'):
+                    asset = StickerAsset.objects.filter(id=sticker_payload.get('asset_id')).first()
+                if asset is None:
                     raise MessageErrors.PAYLOAD_INVALID
                 normalized_content = json.dumps(
-                    dict(kind='sticker', asset_id=sticker.asset_id),
+                    dict(kind='sticker', asset_id=asset.id),
                     separators=(',', ':'),
                 )
             map_access_viewer = None

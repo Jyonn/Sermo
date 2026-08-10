@@ -376,3 +376,7 @@ def issue_sticker_upload(content_hash: str, file_name: str, content_type: str = 
         expires_in=QINIU_TOKEN_EXPIRE_SECONDS,
         max_file_size=MESSAGE_MEDIA_MAX_FILE_SIZE['sticker'],
     )
+
+
+def delete_sticker_file(key: str):
+    return _delete_file(validate_message_media_key('sticker', key))

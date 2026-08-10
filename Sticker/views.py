@@ -2,13 +2,13 @@ from django.http import HttpResponseRedirect
 from django.views import View
 from smartdjango import OK, analyse
 
-from Message.models import MessageTypeChoice
+from Message.models import Message, MessageTypeChoice
 from Sticker.models import StickerAsset, UserSticker
 from Sticker.params import StickerParams
 from Sticker.validators import StickerErrors
 from utils import auth
 from utils.auth import Request
-from utils.qiniu import build_sticker_display_uri, issue_sticker_upload
+from utils.qiniu import build_sticker_display_uri, delete_sticker_file, issue_sticker_upload
 
 
 class StickerView(View):
@@ -19,6 +19,7 @@ class StickerView(View):
     @auth.require_user
     @analyse.json(StickerParams.message_id)
     def post(self, request: Request):
+        request.user.require_growth_capability('create_sticker')
         message = request.json.message
         if message.type != MessageTypeChoice.IMAGE:
             raise StickerErrors.INVALID_IMAGE
@@ -40,7 +41,17 @@ class StickerView(View):
         sticker = request.query.sticker
         if sticker.user_id != request.user.id:
             raise StickerErrors.NOT_ACCESSIBLE
+        asset = sticker.asset
         sticker.delete()
+        owner_references = UserSticker.objects.filter(asset=asset).exists()
+        message_reference = Message.objects.filter(
+            type=MessageTypeChoice.STICKER,
+            content=f'{{"kind":"sticker","asset_id":{asset.id}}}',
+        ).exists()
+        if not owner_references and not message_reference:
+            if asset.storage_key.startswith('sermo/messages/sticker/'):
+                delete_sticker_file(asset.storage_key)
+            asset.delete()
         return OK
 
 
@@ -69,6 +80,7 @@ class StickerPrepareView(View):
         StickerParams.file_size,
     )
     def post(self, request: Request):
+        request.user.require_growth_capability('create_sticker')
         asset = StickerAsset.objects.filter(content_hash=request.json.content_hash).first()
         if asset is not None:
             sticker, _ = UserSticker.collect(request.user, asset)
@@ -92,6 +104,7 @@ class StickerCompleteView(View):
         StickerParams.file_size,
     )
     def post(self, request: Request):
+        request.user.require_growth_capability('create_sticker')
         expected_prefix = f'sermo/messages/sticker/{request.json.content_hash}.'
         if not request.json.storage_key.startswith(expected_prefix):
             raise StickerErrors.INVALID_HASH
