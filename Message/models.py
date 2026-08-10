@@ -122,6 +122,8 @@ class LinkPreview(models.Model):
     USER_AGENT = 'SermoLinkPreviewBot/1.0'
     MAX_HTML_BYTES = 256 * 1024
     MAX_REDIRECTS = 3
+    READY_TTL = datetime.timedelta(days=7)
+    FAILED_TTL = datetime.timedelta(hours=1)
     _FETCHING_IDS = set()
     _FETCHING_LOCK = threading.Lock()
 
@@ -237,6 +239,16 @@ class LinkPreview(models.Model):
         return any(marker in normalized for marker in cls.RETRYABLE_ERROR_MARKERS)
 
     @classmethod
+    def _is_expired(cls, preview, now=None):
+        if preview.status == LinkPreviewStatusChoice.READY:
+            ttl = cls.READY_TTL
+        elif preview.status == LinkPreviewStatusChoice.FAILED:
+            ttl = cls.FAILED_TTL
+        else:
+            return False
+        return preview.fetched_at is None or preview.fetched_at <= (now or timezone.now()) - ttl
+
+    @classmethod
     def fetch_preview_data(cls, url: str):
         current_url = cls.normalize_public_url(url)
         if not current_url:
@@ -311,6 +323,7 @@ class LinkPreview(models.Model):
             url_hash=cls.hash_url(url),
             defaults={'url': url, 'status': LinkPreviewStatusChoice.PENDING},
         )
+        force_refresh = cls._is_expired(preview)
         if preview.status == LinkPreviewStatusChoice.READY and cls._looks_mojibake(preview.title, preview.description, preview.site_name):
             preview.status = LinkPreviewStatusChoice.PENDING
             preview.title = ''
@@ -324,25 +337,27 @@ class LinkPreview(models.Model):
             preview.status = LinkPreviewStatusChoice.PENDING
             preview.error = ''
             preview.save(update_fields=['status', 'error', 'updated_at'])
-        if created or preview.status == LinkPreviewStatusChoice.PENDING:
-            transaction.on_commit(lambda: cls.fetch_async(preview.id))
+        if created or preview.status == LinkPreviewStatusChoice.PENDING or force_refresh:
+            transaction.on_commit(
+                lambda preview_id=preview.id, force=force_refresh: cls.fetch_async(preview_id, force=force),
+            )
         return preview
 
     @classmethod
-    def fetch_async(cls, preview_id: int):
+    def fetch_async(cls, preview_id: int, force=False):
         with cls._FETCHING_LOCK:
             if preview_id in cls._FETCHING_IDS:
                 return
             cls._FETCHING_IDS.add(preview_id)
-        thread = threading.Thread(target=cls.fetch_and_update, args=(preview_id,), daemon=True)
+        thread = threading.Thread(target=cls.fetch_and_update, args=(preview_id, force), daemon=True)
         thread.start()
 
     @classmethod
-    def fetch_and_update(cls, preview_id: int):
+    def fetch_and_update(cls, preview_id: int, force=False):
         close_old_connections()
         try:
             preview = cls.objects.get(id=preview_id)
-            if preview.status == LinkPreviewStatusChoice.READY:
+            if preview.status == LinkPreviewStatusChoice.READY and not force:
                 return
             data = cls.fetch_preview_data(preview.url)
             preview.title = data['title']
