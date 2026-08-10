@@ -193,18 +193,36 @@ class StatementComment(models.Model):
     @classmethod
     def feed(cls, user, statement_id, offset=0, limit=30):
         statement = cls.statement_for_user(user, statement_id)
-        reply_queryset = cls.objects.filter(is_deleted=False).select_related('user').annotate(
+        queryset = cls.objects.filter(statement=statement, is_deleted=False).select_related('user', 'parent__user').annotate(
             visible_like_count=Count('likes', distinct=True),
             viewer_liked=Exists(StatementCommentLike.objects.filter(comment_id=OuterRef('pk'), user=user)),
-        ).order_by('created_at', 'id')
-        queryset = cls.objects.filter(statement=statement, parent__isnull=True, is_deleted=False).select_related('user').prefetch_related(
-            Prefetch('replies', queryset=reply_queryset, to_attr='visible_replies'),
-        ).annotate(
-            visible_like_count=Count('likes', distinct=True),
-            visible_reply_count=Count('replies', filter=Q(replies__is_deleted=False), distinct=True),
-            viewer_liked=Exists(StatementCommentLike.objects.filter(comment_id=OuterRef('pk'), user=user)),
-        ).order_by('-visible_like_count', '-visible_reply_count', '-created_at', '-id')
-        return [comment.jsonl(viewer=user, include_replies=True) for comment in queryset[offset:offset + limit]]
+        )
+        comments = list(queryset)
+        comments_by_id = {comment.id: comment for comment in comments}
+        roots = [comment for comment in comments if comment.parent_id is None]
+        replies_by_root = {comment.id: [] for comment in roots}
+
+        for comment in comments:
+            if comment.parent_id is None:
+                continue
+            root = comment
+            visited = set()
+            while root.parent_id is not None and root.parent_id not in visited:
+                visited.add(root.id)
+                parent = comments_by_id.get(root.parent_id)
+                if parent is None:
+                    root = None
+                    break
+                root = parent
+            if root is not None and root.id in replies_by_root:
+                comment.thread_root_id = root.id
+                replies_by_root[root.id].append(comment)
+
+        for root in roots:
+            root.visible_replies = sorted(replies_by_root[root.id], key=lambda item: (item.created_at, item.id))
+            root.visible_reply_count = len(root.visible_replies)
+        roots.sort(key=lambda item: (-item.visible_like_count, -item.visible_reply_count, -item.created_at.timestamp(), -item.id))
+        return [comment.jsonl(viewer=user, include_replies=True) for comment in roots[offset:offset + limit]]
 
     @classmethod
     def create_comment(cls, user, statement_id, text, parent_id=None):
@@ -220,10 +238,19 @@ class StatementComment(models.Model):
         parent = None
         if parent_id is not None:
             try:
-                parent = cls.objects.get(id=parent_id, statement=statement, parent__isnull=True, is_deleted=False)
+                parent = cls.objects.select_related('user', 'parent').get(
+                    id=parent_id,
+                    statement=statement,
+                    is_deleted=False,
+                )
             except cls.DoesNotExist:
                 raise SquareErrors.NOT_EXISTS
         comment = cls.objects.create(statement=statement, user=user, text=normalized_text, parent=parent)
+        if parent is not None:
+            root = parent
+            while root.parent_id is not None:
+                root = root.parent
+            comment.thread_root_id = root.id
         comment.visible_like_count = 0
         comment.viewer_liked = False
         return comment
@@ -237,6 +264,8 @@ class StatementComment(models.Model):
             comment_id=self.id,
             statement_id=self.statement_id,
             parent_id=self.parent_id,
+            root_id=getattr(self, 'thread_root_id', self.parent_id),
+            reply_to_user=self.parent.user.tiny_json() if self.parent_id else None,
             user=self.user.tiny_json(),
             text=self.text,
             like_count=like_count,

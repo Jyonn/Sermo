@@ -213,6 +213,22 @@ class StatementApiTests(TestCase):
         self.assertEqual(body['reply_count'], 1)
         self.assertEqual(body['replies'][0]['text'], '二级回复')
 
+    def test_reply_to_nested_comment_is_flattened_into_second_level(self):
+        statement = Statement.create_statement(self.author, '两级评论', 'public', [])
+        root = StatementComment.create_comment(self.friend, statement.id, '一级评论')
+        reply = StatementComment.create_comment(self.author, statement.id, '回复一级', parent_id=root.id)
+        nested_reply = StatementComment.create_comment(self.friend, statement.id, '回复二级', parent_id=reply.id)
+
+        comments = StatementComment.feed(self.author, statement.id)
+
+        self.assertEqual(len(comments), 1)
+        self.assertEqual(comments[0]['reply_count'], 2)
+        self.assertEqual([item['comment_id'] for item in comments[0]['replies']], [reply.id, nested_reply.id])
+        self.assertEqual(comments[0]['replies'][1]['parent_id'], reply.id)
+        self.assertEqual(comments[0]['replies'][1]['root_id'], root.id)
+        self.assertEqual(comments[0]['replies'][1]['reply_to_user']['user_id'], self.author.id)
+        self.assertNotIn('replies', comments[0]['replies'][1])
+
     def test_statement_rejects_mixed_media_types(self):
         response = self.post_statement(self.author, {
             'text': '混合媒体',
