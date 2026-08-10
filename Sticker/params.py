@@ -3,7 +3,7 @@ import re
 from smartdjango import Params, Validator
 
 from Message.models import Message
-from Sticker.models import UserSticker
+from Sticker.models import StickerAsset, UserSticker
 from Sticker.validators import StickerErrors
 
 
@@ -22,3 +22,4 @@ class StickerParams(metaclass=Params):
     storage_key = Validator('key', final_name='storage_key').to(str)
     message_id = Validator('message_id', final_name='message').to(int).to(Message.index)
     sticker_id = Validator('sticker_id', final_name='sticker').to(int).to(UserSticker.index)
+    asset_id = Validator('asset_id', final_name='asset').to(int).to(StickerAsset.index)

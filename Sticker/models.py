@@ -17,6 +17,14 @@ class StickerAsset(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     @classmethod
+    def index(cls, asset_id):
+        asset = cls.objects.filter(id=asset_id).first()
+        if asset is None:
+            from Sticker.validators import StickerErrors
+            raise StickerErrors.NOT_FOUND
+        return asset
+
+    @classmethod
     def from_source_uri(cls, source_uri: str, mime_type: str = ''):
         response = requests.get(sign_private_download_url(source_uri), stream=True, timeout=20)
         response.raise_for_status()

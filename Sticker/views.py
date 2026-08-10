@@ -44,6 +44,22 @@ class StickerView(View):
         return OK
 
 
+class StickerExploreView(View):
+    @auth.require_user
+    def get(self, request: Request):
+        owned_asset_ids = UserSticker.objects.filter(user=request.user).values('asset_id')
+        assets = StickerAsset.objects.exclude(id__in=owned_asset_ids).order_by('-created_at', '-id')[:60]
+        return [asset.jsonl(request=request) for asset in assets]
+
+
+class StickerCollectView(View):
+    @auth.require_user
+    @analyse.json(StickerParams.asset_id)
+    def post(self, request: Request):
+        sticker, _ = UserSticker.collect(request.user, request.json.asset)
+        return sticker.jsonl(request=request)
+
+
 class StickerPrepareView(View):
     @auth.require_user
     @analyse.json(
