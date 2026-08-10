@@ -613,22 +613,37 @@ class User(models.Model):
             self.save(update_fields=['plaza_greeting'])
         return self
 
+    def ensure_contact_available(self, channel: int, target: str):
+        target = (target or '').strip()
+        if channel == UserNotificationChoice.EMAIL:
+            normalized = self._normalize_email(target)
+            field = 'email'
+        elif channel == UserNotificationChoice.SMS:
+            normalized = target
+            field = 'phone'
+        elif channel == UserNotificationChoice.BARK:
+            return normalize_bark_endpoint(target)
+        else:
+            raise UserErrors.CONTACT_CHANNEL_INVALID
+
+        if not self.is_official and User.objects.filter(
+            space_id=self.space_id,
+            role=UserRoleChoice.MEMBER,
+            is_deleted=False,
+            **{field: normalized},
+        ).exclude(id=self.id).exists():
+            raise UserErrors.CONTACT_ALREADY_BOUND
+        return normalized
+
     def bind_contact(self, channel: int, target: str):
         target = (target or '').strip()
         now = timezone.now()
 
         if channel == UserNotificationChoice.EMAIL:
-            normalized = self._normalize_email(target)
             with transaction.atomic():
                 from Space.models import Space
                 Space.objects.select_for_update().get(id=self.space_id)
-                if not self.is_official and User.objects.filter(
-                    space_id=self.space_id,
-                    role=UserRoleChoice.MEMBER,
-                    is_deleted=False,
-                    email=normalized,
-                ).exclude(id=self.id).exists():
-                    raise UserErrors.CONTACT_ALREADY_BOUND
+                normalized = self.ensure_contact_available(channel, target)
                 self.email = normalized
                 self.email_verified_at = now
                 self.account_level = UserAccountLevelChoice.VERIFIED
@@ -639,14 +654,8 @@ class User(models.Model):
             with transaction.atomic():
                 from Space.models import Space
                 Space.objects.select_for_update().get(id=self.space_id)
-                if not self.is_official and User.objects.filter(
-                    space_id=self.space_id,
-                    role=UserRoleChoice.MEMBER,
-                    is_deleted=False,
-                    phone=target,
-                ).exclude(id=self.id).exists():
-                    raise UserErrors.CONTACT_ALREADY_BOUND
-                self.phone = target
+                normalized = self.ensure_contact_available(channel, target)
+                self.phone = normalized
                 self.phone_verified_at = now
                 self.save(update_fields=['phone', 'phone_verified_at'])
             self.award_growth('security:phone')
@@ -1489,7 +1498,8 @@ class UserContactVerificationCode(models.Model):
 
     @classmethod
     def issue(cls, user: User, channel: int, target: str):
-        normalized_target = cls._normalize_target(channel, target)
+        normalized_target = user.ensure_contact_available(channel, target)
+        normalized_target = cls._normalize_target(channel, normalized_target)
         now = timezone.now()
         cls.objects.filter(
             user=user,

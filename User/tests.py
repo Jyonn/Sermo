@@ -9,6 +9,8 @@ from User.models import (
     NotificationEvent,
     NotificationEventTypeChoice,
     User,
+    UserContactVerificationCode,
+    UserNotificationChoice,
     account_switch_phone_variants,
     extract_emojis,
     normalize_bark_endpoint,
@@ -95,6 +97,48 @@ class AccountSwitchPhoneNormalizationTests(SimpleTestCase):
 
     def test_other_international_numbers_are_not_rewritten(self):
         self.assertEqual(account_switch_phone_variants('+6591234567'), {'+6591234567'})
+
+
+class ContactAvailabilityTests(TestCase):
+    def setUp(self):
+        self.space = Space.objects.create(name='Contact Space', slug='contact-space', email='owner@example.com')
+        self.bound_user = User.create(space=self.space, name='Bound User')
+        self.new_user = User.create(space=self.space, name='New User')
+
+    def test_email_conflict_is_rejected_before_code_is_issued(self):
+        self.bound_user.bind_contact(UserNotificationChoice.EMAIL, 'Taken@Example.com')
+
+        with self.assertRaises(UserErrors.CONTACT_ALREADY_BOUND.__class__):
+            UserContactVerificationCode.issue(
+                self.new_user,
+                UserNotificationChoice.EMAIL,
+                'taken@example.com',
+            )
+
+        self.assertFalse(UserContactVerificationCode.objects.filter(user=self.new_user).exists())
+
+    def test_phone_conflict_is_rejected_before_code_is_issued(self):
+        self.bound_user.bind_contact(UserNotificationChoice.SMS, '13800000000')
+
+        with self.assertRaises(UserErrors.CONTACT_ALREADY_BOUND.__class__):
+            UserContactVerificationCode.issue(
+                self.new_user,
+                UserNotificationChoice.SMS,
+                '13800000000',
+            )
+
+        self.assertFalse(UserContactVerificationCode.objects.filter(user=self.new_user).exists())
+
+    def test_same_user_can_request_code_for_current_contact(self):
+        self.new_user.bind_contact(UserNotificationChoice.EMAIL, 'self@example.com')
+
+        verification = UserContactVerificationCode.issue(
+            self.new_user,
+            UserNotificationChoice.EMAIL,
+            'SELF@example.com',
+        )
+
+        self.assertEqual(verification.target, 'self@example.com')
 
 
 class EmojiExtractionTests(SimpleTestCase):
