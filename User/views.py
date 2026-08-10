@@ -13,6 +13,12 @@ from utils.qiniu import (
     validate_chat_background_key,
 )
 from utils.global_settings import notificator
+from utils.notificator_integration import (
+    send_verification_mail,
+    send_verification_sms,
+    verification_message_text,
+    verification_title,
+)
 from User.models import (
     NotificationPreference,
     NotificationEvent,
@@ -421,21 +427,24 @@ class PasswordRecoveryCodeView(View):
         user = UserPasswordRecoveryChallenge.find_user(space, request.json.name)
         challenge = UserPasswordRecoveryChallenge.issue(user, request.json.channel)
         expire_minutes = UserPasswordRecoveryChallenge.CODE_EXPIRE_SECONDS // 60
-        title = 'Sermo 言浪密码找回'
-        body = f'Your verification code is {challenge.code}. It expires in {expire_minutes} minutes.'
+        title = verification_title('password_recovery', user.language)
         try:
             if challenge.channel == UserNotificationChoice.EMAIL:
-                notificator.mail(
+                send_verification_mail(
                     challenge.target,
+                    code=challenge.code,
+                    time=expire_minutes,
                     title=title,
-                    body=body,
+                    language=user.language,
                     recipient_name=user.name,
                 )
             elif challenge.channel == UserNotificationChoice.SMS:
-                notificator.sms(
+                send_verification_sms(
                     challenge.target,
+                    code=challenge.code,
+                    time=expire_minutes,
                     title=title,
-                    body=dict(code=challenge.code, time=expire_minutes),
+                    language=user.language,
                 )
             else:
                 raise UserErrors.PASSWORD_RECOVERY_CHANNEL_INVALID
@@ -492,31 +501,33 @@ class ContactVerificationCodeRequestView(View):
             channel=channel,
             target=request.json.target,
         )
-        title = 'Sermo 言浪验证码'
+        title = verification_title('contact', request.user.language)
         expire_minutes = UserContactVerificationCode.EXPIRE_SECONDS // 60
-        body = f'Your verification code is {code_obj.code}. It expires in {expire_minutes} minutes.'
         try:
             if channel == UserNotificationChoice.EMAIL:
-                notificator.mail(
+                send_verification_mail(
                     code_obj.target,
+                    code=code_obj.code,
+                    time=expire_minutes,
                     title=title,
-                    body=body,
+                    language=request.user.language,
                     recipient_name=request.user.name,
                 )
             elif channel == UserNotificationChoice.SMS:
-                notificator.sms(
+                send_verification_sms(
                     code_obj.target,
+                    code=code_obj.code,
+                    time=expire_minutes,
                     title=title,
-                    body=dict(
-                        code=code_obj.code,
-                        time=expire_minutes,
-                    )
+                    language=request.user.language,
                 )
             elif channel == UserNotificationChoice.BARK:
+                body = verification_message_text(code_obj.code, expire_minutes, request.user.language)
                 notificator.bark(
                     code_obj.target,
                     title=title,
                     body=body,
+                    locale='en-US' if request.user.language == 'en' else 'zh-CN',
                 )
             else:
                 raise UserErrors.CONTACT_CHANNEL_INVALID

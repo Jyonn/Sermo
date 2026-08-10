@@ -17,6 +17,7 @@ from pypinyin import lazy_pinyin
 from smartdjango import models, Choice
 
 from utils.global_settings import notificator
+from utils.notificator_integration import notificator_locale, notificator_result_detail
 from utils.qiniu import (
     sign_private_download_url,
     delete_avatar_by_uri,
@@ -2433,6 +2434,39 @@ class NotificationDelivery(models.Model):
             return normalized
         return normalized[:limit - 1].rstrip() + '…'
 
+    @staticmethod
+    def _escape_email_markdown(value):
+        return re.sub(r'([\\`*_{}\[\]()#+.!|>-])', r'\\\1', str(value or ''))
+
+    @classmethod
+    def _email_action_url(cls, deliveries):
+        if not deliveries:
+            return None
+        first = deliveries[0].event
+        space_slug = getattr(first.space, 'slug', None)
+        if not space_slug:
+            return None
+        chat_ids = {
+            (delivery.event.payload or {}).get('chat_id')
+            for delivery in deliveries
+            if delivery.event.event_type in cls.MESSAGE_EVENT_TYPES
+        }
+        chat_ids.discard(None)
+        if len(chat_ids) == 1:
+            return f'{FRONTEND_BASE_URL}/{space_slug}/app/chats/{next(iter(chat_ids))}'
+        return f'{FRONTEND_BASE_URL}/{space_slug}/app/chats'
+
+    def _email_event_action_url(self):
+        space_slug = getattr(self.event.space, 'slug', None)
+        if not space_slug:
+            return None
+        payload = self.event.payload or {}
+        if self.event.event_type in self.MESSAGE_EVENT_TYPES and payload.get('chat_id'):
+            return f'{FRONTEND_BASE_URL}/{space_slug}/app/chats/{payload["chat_id"]}'
+        if payload.get('statement_id'):
+            return f'{FRONTEND_BASE_URL}/{space_slug}/app/square/statements/{payload["statement_id"]}'
+        return f'{FRONTEND_BASE_URL}/{space_slug}/app/menu'
+
     @classmethod
     def _render_email_batch_title(cls, deliveries):
         names = []
@@ -2477,7 +2511,8 @@ class NotificationDelivery(models.Model):
             )
             grouped[indexes[actor_key]]['items'].append(body)
 
-        lines = [str(_('You have unread messages:')), '']
+        total = len(deliveries)
+        lines = [f'## {_("{count} unread messages").format(count=total)}', '']
         remaining = cls.EMAIL_BATCH_MESSAGE_LIMIT
         omitted = 0
         for group in grouped:
@@ -2485,17 +2520,22 @@ class NotificationDelivery(models.Model):
                 omitted += len(group['items'])
                 continue
             items = group['items']
-            lines.append(str(_('{name} ({count} messages)').format(name=group['name'], count=len(items))))
-            for item in items[:remaining]:
-                lines.append(f'- {cls._truncate_email_line(item)}')
-            if len(items) > remaining:
-                omitted += len(items) - remaining
-            remaining -= min(len(items), remaining)
+            safe_name = cls._escape_email_markdown(group['name'])
+            lines.append(f'**{safe_name}** · {_("{count} messages").format(count=len(items))}')
+            if hide_message_content:
+                remaining -= min(len(items), remaining)
+            else:
+                for item in items[:remaining]:
+                    preview = cls._escape_email_markdown(cls._truncate_email_line(item))
+                    lines.append(f'> {preview}')
+                if len(items) > remaining:
+                    omitted += len(items) - remaining
+                remaining -= min(len(items), remaining)
             lines.append('')
 
         if omitted > 0:
-            lines.append(str(_('And {count} more messages.').format(count=omitted)))
-        lines.append(str(_('Open Sermo Yanlang to reply.')))
+            lines.append(f'_{_("And {count} more messages.").format(count=omitted)}_')
+        lines.append(str(_('Return to Sermo Yanlang when you are ready to reply.')))
         body = '\n'.join(lines).strip()
         if len(body) <= cls.EMAIL_BATCH_BODY_LIMIT:
             return body
@@ -2523,22 +2563,27 @@ class NotificationDelivery(models.Model):
         with translation.override(user.language):
             title = cls._render_email_batch_title(deliveries)
             body = cls._render_email_batch_body(deliveries, pref)
+            footer_note = str(_('You can adjust email reminders in Notification settings.'))
         attempted_at = timezone.now()
         try:
-            notificator.mail(
+            result = notificator.mail(
                 target,
+                format='markdown',
                 title=title,
                 body=body,
+                locale=notificator_locale(user.language),
                 recipient_name=user.name,
+                action_url=cls._email_action_url(deliveries),
+                footer_note=footer_note,
             )
-            ok, detail = True, None
+            ok, detail = True, notificator_result_detail(result)
         except NotificatorAPIError as err:
             ok, detail = False, str(err)
         except Exception as err:
             ok, detail = False, str(err)
 
         status = NotificationDeliveryStatusChoice.SENT if ok else NotificationDeliveryStatusChoice.FAILED
-        detail = None if ok else str(detail)[:255]
+        detail = str(detail)[:255] if detail else None
         ids = [delivery.id for delivery in deliveries]
         cls.objects.filter(id__in=ids).update(status=status, detail=detail, attempted_at=attempted_at)
         for delivery in deliveries:
@@ -2569,13 +2614,20 @@ class NotificationDelivery(models.Model):
             friend_online_message_title=pref.friend_online_message_title,
             friend_online_message_text=pref.friend_online_message_text,
         )
+        with translation.override(self.event.user.language):
+            email_footer_note = str(_('You can adjust email reminders in Notification settings.'))
         try:
             if self.channel == UserNotificationChoice.EMAIL:
-                notificator.mail(
+                safe_body = self._escape_email_markdown(body)
+                result = notificator.mail(
                     target,
+                    format='markdown',
                     title=title,
-                    body=body,
+                    body=safe_body,
+                    locale=notificator_locale(self.event.user.language),
                     recipient_name=self.event.user.name,
+                    action_url=self._email_event_action_url(),
+                    footer_note=email_footer_note,
                 )
             elif self.channel == UserNotificationChoice.SMS:
                 notificator.sms(
@@ -2597,14 +2649,15 @@ class NotificationDelivery(models.Model):
                 self.attempted_at = timezone.now()
                 self.save(update_fields=['status', 'detail', 'attempted_at'])
                 return self
-            ok, detail = True, None
+            ok = True
+            detail = notificator_result_detail(result) if self.channel == UserNotificationChoice.EMAIL else None
         except NotificatorAPIError as err:
             ok, detail = False, str(err)
         except Exception as err:
             ok, detail = False, str(err)
 
         self.status = NotificationDeliveryStatusChoice.SENT if ok else NotificationDeliveryStatusChoice.FAILED
-        self.detail = None if ok else str(detail)[:255]
+        self.detail = str(detail)[:255] if detail else None
         self.attempted_at = timezone.now()
         self.save(update_fields=['status', 'detail', 'attempted_at'])
         return self

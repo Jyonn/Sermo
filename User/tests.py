@@ -1,4 +1,5 @@
 from datetime import timedelta
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.test import SimpleTestCase, TestCase
@@ -8,6 +9,7 @@ from Space.models import Space
 from User.models import (
     NotificationEvent,
     NotificationEventTypeChoice,
+    NotificationDelivery,
     User,
     UserContactVerificationCode,
     UserNotificationChoice,
@@ -17,6 +19,7 @@ from User.models import (
 )
 from TravelMap.models import MapCheckIn
 from User.validators import UserErrors
+from utils.notificator_integration import send_verification_mail
 
 
 class UserPresentationTests(SimpleTestCase):
@@ -139,6 +142,54 @@ class ContactAvailabilityTests(TestCase):
         )
 
         self.assertEqual(verification.target, 'self@example.com')
+
+
+class NotificatorIntegrationTests(SimpleTestCase):
+    @patch('utils.notificator_integration.notificator')
+    def test_verification_mail_uses_structured_format_and_locale(self, client):
+        send_verification_mail(
+            'reader@example.com',
+            code='223806',
+            time=10,
+            title='Sermo 言浪验证码',
+            language='zh-CN',
+            recipient_name='读者',
+        )
+
+        client.mail.assert_called_once_with(
+            'reader@example.com',
+            format='verification',
+            title='Sermo 言浪验证码',
+            locale='zh-CN',
+            body={'code': '223806', 'time': 10},
+            recipient_name='读者',
+        )
+
+    def test_message_email_is_grouped_markdown_without_content_leak(self):
+        actor = SimpleNamespace(id=8, name='Fly')
+        event = SimpleNamespace(
+            actor=actor,
+            actor_id=actor.id,
+            id=21,
+            payload={'content': 'secret'},
+            render_delivery_message=lambda **_kwargs: ('New message', 'secret'),
+        )
+        deliveries = [SimpleNamespace(event=event, event_id=event.id)] * 2
+        preference = SimpleNamespace(
+            hide_message_content=True,
+            hidden_direct_message_title='',
+            hidden_direct_message_text='',
+            hidden_group_message_title='',
+            hidden_group_message_text='',
+            friend_online_message_title='',
+            friend_online_message_text='',
+        )
+
+        body = NotificationDelivery._render_email_batch_body(deliveries, preference)
+
+        self.assertIn('## 2 unread messages', body)
+        self.assertIn('**Fly** · 2 messages', body)
+        self.assertNotIn('secret', body)
 
 
 class EmojiExtractionTests(SimpleTestCase):

@@ -2,7 +2,7 @@ import datetime
 import logging
 
 from django.views import View
-from django.utils import timezone
+from django.utils import timezone, translation
 from django.db import transaction
 from django.db.models import Q
 from notificator import NotificatorAPIError
@@ -34,7 +34,11 @@ from User.models import (
 )
 from User.params import UserParams
 from User.validators import UserErrors
-from utils.global_settings import notificator
+from utils.notificator_integration import (
+    send_verification_mail,
+    space_administrator_name,
+    verification_title,
+)
 from utils.qiniu import issue_message_upload
 
 
@@ -108,14 +112,20 @@ class SpaceEmailCodeRequestView(View):
             purpose=purpose,
             space=space,
         )
-        title = 'Sermo 言浪空间验证码'
-        body = f'Your verification code is {verify_code.code}. It expires in {SpaceEmailVerificationCode.EXPIRE_SECONDS // 60} minutes.'
+        language = (
+            space.official_user.language
+            if space is not None and space.official_user_id
+            else translation.get_language()
+        )
+        title = verification_title('space', language)
         try:
-            notificator.mail(
-                mail=verify_code.email,
+            send_verification_mail(
+                target=verify_code.email,
+                code=verify_code.code,
+                time=SpaceEmailVerificationCode.EXPIRE_SECONDS // 60,
                 title=title,
-                body=body,
-                recipient_name='Space Admin',
+                language=language,
+                recipient_name=space_administrator_name(language),
             )
         except NotificatorAPIError as e:
             if _is_notificator_timeout(e):

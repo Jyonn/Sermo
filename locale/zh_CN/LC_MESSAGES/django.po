@@ -395,6 +395,36 @@ msgstr "还有 {count} 条消息。"
 msgid "Open Sermo Yanlang to reply."
 msgstr "打开 Sermo 言浪回复。"
 
+msgid "Sermo password recovery"
+msgstr "Sermo 言浪密码找回"
+
+msgid "Sermo verification code"
+msgstr "Sermo 言浪验证码"
+
+msgid "Sermo space verification code"
+msgstr "Sermo 言浪空间验证码"
+
+msgid "Space administrator"
+msgstr "空间管理员"
+
+#, python-brace-format
+msgid "Your verification code is {code}. It expires in {time} minutes."
+msgstr "你的验证码是 {code}，{time} 分钟内有效。"
+
+#, python-brace-format
+msgid "{count} unread messages"
+msgstr "{count} 条未读消息"
+
+#, python-brace-format
+msgid "{count} messages"
+msgstr "{count} 条消息"
+
+msgid "Return to Sermo Yanlang when you are ready to reply."
+msgstr "准备好回复时，再回到 Sermo 言浪。"
+
+msgid "You can adjust email reminders in Notification settings."
+msgstr "你可以在“通知与提醒”中调整邮件提醒。"
+
 #| msgid "Space slug is required"
 msgid "language is required"
 msgstr "必须提供语言"

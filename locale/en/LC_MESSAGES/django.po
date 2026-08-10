@@ -394,6 +394,36 @@ msgstr "And {count} more messages."
 msgid "Open Sermo Yanlang to reply."
 msgstr "Open Sermo Yanlang to reply."
 
+msgid "Sermo password recovery"
+msgstr "Sermo password recovery"
+
+msgid "Sermo verification code"
+msgstr "Sermo verification code"
+
+msgid "Sermo space verification code"
+msgstr "Sermo space verification code"
+
+msgid "Space administrator"
+msgstr "Space administrator"
+
+#, python-brace-format
+msgid "Your verification code is {code}. It expires in {time} minutes."
+msgstr "Your verification code is {code}. It expires in {time} minutes."
+
+#, python-brace-format
+msgid "{count} unread messages"
+msgstr "{count} unread messages"
+
+#, python-brace-format
+msgid "{count} messages"
+msgstr "{count} messages"
+
+msgid "Return to Sermo Yanlang when you are ready to reply."
+msgstr "Return to Sermo Yanlang when you are ready to reply."
+
+msgid "You can adjust email reminders in Notification settings."
+msgstr "You can adjust email reminders in Notification settings."
+
 #| msgid "Space slug is required"
 msgid "language is required"
 msgstr "language is required"
