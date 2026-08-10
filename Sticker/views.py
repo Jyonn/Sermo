@@ -8,7 +8,7 @@ from Sticker.params import StickerParams
 from Sticker.validators import StickerErrors
 from utils import auth
 from utils.auth import Request
-from utils.qiniu import issue_sticker_upload, sign_private_download_url
+from utils.qiniu import build_sticker_display_uri, issue_sticker_upload
 
 
 class StickerView(View):
@@ -112,4 +112,4 @@ class StickerAssetView(View):
         asset = StickerAsset.objects.filter(id=asset_id).first()
         if asset is None:
             raise StickerErrors.NOT_FOUND
-        return HttpResponseRedirect(sign_private_download_url(asset.source_uri()))
+        return HttpResponseRedirect(build_sticker_display_uri(asset.source_uri()))

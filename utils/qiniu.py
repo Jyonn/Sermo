@@ -114,6 +114,11 @@ def build_message_image_thumbnail_uri(uri: str, width: int = 120):
     return sign_private_processed_url(uri, f'imageView2/2/w/{normalized_width}/q/70')
 
 
+def build_sticker_display_uri(uri: str, width: int = 320):
+    normalized_width = max(120, min(int(width), 480))
+    return sign_private_processed_url(uri, f'imageView2/2/w/{normalized_width}/q/75')
+
+
 def build_message_video_thumbnail_uri(uri: str, width: int = 480):
     normalized_width = max(120, min(int(width), 960))
     return sign_private_processed_url(uri, f'vframe/jpg/offset/0.1/w/{normalized_width}')
