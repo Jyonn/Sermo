@@ -504,9 +504,10 @@ class ChatReadState(models.Model):
     def unread_count(cls, chat: Chat, user: User):
         from Message.models import Message
         last_read_at = cls.get_last_read_at(chat, user)
+        unread_messages = Message.visible_for_user(chat, user).exclude(user=user)
         if last_read_at is None:
-            return Message.visible_for_user(chat, user).count()
-        return Message.visible_for_user(chat, user).filter(created_at__gt=last_read_at).count()
+            return unread_messages.count()
+        return unread_messages.filter(created_at__gt=last_read_at).count()
 
 
 class ChatUserPreference(models.Model):

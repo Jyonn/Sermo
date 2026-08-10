@@ -1077,9 +1077,11 @@ class MessageEvent(models.Model):
 
     @classmethod
     def sync_for_user(cls, user: User, after: int, limit: int, request: HttpRequest = None):
+        from Chat.models import ChatReadState, ChatUserPreference
+
         chat_ids = [chat.id for chat in Chat.get_user_chats(user)]
         rows = list(
-            cls.objects.select_related('message', 'message__user', 'message__reply_to', 'message__reply_to__user')
+            cls.objects.select_related('chat', 'message', 'message__user', 'message__reply_to', 'message__reply_to__user')
             .filter(id__gt=after)
             .filter(Q(target_user=user) | Q(target_user__isnull=True, chat_id__in=chat_ids))
             .order_by('id')[:limit + 1]
@@ -1098,7 +1100,33 @@ class MessageEvent(models.Model):
                 if not MessageUserState.objects.filter(message=row.message, user=user).exists():
                     event['message'] = row.message.jsonl(request=request)
             events.append(event)
-        return dict(events=events, has_more=has_more, next_after=rows[-1].id if rows else after)
+
+        affected_chats = {row.chat_id: row.chat for row in rows}
+        muted_chat_ids = set(
+            ChatUserPreference.objects.filter(
+                user=user,
+                chat_id__in=affected_chats,
+                notifications_muted=True,
+            ).values_list('chat_id', flat=True)
+        )
+        read_states = {
+            state.chat_id: state.last_read_at
+            for state in ChatReadState.objects.filter(user=user, chat_id__in=affected_chats)
+        }
+        chat_states = [
+            dict(
+                chat_id=chat_id,
+                unread_count=0 if chat_id in muted_chat_ids else ChatReadState.unread_count(chat, user),
+                last_read_at=read_states[chat_id].timestamp() if read_states.get(chat_id) else None,
+            )
+            for chat_id, chat in affected_chats.items()
+        ]
+        return dict(
+            events=events,
+            chat_states=chat_states,
+            has_more=has_more,
+            next_after=rows[-1].id if rows else after,
+        )
 
 
 class PinnedMessage(models.Model):
