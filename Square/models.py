@@ -202,7 +202,7 @@ class StatementComment(models.Model):
             raise SquareErrors.NOT_EXISTS
 
     @classmethod
-    def feed(cls, user, statement_id, offset=0, limit=30):
+    def feed(cls, user, statement_id, offset=0, limit=30, sort='hot'):
         statement = cls.statement_for_user(user, statement_id)
         queryset = cls.objects.filter(statement=statement, is_deleted=False).select_related('user', 'parent__user').annotate(
             visible_like_count=Count('likes', distinct=True),
@@ -232,7 +232,10 @@ class StatementComment(models.Model):
         for root in roots:
             root.visible_replies = sorted(replies_by_root[root.id], key=lambda item: (item.created_at, item.id))
             root.visible_reply_count = len(root.visible_replies)
-        roots.sort(key=lambda item: (-item.visible_like_count, -item.visible_reply_count, -item.created_at.timestamp(), -item.id))
+        if sort == 'latest':
+            roots.sort(key=lambda item: (-item.created_at.timestamp(), -item.id))
+        else:
+            roots.sort(key=lambda item: (-item.visible_like_count, -item.visible_reply_count, -item.created_at.timestamp(), -item.id))
         return [comment.jsonl(viewer=user, include_replies=True) for comment in roots[offset:offset + limit]]
 
     @classmethod

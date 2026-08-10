@@ -4,7 +4,7 @@ from django.test import TestCase
 
 from Friendship.models import Friendship
 from Space.models import Space
-from Square.models import Statement, StatementComment, StatementLike
+from Square.models import Statement, StatementComment, StatementCommentLike, StatementLike
 from User.models import User
 from utils import auth
 
@@ -251,6 +251,18 @@ class StatementApiTests(TestCase):
         self.assertTrue(self.friend.growth_events.filter(event_key='explore:square_comment').exists())
         self.assertEqual(self.friend.growth_events.filter(event_key='explore:square_like').count(), 1)
         self.assertTrue(self.author.growth_events.filter(event_key='explore:square_comment_like').exists())
+
+    def test_comments_can_switch_between_hot_and_latest_order(self):
+        statement = Statement.create_statement(self.author, '评论排序', 'public', [])
+        older = StatementComment.create_comment(self.friend, statement.id, '较早热门')
+        newer = StatementComment.create_comment(self.author, statement.id, '较新评论')
+        StatementCommentLike.objects.create(comment=older, user=self.author)
+
+        hot = StatementComment.feed(self.author, statement.id, sort='hot')
+        latest = StatementComment.feed(self.author, statement.id, sort='latest')
+
+        self.assertEqual([item['comment_id'] for item in hot], [older.id, newer.id])
+        self.assertEqual([item['comment_id'] for item in latest], [newer.id, older.id])
 
     def test_statement_rejects_mixed_media_types(self):
         response = self.post_statement(self.author, {

@@ -199,7 +199,7 @@ class StatementCommentLikeView(View):
 
 class StatementCommentView(View):
     @auth.require_user
-    @analyse.query(SquareParams.offset, SquareParams.limit)
+    @analyse.query(SquareParams.offset, SquareParams.limit, SquareParams.comment_sort)
     def get(self, request: Request, statement_id: int):
         request.user.space.require_square_enabled()
         return StatementComment.feed(
@@ -207,6 +207,7 @@ class StatementCommentView(View):
             statement_id=statement_id,
             offset=request.query.offset,
             limit=request.query.limit,
+            sort=request.query.comment_sort,
         )
 
     @auth.require_user

@@ -45,6 +45,7 @@ class SquareParams(metaclass=Params):
     scope = Validator('scope').to(str).bool(lambda value: value in ('all', 'friends', 'mine')).default('all')
     user_id = Validator('user_id').to(int).null().default(None)
     parent_id = Validator('parent_id').to(int).null().default(None)
+    comment_sort = Validator('sort').to(str).bool(lambda value: value in ('hot', 'latest')).default('hot')
     limit = Validator('limit').to(int).bool(
         lambda value: 5 <= value <= 50,
         message=_('limit should be between 5 and 50'),
