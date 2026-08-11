@@ -985,6 +985,7 @@ class Message(models.Model):
             content=self.preview_text(),
             payload=self._payload_for_type(request=request),
             reply_to=self._reply_to_payload(),
+            mentions=[mention.user.tiny_json() for mention in self.chat_mentions.all()],
             created_at=self.created_at.timestamp(),
         )
 
@@ -1007,24 +1008,24 @@ class Message(models.Model):
     @classmethod
     def latest(cls, chat: Chat, limit: int, request: HttpRequest = None, user: User = None):
         queryset = cls.visible_for_user(chat, user) if user is not None else cls.visible_in_chat(chat)
-        messages = queryset.select_related('user', 'reply_to', 'reply_to__user').order_by('-id')[:limit]
+        messages = queryset.select_related('user', 'reply_to', 'reply_to__user').prefetch_related('chat_mentions__user').order_by('-id')[:limit]
         return [message.jsonl(request=request) for message in messages]
 
     @classmethod
     def older(cls, chat: Chat, message_id, limit: int, request: HttpRequest = None, user: User = None):
         queryset = cls.visible_for_user(chat, user) if user is not None else cls.visible_in_chat(chat)
-        messages = queryset.select_related('user', 'reply_to', 'reply_to__user').filter(id__lt=message_id).order_by('-id')[:limit]
+        messages = queryset.select_related('user', 'reply_to', 'reply_to__user').prefetch_related('chat_mentions__user').filter(id__lt=message_id).order_by('-id')[:limit]
         return [message.jsonl(request=request) for message in messages]
 
     @classmethod
     def newer(cls, chat: Chat, message_id, limit: int, request: HttpRequest = None, user: User = None):
         queryset = cls.visible_for_user(chat, user) if user is not None else cls.visible_in_chat(chat)
-        messages = queryset.select_related('user', 'reply_to', 'reply_to__user').filter(id__gt=message_id).order_by('id')[:limit]
+        messages = queryset.select_related('user', 'reply_to', 'reply_to__user').prefetch_related('chat_mentions__user').filter(id__gt=message_id).order_by('id')[:limit]
         return [message.jsonl(request=request) for message in messages]
 
     @classmethod
     def search(cls, chat: Chat, user: User, keyword=None, message_type=None, before=None, limit=30, request=None):
-        queryset = cls.visible_for_user(chat, user).select_related('user', 'reply_to', 'reply_to__user')
+        queryset = cls.visible_for_user(chat, user).select_related('user', 'reply_to', 'reply_to__user').prefetch_related('chat_mentions__user')
         normalized_keyword = (keyword or '').strip()
         if normalized_keyword:
             queryset = queryset.filter(content__icontains=normalized_keyword)
@@ -1093,6 +1094,7 @@ class MessageEvent(models.Model):
         chat_ids = [chat.id for chat in Chat.get_user_chats(user)]
         rows = list(
             cls.objects.select_related('chat', 'message', 'message__user', 'message__reply_to', 'message__reply_to__user')
+            .prefetch_related('message__chat_mentions__user')
             .filter(id__gt=after)
             .filter(Q(target_user=user) | Q(target_user__isnull=True, chat_id__in=chat_ids))
             .order_by('id')[:limit + 1]
