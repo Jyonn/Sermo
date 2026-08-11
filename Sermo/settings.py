@@ -64,12 +64,14 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'utils.middleware.GrowthAwardHeader',
     'utils.middleware.APIPacker',
 ]
 
 CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOWED_ORIGINS = ['http://*', 'https://*']
 CORS_ALLOW_CREDENTIALS = True
+CORS_EXPOSE_HEADERS = ['X-Sermo-Growth-Award']
 CORS_ALLOW_HEADERS = [
     'accept',
     'accept-encoding',

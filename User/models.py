@@ -38,6 +38,7 @@ from User.growth import (
     level_unlock_titles,
     resolve_event_rule,
 )
+from User.growth_notifications import record_growth_award
 from utils import function
 
 
@@ -939,6 +940,7 @@ class User(models.Model):
             locked.save(update_fields=['growth_score', 'growth_level'])
             self.growth_score = locked.growth_score
             self.growth_level = locked.growth_level
+        record_growth_award(awarded)
         return awarded
 
     def reconcile_growth(self):

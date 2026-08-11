@@ -5,6 +5,12 @@ from django.utils.functional import Promise
 
 from smartdjango.error import Error, OK
 
+from User.growth_notifications import (
+    begin_growth_awards,
+    growth_award_total,
+    reset_growth_awards,
+)
+
 
 def _safe_error_eq(self, other):
     if not isinstance(other, Error):
@@ -13,6 +19,24 @@ def _safe_error_eq(self, other):
 
 
 Error.__eq__ = _safe_error_eq
+
+
+class GrowthAwardHeader:
+    header_name = 'X-Sermo-Growth-Award'
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        token = begin_growth_awards()
+        try:
+            response = self.get_response(request)
+            awarded = growth_award_total()
+            if 200 <= response.status_code < 400 and awarded > 0:
+                response[self.header_name] = str(awarded)
+            return response
+        finally:
+            reset_growth_awards(token)
 
 
 def _to_jsonable(value):

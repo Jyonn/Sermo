@@ -8,6 +8,7 @@ from User.growth import (
     PERSONALIZATION_LEVELS,
     resolve_event_rule,
 )
+from User.growth_notifications import begin_growth_awards, growth_award_total, reset_growth_awards
 from User.models import GrowthEvent, User
 
 
@@ -146,3 +147,12 @@ class GrowthReconciliationTests(TestCase):
             GrowthEvent.objects.filter(user=self.user, event_key='vip:permanent').count(),
             1,
         )
+
+    def test_only_effective_growth_awards_are_collected_for_the_response(self):
+        token = begin_growth_awards()
+        try:
+            self.assertEqual(self.user.award_growth('explore:image'), 20)
+            self.assertEqual(self.user.award_growth('explore:image'), 0)
+            self.assertEqual(growth_award_total(), 20)
+        finally:
+            reset_growth_awards(token)
