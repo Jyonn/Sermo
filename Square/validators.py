@@ -21,4 +21,5 @@ class SquareErrors:
     VIDEO_LEVEL_REQUIRED = Error(message=_('Video statements unlock at LV8'), code=Code.Forbidden)
     VIDEO_LIMIT_EXCEEDED = Error(message=_('A statement can contain only one video'), code=Code.BadRequest)
     DELETE_FORBIDDEN = Error(message=_('You cannot delete this statement'), code=Code.Forbidden)
+    COMMENT_DELETE_FORBIDDEN = Error(message=_('You cannot delete this comment'), code=Code.Forbidden)
     PIN_FORBIDDEN = Error(message=_('Only the official account can pin its own statement'), code=Code.Forbidden)

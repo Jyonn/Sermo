@@ -802,3 +802,6 @@ msgstr "当前空间不允许未认证成员加入群聊"
 
 msgid "Unverified members cannot send messages in group chats in this space"
 msgstr "当前空间不允许未认证成员发送群消息"
+
+msgid "You cannot delete this comment"
+msgstr "你无法删除这条评论"

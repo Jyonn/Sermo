@@ -204,7 +204,7 @@ class StatementComment(models.Model):
     @classmethod
     def feed(cls, user, statement_id, offset=0, limit=30, sort='hot'):
         statement = cls.statement_for_user(user, statement_id)
-        queryset = cls.objects.filter(statement=statement, is_deleted=False).select_related('user', 'parent__user').annotate(
+        queryset = cls.objects.filter(statement=statement, is_deleted=False).select_related('statement', 'user', 'parent__user').annotate(
             visible_like_count=Count('likes', distinct=True),
             viewer_liked=Exists(StatementCommentLike.objects.filter(comment_id=OuterRef('pk'), user=user)),
         )
@@ -286,6 +286,11 @@ class StatementComment(models.Model):
             like_count=like_count,
             reply_count=reply_count,
             liked=bool(getattr(self, 'viewer_liked', viewer and self.likes.filter(user=viewer).exists())),
+            can_delete=bool(viewer and (
+                viewer.id == self.user_id
+                or viewer.id == self.statement.user_id
+                or viewer.is_official and viewer.space_id == self.statement.space_id
+            )),
             created_at=self.created_at.timestamp(),
         )
         if include_replies:
@@ -294,6 +299,26 @@ class StatementComment(models.Model):
                 for reply in getattr(self, 'visible_replies', [])
             ]
         return payload
+
+    def delete_for(self, user):
+        if user.id not in (self.user_id, self.statement.user_id) and not (
+            user.is_official and user.space_id == self.statement.space_id
+        ):
+            raise SquareErrors.COMMENT_DELETE_FORBIDDEN
+
+        delete_ids = {self.id}
+        if self.parent_id is None:
+            descendants = list(type(self).objects.filter(
+                statement_id=self.statement_id,
+                is_deleted=False,
+            ).values_list('id', 'parent_id'))
+            while True:
+                next_ids = {comment_id for comment_id, parent_id in descendants if parent_id in delete_ids}
+                if next_ids.issubset(delete_ids):
+                    break
+                delete_ids.update(next_ids)
+        deleted_count = type(self).objects.filter(id__in=delete_ids, is_deleted=False).update(is_deleted=True)
+        return deleted_count
 
 
 class StatementLike(models.Model):

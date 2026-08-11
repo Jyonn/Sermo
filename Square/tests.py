@@ -179,6 +179,20 @@ class StatementApiTests(TestCase):
         self.assertEqual(limited.status_code, 403, limited.content)
         self.assertEqual(limited.json()['identifier'], 'SQUARE@DAILY_LIMIT_REACHED')
 
+    def test_comment_delete_permissions_and_thread_cleanup(self):
+        statement = Statement.create_statement(self.author, '评论治理', 'public', [])
+        root = StatementComment.create_comment(self.friend, statement.id, '一级评论')
+        StatementComment.create_comment(self.author, statement.id, '二级回复', parent_id=root.id)
+
+        forbidden = self.client.delete(f'/square/comments/{root.id}', **self.authorization(self.stranger))
+        self.assertEqual(forbidden.status_code, 403, forbidden.content)
+
+        deleted = self.client.delete(f'/square/comments/{root.id}', **self.authorization(self.author))
+        self.assertEqual(deleted.status_code, 200, deleted.content)
+        self.assertEqual(deleted.json()['body']['deleted_count'], 2)
+        self.assertTrue(deleted.json()['body']['root_deleted'])
+        self.assertEqual(StatementComment.objects.filter(statement=statement, is_deleted=False).count(), 0)
+
     def test_quota_reports_current_rolling_usage(self):
         Statement.create_statement(self.author, '今日发言', 'public', [])
         statement = Statement.objects.get(user=self.author)

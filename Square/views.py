@@ -197,6 +197,27 @@ class StatementCommentLikeView(View):
         return dict(liked=False, like_count=comment.likes.count())
 
 
+class StatementCommentDetailView(View):
+    @auth.require_user
+    def delete(self, request: Request, comment_id: int):
+        request.user.space.require_square_enabled()
+        try:
+            comment = StatementComment.objects.select_related('statement', 'user').get(
+                id=comment_id,
+                is_deleted=False,
+            )
+        except StatementComment.DoesNotExist:
+            raise SquareErrors.NOT_EXISTS
+        StatementComment.statement_for_user(request.user, comment.statement_id)
+        deleted_count = comment.delete_for(request.user)
+        return dict(
+            comment_id=comment.id,
+            statement_id=comment.statement_id,
+            deleted_count=deleted_count,
+            root_deleted=comment.parent_id is None,
+        )
+
+
 class StatementCommentView(View):
     @auth.require_user
     @analyse.query(SquareParams.offset, SquareParams.limit, SquareParams.comment_sort)

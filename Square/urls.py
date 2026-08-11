@@ -1,6 +1,6 @@
 from django.urls import path
 
-from Square.views import PinnedStatementView, SquareQuotaView, StatementCommentLikeView, StatementCommentView, StatementDetailView, StatementLikeView, StatementMediaThumbnailView, StatementMediaView, StatementPinView, StatementUploadView, StatementView
+from Square.views import PinnedStatementView, SquareQuotaView, StatementCommentDetailView, StatementCommentLikeView, StatementCommentView, StatementDetailView, StatementLikeView, StatementMediaThumbnailView, StatementMediaView, StatementPinView, StatementUploadView, StatementView
 
 
 urlpatterns = [
@@ -15,4 +15,5 @@ urlpatterns = [
     path('statements/<int:statement_id>', StatementDetailView.as_view(), name='square statement detail'),
     path('statements/<int:statement_id>/like', StatementLikeView.as_view(), name='square statement like'),
     path('comments/<int:comment_id>/like', StatementCommentLikeView.as_view(), name='square comment like'),
+    path('comments/<int:comment_id>', StatementCommentDetailView.as_view(), name='square comment detail'),
 ]
