@@ -9,7 +9,7 @@ from User.growth import (
     resolve_event_rule,
 )
 from User.growth_notifications import begin_growth_awards, growth_award_total, reset_growth_awards
-from User.models import GrowthEvent, User
+from User.models import GrowthEvent, User, UserFeatureDiscovery
 
 
 class GrowthRuleTests(SimpleTestCase):
@@ -156,3 +156,25 @@ class GrowthReconciliationTests(TestCase):
             self.assertEqual(growth_award_total(), 20)
         finally:
             reset_growth_awards(token)
+
+
+class FeatureDiscoveryTests(TestCase):
+    def setUp(self):
+        space = Space.objects.create(name='Discovery Space', slug='discovery-space', email='admin@example.com')
+        self.user = User.create(space=space, name='Member')
+        self.user.growth_score = GROWTH_THRESHOLDS[2]
+        self.user.growth_level = 3
+        self.user.save(update_fields=['growth_score', 'growth_level'])
+
+    def test_unlocked_features_remain_new_until_discovered(self):
+        status = UserFeatureDiscovery.status_for(self.user)
+        features = {feature['reward_id']: feature for feature in status['features']}
+
+        self.assertTrue(features['capability.image']['is_new'])
+        self.assertTrue(features['capability.audio']['is_new'])
+        self.assertTrue(features['capability.location']['is_new'])
+
+        updated = UserFeatureDiscovery.discover(self.user, 'capability.audio')
+        updated_features = {feature['reward_id']: feature for feature in updated['features']}
+        self.assertFalse(updated_features['capability.audio']['is_new'])
+        self.assertTrue(updated_features['capability.location']['is_new'])

@@ -34,6 +34,7 @@ from User.models import (
     AccountSwitchTicket,
     UserEmojiUsage,
     PermanentVipCampaign,
+    UserFeatureDiscovery,
 )
 from User.params import (
     AuthParams,
@@ -48,6 +49,7 @@ from User.params import (
     UserContactVerificationCodeParams,
     UserGrowthEventParams,
     UserGrowthAcknowledgementParams,
+    UserFeatureDiscoveryParams,
     UserPrivateAccountParams,
     UserContactUnbindParams,
     UserPasswordRecoveryParams,
@@ -126,6 +128,17 @@ class UserGrowthAcknowledgementView(View):
     @analyse.json(UserGrowthAcknowledgementParams.level)
     def post(self, request: Request):
         return request.user.acknowledge_growth_level(request.json.level)
+
+
+class UserFeatureDiscoveryView(View):
+    @auth.require_user
+    def get(self, request: Request):
+        return UserFeatureDiscovery.status_for(request.user)
+
+    @auth.require_user
+    @analyse.json(UserFeatureDiscoveryParams.reward_id)
+    def post(self, request: Request):
+        return UserFeatureDiscovery.discover(request.user, request.json.reward_id)
 
 
 class PermanentVipCampaignView(View):

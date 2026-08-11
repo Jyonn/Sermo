@@ -89,6 +89,13 @@ class UserGrowthAcknowledgementParams(metaclass=Params):
     )
 
 
+class UserFeatureDiscoveryParams(metaclass=Params):
+    reward_id = Validator('reward_id').to(str).to(lambda value: value.strip()).bool(
+        lambda value: 0 < len(value) <= 80,
+        message=_('Invalid feature discovery'),
+    )
+
+
 class UserPasswordParams(metaclass=Params):
     old_password = UserParams.password.copy().rename('old_password', final_name='old_password') \
         .null().default(None)

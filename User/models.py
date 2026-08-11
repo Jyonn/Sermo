@@ -1224,6 +1224,59 @@ class GrowthEvent(models.Model):
         )
 
 
+class UserFeatureDiscovery(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='feature_discoveries')
+    reward_id = models.CharField(max_length=80)
+    discovered_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['user', 'reward_id'], name='user_feature_discovery_unique'),
+        ]
+
+    @classmethod
+    def feature_rewards(cls, user):
+        if user.is_official:
+            return []
+        level = user.effective_growth_level()
+        return [
+            reward
+            for unlock_level, rewards in LEVEL_REWARDS.items()
+            for reward in rewards
+            if (
+                unlock_level <= level
+                or (reward['id'] == 'capability.notification' and user.is_permanent_vip)
+            )
+            and reward['category'] == 'capability'
+            and reward['implementation_status'] == 'live'
+            and reward.get('capability_key') != 'basic'
+        ]
+
+    @classmethod
+    def status_for(cls, user):
+        discovered = set(cls.objects.filter(user=user).values_list('reward_id', flat=True))
+        features = cls.feature_rewards(user)
+        return dict(
+            features=[dict(
+                reward_id=reward['id'],
+                capability_key=reward['capability_key'],
+                required_level=reward['level'],
+                title=reward['title'],
+                destination=reward['destination'],
+                is_new=reward['id'] not in discovered,
+            ) for reward in features],
+            pending_count=sum(reward['id'] not in discovered for reward in features),
+        )
+
+    @classmethod
+    def discover(cls, user, reward_id):
+        available = {reward['id'] for reward in cls.feature_rewards(user)}
+        if reward_id not in available:
+            raise UserErrors.FEATURE_DISCOVERY_INVALID
+        cls.objects.get_or_create(user=user, reward_id=reward_id)
+        return cls.status_for(user)
+
+
 class PermanentVipCampaign(models.Model):
     LIMIT = 100
 
