@@ -509,6 +509,14 @@ class ChatReadState(models.Model):
             return unread_messages.count()
         return unread_messages.filter(created_at__gt=last_read_at).count()
 
+    @classmethod
+    def has_unread_mention(cls, chat: Chat, user: User):
+        last_read_at = cls.get_last_read_at(chat, user)
+        mentions = ChatMessageMention.objects.filter(chat=chat, user=user, message__is_deleted=False)
+        if last_read_at is not None:
+            mentions = mentions.filter(message__created_at__gt=last_read_at)
+        return mentions.exists()
+
 
 class ChatUserPreference(models.Model):
     chat = models.ForeignKey(Chat, on_delete=models.CASCADE, related_name='user_preferences', db_index=True)
@@ -516,6 +524,7 @@ class ChatUserPreference(models.Model):
     pinned = models.BooleanField(default=False)
     online_reminder_enabled = models.BooleanField(default=False)
     notifications_muted = models.BooleanField(default=False)
+    unread_badge_muted = models.BooleanField(default=False)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
@@ -527,7 +536,7 @@ class ChatUserPreference(models.Model):
         return preference
 
     @classmethod
-    def update(cls, chat: Chat, user: User, pinned=None, online_reminder_enabled=None, notifications_muted=None):
+    def update(cls, chat: Chat, user: User, pinned=None, online_reminder_enabled=None, notifications_muted=None, unread_badge_muted=None):
         preference = cls.ensure(chat, user)
         updates = []
         if pinned is not None:
@@ -543,12 +552,23 @@ class ChatUserPreference(models.Model):
                 raise ChatErrors.NOT_GROUP_CHAT(chat=chat.id)
             preference.notifications_muted = bool(notifications_muted)
             updates.append('notifications_muted')
+        if unread_badge_muted is not None:
+            if not chat.group and bool(unread_badge_muted):
+                raise ChatErrors.NOT_GROUP_CHAT(chat=chat.id)
+            if bool(unread_badge_muted) and not preference.notifications_muted:
+                preference.notifications_muted = True
+                updates.append('notifications_muted')
+            preference.unread_badge_muted = bool(unread_badge_muted)
+            updates.append('unread_badge_muted')
+        if notifications_muted is not None and not bool(notifications_muted) and preference.unread_badge_muted:
+            preference.unread_badge_muted = False
+            updates.append('unread_badge_muted')
         if updates:
-            preference.save(update_fields=[*updates, 'updated_at'])
+            preference.save(update_fields=[*dict.fromkeys(updates), 'updated_at'])
         return preference
 
     def json(self):
-        return self.dictify('pinned', 'online_reminder_enabled', 'notifications_muted')
+        return self.dictify('pinned', 'online_reminder_enabled', 'notifications_muted', 'unread_badge_muted')
 
     @classmethod
     def emit_peer_online_events(cls, peer: User):
@@ -573,3 +593,29 @@ class ChatUserPreference(models.Model):
             )
             events.append(event)
         return events
+
+
+class ChatMessageMention(models.Model):
+    chat = models.ForeignKey(Chat, on_delete=models.CASCADE, related_name='message_mentions', db_index=True)
+    message = models.ForeignKey('Message.Message', on_delete=models.CASCADE, related_name='chat_mentions')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='chat_mentions', db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['message', 'user'], name='unique_message_mention_user'),
+        ]
+
+    @classmethod
+    def record(cls, message, user_ids):
+        if not message.chat.group or not user_ids:
+            return []
+        active_user_ids = set(ChatMember.objects.filter(
+            chat=message.chat,
+            status=ChatMemberStatusChoice.ACTIVE,
+            user_id__in=set(user_ids),
+        ).exclude(user_id=message.user_id).values_list('user_id', flat=True))
+        return cls.objects.bulk_create([
+            cls(chat=message.chat, message=message, user_id=user_id)
+            for user_id in active_user_ids
+        ], ignore_conflicts=True)

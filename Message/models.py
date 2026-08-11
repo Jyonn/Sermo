@@ -467,7 +467,7 @@ class Message(models.Model):
         return cls.visible_in_chat(chat).exclude(hidden_states__user=user)
 
     @classmethod
-    def create(cls, chat: Chat, user: User, message_type, content, reply_to=None, client_message_id=None):
+    def create(cls, chat: Chat, user: User, message_type, content, reply_to=None, client_message_id=None, mention_user_ids=None):
         if chat.has_active_member(user):
             if message_type == MessageTypeChoice.TEXT:
                 statement_reference = cls.statement_reference_from_text(content, user)
@@ -579,6 +579,9 @@ class Message(models.Model):
                 user.award_growth('explore:message_reply')
             if message.type != MessageTypeChoice.SYSTEM:
                 message._award_interaction_growth()
+            if message.type == MessageTypeChoice.TEXT and mention_user_ids:
+                from Chat.models import ChatMessageMention
+                ChatMessageMention.record(message, mention_user_ids)
             MessageEvent.record_created(message)
             return message
         raise MessageErrors.NOT_A_MEMBER
@@ -1107,14 +1110,15 @@ class MessageEvent(models.Model):
             if row.type == MessageEventTypeChoice.CREATED and not row.message.is_deleted:
                 if not MessageUserState.objects.filter(message=row.message, user=user).exists():
                     event['message'] = row.message.jsonl(request=request)
+                    event['message']['mentioned_me'] = row.message.chat_mentions.filter(user=user).exists()
             events.append(event)
 
         affected_chats = {row.chat_id: row.chat for row in rows}
-        muted_chat_ids = set(
+        muted_badge_chat_ids = set(
             ChatUserPreference.objects.filter(
                 user=user,
                 chat_id__in=affected_chats,
-                notifications_muted=True,
+                unread_badge_muted=True,
             ).values_list('chat_id', flat=True)
         )
         read_states = {
@@ -1124,7 +1128,9 @@ class MessageEvent(models.Model):
         chat_states = [
             dict(
                 chat_id=chat_id,
-                unread_count=0 if chat_id in muted_chat_ids else ChatReadState.unread_count(chat, user),
+                unread_count=ChatReadState.unread_count(chat, user),
+                unread_badge_muted=chat_id in muted_badge_chat_ids,
+                has_unread_mention=ChatReadState.has_unread_mention(chat, user) if chat.group else False,
                 last_read_at=read_states[chat_id].timestamp() if read_states.get(chat_id) else None,
             )
             for chat_id, chat in affected_chats.items()

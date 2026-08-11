@@ -45,6 +45,7 @@ class MessageView(View):
         MessageParams.type,
         MessageParams.reply_to_message_id,
         MessageParams.client_message_id,
+        MessageParams.mention_user_ids,
     )
     def post(self, request: Request):
         request.user.space.require_chat_enabled()
@@ -57,7 +58,8 @@ class MessageView(View):
                 message_type=request.json.type,
                 content=request.json.content,
                 reply_to=request.json.reply_to,
-                client_message_id=request.json.client_message_id)
+                client_message_id=request.json.client_message_id,
+                mention_user_ids=request.json.mention_user_ids)
             if getattr(message, '_was_created', True):
                 NotificationEvent.emit_message_notifications(message, actor=request.user)
         return message.jsonl(request=request)

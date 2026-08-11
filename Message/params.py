@@ -1,5 +1,5 @@
 from django.utils.translation import gettext_lazy as _
-from smartdjango import Params, Validator
+from smartdjango import ListValidator, Params, Validator
 
 from Chat.models import Chat
 from Message.models import Message
@@ -25,6 +25,7 @@ class MessageParams(metaclass=Params):
     message_ids = Validator('message_ids').to(validate_message_ids)
     reply_to_message_id = Validator('reply_to_message_id', final_name='reply_to').to(int).to(Message.index).null().default(None)
     client_message_id = Validator('client_message_id').to(str).null().default(None)
+    mention_user_ids = ListValidator('mention_user_ids').element(Validator().to(int)).default([])
     chat_id = Validator('chat_id', final_name='chat').to(int).to(Chat.index)
 
     content: Validator

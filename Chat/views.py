@@ -16,12 +16,14 @@ class ChatListView(View):
         if last_message is not None:
             data['last_message'] = last_message.jsonl(request=request)
         preference = ChatUserPreference.objects.filter(chat=chat, user=user).first()
-        data['unread_count'] = 0 if preference and preference.notifications_muted else ChatReadState.unread_count(chat, user)
+        data['unread_count'] = ChatReadState.unread_count(chat, user)
+        data['has_unread_mention'] = ChatReadState.has_unread_mention(chat, user) if chat.group else False
         last_read_at = ChatReadState.get_last_read_at(chat, user)
         data['last_read_at'] = last_read_at.timestamp() if last_read_at else None
         data['pinned'] = bool(preference and preference.pinned)
         data['online_reminder_enabled'] = bool(preference and preference.online_reminder_enabled)
         data['notifications_muted'] = bool(preference and preference.notifications_muted)
+        data['unread_badge_muted'] = bool(preference and preference.unread_badge_muted)
         return data
 
     @auth.require_user
@@ -144,6 +146,7 @@ class ChatPreferenceView(View):
         ChatPreferenceParams.pinned,
         ChatPreferenceParams.online_reminder_enabled,
         ChatPreferenceParams.notifications_muted,
+        ChatPreferenceParams.unread_badge_muted,
     )
     @auth.require_chat_member()
     def post(self, request):
@@ -155,5 +158,6 @@ class ChatPreferenceView(View):
             pinned=request.json.pinned,
             online_reminder_enabled=request.json.online_reminder_enabled,
             notifications_muted=request.json.notifications_muted,
+            unread_badge_muted=request.json.unread_badge_muted,
         )
         return preference.json()

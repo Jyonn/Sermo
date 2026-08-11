@@ -51,3 +51,7 @@ class ChatPreferenceParams(metaclass=Params):
         .to(int) \
         .null().default(None) \
         .bool(lambda x: x is None or x in (0, 1), message=_('notifications_muted should be 0 or 1'))
+    unread_badge_muted = Validator('unread_badge_muted') \
+        .to(int) \
+        .null().default(None) \
+        .bool(lambda x: x is None or x in (0, 1), message=_('unread_badge_muted should be 0 or 1'))

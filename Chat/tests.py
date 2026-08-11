@@ -38,7 +38,7 @@ class ChatNotificationPreferenceTests(TestCase):
     def authorization(self, user):
         return {'HTTP_AUTHORIZATION': f"Bearer {auth.get_login_token(user)['auth']}"}
 
-    def test_muted_group_suppresses_badge_and_notification_event(self):
+    def test_muted_group_suppresses_external_notification_but_keeps_unread(self):
         preference_response = self.client.post(
             f'/chats/preference?chat_id={self.chat.id}',
             data=json.dumps({'notifications_muted': 1}),
@@ -55,9 +55,21 @@ class ChatNotificationPreferenceTests(TestCase):
         chat_list = self.client.get('/chats/', **self.authorization(self.recipient))
         self.assertEqual(chat_list.status_code, 200, chat_list.content)
         payload = next(item for item in chat_list.json()['body'] if item['chat_id'] == self.chat.id)
-        self.assertEqual(payload['unread_count'], 0)
+        self.assertEqual(payload['unread_count'], 1)
         self.assertTrue(payload['notifications_muted'])
+        self.assertFalse(payload['unread_badge_muted'])
         self.assertEqual(payload['last_message']['content'], 'still delivered')
+
+    def test_weak_unread_keeps_count_but_marks_badge_as_muted(self):
+        ChatUserPreference.update(self.chat, self.recipient, unread_badge_muted=True)
+        Message.create(self.chat, self.sender, MessageTypeChoice.TEXT, 'quiet unread')
+
+        chat_list = self.client.get('/chats/', **self.authorization(self.recipient))
+        payload = next(item for item in chat_list.json()['body'] if item['chat_id'] == self.chat.id)
+
+        self.assertEqual(payload['unread_count'], 1)
+        self.assertTrue(payload['notifications_muted'])
+        self.assertTrue(payload['unread_badge_muted'])
 
     def test_unmuted_group_keeps_normal_notification_behavior(self):
         message = Message.create(self.chat, self.sender, MessageTypeChoice.TEXT, 'notify me')
