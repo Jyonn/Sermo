@@ -129,7 +129,7 @@ class UserValidator:
             'moon', 'camera', 'comet', 'snowfall', 'papercut', 'mechanical', 'niko-run', 'fufu-wave', 'xiaobai-run', 'vip',
         },
         'statement_card_style': {
-            'default', 'editorial', 'aurora', 'pixel', 'lacquer', 'collage',
+            'default', 'editorial', 'mosaic', 'hero', 'comic', 'receipt', 'vip', 'niko', 'fufu',
         },
     }
     GESTURE_LOCK_MIN_MINUTES = 1

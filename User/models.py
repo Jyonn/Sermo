@@ -532,6 +532,11 @@ class User(models.Model):
             raise UserErrors.PERMANENT_VIP_NOT_ELIGIBLE
         if values['avatar_frame_style'] == 'vip' and not self.is_permanent_vip:
             raise UserErrors.PERMANENT_VIP_NOT_ELIGIBLE
+        requested_statement = values.get('statement_card_style')
+        if requested_statement == 'vip' and not self.is_permanent_vip:
+            raise UserErrors.PERMANENT_VIP_NOT_ELIGIBLE
+        if requested_statement in {'niko', 'fufu'} and not self.is_permanent_vip and self.effective_growth_level() < 16:
+            raise UserErrors.GROWTH_LEVEL_REQUIRED(level=16)
         requested_bubble = values['chat_bubble_style']
         if requested_bubble in CITY_BUBBLE_RULES and requested_bubble not in unlocked_city_bubble_styles(self):
             raise UserErrors.CITY_BUBBLE_CHECKIN_REQUIRED(region=city_bubble_requirement(requested_bubble))
