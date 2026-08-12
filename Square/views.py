@@ -4,7 +4,8 @@ from django.views import View
 from oba import raw
 from smartdjango import OK, analyse
 
-from Square.models import Statement, StatementComment, StatementCommentLike, StatementLike, StatementMedia, StatementMediaKindChoice
+from Square.models import Statement, StatementComment, StatementCommentLike, StatementLike, StatementMedia, statement_media_prefetch
+from Message.models import MediaAsset, MediaAssetAlias
 from Square.params import SquareParams
 from Square.quota import quota_for_user
 from Square.validators import SquareErrors
@@ -88,7 +89,7 @@ class StatementPinView(View):
         if not request.user.is_official:
             raise SquareErrors.PIN_FORBIDDEN
         try:
-            statement = Statement.objects.select_related('user').prefetch_related('media').get(
+            statement = Statement.objects.select_related('user').prefetch_related(statement_media_prefetch()).get(
                 id=statement_id,
                 user=request.user,
                 space=request.user.space,
@@ -272,18 +273,20 @@ class StatementCommentView(View):
 
 class StatementMediaView(View):
     def get(self, request: Request, blob_slug: str):
-        media = StatementMedia.index_by_blob_slug(blob_slug)
-        response = HttpResponseRedirect(sign_private_download_url(media.source_uri()))
+        asset = MediaAssetAlias.resolve(blob_slug)
+        if asset is None or not asset.statement_media_items.filter(statement__is_deleted=False).exists():
+            raise SquareErrors.NOT_EXISTS
+        response = HttpResponseRedirect(sign_private_download_url(asset.source_uri))
         response['Cache-Control'] = 'private, max-age=86400'
         return response
 
 
 class StatementMediaThumbnailView(View):
     def get(self, request: Request, blob_slug: str):
-        media = StatementMedia.index_by_blob_slug(blob_slug)
-        if media.kind not in {StatementMediaKindChoice.IMAGE, StatementMediaKindChoice.VIDEO}:
+        asset = MediaAssetAlias.resolve(blob_slug)
+        if asset is None or asset.kind not in {MediaAsset.KIND_IMAGE, MediaAsset.KIND_VIDEO} or not asset.statement_media_items.filter(statement__is_deleted=False).exists():
             raise SquareErrors.NOT_EXISTS
-        thumbnail_uri = build_message_image_thumbnail_uri(media.source_uri(), width=480) if media.kind == StatementMediaKindChoice.IMAGE else build_message_video_thumbnail_uri(media.source_uri(), width=480)
+        thumbnail_uri = build_message_image_thumbnail_uri(asset.source_uri, width=480) if asset.kind == MediaAsset.KIND_IMAGE else build_message_video_thumbnail_uri(asset.source_uri, width=480)
         response = HttpResponseRedirect(thumbnail_uri)
         response['Cache-Control'] = 'private, max-age=86400'
         return response

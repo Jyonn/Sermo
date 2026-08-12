@@ -1,5 +1,5 @@
 from django.core.management.base import BaseCommand
-from Message.models import MediaMetadata, Message, MessageTypeChoice
+from Message.models import MediaAsset, Message, MessageTypeChoice
 
 
 class Command(BaseCommand):
@@ -27,23 +27,23 @@ class Command(BaseCommand):
         processed = 0
         for message in query.iterator():
             source_key = message.source_media_key()
-            metadata = MediaMetadata.objects.filter(source_key=source_key).first()
+            metadata = MediaAsset.objects.filter(source_key=source_key).first()
             if not options['force'] and metadata and all((metadata.file_size, metadata.pixel_width, metadata.pixel_height)):
                 continue
             if metadata is None:
-                metadata = MediaMetadata.objects.create(
+                metadata = MediaAsset.objects.create(
                     source_key=source_key,
                     source_uri=message.source_media_uri(),
-                    kind=MediaMetadata.KIND_IMAGE,
+                    kind=MediaAsset.KIND_IMAGE,
                 )
-            metadata = MediaMetadata.refresh(metadata, geocode=options['geocode'])
+            metadata = MediaAsset.refresh(metadata, geocode=options['geocode'])
             processed += 1
-            self.stdout.write(f'{message.id}: {"ready" if metadata.status == MediaMetadata.STATUS_READY else metadata.error}')
+            self.stdout.write(f'{message.id}: {"ready" if metadata.status == MediaAsset.STATUS_READY else metadata.error}')
         self.stdout.write(self.style.SUCCESS(f'Processed {processed} image messages.'))
 
     def _geocode_missing(self, limit):
-        query = MediaMetadata.objects.filter(
-            kind=MediaMetadata.KIND_IMAGE,
+        query = MediaAsset.objects.filter(
+            kind=MediaAsset.KIND_IMAGE,
             latitude__isnull=False,
             longitude__isnull=False,
             address='',
@@ -53,7 +53,7 @@ class Command(BaseCommand):
 
         processed = 0
         for metadata in query.iterator():
-            MediaMetadata.refresh_geocoding(metadata)
+            MediaAsset.refresh_geocoding(metadata)
             processed += 1
             result = metadata.address or metadata.geocoding_error or 'no address returned'
             self.stdout.write(f'{metadata.source_key}: {result}')

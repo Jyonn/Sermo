@@ -1,4 +1,3 @@
-import secrets
 from datetime import timedelta
 
 from django.db import transaction
@@ -22,6 +21,10 @@ class StatementMediaKindChoice(Choice):
     IMAGE = 0
     AUDIO = 1
     VIDEO = 2
+
+
+def statement_media_prefetch():
+    return Prefetch('media', queryset=StatementMedia.objects.select_related('media_asset'))
 
 
 def _frequency_limits(level):
@@ -78,7 +81,7 @@ class Statement(models.Model):
 
     @classmethod
     def feed(cls, user, before=None, limit=20, request=None, scope='all', user_id=None):
-        queryset = cls.visible_for(user).select_related('user').prefetch_related('media').annotate(
+        queryset = cls.visible_for(user).select_related('user').prefetch_related(statement_media_prefetch()).annotate(
             visible_comment_count=Count('comments', filter=Q(comments__is_deleted=False), distinct=True),
             visible_like_count=Count('likes', distinct=True),
             viewer_liked=Exists(StatementLike.objects.filter(statement_id=OuterRef('pk'), user=user)),
@@ -100,7 +103,7 @@ class Statement(models.Model):
 
     @classmethod
     def admin_feed(cls, space, viewer, before=None, limit=20, request=None):
-        queryset = cls.objects.filter(space=space, is_deleted=False).select_related('user').prefetch_related('media').annotate(
+        queryset = cls.objects.filter(space=space, is_deleted=False).select_related('user').prefetch_related(statement_media_prefetch()).annotate(
             visible_comment_count=Count('comments', filter=Q(comments__is_deleted=False), distinct=True),
             visible_like_count=Count('likes', distinct=True),
             viewer_liked=Exists(StatementLike.objects.filter(statement_id=OuterRef('pk'), user=viewer)),
@@ -112,7 +115,7 @@ class Statement(models.Model):
     @classmethod
     def detail(cls, user, statement_id, request=None):
         try:
-            statement = cls.visible_for(user).select_related('user').prefetch_related('media').annotate(
+            statement = cls.visible_for(user).select_related('user').prefetch_related(statement_media_prefetch()).annotate(
                 visible_comment_count=Count('comments', filter=Q(comments__is_deleted=False), distinct=True),
                 visible_like_count=Count('likes', distinct=True),
                 viewer_liked=Exists(StatementLike.objects.filter(statement_id=OuterRef('pk'), user=user)),
@@ -144,6 +147,7 @@ class Statement(models.Model):
             raise SquareErrors.VIDEO_LEVEL_REQUIRED
         if not normalized_text and not normalized_media:
             raise SquareErrors.CONTENT_REQUIRED
+        StatementMedia.attach_assets(normalized_media)
         statement = cls.objects.create(
             space=user.space,
             user=user,
@@ -151,7 +155,7 @@ class Statement(models.Model):
             visibility=visibility_value,
         )
         StatementMedia.objects.bulk_create([
-            StatementMedia(statement=statement, position=index, **item)
+            StatementMedia(statement=statement, position=index, media_asset=item['media_asset'])
             for index, item in enumerate(normalized_media)
         ])
         user.award_growth('explore:square_statement')
@@ -167,11 +171,11 @@ class Statement(models.Model):
                 user.award_growth(media_events[kind])
         media_ids = list(statement.media.values_list('id', flat=True))
         transaction.on_commit(lambda: [StatementMedia.fetch_metadata_async(media_id) for media_id in media_ids])
-        return cls.objects.select_related('user').prefetch_related('media').get(id=statement.id)
+        return cls.objects.select_related('user').prefetch_related(statement_media_prefetch()).get(id=statement.id)
 
     def jsonl(self, request=None):
         viewer = getattr(request, 'user', None) if request else None
-        if not getattr(viewer, 'is_authenticated', False):
+        if viewer is not None and not hasattr(viewer, 'space_id'):
             viewer = None
         return dict(
             statement_id=self.id,
@@ -353,22 +357,12 @@ class StatementCommentLike(models.Model):
 
 class StatementMedia(models.Model):
     statement = models.ForeignKey(Statement, on_delete=models.CASCADE, related_name='media')
-    media_metadata = models.ForeignKey(
-        'Message.MediaMetadata',
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
+    media_asset = models.ForeignKey(
+        'Message.MediaAsset',
+        on_delete=models.PROTECT,
         related_name='statement_media_items',
     )
-    kind = models.IntegerField(choices=StatementMediaKindChoice.to_choices())
     position = models.PositiveSmallIntegerField(default=0)
-    key = models.CharField(max_length=255)
-    blob_slug = models.CharField(max_length=32, unique=True, db_index=True)
-    mime_type = models.CharField(max_length=100, blank=True, default='')
-    duration_seconds = models.PositiveSmallIntegerField(null=True, blank=True)
-    latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
-    longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
-    address = models.CharField(max_length=255, blank=True, default='')
 
     class Meta:
         ordering = ['position', 'id']
@@ -413,88 +407,59 @@ class StatementMedia(models.Model):
                     raise SquareErrors.AUDIO_DURATION_INVALID
                 if duration > MessageValidator.MAX_AUDIO_DURATION_SECONDS:
                     raise SquareErrors.AUDIO_DURATION_INVALID
-            location = item.get('location') or {}
-            if not hasattr(location, 'get'):
-                raise SquareErrors.MEDIA_INVALID
-            try:
-                raw_latitude = location.get('latitude')
-                raw_longitude = location.get('longitude')
-                latitude = round(float(raw_latitude), 6) if raw_latitude is not None else None
-                longitude = round(float(raw_longitude), 6) if raw_longitude is not None else None
-            except (TypeError, ValueError):
-                raise SquareErrors.MEDIA_INVALID
-            if latitude is not None and not -90 <= latitude <= 90:
-                raise SquareErrors.MEDIA_INVALID
-            if longitude is not None and not -180 <= longitude <= 180:
-                raise SquareErrors.MEDIA_INVALID
             normalized.append(dict(
-                kind=kind_value,
                 key=key,
-                blob_slug=secrets.token_hex(12),
-                mime_type=str(item.get('mime_type') or '')[:100],
+                mime_type=item.get('mime_type'),
                 duration_seconds=duration,
-                latitude=latitude,
-                longitude=longitude,
-                address=str(location.get('address') or '')[:255],
+                kind=kind_value,
             ))
         return normalized
 
     @classmethod
-    def fetch_metadata_async(cls, media_id):
-        from Message.models import MediaMetadata
-
-        try:
-            media = cls.objects.get(id=media_id)
-        except cls.DoesNotExist:
-            return None
-        kind = {
-            StatementMediaKindChoice.IMAGE: MediaMetadata.KIND_IMAGE,
-            StatementMediaKindChoice.VIDEO: MediaMetadata.KIND_VIDEO,
-        }.get(media.kind)
-        if kind is None:
-            return None
-        metadata = MediaMetadata.queue(media.key, media.source_uri(), kind)
-        if media.media_metadata_id != metadata.id:
-            media.media_metadata = metadata
-            media.save(update_fields=['media_metadata'])
-        return metadata
+    def attach_assets(cls, normalized):
+        from Message.models import MediaAsset
+        for item in normalized:
+            kind_name = {
+                StatementMediaKindChoice.IMAGE: 'image',
+                StatementMediaKindChoice.AUDIO: 'audio',
+                StatementMediaKindChoice.VIDEO: 'video',
+            }[item['kind']]
+            try:
+                source_uri = avatar_uri_for_key(item['key'])
+            except Exception:
+                source_uri = item['key']
+            item['media_asset'] = MediaAsset.queue(
+                item['key'], source_uri, MediaAsset.kind_for_name(kind_name),
+                mime_type=item['mime_type'], duration_seconds=item['duration_seconds'],
+            )
 
     @classmethod
-    def index_by_blob_slug(cls, blob_slug):
+    def fetch_metadata_async(cls, media_id):
         try:
-            return cls.objects.select_related('statement', 'statement__user').get(
-                blob_slug=(blob_slug or '').strip().lower(),
-                statement__is_deleted=False,
-            )
+            media = cls.objects.select_related('media_asset').get(id=media_id)
         except cls.DoesNotExist:
-            raise SquareErrors.NOT_EXISTS
+            return None
+        return media.media_asset
 
     def source_uri(self):
-        return avatar_uri_for_key(self.key)
+        return self.media_asset.source_uri
 
     def jsonl(self, request=None):
-        path = reverse('square media', kwargs={'blob_slug': self.blob_slug})
+        asset = self.media_asset
+        path = reverse('square media', kwargs={'blob_slug': asset.blob_slug})
         uri = request.build_absolute_uri(path) if request else path
         thumbnail_uri = None
-        if self.kind in (StatementMediaKindChoice.IMAGE, StatementMediaKindChoice.VIDEO):
-            thumbnail_path = reverse('square media thumbnail', kwargs={'blob_slug': self.blob_slug})
+        if asset.kind in (asset.KIND_IMAGE, asset.KIND_VIDEO):
+            thumbnail_path = reverse('square media thumbnail', kwargs={'blob_slug': asset.blob_slug})
             thumbnail_uri = request.build_absolute_uri(thumbnail_path) if request else thumbnail_path
-        location = None
-        if self.latitude is not None and self.longitude is not None:
-            location = dict(
-                latitude=float(self.latitude),
-                longitude=float(self.longitude),
-                address=self.address,
-            )
-        metadata = self.media_metadata
         return dict(
             media_id=self.id,
-            kind={StatementMediaKindChoice.IMAGE: 'image', StatementMediaKindChoice.AUDIO: 'audio', StatementMediaKindChoice.VIDEO: 'video'}[self.kind],
+            kind={asset.KIND_IMAGE: 'image', asset.KIND_AUDIO: 'audio', asset.KIND_VIDEO: 'video'}[asset.kind],
             uri=uri,
             thumbnail_uri=thumbnail_uri,
-            mime_type=self.mime_type,
-            duration_seconds=self.duration_seconds,
-            location=location,
-            metadata_status=metadata.status if metadata else 0,
-            metadata=metadata.jsonl() if metadata else {},
+            mime_type=asset.mime_type,
+            duration_seconds=asset.duration_seconds,
+            location=None,
+            metadata_status=asset.status,
+            metadata=asset.jsonl(),
         )

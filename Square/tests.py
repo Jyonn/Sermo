@@ -5,7 +5,7 @@ from django.utils import timezone
 
 from Friendship.models import Friendship
 from Space.models import Space
-from Message.models import MediaMetadata
+from Message.models import MediaAsset
 from Square.models import Statement, StatementComment, StatementCommentLike, StatementLike, StatementMedia
 from User.models import User
 from utils import auth
@@ -95,7 +95,7 @@ class StatementApiTests(TestCase):
         self.assertEqual(response.status_code, 200, response.content)
         self.assertEqual(response.json()['body'][0]['text'], '朋友可见')
 
-    def test_statement_supports_nine_ordered_photos_and_location(self):
+    def test_statement_supports_nine_ordered_photos_without_user_location(self):
         media = [
             {
                 'kind': 'image',
@@ -110,27 +110,25 @@ class StatementApiTests(TestCase):
         self.assertEqual(response.status_code, 200, response.content)
         body = response.json()['body']
         self.assertEqual(len(body['media']), 9)
-        self.assertEqual(body['media'][0]['location']['address'], '厦门')
+        self.assertIsNone(body['media'][0]['location'])
 
-    def test_statements_can_share_media_metadata(self):
-        metadata = MediaMetadata.objects.create(
+    def test_statements_can_share_media_asset(self):
+        asset = MediaAsset.objects.create(
             source_key='sermo/messages/image/reused.jpg',
             source_uri='https://resource.example.com/sermo/messages/image/reused.jpg',
-            kind=MediaMetadata.KIND_IMAGE,
-            status=MediaMetadata.STATUS_READY,
+            kind=MediaAsset.KIND_IMAGE,
+            status=MediaAsset.STATUS_READY,
         )
         first = Statement.objects.create(space=self.space, user=self.author, text='第一条')
         second = Statement.objects.create(space=self.space, user=self.author, text='第二条')
         StatementMedia.objects.create(
-            statement=first, media_metadata=metadata, kind=0, position=0,
-            key=metadata.source_key, blob_slug='shared-media-first',
+            statement=first, media_asset=asset, position=0,
         )
         StatementMedia.objects.create(
-            statement=second, media_metadata=metadata, kind=0, position=0,
-            key=metadata.source_key, blob_slug='shared-media-second',
+            statement=second, media_asset=asset, position=0,
         )
 
-        self.assertEqual(metadata.statement_media_items.count(), 2)
+        self.assertEqual(asset.statement_media_items.count(), 2)
 
     def test_statement_rejects_more_than_nine_photos_and_long_audio(self):
         photos = [

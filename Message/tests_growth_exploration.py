@@ -13,7 +13,10 @@ from User.models import User
 
 class MessageGrowthExplorationTests(TestCase):
     def setUp(self):
-        self.space = Space.objects.create(name='Message Growth', slug='message-growth', email='admin@example.com')
+        self.space = Space.objects.create(
+            name='Message Growth', slug='message-growth', email='admin@example.com',
+            admin_phone_verified_at=timezone.now(),
+        )
         self.user = User.create(self.space, 'Sender', verified=True)
         self.peer = User.create(self.space, 'Peer', verified=True)
         Friendship.ensure_locked_friendship(self.user, self.peer)

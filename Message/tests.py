@@ -6,7 +6,7 @@ from django.test import SimpleTestCase, TestCase
 
 from Message.image_metadata import _reverse_geocode_opencage, parse_image_info, reverse_geocode
 from Message.video_metadata import parse_avinfo
-from Message.models import MediaMetadata, Message, MessageTypeChoice, random_point_within_radius
+from Message.models import MediaAsset, MediaAssetAlias, Message, MessageTypeChoice, random_point_within_radius
 from utils.global_settings import Globals
 
 
@@ -143,56 +143,84 @@ class VideoMetadataTests(SimpleTestCase):
         self.assertEqual(metadata['longitude'], 121.4737)
 
 
-class UnifiedMediaMetadataTests(TestCase):
+class UnifiedMediaAssetTests(TestCase):
     @patch('Message.image_metadata.reverse_geocode', return_value=('上海市', 'opencage'))
     @patch('Message.image_metadata.fetch_qiniu_exif')
     @patch('Message.image_metadata.fetch_qiniu_image_info')
     def test_image_and_video_use_the_same_metadata_model(self, image_info, exif, geocode):
         image_info.return_value = {'size': 1024, 'width': 640, 'height': 480}
         exif.return_value = {}
-        image = MediaMetadata.objects.create(
+        image = MediaAsset.objects.create(
             source_key='sermo/messages/image/shared.jpg',
             source_uri='https://resource.example.com/sermo/messages/image/shared.jpg',
-            kind=MediaMetadata.KIND_IMAGE,
+            kind=MediaAsset.KIND_IMAGE,
         )
-        MediaMetadata.refresh(image)
+        MediaAsset.refresh(image)
 
-        self.assertEqual(image.status, MediaMetadata.STATUS_READY)
+        self.assertEqual(image.status, MediaAsset.STATUS_READY)
         self.assertEqual(image.pixel_width, 640)
         self.assertEqual(image.jsonl()['file_size'], 1024)
 
-        video = MediaMetadata.objects.create(
+        video = MediaAsset.objects.create(
             source_key='sermo/messages/video/shared.mp4',
             source_uri='https://resource.example.com/sermo/messages/video/shared.mp4',
-            kind=MediaMetadata.KIND_VIDEO,
+            kind=MediaAsset.KIND_VIDEO,
         )
         with patch('Message.video_metadata.fetch_qiniu_avinfo', return_value={
             'streams': [{'codec_type': 'video', 'codec_name': 'h264', 'width': 1280, 'height': 720}],
             'format': {'duration': '8.5', 'size': '2048'},
         }):
-            MediaMetadata.refresh(video)
+            MediaAsset.refresh(video)
 
-        self.assertEqual(video.status, MediaMetadata.STATUS_READY)
+        self.assertEqual(video.status, MediaAsset.STATUS_READY)
         self.assertEqual(video.pixel_width, 1280)
         self.assertEqual(video.duration_seconds, 8.5)
-        self.assertEqual(MediaMetadata.objects.count(), 2)
+        self.assertEqual(MediaAsset.objects.count(), 2)
 
     def test_queue_reuses_metadata_for_the_same_storage_key(self):
-        first = MediaMetadata.queue(
+        first = MediaAsset.queue(
             'sermo/messages/image/shared.jpg',
             'https://resource.example.com/sermo/messages/image/shared.jpg?token=old',
-            MediaMetadata.KIND_IMAGE,
+            MediaAsset.KIND_IMAGE,
         )
-        second = MediaMetadata.queue(
+        second = MediaAsset.queue(
             'sermo/messages/image/shared.jpg',
             'https://resource.example.com/sermo/messages/image/shared.jpg?token=new',
-            MediaMetadata.KIND_IMAGE,
+            MediaAsset.KIND_IMAGE,
         )
 
         self.assertEqual(first.id, second.id)
-        self.assertEqual(MediaMetadata.objects.count(), 1)
+        self.assertEqual(MediaAsset.objects.count(), 1)
         second.refresh_from_db()
         self.assertIn('token=new', second.source_uri)
+
+    def test_audio_and_file_are_assets_without_metadata_fetch(self):
+        with patch.object(MediaAsset, 'fetch_async') as fetch:
+            audio = MediaAsset.queue(
+                'sermo/messages/audio/voice.m4a', 'https://resource.example.com/sermo/messages/audio/voice.m4a',
+                MediaAsset.KIND_AUDIO, mime_type='audio/mp4', duration_seconds=12,
+            )
+            file = MediaAsset.queue(
+                'sermo/messages/file/report.pdf', 'https://resource.example.com/sermo/messages/file/report.pdf',
+                MediaAsset.KIND_FILE, mime_type='application/pdf', file_name='report.pdf', file_size=2048,
+            )
+
+        self.assertEqual(audio.status, MediaAsset.STATUS_READY)
+        self.assertEqual(audio.duration_seconds, 12)
+        self.assertEqual(file.file_name, 'report.pdf')
+        self.assertEqual(file.file_size, 2048)
+        fetch.assert_not_called()
+
+    def test_legacy_blob_slug_resolves_to_asset(self):
+        asset = MediaAsset.objects.create(
+            source_key='sermo/messages/image/legacy.jpg',
+            source_uri='https://resource.example.com/sermo/messages/image/legacy.jpg',
+            kind=MediaAsset.KIND_IMAGE,
+        )
+        MediaAssetAlias.objects.create(slug='legacy-message-slug', asset=asset)
+
+        self.assertEqual(MediaAssetAlias.resolve(asset.blob_slug), asset)
+        self.assertEqual(MediaAssetAlias.resolve('legacy-message-slug'), asset)
 
 
 class LocationMessageTests(SimpleTestCase):

@@ -32,6 +32,10 @@ EARTH_RADIUS_KM = 6371.0088
 LOCATION_OBSCURE_RADIUS_KM = 50
 
 
+def generate_media_blob_slug():
+    return uuid.uuid4().hex
+
+
 def random_point_within_radius(latitude, longitude, radius_km=LOCATION_OBSCURE_RADIUS_KM, rng=None):
     random_source = rng or secrets.SystemRandom()
     distance_km = radius_km * math.sqrt(random_source.random())
@@ -441,7 +445,9 @@ class Message(models.Model):
 
     type = models.IntegerField(choices=MessageTypeChoice.to_choices())
     content = models.CharField(max_length=vldt.MAX_CONTENT_LENGTH)
-    blob_slug = models.CharField(max_length=32, null=True, blank=True, unique=True, db_index=True)
+    media_asset = models.ForeignKey(
+        'MediaAsset', on_delete=models.SET_NULL, null=True, blank=True, related_name='messages',
+    )
 
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
     is_deleted = models.BooleanField(default=False, db_index=True)
@@ -559,15 +565,16 @@ class Message(models.Model):
                 from TravelMap.models import MapAccessGrant
                 MapAccessGrant.grant(user, map_access_viewer)
             if message.type in cls.MEDIA_KIND_BY_TYPE:
-                message.ensure_blob_slug(save=True)
-            if message.type == MessageTypeChoice.IMAGE:
-                MediaMetadata.queue(
-                    message.source_media_key(), message.source_media_uri(), MediaMetadata.KIND_IMAGE,
+                payload = cls._parse_payload(message.content)
+                message.media_asset = MediaAsset.queue(
+                    message.source_media_key(), message.source_media_uri(),
+                    MediaAsset.kind_for_name(cls.MEDIA_KIND_BY_TYPE[message.type]),
+                    mime_type=payload.get('mime_type'),
+                    duration_seconds=payload.get('duration_seconds'),
+                    file_size=payload.get('file_size'),
+                    file_name=payload.get('file_name'),
                 )
-            elif message.type == MessageTypeChoice.VIDEO:
-                MediaMetadata.queue(
-                    message.source_media_key(), message.source_media_uri(), MediaMetadata.KIND_VIDEO,
-                )
+                message.save(update_fields=['media_asset'])
             if message.type == MessageTypeChoice.TEXT:
                 link_preview = LinkPreview.queue_for_text(message.content)
                 UserEmojiUsage.record_text(user, message.content)
@@ -837,30 +844,11 @@ class Message(models.Model):
 
         raise MessageErrors.TYPE_INVALID
 
-    @classmethod
-    def _generate_blob_slug(cls):
-        return uuid.uuid4().hex
-
-    def ensure_blob_slug(self, save: bool = False):
-        if self.type not in self.MEDIA_KIND_BY_TYPE:
-            return None
-        if self.blob_slug:
-            return self.blob_slug
-
-        blob_slug = self._generate_blob_slug()
-        while Message.objects.filter(blob_slug=blob_slug).exists():
-            blob_slug = self._generate_blob_slug()
-        self.blob_slug = blob_slug
-        if save:
-            self.save(update_fields=['blob_slug'])
-        return self.blob_slug
-
     def _blob_path(self, thumbnail: bool = False):
-        self.ensure_blob_slug(save=False)
-        if not self.blob_slug:
+        if not self.media_asset_id:
             return ''
         route_name = 'message blob thumbnail' if thumbnail else 'message blob'
-        return reverse(route_name, kwargs={'blob_slug': self.blob_slug})
+        return reverse(route_name, kwargs={'blob_slug': self.media_asset.blob_slug})
 
     def media_blob_uri(self, request: HttpRequest = None, thumbnail: bool = False):
         path = self._blob_path(thumbnail=thumbnail)
@@ -885,7 +873,7 @@ class Message(models.Model):
             from TravelMap.models import MapAccessGrant, MapChatGrant
             payload = self._parse_payload(self.content)
             viewer = getattr(request, 'user', None) if request is not None else None
-            if not getattr(viewer, 'is_authenticated', False):
+            if viewer is not None and not hasattr(viewer, 'space_id'):
                 viewer = None
             response = dict(
                 kind='map_access',
@@ -902,7 +890,7 @@ class Message(models.Model):
             from Square.models import Statement
             reference = self._parse_payload(self.content)
             viewer = getattr(request, 'user', None) if request is not None else None
-            if not getattr(viewer, 'is_authenticated', False):
+            if viewer is not None and not hasattr(viewer, 'space_id'):
                 viewer = None
             response = dict(
                 kind='statement',
@@ -929,7 +917,7 @@ class Message(models.Model):
             payload = self._parse_payload(self.content)
             uri = (payload.get('uri') or '').strip()
             response = dict(kind=payload.get('kind') or self.MEDIA_KIND_BY_TYPE[self.type])
-            if self.blob_slug:
+            if self.media_asset_id:
                 response['uri'] = self.media_blob_uri(request=request)
                 if self.type in (MessageTypeChoice.IMAGE, MessageTypeChoice.VIDEO):
                     response['thumbnail_uri'] = self.media_blob_uri(request=request, thumbnail=True)
@@ -948,11 +936,11 @@ class Message(models.Model):
                 response['file_name'] = payload.get('file_name') or '文件'
                 response['file_size'] = payload.get('file_size') or 0
             if self.type == MessageTypeChoice.IMAGE:
-                metadata = MediaMetadata.objects.filter(source_key=self.source_media_key()).first()
+                metadata = self.media_asset
                 if metadata is not None:
                     response['image_metadata'] = metadata.jsonl()
             elif self.type == MessageTypeChoice.VIDEO:
-                metadata = MediaMetadata.objects.filter(source_key=self.source_media_key()).first()
+                metadata = self.media_asset
                 if metadata is not None:
                     response['video_metadata'] = metadata.jsonl()
             return response
@@ -1018,35 +1006,26 @@ class Message(models.Model):
             raise MessageErrors.NOT_EXISTS
 
     @classmethod
-    def index_by_blob_slug(cls, blob_slug):
-        normalized = (blob_slug or '').strip().lower()
-        try:
-            return cls.objects.get(blob_slug=normalized, is_deleted=False)
-        except cls.DoesNotExist:
-            raise MessageErrors.NOT_EXISTS
-
-
-    @classmethod
     def latest(cls, chat: Chat, limit: int, request: HttpRequest = None, user: User = None):
         queryset = cls.visible_for_user(chat, user) if user is not None else cls.visible_in_chat(chat)
-        messages = queryset.select_related('user', 'reply_to', 'reply_to__user').prefetch_related('chat_mentions__user').order_by('-id')[:limit]
+        messages = queryset.select_related('user', 'reply_to', 'reply_to__user', 'media_asset').prefetch_related('chat_mentions__user').order_by('-id')[:limit]
         return [message.jsonl(request=request) for message in messages]
 
     @classmethod
     def older(cls, chat: Chat, message_id, limit: int, request: HttpRequest = None, user: User = None):
         queryset = cls.visible_for_user(chat, user) if user is not None else cls.visible_in_chat(chat)
-        messages = queryset.select_related('user', 'reply_to', 'reply_to__user').prefetch_related('chat_mentions__user').filter(id__lt=message_id).order_by('-id')[:limit]
+        messages = queryset.select_related('user', 'reply_to', 'reply_to__user', 'media_asset').prefetch_related('chat_mentions__user').filter(id__lt=message_id).order_by('-id')[:limit]
         return [message.jsonl(request=request) for message in messages]
 
     @classmethod
     def newer(cls, chat: Chat, message_id, limit: int, request: HttpRequest = None, user: User = None):
         queryset = cls.visible_for_user(chat, user) if user is not None else cls.visible_in_chat(chat)
-        messages = queryset.select_related('user', 'reply_to', 'reply_to__user').prefetch_related('chat_mentions__user').filter(id__gt=message_id).order_by('id')[:limit]
+        messages = queryset.select_related('user', 'reply_to', 'reply_to__user', 'media_asset').prefetch_related('chat_mentions__user').filter(id__gt=message_id).order_by('id')[:limit]
         return [message.jsonl(request=request) for message in messages]
 
     @classmethod
     def search(cls, chat: Chat, user: User, keyword=None, message_type=None, before=None, limit=30, request=None):
-        queryset = cls.visible_for_user(chat, user).select_related('user', 'reply_to', 'reply_to__user').prefetch_related('chat_mentions__user')
+        queryset = cls.visible_for_user(chat, user).select_related('user', 'reply_to', 'reply_to__user', 'media_asset').prefetch_related('chat_mentions__user')
         normalized_keyword = (keyword or '').strip()
         if normalized_keyword:
             queryset = queryset.filter(content__icontains=normalized_keyword)
@@ -1255,9 +1234,11 @@ class PinnedMessage(models.Model):
         )
 
 
-class MediaMetadata(models.Model):
+class MediaAsset(models.Model):
     KIND_IMAGE = 0
     KIND_VIDEO = 1
+    KIND_AUDIO = 2
+    KIND_FILE = 3
     STATUS_PENDING = 0
     STATUS_READY = 1
     STATUS_FAILED = 2
@@ -1270,7 +1251,10 @@ class MediaMetadata(models.Model):
 
     source_key = models.CharField(max_length=255, unique=True)
     source_uri = models.CharField(max_length=500)
+    blob_slug = models.CharField(max_length=32, unique=True, db_index=True, default=generate_media_blob_slug)
     kind = models.IntegerField(db_index=True)
+    mime_type = models.CharField(max_length=100, blank=True, default='')
+    file_name = models.CharField(max_length=180, blank=True, default='')
     status = models.IntegerField(default=STATUS_PENDING, db_index=True)
     raw_metadata = models.JSONField(default=dict, blank=True)
     duration_seconds = models.FloatField(null=True, blank=True)
@@ -1296,7 +1280,11 @@ class MediaMetadata(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     @classmethod
-    def queue(cls, source_key, source_uri, kind):
+    def kind_for_name(cls, kind):
+        return {'image': cls.KIND_IMAGE, 'video': cls.KIND_VIDEO, 'audio': cls.KIND_AUDIO, 'file': cls.KIND_FILE}[kind]
+
+    @classmethod
+    def queue(cls, source_key, source_uri, kind, mime_type=None, duration_seconds=None, file_size=None, file_name=None):
         normalized_uri = str(source_uri or '').strip()
         normalized_key = urlparse(str(source_key or '').strip()).path.lstrip('/')
         if not normalized_key:
@@ -1306,7 +1294,13 @@ class MediaMetadata(models.Model):
         try:
             metadata, _created = cls.objects.get_or_create(
                 source_key=normalized_key,
-                defaults=dict(source_uri=normalized_uri, kind=kind),
+                defaults=dict(
+                    source_uri=normalized_uri, kind=kind,
+                    mime_type=str(mime_type or '')[:100], file_name=str(file_name or '')[:180],
+                    duration_seconds=duration_seconds, file_size=file_size,
+                    status=cls.STATUS_PENDING if kind in {cls.KIND_IMAGE, cls.KIND_VIDEO} else cls.STATUS_READY,
+                    geocoding_status=cls.GEOCODING_PENDING if kind in {cls.KIND_IMAGE, cls.KIND_VIDEO} else cls.GEOCODING_UNAVAILABLE,
+                ),
             )
         except IntegrityError:
             metadata = cls.objects.get(source_key=normalized_key)
@@ -1317,9 +1311,17 @@ class MediaMetadata(models.Model):
         if metadata.kind != kind:
             metadata.kind = kind
             updates.append('kind')
+        for field, value in (
+            ('mime_type', str(mime_type or '')[:100]), ('file_name', str(file_name or '')[:180]),
+            ('duration_seconds', duration_seconds), ('file_size', file_size),
+        ):
+            if value not in (None, '') and getattr(metadata, field) != value:
+                setattr(metadata, field, value)
+                updates.append(field)
         if updates:
             metadata.save(update_fields=[*updates, 'updated_at'])
-        transaction.on_commit(lambda: cls.fetch_async(metadata.id))
+        if kind in {cls.KIND_IMAGE, cls.KIND_VIDEO}:
+            transaction.on_commit(lambda: cls.fetch_async(metadata.id))
         return metadata
 
     @classmethod
@@ -1446,3 +1448,17 @@ class MediaMetadata(models.Model):
             geocoding_provider=self.geocoding_provider,
             geocoding_status=self.geocoding_status,
         )
+
+
+class MediaAssetAlias(models.Model):
+    slug = models.CharField(max_length=32, unique=True, db_index=True)
+    asset = models.ForeignKey(MediaAsset, on_delete=models.CASCADE, related_name='aliases')
+
+    @classmethod
+    def resolve(cls, slug):
+        normalized = str(slug or '').strip().lower()
+        asset = MediaAsset.objects.filter(blob_slug=normalized).first()
+        if asset is not None:
+            return asset
+        alias = cls.objects.select_related('asset').filter(slug=normalized).first()
+        return alias.asset if alias else None

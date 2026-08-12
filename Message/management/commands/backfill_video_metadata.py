@@ -1,5 +1,5 @@
 from django.core.management.base import BaseCommand
-from Message.models import MediaMetadata, Message, MessageTypeChoice
+from Message.models import MediaAsset, Message, MessageTypeChoice
 
 
 class Command(BaseCommand):
@@ -18,17 +18,17 @@ class Command(BaseCommand):
         processed = 0
         for message in query.iterator():
             source_key = message.source_media_key()
-            metadata = MediaMetadata.objects.filter(source_key=source_key).first()
+            metadata = MediaAsset.objects.filter(source_key=source_key).first()
             if not options['force'] and metadata and all((metadata.file_size, metadata.pixel_width, metadata.pixel_height)):
                 continue
             if metadata is None:
-                metadata = MediaMetadata.objects.create(
+                metadata = MediaAsset.objects.create(
                     source_key=source_key,
                     source_uri=message.source_media_uri(),
-                    kind=MediaMetadata.KIND_VIDEO,
+                    kind=MediaAsset.KIND_VIDEO,
                 )
-            metadata = MediaMetadata.refresh(metadata, geocode=options['geocode'])
+            metadata = MediaAsset.refresh(metadata, geocode=options['geocode'])
             processed += 1
-            result = 'ready' if metadata.status == MediaMetadata.STATUS_READY else metadata.error
+            result = 'ready' if metadata.status == MediaAsset.STATUS_READY else metadata.error
             self.stdout.write(f'{message.id}: {result}')
         self.stdout.write(self.style.SUCCESS(f'Processed {processed} video messages.'))

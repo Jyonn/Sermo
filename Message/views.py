@@ -6,7 +6,7 @@ from django.utils import timezone
 from django.views import View
 from smartdjango import analyse, OK
 
-from Message.models import LinkPreview, MediaMetadata, Message, MessageEvent, MessageTypeChoice, PinnedMessage
+from Message.models import LinkPreview, MediaAsset, MediaAssetAlias, Message, MessageEvent, MessageTypeChoice, PinnedMessage
 from Message.params import MessageParams
 from Message.validators import MessageErrors
 from Space.validators import SpaceErrors
@@ -227,10 +227,10 @@ class MessageImageMetadataView(View):
             raise MessageErrors.NOT_A_MEMBER
         if message.type != MessageTypeChoice.IMAGE:
             raise MessageErrors.TYPE_INVALID
-        metadata = MediaMetadata.objects.filter(source_key=message.source_media_key()).first()
+        metadata = message.media_asset
         if metadata is None:
-            metadata = MediaMetadata.queue(
-                message.source_media_key(), message.source_media_uri(), MediaMetadata.KIND_IMAGE,
+            metadata = MediaAsset.queue(
+                message.source_media_key(), message.source_media_uri(), MediaAsset.KIND_IMAGE,
             )
         return metadata.jsonl()
 
@@ -244,10 +244,10 @@ class MessageVideoMetadataView(View):
             raise MessageErrors.NOT_A_MEMBER
         if message.type != MessageTypeChoice.VIDEO:
             raise MessageErrors.TYPE_INVALID
-        metadata = MediaMetadata.objects.filter(source_key=message.source_media_key()).first()
+        metadata = message.media_asset
         if metadata is None:
-            metadata = MediaMetadata.queue(
-                message.source_media_key(), message.source_media_uri(), MediaMetadata.KIND_VIDEO,
+            metadata = MediaAsset.queue(
+                message.source_media_key(), message.source_media_uri(), MediaAsset.KIND_VIDEO,
             )
         return metadata.jsonl()
 
@@ -262,21 +262,17 @@ class MessageBlobView(View):
         return response
 
     def get(self, request: Request, blob_slug: str):
-        message = Message.index_by_blob_slug(blob_slug)
-        source_uri = message.source_media_uri()
-        if not source_uri:
+        asset = MediaAssetAlias.resolve(blob_slug)
+        if asset is None or not asset.messages.filter(is_deleted=False).exists():
             raise MessageErrors.NOT_EXISTS
-        return self._redirect(sign_private_download_url(source_uri))
+        return self._redirect(sign_private_download_url(asset.source_uri))
 
 
 class MessageBlobThumbnailView(View):
     def get(self, request: Request, blob_slug: str):
-        message = Message.index_by_blob_slug(blob_slug)
-        if message.type not in (MessageTypeChoice.IMAGE, MessageTypeChoice.VIDEO):
+        asset = MediaAssetAlias.resolve(blob_slug)
+        if asset is None or asset.kind not in (MediaAsset.KIND_IMAGE, MediaAsset.KIND_VIDEO) or not asset.messages.filter(is_deleted=False).exists():
             raise MessageErrors.NOT_EXISTS
-        source_uri = message.source_media_uri()
-        if not source_uri:
-            raise MessageErrors.NOT_EXISTS
-        if message.type == MessageTypeChoice.VIDEO:
-            return MessageBlobView._redirect(build_message_video_thumbnail_uri(source_uri))
-        return MessageBlobView._redirect(build_message_image_thumbnail_uri(source_uri))
+        if asset.kind == MediaAsset.KIND_VIDEO:
+            return MessageBlobView._redirect(build_message_video_thumbnail_uri(asset.source_uri))
+        return MessageBlobView._redirect(build_message_image_thumbnail_uri(asset.source_uri))
