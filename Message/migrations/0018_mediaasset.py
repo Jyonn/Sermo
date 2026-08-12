@@ -2,7 +2,7 @@ from urllib.parse import urlparse
 
 from django.db import migrations, models
 import django.db.models.deletion
-import Message.models
+from Message import models as message_models
 
 
 def table_columns(schema_editor, table_name):
@@ -80,7 +80,7 @@ def consolidate_assets(apps, schema_editor):
         return
 
     for asset in MediaAsset.objects.filter(blob_slug__isnull=True).iterator():
-        asset.blob_slug = Message.models.generate_media_blob_slug()
+        asset.blob_slug = message_models.generate_media_blob_slug()
         asset.save(update_fields=['blob_slug'])
 
     kind_by_message_type = {1: 0, 4: 1, 5: 2, 2: 3}
@@ -102,7 +102,7 @@ def consolidate_assets(apps, schema_editor):
             file_size=payload.get('file_size'),
             status=0 if message.type in {1, 4} else 1,
             geocoding_status=0 if message.type in {1, 4} else 3,
-            blob_slug=Message.models.generate_media_blob_slug(),
+            blob_slug=message_models.generate_media_blob_slug(),
         )
         asset, _ = MediaAsset.objects.get_or_create(source_key=source_key, defaults=defaults)
         message.media_asset_id = asset.id
@@ -125,7 +125,7 @@ def consolidate_assets(apps, schema_editor):
                     mime_type=media.mime_type or '', duration_seconds=media.duration_seconds,
                     status=0 if kind in {0, 1} else 1,
                     geocoding_status=0 if kind in {0, 1} else 3,
-                    blob_slug=Message.models.generate_media_blob_slug(),
+                    blob_slug=message_models.generate_media_blob_slug(),
                 ),
             )
             media.media_metadata_id = asset.id
@@ -159,7 +159,7 @@ class Migration(migrations.Migration):
             options={'default_manager_name': 'objects'},
         ),
         migrations.RunPython(consolidate_assets, migrations.RunPython.noop),
-        migrations.AlterField(model_name='mediaasset', name='blob_slug', field=models.CharField(db_index=True, default=Message.models.generate_media_blob_slug, max_length=32, unique=True)),
+        migrations.AlterField(model_name='mediaasset', name='blob_slug', field=models.CharField(db_index=True, default=message_models.generate_media_blob_slug, max_length=32, unique=True)),
         ResumeRemoveField(model_name='message', name='blob_slug'),
         migrations.AlterField(
             model_name='message', name='type',
