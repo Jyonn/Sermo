@@ -171,6 +171,8 @@ class Statement(models.Model):
 
     def jsonl(self, request=None):
         viewer = getattr(request, 'user', None) if request else None
+        if not getattr(viewer, 'is_authenticated', False):
+            viewer = None
         return dict(
             statement_id=self.id,
             user=self.user.tiny_json(),

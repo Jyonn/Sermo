@@ -4,11 +4,13 @@ import hmac
 from base64 import b32decode
 
 from django.test import RequestFactory, TestCase
+from django.contrib.auth.models import AnonymousUser
 from django.utils import timezone
 
 from Config.models import CI, Config
 from PlatformAdmin.models import PlatformAdminEmailCode, PlatformAdminSecurity, PlatformAuditLog
 from PlatformAdmin.views import LoginView
+from Message.models import Message, MessageTypeChoice
 from utils import auth
 
 
@@ -43,3 +45,18 @@ class PlatformAdminSecurityTests(TestCase):
         self.assertEqual(auth.decrypt(response['auth'], expected_type='platform_admin_access')['email'], 'admin@example.com')
         self.assertIsNotNone(PlatformAdminEmailCode.objects.get().consumed_at)
         self.assertTrue(PlatformAuditLog.objects.filter(action='auth.login').exists())
+
+    def test_audit_serialization_ignores_anonymous_django_user(self):
+        request = RequestFactory().get('/platform-admin/chats/1/messages')
+        request.user = AnonymousUser()
+        message = Message(type=MessageTypeChoice.MAP_ACCESS, content='{}')
+        message._state.fields_cache['user'] = type('AuditMessageUser', (), {
+            'space_id': 1,
+            'tiny_json': lambda self: {'user_id': 1, 'name': 'sender'},
+        })()
+
+        payload = message._payload_for_type(request=request)
+
+        self.assertEqual(payload['kind'], 'map_access')
+        self.assertNotIn('access', payload)
+        self.assertNotIn('chat_access', payload)

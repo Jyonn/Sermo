@@ -885,6 +885,8 @@ class Message(models.Model):
             from TravelMap.models import MapAccessGrant, MapChatGrant
             payload = self._parse_payload(self.content)
             viewer = getattr(request, 'user', None) if request is not None else None
+            if not getattr(viewer, 'is_authenticated', False):
+                viewer = None
             response = dict(
                 kind='map_access',
                 owner=self.user.tiny_json(),
@@ -900,6 +902,8 @@ class Message(models.Model):
             from Square.models import Statement
             reference = self._parse_payload(self.content)
             viewer = getattr(request, 'user', None) if request is not None else None
+            if not getattr(viewer, 'is_authenticated', False):
+                viewer = None
             response = dict(
                 kind='statement',
                 statement_id=reference.get('statement_id'),
