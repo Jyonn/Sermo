@@ -1,6 +1,7 @@
 import json
 
 from django.test import TestCase
+from django.utils import timezone
 
 from Friendship.models import Friendship
 from Space.models import Space
@@ -17,6 +18,7 @@ class StatementApiTests(TestCase):
             slug='square-test',
             email='owner@example.com',
             group_square_enabled=True,
+            admin_phone_verified_at=timezone.now(),
         )
         self.author = User.create(
             space=self.space,
@@ -82,6 +84,16 @@ class StatementApiTests(TestCase):
 
         self.assertEqual(len(friend_feed.json()['body']), 1)
         self.assertEqual(stranger_feed.json()['body'], [])
+
+    def test_admin_feed_includes_friends_only_statement(self):
+        Statement.create_statement(self.author, '朋友可见', 'friends', [])
+        response = self.client.get(
+            '/square/admin/statements?limit=20',
+            HTTP_AUTHORIZATION=f"Bearer {auth.get_space_login_token(self.space)['auth']}",
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json()['body'][0]['text'], '朋友可见')
 
     def test_statement_supports_nine_ordered_photos_and_location(self):
         media = [

@@ -5,7 +5,7 @@ import threading
 from django.views import View
 from django.utils import timezone, translation
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import Count, Q
 from notificator import NotificatorAPIError
 from smartdjango import analyse
 
@@ -25,7 +25,7 @@ from Space.validators import SpaceErrors
 from utils import auth
 from utils.auth import Request
 from Chat.models import Chat
-from Friendship.models import Friendship
+from Friendship.models import Friendship, FriendshipStatusChoice
 from Message.models import Message
 from Message.params import MessageParams
 from User.models import (
@@ -441,6 +441,8 @@ class SpaceAdminUserListView(SpaceUserListView):
             space=request.space,
             is_deleted=False,
             role=UserRoleChoice.MEMBER,
+        ).annotate(
+            admin_statement_count=Count('statements', filter=Q(statements__is_deleted=False), distinct=True),
         )
 
         if request.query.q:
@@ -491,6 +493,11 @@ class SpaceAdminUserListView(SpaceUserListView):
             item['growth_level_name'] = level_names[level_index] if level_names else ''
             item['contacts'] = self._contact_status(user)
             item['notification_preferences'] = self._notification_status(user, preferences)
+            item['friend_count'] = Friendship.objects.filter(
+                space=request.space,
+                status=FriendshipStatusChoice.ACCEPTED,
+            ).filter(Q(user_low=user) | Q(user_high=user)).count()
+            item['statement_count'] = getattr(user, 'admin_statement_count', 0)
             payload.append(item)
         return payload
 

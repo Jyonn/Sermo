@@ -52,6 +52,22 @@ class StatementView(View):
         return statement.jsonl(request=request)
 
 
+class AdminStatementView(View):
+    @auth.require_space
+    @analyse.query(SquareParams.before, SquareParams.limit)
+    def get(self, request: Request):
+        request.space.require_square_enabled()
+        official = request.space.ensure_official_user()
+        request.user = official
+        return Statement.admin_feed(
+            request.space,
+            official,
+            before=request.query.before,
+            limit=request.query.limit,
+            request=request,
+        )
+
+
 class PinnedStatementView(View):
     @auth.require_user
     def get(self, request: Request):

@@ -99,6 +99,17 @@ class Statement(models.Model):
         return [item.jsonl(request=request) for item in queryset.order_by('-created_at', '-id')[:limit]]
 
     @classmethod
+    def admin_feed(cls, space, viewer, before=None, limit=20, request=None):
+        queryset = cls.objects.filter(space=space, is_deleted=False).select_related('user').prefetch_related('media').annotate(
+            visible_comment_count=Count('comments', filter=Q(comments__is_deleted=False), distinct=True),
+            visible_like_count=Count('likes', distinct=True),
+            viewer_liked=Exists(StatementLike.objects.filter(statement_id=OuterRef('pk'), user=viewer)),
+        )
+        if before:
+            queryset = queryset.filter(id__lt=before)
+        return [item.jsonl(request=request) for item in queryset.order_by('-created_at', '-id')[:limit]]
+
+    @classmethod
     def detail(cls, user, statement_id, request=None):
         try:
             statement = cls.visible_for(user).select_related('user').prefetch_related('media').annotate(
