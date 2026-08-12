@@ -994,8 +994,8 @@ class Message(models.Model):
         source_uri = self.source_media_uri()
         return urlparse(source_uri).path.lstrip('/') if source_uri else ''
 
-    def jsonl(self, request: HttpRequest = None):
-        return dict(
+    def jsonl(self, request: HttpRequest = None, include_deleted: bool = False):
+        payload = dict(
             message_id=self.id,
             client_message_id=self.client_message_id,
             user=self.user.tiny_json(),
@@ -1006,6 +1006,9 @@ class Message(models.Model):
             mentions=[mention.user.tiny_json() for mention in self.chat_mentions.all()],
             created_at=self.created_at.timestamp(),
         )
+        if include_deleted:
+            payload['is_deleted'] = self.is_deleted
+        return payload
 
     @classmethod
     def index(cls, message_id):

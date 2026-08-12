@@ -9,7 +9,10 @@ from django.utils import timezone
 
 from Config.models import CI, Config
 from PlatformAdmin.models import PlatformAdminEmailCode, PlatformAdminSecurity, PlatformAuditLog
-from PlatformAdmin.views import LoginView
+from PlatformAdmin.views import ChatMessageView, LoginView
+from Chat.models import Chat, ChatMember, ChatMemberStatusChoice, ChatTypeChoice
+from Space.models import Space
+from User.models import User, UserRoleChoice
 from Message.models import Message, MessageTypeChoice
 from utils import auth
 
@@ -60,3 +63,26 @@ class PlatformAdminSecurityTests(TestCase):
         self.assertEqual(payload['kind'], 'map_access')
         self.assertNotIn('access', payload)
         self.assertNotIn('chat_access', payload)
+
+    def test_chat_audit_includes_deleted_messages_and_pagination(self):
+        space = Space.objects.create(name='Audit Space', slug='audit-space', email='owner@example.com')
+        user = User.objects.create(space=space, name='Audited User', role=UserRoleChoice.MEMBER)
+        chat = Chat.objects.create(space=space, chat_type=ChatTypeChoice.GROUP, title='Audit Chat', created_by=user)
+        ChatMember.objects.create(chat=chat, user=user, status=ChatMemberStatusChoice.ACTIVE)
+        deleted = Message.objects.create(chat=chat, user=user, type=MessageTypeChoice.TEXT, content='deleted evidence', is_deleted=True)
+        Message.objects.create(chat=chat, user=user, type=MessageTypeChoice.TEXT, content='visible message')
+        request = RequestFactory().get(
+            f'/platform-admin/chats/{chat.id}/messages?reason=incident&limit=1',
+            HTTP_AUTHORIZATION=f'Bearer {auth.get_platform_admin_token("admin@example.com")["auth"]}',
+        )
+
+        first_page = ChatMessageView.as_view()(request, chat_id=chat.id)
+        next_request = RequestFactory().get(
+            f'/platform-admin/chats/{chat.id}/messages?reason=incident&limit=1&before={first_page["next_before"]}',
+            HTTP_AUTHORIZATION=f'Bearer {auth.get_platform_admin_token("admin@example.com")["auth"]}',
+        )
+        second_page = ChatMessageView.as_view()(next_request, chat_id=chat.id)
+
+        self.assertTrue(first_page['has_more'])
+        self.assertEqual(second_page['messages'][0]['message_id'], deleted.id)
+        self.assertTrue(second_page['messages'][0]['is_deleted'])

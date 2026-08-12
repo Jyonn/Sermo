@@ -196,10 +196,18 @@ class ChatMessageView(View):
         before = request.GET.get('before')
         limit = min(100, max(1, int(request.GET.get('limit', 50))))
         _audit(request, 'chat.messages_viewed', 'chat', chat.id, request.GET.get('reason', '')[:255])
-        queryset = Message.visible_in_chat(chat).select_related('user', 'reply_to', 'reply_to__user').prefetch_related('chat_mentions__user')
+        queryset = Message.objects.filter(chat=chat).select_related('user', 'reply_to', 'reply_to__user').prefetch_related('chat_mentions__user')
         if before:
             queryset = queryset.filter(id__lt=int(before))
-        return dict(chat=chat.jsonl(), messages=[item.jsonl(request=request) for item in queryset.order_by('-id')[:limit]])
+        messages = list(queryset.order_by('-id')[:limit + 1])
+        has_more = len(messages) > limit
+        messages = messages[:limit]
+        return dict(
+            chat=chat.jsonl(),
+            messages=[item.jsonl(request=request, include_deleted=True) for item in messages],
+            has_more=has_more,
+            next_before=messages[-1].id if has_more and messages else None,
+        )
 
 
 class IdentityDocumentView(View):
