@@ -33,16 +33,22 @@ def _frequency_limits(level):
     if level <= 9:
         return 2, 10
     if level <= 13:
-        return 2, 12
+        return 3, 15
     if level <= 17:
-        return 3, 18
-    return 3, 21
+        return 4, 20
+    return 5, 35
+
+
+def frequency_limits_for_user(user):
+    if user.is_permanent_vip:
+        return _frequency_limits(18)
+    return _frequency_limits(user.effective_growth_level())
 
 
 def _enforce_frequency(queryset, user, multiplier=1):
     if user.is_official:
         return
-    daily, weekly = _frequency_limits(user.effective_growth_level())
+    daily, weekly = frequency_limits_for_user(user)
     now = timezone.now()
     if queryset.filter(user=user, created_at__gte=now - timedelta(days=1)).count() >= daily * multiplier:
         raise SquareErrors.DAILY_LIMIT_REACHED

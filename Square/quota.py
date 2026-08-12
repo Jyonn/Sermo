@@ -7,13 +7,13 @@ from Square.models import (
     StatementComment,
     StatementCommentLike,
     StatementLike,
-    _frequency_limits,
+    frequency_limits_for_user,
 )
 
 
 def quota_for_user(user):
     level = user.effective_growth_level()
-    daily_limit, weekly_limit = _frequency_limits(level)
+    daily_limit, weekly_limit = frequency_limits_for_user(user)
     now = timezone.now()
     day_start = now - timedelta(days=1)
     week_start = now - timedelta(days=7)
@@ -23,6 +23,7 @@ def quota_for_user(user):
 
     return dict(
         level=level,
+        vip=bool(user.is_permanent_vip),
         verified=bool(user.verified),
         unlimited=unlimited,
         statements=dict(

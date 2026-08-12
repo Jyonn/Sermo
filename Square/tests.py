@@ -240,6 +240,20 @@ class StatementApiTests(TestCase):
         self.assertEqual(quota['likes']['daily_used'], 1)
         self.assertFalse(quota['media']['audio'])
 
+    def test_permanent_vip_uses_level_18_frequency_limits(self):
+        self.author.is_permanent_vip = True
+        self.author.save(update_fields=['is_permanent_vip'])
+
+        response = self.client.get('/square/quota', **self.authorization(self.author))
+
+        self.assertEqual(response.status_code, 200, response.content)
+        quota = response.json()['body']
+        self.assertTrue(quota['vip'])
+        self.assertEqual(quota['statements']['daily_limit'], 5)
+        self.assertEqual(quota['statements']['weekly_limit'], 35)
+        self.assertEqual(quota['comments']['daily_limit'], 25)
+        self.assertEqual(quota['comments']['weekly_limit'], 175)
+
     def test_friends_feed_and_threaded_comments(self):
         public = Statement.create_statement(self.author, '好友动态', 'public', [])
         Statement.create_statement(self.friend, '朋友动态', 'public', [])
