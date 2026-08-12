@@ -3,6 +3,7 @@ from unittest.mock import patch
 
 from django.core.management import call_command
 from django.test import TestCase
+from django.utils import timezone
 
 from Message.models import MediaAsset
 
@@ -20,6 +21,7 @@ class BackfillMediaMetadataCommandTests(TestCase):
             latitude=31.2304,
             longitude=121.4737,
             address='',
+            detail_metadata_checked_at=timezone.now(),
         )
 
         with patch.object(MediaAsset, 'refresh') as refresh, patch.object(
@@ -46,3 +48,19 @@ class BackfillMediaMetadataCommandTests(TestCase):
             call_command('backfill_media_metadata', stdout=StringIO())
 
         self.assertEqual([call.args[0].id for call in refresh.call_args_list], [image.id, video.id])
+
+    def test_refetches_asset_with_dimensions_but_unchecked_exif(self):
+        asset = MediaAsset.objects.create(
+            source_key='sermo/statements/image/legacy.jpg',
+            source_uri='https://example.test/sermo/statements/image/legacy.jpg',
+            kind=MediaAsset.KIND_IMAGE,
+            status=MediaAsset.STATUS_READY,
+            file_size=451306,
+            pixel_width=1379,
+            pixel_height=1379,
+        )
+
+        with patch.object(MediaAsset, 'refresh', side_effect=lambda asset, geocode=True: asset) as refresh:
+            call_command('backfill_media_metadata', stdout=StringIO())
+
+        refresh.assert_called_once_with(asset, geocode=True)

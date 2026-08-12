@@ -1277,6 +1277,8 @@ class MediaAsset(models.Model):
     geocoding_status = models.IntegerField(default=GEOCODING_PENDING, db_index=True)
     geocoding_error = models.CharField(max_length=500, blank=True, default='')
     error = models.CharField(max_length=500, blank=True, default='')
+    detail_metadata_checked_at = models.DateTimeField(null=True, blank=True)
+    detail_metadata_error = models.CharField(max_length=500, blank=True, default='')
     updated_at = models.DateTimeField(auto_now=True)
 
     @classmethod
@@ -1351,13 +1353,15 @@ class MediaAsset(models.Model):
         previous_coordinates = (metadata.latitude, metadata.longitude)
         previous_address = metadata.address
         previous_provider = metadata.geocoding_provider
+        detail_metadata_error = ''
         try:
             if metadata.kind == cls.KIND_IMAGE:
                 properties = parse_image_info(fetch_qiniu_image_info(metadata.source_uri))
                 try:
                     raw_metadata = fetch_qiniu_exif(metadata.source_uri)
-                except Exception:
+                except Exception as error:
                     raw_metadata = {}
+                    detail_metadata_error = str(error)[:500]
                 properties.update(parse_exif(raw_metadata))
             elif metadata.kind == cls.KIND_VIDEO:
                 raw_metadata = fetch_qiniu_avinfo(metadata.source_uri)
@@ -1367,6 +1371,8 @@ class MediaAsset(models.Model):
             for field, value in properties.items():
                 setattr(metadata, field, value)
             metadata.raw_metadata = raw_metadata
+            metadata.detail_metadata_checked_at = timezone.now()
+            metadata.detail_metadata_error = detail_metadata_error
             metadata.status = cls.STATUS_READY
             metadata.error = ''
             coordinates = (metadata.latitude, metadata.longitude)
@@ -1447,6 +1453,8 @@ class MediaAsset(models.Model):
             address=self.address,
             geocoding_provider=self.geocoding_provider,
             geocoding_status=self.geocoding_status,
+            detail_metadata_checked_at=self.detail_metadata_checked_at.timestamp() if self.detail_metadata_checked_at else None,
+            detail_metadata_error=self.detail_metadata_error,
         )
 
 

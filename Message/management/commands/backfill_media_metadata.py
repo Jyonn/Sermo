@@ -21,6 +21,8 @@ class Command(BaseCommand):
                 | Q(file_size__isnull=True)
                 | Q(pixel_width__isnull=True)
                 | Q(pixel_height__isnull=True)
+                | Q(detail_metadata_checked_at__isnull=True)
+                | ~Q(detail_metadata_error='')
                 | (Q(latitude__isnull=False) & Q(longitude__isnull=False) & Q(address=''))
             )
         if options['limit'] > 0:
@@ -35,6 +37,8 @@ class Command(BaseCommand):
                 asset.file_size is None,
                 asset.pixel_width is None,
                 asset.pixel_height is None,
+                asset.detail_metadata_checked_at is None,
+                bool(asset.detail_metadata_error),
             ))
             if needs_metadata:
                 MediaAsset.refresh(asset, geocode=not options['skip_geocode'])
