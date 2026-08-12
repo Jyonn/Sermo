@@ -2,7 +2,7 @@ import json
 from datetime import timedelta
 from unittest.mock import patch
 
-from django.test import TestCase
+from django.test import SimpleTestCase, TestCase
 from django.utils import timezone
 
 from Chat.models import Chat, ChatMember, ChatMemberRoleChoice, ChatMemberStatusChoice, ChatTypeChoice
@@ -12,6 +12,19 @@ from Space.models import Space
 from User.models import GrowthEvent, NotificationPreference, User, UserEmojiUsage, UserNotificationChoice
 from User.growth import GROWTH_THRESHOLDS
 from utils import auth
+
+
+class SpaceSlugValidationTests(SimpleTestCase):
+    def test_frontend_root_routes_are_reserved(self):
+        for slug in (
+            'entry', 'space', 'app', 'friend-invite', 'official-login',
+            'account-switch', 'pwa', 'assets', 'icons', 'labs',
+        ):
+            with self.subTest(slug=slug):
+                self.assertTrue(Space.vldt.reserved_slug(slug))
+
+    def test_regular_space_slug_is_available(self):
+        self.assertFalse(Space.vldt.reserved_slug('yuanmeng'))
 
 
 class SpaceAdminApiTests(TestCase):

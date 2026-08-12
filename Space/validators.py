@@ -2,11 +2,7 @@ from django.utils.translation import gettext_lazy as _
 
 from smartdjango import Error, Code
 
-
-RESERVED_SLUGS = {
-    'api', 'www', 'admin', 'static', 'cdn', 'mail', 'smtp', 'imap', 'pop',
-    'ftp', 'docs', 'status', 'support', 'help', 'blog', 'dev', 'test', 'staging'
-}
+from utils.space_slug import is_reserved_space_slug
 
 
 @Error.register
@@ -67,7 +63,7 @@ class SpaceValidator:
 
     @classmethod
     def reserved_slug(cls, value):
-        return value in RESERVED_SLUGS
+        return is_reserved_space_slug(value)
 
     @classmethod
     def member_limit(cls, value):

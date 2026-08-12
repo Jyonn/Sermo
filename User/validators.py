@@ -3,6 +3,7 @@ import string
 from django.utils.translation import gettext_lazy as _
 
 from smartdjango import Error, Code
+from utils.space_slug import is_reserved_space_slug
 
 
 @Error.register
@@ -75,16 +76,6 @@ class UserErrors:
     PASSWORD_RECOVERY_ATTEMPTS_EXCEEDED = Error(message=_('Too many password recovery attempts'), code=Code.BadRequest)
     PASSWORD_RECOVERY_TOKEN_INVALID = Error(message=_('Invalid password reset token'), code=Code.BadRequest)
     PASSWORD_RECOVERY_TOKEN_EXPIRED = Error(message=_('Password reset token expired'), code=Code.BadRequest)
-
-
-RESERVED_SPACE_SLUGS = {
-    'api', 'www', 'admin', 'static', 'cdn', 'mail', 'smtp', 'imap', 'pop',
-    'ftp', 'docs', 'status', 'support', 'help', 'blog', 'dev', 'test', 'staging'
-}
-
-
-def is_reserved_space_slug(value: str) -> bool:
-    return value in RESERVED_SPACE_SLUGS
 
 
 class UserValidator:
