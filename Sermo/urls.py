@@ -25,4 +25,5 @@ urlpatterns = [
     path('stickers/', include('Sticker.urls')),
     path('maps/', include('TravelMap.urls')),
     path('square/', include('Square.urls')),
+    path('platform-admin/', include('PlatformAdmin.urls')),
 ]

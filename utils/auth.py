@@ -46,6 +46,7 @@ class Symbols:
 ACCESS_EXPIRE_SECONDS = 15 * 60
 REFRESH_EXPIRE_SECONDS = 30 * 24 * 60 * 60
 SPACE_ACCESS_EXPIRE_SECONDS = 24 * 60 * 60
+PLATFORM_ADMIN_ACCESS_EXPIRE_SECONDS = 8 * 60 * 60
 
 
 def _encode_token(data: dict, expire_second: int, token_type: str, jti: Optional[str] = None):
@@ -123,6 +124,16 @@ def require_space(func):
     return wrapper
 
 
+def require_platform_admin(func):
+    def wrapper(*args, **kwargs):
+        request = get_request(*args)
+        token = _get_authorization_token(request)
+        data = decrypt(token, expected_type='platform_admin_access')
+        request.platform_admin_email = data['email']
+        return func(*args, **kwargs)
+    return wrapper
+
+
 def get_login_token(user: User):
     access_token, access_payload = _encode_token(
         user.jwt_json(),
@@ -151,6 +162,15 @@ def get_space_login_token(space):
         auth=access_token,
         data=access_payload,
     )
+
+
+def get_platform_admin_token(email):
+    access_token, access_payload = _encode_token(
+        dict(email=email),
+        expire_second=PLATFORM_ADMIN_ACCESS_EXPIRE_SECONDS,
+        token_type='platform_admin_access',
+    )
+    return dict(auth=access_token, data=access_payload)
 
 
 def _issue_refresh_token(user: User):

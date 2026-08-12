@@ -1,0 +1,290 @@
+import datetime
+import json
+import secrets
+from urllib.parse import quote
+
+from django.db.models import Count, Q
+from django.utils import timezone
+from django.views import View
+from smartdjango import OK
+
+from Chat.models import Chat, ChatMember, ChatMemberStatusChoice
+from Config.models import CI, Config
+from Friendship.models import Friendship, FriendshipStatusChoice
+from Message.models import Message
+from PlatformAdmin.models import PlatformAdminEmailCode, PlatformAdminSecurity, PlatformAuditLog
+from PlatformAdmin.validators import PlatformAdminErrors
+from Space.models import Space
+from User.models import NotificationPreference, User, UserRoleChoice
+from utils import auth
+from utils.notificator_integration import send_verification_mail
+from utils.qiniu import avatar_uri_for_key, sign_private_download_url
+
+
+def _body(request):
+    value = getattr(request, 'json', None)
+    if value is not None:
+        return value
+    try:
+        return json.loads(request.body or b'{}')
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return {}
+
+
+def _value(data, key, default=''):
+    if isinstance(data, dict):
+        return data.get(key, default)
+    return getattr(data, key, default)
+
+
+def _boolean(value):
+    if isinstance(value, bool):
+        return value
+    return str(value or '').strip().lower() in {'1', 'true', 'yes', 'on'}
+
+
+def _client_ip(request):
+    forwarded = request.headers.get('X-Forwarded-For', '').split(',')[0].strip()
+    return forwarded or request.headers.get('X-Real-IP') or request.META.get('REMOTE_ADDR')
+
+
+def _admin_email():
+    return (Config.get_value_by_key(CI.ADMIN_EMAIL, default='') or '').strip().lower()
+
+
+def _require_email(value):
+    email = str(value or '').strip().lower()
+    if not email or email != _admin_email():
+        raise PlatformAdminErrors.ACCESS_DENIED
+    return email
+
+
+def _audit(request, action, target_type='', target_id=None, summary='', metadata=None):
+    PlatformAuditLog.objects.create(
+        action=action,
+        target_type=target_type,
+        target_id=target_id,
+        summary=summary[:255],
+        metadata=metadata or {},
+        ip_address=_client_ip(request),
+    )
+
+
+def _space_payload(space):
+    return dict(
+        space_id=space.id,
+        name=space.name,
+        slug=space.slug,
+        email=space.email,
+        official_user=space.official_user.tiny_json() if space.official_user else None,
+        verification_tier=space.verification_tier,
+        member_limit=space.effective_member_limit,
+        member_count=getattr(space, 'admin_member_count', space.active_member_count()),
+        chat_enabled=space.chat_enabled,
+        square_enabled=space.group_square_enabled,
+        identity_submitted_at=space.identity_submitted_at.timestamp() if space.identity_submitted_at else None,
+        identity_verified_at=space.identity_verified_at.timestamp() if space.identity_verified_at else None,
+        created_at=space.created_at.timestamp(),
+    )
+
+
+class EmailCodeView(View):
+    def post(self, request):
+        email = _require_email(_value(_body(request), 'email'))
+        now = timezone.now()
+        recent = PlatformAdminEmailCode.objects.filter(email=email, created_at__gte=now - datetime.timedelta(seconds=45)).exists()
+        if recent:
+            return dict(expires_in=600, masked_email=_mask_email(email))
+        code = f'{secrets.randbelow(1_000_000):06d}'
+        PlatformAdminEmailCode.objects.create(email=email, code=code, expires_at=now + datetime.timedelta(minutes=10))
+        send_verification_mail(email, code, 10, 'Sermo 超级管理员登录', language='zh-CN', recipient_name='Sermo 管理员')
+        _audit(request, 'auth.code_sent', summary='平台管理员验证码已发送')
+        return dict(expires_in=600, masked_email=_mask_email(email))
+
+
+def _mask_email(email):
+    local, domain = email.split('@', 1)
+    return f'{local[:2]}***@{domain}'
+
+
+class LoginView(View):
+    def post(self, request):
+        data = _body(request)
+        email = _require_email(_value(data, 'email'))
+        now = timezone.now()
+        code = PlatformAdminEmailCode.objects.filter(
+            email=email, code=str(_value(data, 'code')).strip(), consumed_at__isnull=True, expires_at__gt=now,
+        ).order_by('-id').first()
+        if code is None:
+            _audit(request, 'auth.login_failed', summary='验证码错误')
+            raise PlatformAdminErrors.CODE_INVALID
+        security = PlatformAdminSecurity.primary()
+        mfa_code = str(_value(data, 'mfa_code')).strip()
+        if security.mfa_enabled:
+            if not mfa_code:
+                raise PlatformAdminErrors.MFA_REQUIRED
+            if not security.verify_totp(security.totp_secret, mfa_code):
+                recovery_hash = security.hash_recovery_code(mfa_code)
+                if recovery_hash not in security.recovery_code_hashes:
+                    raise PlatformAdminErrors.MFA_INVALID
+                security.recovery_code_hashes = [item for item in security.recovery_code_hashes if item != recovery_hash]
+                security.save(update_fields=['recovery_code_hashes', 'updated_at'])
+        code.consumed_at = now
+        code.save(update_fields=['consumed_at'])
+        _audit(request, 'auth.login', summary='平台管理员登录')
+        return dict(**auth.get_platform_admin_token(email), mfa_enabled=security.mfa_enabled)
+
+
+class DashboardView(View):
+    @auth.require_platform_admin
+    def get(self, request):
+        pending = Space.objects.filter(identity_submitted_at__isnull=False, identity_verified_at__isnull=True).count()
+        return dict(
+            spaces=Space.objects.count(),
+            members=User.objects.filter(role=UserRoleChoice.MEMBER, is_deleted=False).count(),
+            pending_identity_reviews=pending,
+            mfa_enabled=PlatformAdminSecurity.primary().mfa_enabled,
+            recent_audit=[_audit_payload(item) for item in PlatformAuditLog.objects.all()[:8]],
+        )
+
+
+class SpaceListView(View):
+    @auth.require_platform_admin
+    def get(self, request):
+        query = request.GET.get('q', '').strip()
+        spaces = Space.objects.select_related('official_user').annotate(
+            admin_member_count=Count('users', filter=Q(users__role=UserRoleChoice.MEMBER, users__is_deleted=False), distinct=True),
+        )
+        if query:
+            spaces = spaces.filter(Q(name__icontains=query) | Q(slug__icontains=query) | Q(email__icontains=query))
+        return [_space_payload(space) for space in spaces.order_by('-created_at', '-id')[:100]]
+
+
+class MemberListView(View):
+    @auth.require_platform_admin
+    def get(self, request, space_id):
+        space = Space.index(space_id)
+        _audit(request, 'space.members_viewed', 'space', space.id, f'查看空间 {space.slug} 的成员')
+        users = User.objects.filter(space=space, is_deleted=False).order_by('role', 'name_pinyin', 'id')
+        payload = []
+        for user in users:
+            item = user.json_admin()
+            item['friend_count'] = Friendship.objects.filter(space=space, status=FriendshipStatusChoice.ACCEPTED).filter(Q(user_low=user) | Q(user_high=user)).count()
+            item['chat_count'] = ChatMember.objects.filter(user=user, status=ChatMemberStatusChoice.ACTIVE, chat__is_deleted=False).count()
+            item['statement_count'] = user.statements.filter(is_deleted=False).count()
+            item['contacts'] = dict(email=bool(user.email_verified_at), phone=bool(user.phone_verified_at), bark=bool(user.bark_verified_at))
+            item['notifications_enabled'] = NotificationPreference.objects.filter(user=user, enabled=True).count()
+            payload.append(item)
+        return payload
+
+
+class ChatListView(View):
+    @auth.require_platform_admin
+    def get(self, request, user_id):
+        user = User.index(user_id)
+        _audit(request, 'member.chats_viewed', 'user', user.id, f'查看 {user.name} 的会话列表')
+        chats = Chat.objects.filter(chat_members__user=user, chat_members__status=ChatMemberStatusChoice.ACTIVE, is_deleted=False).distinct().order_by('-last_chat_at')
+        return [chat.jsonl() for chat in chats]
+
+
+class ChatMessageView(View):
+    @auth.require_platform_admin
+    def get(self, request, chat_id):
+        chat = Chat.index(chat_id)
+        if not request.GET.get('reason', '').strip():
+            raise PlatformAdminErrors.ACCESS_DENIED
+        before = request.GET.get('before')
+        limit = min(100, max(1, int(request.GET.get('limit', 50))))
+        _audit(request, 'chat.messages_viewed', 'chat', chat.id, request.GET.get('reason', '')[:255])
+        queryset = Message.visible_in_chat(chat).select_related('user', 'reply_to', 'reply_to__user').prefetch_related('chat_mentions__user')
+        if before:
+            queryset = queryset.filter(id__lt=int(before))
+        return dict(chat=chat.jsonl(), messages=[item.jsonl(request=request) for item in queryset.order_by('-id')[:limit]])
+
+
+class IdentityDocumentView(View):
+    @auth.require_platform_admin
+    def get(self, request, space_id):
+        space = Space.index(space_id)
+        if not space.identity_document_key:
+            raise PlatformAdminErrors.IDENTITY_NOT_PENDING
+        _audit(request, 'identity.document_opened', 'space', space.id, f'打开 {space.slug} 身份材料')
+        return dict(uri=sign_private_download_url(avatar_uri_for_key(space.identity_document_key), expire_seconds=10 * 60))
+
+
+class IdentityReviewView(View):
+    @auth.require_platform_admin
+    def post(self, request, space_id):
+        space = Space.index(space_id)
+        if not space.identity_submitted_at or space.identity_verified_at:
+            raise PlatformAdminErrors.IDENTITY_NOT_PENDING
+        data = _body(request)
+        approved = _boolean(_value(data, 'approved', False))
+        note = str(_value(data, 'note')).strip()
+        if approved:
+            space.identity_verified_at = timezone.now()
+            space.save(update_fields=['identity_verified_at'])
+        else:
+            space.identity_document_key = ''
+            space.identity_submitted_at = None
+            space.save(update_fields=['identity_document_key', 'identity_submitted_at'])
+        _audit(request, 'identity.approved' if approved else 'identity.rejected', 'space', space.id, note or ('审核通过' if approved else '审核驳回'))
+        return _space_payload(space)
+
+
+class MfaSetupView(View):
+    @auth.require_platform_admin
+    def post(self, request):
+        secret = PlatformAdminSecurity.new_secret()
+        Config.update_value(CI.PLATFORM_ADMIN_MFA_PENDING_SECRET, secret)
+        email = _admin_email()
+        uri = f'otpauth://totp/{quote("Sermo:" + email)}?secret={secret}&issuer=Sermo&algorithm=SHA1&digits=6&period=30'
+        _audit(request, 'mfa.setup_started', summary='开始配置 MFA')
+        return dict(secret=secret, otpauth_uri=uri)
+
+
+class MfaVerifyView(View):
+    @auth.require_platform_admin
+    def post(self, request):
+        secret = Config.get_value_by_key(CI.PLATFORM_ADMIN_MFA_PENDING_SECRET, default='')
+        if not secret:
+            raise PlatformAdminErrors.MFA_NOT_PENDING
+        if not PlatformAdminSecurity.verify_totp(secret, _value(_body(request), 'code')):
+            raise PlatformAdminErrors.MFA_INVALID
+        recovery_codes = [secrets.token_hex(4).upper() for _ in range(8)]
+        security = PlatformAdminSecurity.primary()
+        security.totp_secret = secret
+        security.mfa_enabled = True
+        security.recovery_code_hashes = [security.hash_recovery_code(item) for item in recovery_codes]
+        security.save()
+        Config.update_value(CI.PLATFORM_ADMIN_MFA_PENDING_SECRET, '')
+        _audit(request, 'mfa.enabled', summary='启用 MFA')
+        return dict(recovery_codes=recovery_codes)
+
+
+class MfaDisableView(View):
+    @auth.require_platform_admin
+    def post(self, request):
+        security = PlatformAdminSecurity.primary()
+        if not security.verify_totp(security.totp_secret, _value(_body(request), 'code')):
+            raise PlatformAdminErrors.MFA_INVALID
+        security.totp_secret = ''
+        security.mfa_enabled = False
+        security.recovery_code_hashes = []
+        security.save()
+        _audit(request, 'mfa.disabled', summary='关闭 MFA')
+        return OK
+
+
+def _audit_payload(item):
+    return dict(audit_id=item.id, action=item.action, target_type=item.target_type, target_id=item.target_id, summary=item.summary, metadata=item.metadata, ip_address=item.ip_address, created_at=item.created_at.timestamp())
+
+
+class AuditLogView(View):
+    @auth.require_platform_admin
+    def get(self, request):
+        queryset = PlatformAuditLog.objects.all()
+        action = request.GET.get('action', '').strip()
+        if action:
+            queryset = queryset.filter(action__startswith=action)
+        return [_audit_payload(item) for item in queryset[:100]]
