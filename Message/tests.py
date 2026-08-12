@@ -2,11 +2,11 @@ import json
 import math
 from unittest.mock import Mock, patch
 
-from django.test import SimpleTestCase
+from django.test import SimpleTestCase, TestCase
 
 from Message.image_metadata import _reverse_geocode_opencage, parse_image_info, reverse_geocode
 from Message.video_metadata import parse_avinfo
-from Message.models import Message, MessageTypeChoice, random_point_within_radius
+from Message.models import MediaMetadata, Message, MessageTypeChoice, random_point_within_radius
 from utils.global_settings import Globals
 
 
@@ -141,6 +141,58 @@ class VideoMetadataTests(SimpleTestCase):
         self.assertEqual(metadata['model'], 'iPhone')
         self.assertEqual(metadata['latitude'], 31.2304)
         self.assertEqual(metadata['longitude'], 121.4737)
+
+
+class UnifiedMediaMetadataTests(TestCase):
+    @patch('Message.image_metadata.reverse_geocode', return_value=('上海市', 'opencage'))
+    @patch('Message.image_metadata.fetch_qiniu_exif')
+    @patch('Message.image_metadata.fetch_qiniu_image_info')
+    def test_image_and_video_use_the_same_metadata_model(self, image_info, exif, geocode):
+        image_info.return_value = {'size': 1024, 'width': 640, 'height': 480}
+        exif.return_value = {}
+        image = MediaMetadata.objects.create(
+            source_key='sermo/messages/image/shared.jpg',
+            source_uri='https://resource.example.com/sermo/messages/image/shared.jpg',
+            kind=MediaMetadata.KIND_IMAGE,
+        )
+        MediaMetadata.refresh(image)
+
+        self.assertEqual(image.status, MediaMetadata.STATUS_READY)
+        self.assertEqual(image.pixel_width, 640)
+        self.assertEqual(image.jsonl()['file_size'], 1024)
+
+        video = MediaMetadata.objects.create(
+            source_key='sermo/messages/video/shared.mp4',
+            source_uri='https://resource.example.com/sermo/messages/video/shared.mp4',
+            kind=MediaMetadata.KIND_VIDEO,
+        )
+        with patch('Message.video_metadata.fetch_qiniu_avinfo', return_value={
+            'streams': [{'codec_type': 'video', 'codec_name': 'h264', 'width': 1280, 'height': 720}],
+            'format': {'duration': '8.5', 'size': '2048'},
+        }):
+            MediaMetadata.refresh(video)
+
+        self.assertEqual(video.status, MediaMetadata.STATUS_READY)
+        self.assertEqual(video.pixel_width, 1280)
+        self.assertEqual(video.duration_seconds, 8.5)
+        self.assertEqual(MediaMetadata.objects.count(), 2)
+
+    def test_queue_reuses_metadata_for_the_same_storage_key(self):
+        first = MediaMetadata.queue(
+            'sermo/messages/image/shared.jpg',
+            'https://resource.example.com/sermo/messages/image/shared.jpg?token=old',
+            MediaMetadata.KIND_IMAGE,
+        )
+        second = MediaMetadata.queue(
+            'sermo/messages/image/shared.jpg',
+            'https://resource.example.com/sermo/messages/image/shared.jpg?token=new',
+            MediaMetadata.KIND_IMAGE,
+        )
+
+        self.assertEqual(first.id, second.id)
+        self.assertEqual(MediaMetadata.objects.count(), 1)
+        second.refresh_from_db()
+        self.assertIn('token=new', second.source_uri)
 
 
 class LocationMessageTests(SimpleTestCase):

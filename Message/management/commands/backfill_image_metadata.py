@@ -1,7 +1,5 @@
 from django.core.management.base import BaseCommand
-from django.db.models import Q
-
-from Message.models import ImageMetadata, Message, MessageTypeChoice
+from Message.models import MediaMetadata, Message, MessageTypeChoice
 
 
 class Command(BaseCommand):
@@ -23,38 +21,40 @@ class Command(BaseCommand):
             return
 
         query = Message.objects.filter(type=MessageTypeChoice.IMAGE, is_deleted=False).order_by('id')
-        if not options['force']:
-            query = query.filter(
-                Q(image_metadata__isnull=True)
-                | Q(image_metadata__file_size__isnull=True)
-                | Q(image_metadata__pixel_width__isnull=True)
-                | Q(image_metadata__pixel_height__isnull=True)
-            )
         if options['limit'] > 0:
             query = query[:options['limit']]
 
         processed = 0
         for message in query.iterator():
-            metadata = ImageMetadata.refresh_for_message(message, geocode=options['geocode'])
+            source_key = message.source_media_key()
+            metadata = MediaMetadata.objects.filter(source_key=source_key).first()
+            if not options['force'] and metadata and all((metadata.file_size, metadata.pixel_width, metadata.pixel_height)):
+                continue
+            if metadata is None:
+                metadata = MediaMetadata.objects.create(
+                    source_key=source_key,
+                    source_uri=message.source_media_uri(),
+                    kind=MediaMetadata.KIND_IMAGE,
+                )
+            metadata = MediaMetadata.refresh(metadata, geocode=options['geocode'])
             processed += 1
-            self.stdout.write(f'{message.id}: {"ready" if metadata.status == ImageMetadata.STATUS_READY else metadata.error}')
+            self.stdout.write(f'{message.id}: {"ready" if metadata.status == MediaMetadata.STATUS_READY else metadata.error}')
         self.stdout.write(self.style.SUCCESS(f'Processed {processed} image messages.'))
 
     def _geocode_missing(self, limit):
-        query = ImageMetadata.objects.filter(
-            message__type=MessageTypeChoice.IMAGE,
-            message__is_deleted=False,
+        query = MediaMetadata.objects.filter(
+            kind=MediaMetadata.KIND_IMAGE,
             latitude__isnull=False,
             longitude__isnull=False,
             address='',
-        ).order_by('message_id')
+        ).order_by('id')
         if limit > 0:
             query = query[:limit]
 
         processed = 0
         for metadata in query.iterator():
-            ImageMetadata.refresh_geocoding(metadata)
+            MediaMetadata.refresh_geocoding(metadata)
             processed += 1
             result = metadata.address or metadata.geocoding_error or 'no address returned'
-            self.stdout.write(f'{metadata.message_id}: {result}')
+            self.stdout.write(f'{metadata.source_key}: {result}')
         self.stdout.write(self.style.SUCCESS(f'Geocoded {processed} image messages.'))

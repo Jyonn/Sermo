@@ -4,7 +4,8 @@ from django.test import TestCase
 
 from Friendship.models import Friendship
 from Space.models import Space
-from Square.models import Statement, StatementComment, StatementCommentLike, StatementLike
+from Message.models import MediaMetadata
+from Square.models import Statement, StatementComment, StatementCommentLike, StatementLike, StatementMedia
 from User.models import User
 from utils import auth
 
@@ -98,6 +99,26 @@ class StatementApiTests(TestCase):
         body = response.json()['body']
         self.assertEqual(len(body['media']), 9)
         self.assertEqual(body['media'][0]['location']['address'], '厦门')
+
+    def test_statements_can_share_media_metadata(self):
+        metadata = MediaMetadata.objects.create(
+            source_key='sermo/messages/image/reused.jpg',
+            source_uri='https://resource.example.com/sermo/messages/image/reused.jpg',
+            kind=MediaMetadata.KIND_IMAGE,
+            status=MediaMetadata.STATUS_READY,
+        )
+        first = Statement.objects.create(space=self.space, user=self.author, text='第一条')
+        second = Statement.objects.create(space=self.space, user=self.author, text='第二条')
+        StatementMedia.objects.create(
+            statement=first, media_metadata=metadata, kind=0, position=0,
+            key=metadata.source_key, blob_slug='shared-media-first',
+        )
+        StatementMedia.objects.create(
+            statement=second, media_metadata=metadata, kind=0, position=0,
+            key=metadata.source_key, blob_slug='shared-media-second',
+        )
+
+        self.assertEqual(metadata.statement_media_items.count(), 2)
 
     def test_statement_rejects_more_than_nine_photos_and_long_audio(self):
         photos = [

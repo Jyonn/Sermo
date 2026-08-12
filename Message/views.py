@@ -6,7 +6,7 @@ from django.utils import timezone
 from django.views import View
 from smartdjango import analyse, OK
 
-from Message.models import ImageMetadata, LinkPreview, Message, MessageEvent, MessageTypeChoice, PinnedMessage, VideoMetadata
+from Message.models import LinkPreview, MediaMetadata, Message, MessageEvent, MessageTypeChoice, PinnedMessage
 from Message.params import MessageParams
 from Message.validators import MessageErrors
 from utils.qiniu import issue_message_upload, build_message_image_thumbnail_uri, build_message_video_thumbnail_uri, sign_private_download_url
@@ -224,9 +224,11 @@ class MessageImageMetadataView(View):
             raise MessageErrors.NOT_A_MEMBER
         if message.type != MessageTypeChoice.IMAGE:
             raise MessageErrors.TYPE_INVALID
-        metadata = ImageMetadata.objects.filter(message=message).first()
+        metadata = MediaMetadata.objects.filter(source_key=message.source_media_key()).first()
         if metadata is None:
-            metadata = ImageMetadata.queue_for_message(message)
+            metadata = MediaMetadata.queue(
+                message.source_media_key(), message.source_media_uri(), MediaMetadata.KIND_IMAGE,
+            )
         return metadata.jsonl()
 
 
@@ -239,9 +241,11 @@ class MessageVideoMetadataView(View):
             raise MessageErrors.NOT_A_MEMBER
         if message.type != MessageTypeChoice.VIDEO:
             raise MessageErrors.TYPE_INVALID
-        metadata = VideoMetadata.objects.filter(message=message).first()
+        metadata = MediaMetadata.objects.filter(source_key=message.source_media_key()).first()
         if metadata is None:
-            metadata = VideoMetadata.queue_for_message(message)
+            metadata = MediaMetadata.queue(
+                message.source_media_key(), message.source_media_uri(), MediaMetadata.KIND_VIDEO,
+            )
         return metadata.jsonl()
 
 

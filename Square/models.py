@@ -1,8 +1,7 @@
 import secrets
-import threading
 from datetime import timedelta
 
-from django.db import close_old_connections, transaction
+from django.db import transaction
 from django.db.models import Count, Exists, OuterRef, Prefetch, Q
 from django.utils import timezone
 from django.urls import reverse
@@ -340,9 +339,14 @@ class StatementCommentLike(models.Model):
 
 
 class StatementMedia(models.Model):
-    _FETCHING_IDS = set()
-    _FETCHING_LOCK = threading.Lock()
     statement = models.ForeignKey(Statement, on_delete=models.CASCADE, related_name='media')
+    media_metadata = models.ForeignKey(
+        'Message.MediaMetadata',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='statement_media_items',
+    )
     kind = models.IntegerField(choices=StatementMediaKindChoice.to_choices())
     position = models.PositiveSmallIntegerField(default=0)
     key = models.CharField(max_length=255)
@@ -352,9 +356,6 @@ class StatementMedia(models.Model):
     latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
     longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
     address = models.CharField(max_length=255, blank=True, default='')
-    metadata_status = models.IntegerField(default=0, db_index=True)
-    metadata = models.JSONField(default=dict, blank=True)
-    metadata_error = models.CharField(max_length=500, blank=True, default='')
 
     class Meta:
         ordering = ['position', 'id']
@@ -427,45 +428,23 @@ class StatementMedia(models.Model):
 
     @classmethod
     def fetch_metadata_async(cls, media_id):
-        with cls._FETCHING_LOCK:
-            if media_id in cls._FETCHING_IDS:
-                return
-            cls._FETCHING_IDS.add(media_id)
-        threading.Thread(target=cls._refresh_metadata, args=(media_id,), daemon=True).start()
+        from Message.models import MediaMetadata
 
-    @classmethod
-    def _refresh_metadata(cls, media_id):
-        close_old_connections()
         try:
             media = cls.objects.get(id=media_id)
-            if media.kind == StatementMediaKindChoice.IMAGE:
-                from Message.image_metadata import fetch_qiniu_exif, fetch_qiniu_image_info, parse_exif, parse_image_info, reverse_geocode
-                parsed = parse_image_info(fetch_qiniu_image_info(media.source_uri()))
-                try:
-                    parsed.update(parse_exif(fetch_qiniu_exif(media.source_uri())))
-                except Exception:
-                    # Images without EXIF still retain dimensions and file size.
-                    pass
-                if parsed.get('latitude') is not None and parsed.get('longitude') is not None:
-                    parsed['address'], parsed['geocoding_provider'] = reverse_geocode(parsed['latitude'], parsed['longitude'])
-            elif media.kind == StatementMediaKindChoice.VIDEO:
-                from Message.video_metadata import fetch_qiniu_avinfo, parse_avinfo
-                parsed = parse_avinfo(fetch_qiniu_avinfo(media.source_uri()))
-            else:
-                return
-            media.metadata = {
-                key: value.timestamp() if hasattr(value, 'timestamp') else value
-                for key, value in parsed.items()
-            }
-            media.metadata_status = 1
-            media.metadata_error = ''
-            media.save(update_fields=['metadata', 'metadata_status', 'metadata_error'])
-        except Exception as error:
-            cls.objects.filter(id=media_id).update(metadata_status=2, metadata_error=str(error)[:500])
-        finally:
-            with cls._FETCHING_LOCK:
-                cls._FETCHING_IDS.discard(media_id)
-            close_old_connections()
+        except cls.DoesNotExist:
+            return None
+        kind = {
+            StatementMediaKindChoice.IMAGE: MediaMetadata.KIND_IMAGE,
+            StatementMediaKindChoice.VIDEO: MediaMetadata.KIND_VIDEO,
+        }.get(media.kind)
+        if kind is None:
+            return None
+        metadata = MediaMetadata.queue(media.key, media.source_uri(), kind)
+        if media.media_metadata_id != metadata.id:
+            media.media_metadata = metadata
+            media.save(update_fields=['media_metadata'])
+        return metadata
 
     @classmethod
     def index_by_blob_slug(cls, blob_slug):
@@ -494,6 +473,7 @@ class StatementMedia(models.Model):
                 longitude=float(self.longitude),
                 address=self.address,
             )
+        metadata = self.media_metadata
         return dict(
             media_id=self.id,
             kind={StatementMediaKindChoice.IMAGE: 'image', StatementMediaKindChoice.AUDIO: 'audio', StatementMediaKindChoice.VIDEO: 'video'}[self.kind],
@@ -502,6 +482,6 @@ class StatementMedia(models.Model):
             mime_type=self.mime_type,
             duration_seconds=self.duration_seconds,
             location=location,
-            metadata_status=self.metadata_status,
-            metadata=self.metadata,
+            metadata_status=metadata.status if metadata else 0,
+            metadata=metadata.jsonl() if metadata else {},
         )
