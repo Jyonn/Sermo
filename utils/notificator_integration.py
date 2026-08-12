@@ -2,6 +2,7 @@ from django.utils import translation
 from django.utils.translation import gettext as _
 
 from utils.global_settings import notificator
+from Config.models import Config, CI
 
 
 def notificator_locale(language=None):
@@ -58,6 +59,34 @@ def send_verification_sms(target, code, time, title, language=None):
         title=title,
         locale=locale,
         body=dict(code=str(code), time=int(time)),
+    )
+
+
+def send_space_capacity_mail(space, count, limit):
+    admin_email = Config.get_value_by_key(CI.ADMIN_EMAIL, default='')
+    identity_tier = space.verification_tier == 'identity'
+    contact_note = f' 请联系 Sermo 管理员 {admin_email} 手动调整空间规模。' if identity_tier and admin_email else ''
+    return notificator.mail(
+        space.email,
+        format='markdown',
+        title=f'{space.name} 的成员容量即将用完',
+        body=f'空间当前已有 **{count}** 位成员，档位容量为 **{limit}** 人。{contact_note or "请完成更高等级认证以继续扩容。"}',
+        locale='zh-CN',
+        recipient_name=space_administrator_name('zh-CN'),
+    )
+
+
+def send_space_identity_review_mail(space):
+    admin_email = Config.get_value_by_key(CI.ADMIN_EMAIL, default='')
+    if not admin_email:
+        return None
+    return notificator.mail(
+        admin_email,
+        format='markdown',
+        title=f'空间实名认证待审：{space.name}',
+        body=f'空间 `{space.slug}` 已提交 PDF 身份凭证，请登录后续管理后台审阅。\n\n凭证 Key：`{space.identity_document_key}`',
+        locale='zh-CN',
+        recipient_name='Sermo 管理员',
     )
 
 

@@ -61,6 +61,17 @@ class SpaceOfficialLoginTicketParams(metaclass=Params):
     token = Validator('token').to(str)
 
 
+class SpacePhoneVerificationParams(metaclass=Params):
+    phone = Validator('phone').to(str).to(lambda value: value.strip())
+    code = Validator('code').to(str).to(lambda value: value.strip())
+
+
+class SpaceIdentityParams(metaclass=Params):
+    file_name = Validator('file_name').to(str)
+    content_type = Validator('content_type').to(str)
+    key = Validator('key').to(str)
+
+
 class SpaceAdminBroadcastParams(metaclass=Params):
     content = MessageParams.content.copy()
     type = MessageParams.type.copy().null().default(0)

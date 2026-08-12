@@ -8,7 +8,7 @@ from django.utils import timezone
 from Chat.models import Chat, ChatMember, ChatMemberRoleChoice, ChatMemberStatusChoice, ChatTypeChoice
 from Config.models import Config, ConfigInstance
 from Message.models import Message, MessageEvent, MessageTypeChoice, MessageUserState, PinnedMessage
-from Space.models import Space
+from Space.models import Space, SpacePhoneVerificationCode
 from User.models import GrowthEvent, NotificationPreference, User, UserEmojiUsage, UserNotificationChoice
 from User.growth import GROWTH_THRESHOLDS
 from utils import auth
@@ -34,6 +34,9 @@ class SpaceAdminApiTests(TestCase):
             slug='test-space',
             email='admin@example.com',
         )
+        self.space.admin_phone = '+8613800000000'
+        self.space.admin_phone_verified_at = timezone.now()
+        self.space.save(update_fields=['admin_phone', 'admin_phone_verified_at'])
         self.official = self.space.ensure_official_user()
         self.member = User.create(
             space=self.space,
@@ -63,6 +66,29 @@ class SpaceAdminApiTests(TestCase):
                 defaults=dict(category='social', title='连续活跃 4 周', points=60),
             )
         user.reconcile_growth()
+
+    def test_email_tier_has_five_member_limit_and_restricted_square(self):
+        trial = Space.objects.create(name='Trial', slug='trial-space', email='trial@example.com')
+        self.assertEqual(trial.tier_member_limit, 5)
+        self.assertFalse(trial.json()['group_square_enabled'])
+        with self.assertRaises(Exception):
+            trial.set_admin_settings('Trial', True, True, True, 2, None)
+
+    def test_email_can_create_again_only_after_existing_space_phone_verification(self):
+        trial = Space.objects.create(name='Trial', slug='trial-email', email='shared@example.com')
+        with self.assertRaises(Exception):
+            Space.require_email_creation_available('shared@example.com')
+        trial.admin_phone_verified_at = timezone.now()
+        trial.save(update_fields=['admin_phone_verified_at'])
+        self.assertEqual(Space.require_email_creation_available('shared@example.com'), 'shared@example.com')
+
+    def test_phone_verification_upgrades_space_to_one_hundred_members(self):
+        trial = Space.objects.create(name='Trial', slug='trial-phone', email='phone@example.com')
+        code = SpacePhoneVerificationCode.issue(trial, '+8613900000000')
+        SpacePhoneVerificationCode.verify(trial, code.phone, code.code)
+        trial.refresh_from_db()
+        self.assertEqual(trial.verification_tier, 'phone')
+        self.assertEqual(trial.tier_member_limit, 100)
 
     def test_online_square_always_includes_official_user(self):
         self.official.last_heartbeat = timezone.now() - timedelta(days=30)

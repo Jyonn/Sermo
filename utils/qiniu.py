@@ -24,6 +24,8 @@ CHAT_BACKGROUND_MAX_FILE_SIZE = 10 * 1024 * 1024  # 10M
 AVATAR_DOWNLOAD_EXPIRE_SECONDS = 30 * 24 * 60 * 60
 AVATAR_PREFIX = 'sermo/avatar/'
 CHAT_BACKGROUND_PREFIX = 'sermo/chat-background/'
+SPACE_IDENTITY_PREFIX = 'sermo/space-identity/'
+SPACE_IDENTITY_MAX_FILE_SIZE = 10 * 1024 * 1024
 MESSAGE_MEDIA_PREFIX = 'sermo/messages'
 MESSAGE_MEDIA_MAX_FILE_SIZE = {
     'image': 10 * 1024 * 1024,
@@ -362,6 +364,30 @@ def issue_message_upload(kind: str, file_name: str, content_type: str = None):
         expires_in=QINIU_TOKEN_EXPIRE_SECONDS,
         max_file_size=MESSAGE_MEDIA_MAX_FILE_SIZE[normalized_kind],
     )
+
+
+def issue_space_identity_upload(space_id, file_name, content_type=None):
+    extension = os.path.splitext(str(file_name or '').strip())[1].lower()
+    if extension != '.pdf' or str(content_type or '').strip().lower() not in {'application/pdf', 'application/x-pdf'}:
+        from Space.validators import SpaceErrors
+        raise SpaceErrors.IDENTITY_FILE_INVALID
+    key = f'{SPACE_IDENTITY_PREFIX}{int(space_id)}/{uuid.uuid4().hex}.pdf'
+    return dict(
+        upload_token=build_upload_token(key, max_file_size=SPACE_IDENTITY_MAX_FILE_SIZE),
+        upload_url=QINIU_UPLOAD_URL,
+        key=key,
+        expires_in=QINIU_TOKEN_EXPIRE_SECONDS,
+        max_file_size=SPACE_IDENTITY_MAX_FILE_SIZE,
+    )
+
+
+def validate_space_identity_key(space_id, key):
+    normalized = str(key or '').strip()
+    prefix = f'{SPACE_IDENTITY_PREFIX}{int(space_id)}/'
+    if not normalized.startswith(prefix) or not normalized.endswith('.pdf'):
+        from Space.validators import SpaceErrors
+        raise SpaceErrors.IDENTITY_FILE_INVALID
+    return normalized
 
 
 def issue_sticker_upload(content_hash: str, file_name: str, content_type: str = None):

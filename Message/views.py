@@ -9,6 +9,7 @@ from smartdjango import analyse, OK
 from Message.models import LinkPreview, MediaMetadata, Message, MessageEvent, MessageTypeChoice, PinnedMessage
 from Message.params import MessageParams
 from Message.validators import MessageErrors
+from Space.validators import SpaceErrors
 from utils.qiniu import issue_message_upload, build_message_image_thumbnail_uri, build_message_video_thumbnail_uri, sign_private_download_url
 from utils import auth
 from utils.auth import Request
@@ -49,6 +50,8 @@ class MessageView(View):
     )
     def post(self, request: Request):
         request.user.space.require_chat_enabled()
+        if request.json.kind in {'video', 'file'} and request.user.space.verification_tier == 'email':
+            raise SpaceErrors.TIER_FEATURE_RESTRICTED
         if request.query.chat.group:
             request.user.space.require_group_send_allowed(request.user)
         with transaction.atomic():

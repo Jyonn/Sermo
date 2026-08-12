@@ -390,12 +390,14 @@ class User(models.Model):
             if deleted_user is not None:
                 deleted_user.release_deleted_identity()
             space.ensure_member_limit_available()
-            return cls.create(
+            user = cls.create(
                 space=space,
                 name=name,
                 password=password,
                 language=normalized_language,
             )
+            transaction.on_commit(space.notify_capacity_if_needed)
+            return user
 
         if user.is_deleted:
             raise UserErrors.USER_DELETED
@@ -1022,6 +1024,14 @@ class User(models.Model):
         privileges = [title for unlock_level in range(1, level + 1) for title in level_unlock_titles(unlock_level)]
         recent_events = list(self.growth_events.order_by('-updated_at')[:8])
         earned_keys = set(self.growth_events.values_list('event_key', flat=True))
+        square_rewards_enabled = self.space.verification_tier != 'email' and self.space.group_square_enabled
+
+        def visible_rewards(index):
+            rewards = LEVEL_REWARDS.get(index, [])
+            if square_rewards_enabled:
+                return rewards
+            return [reward for reward in rewards if reward.get('category') != 'statement']
+
         return dict(
             score=score,
             score_level=score_level,
@@ -1059,7 +1069,7 @@ class User(models.Model):
                     name=names[index - 1] if len(names) >= index else f'Lv.{index}',
                     score=threshold,
                     unlocks=level_unlock_titles(index),
-                    rewards=LEVEL_REWARDS.get(index, []),
+                    rewards=visible_rewards(index),
                     unlocked=level >= index,
                 )
                 for index, threshold in enumerate(GROWTH_THRESHOLDS, start=1)

@@ -1,5 +1,6 @@
 import datetime
 import logging
+import threading
 
 from django.views import View
 from django.utils import timezone, translation
@@ -9,7 +10,7 @@ from notificator import NotificatorAPIError
 from smartdjango import analyse
 
 from Space.models import Space
-from Space.models import SpaceEmailVerificationCode, SpaceEmailCodePurposeChoice
+from Space.models import SpaceEmailVerificationCode, SpaceEmailCodePurposeChoice, SpacePhoneVerificationCode
 from Space.params import (
     SpaceParams,
     SpaceEmailVerificationCodeParams,
@@ -17,6 +18,8 @@ from Space.params import (
     SpaceAdminBroadcastParams,
     SpaceOfficialLoginTicketParams,
     SpaceUserListParams,
+    SpacePhoneVerificationParams,
+    SpaceIdentityParams,
 )
 from Space.validators import SpaceErrors
 from utils import auth
@@ -36,13 +39,22 @@ from User.params import UserParams
 from User.validators import UserErrors
 from utils.notificator_integration import (
     send_verification_mail,
+    send_verification_sms,
+    send_space_identity_review_mail,
     space_administrator_name,
     verification_title,
 )
-from utils.qiniu import issue_message_upload
+from utils.qiniu import issue_message_upload, issue_space_identity_upload, validate_space_identity_key
 
 
 logger = logging.getLogger(__name__)
+
+
+def _send_identity_review_safely(space_id):
+    try:
+        send_space_identity_review_mail(Space.index(space_id))
+    except Exception:
+        logger.exception('Failed to send identity review notification for space %s', space_id)
 
 
 def _extract_client_ip(request: Request):
@@ -105,6 +117,7 @@ class SpaceEmailCodeRequestView(View):
             space = None
             if not email:
                 raise SpaceErrors.EMAIL_REQUIRED
+            Space.require_email_creation_available(email)
             purpose = SpaceEmailCodePurposeChoice.REGISTER
 
         verify_code = SpaceEmailVerificationCode.issue(
@@ -273,6 +286,65 @@ class SpaceAdminDashboardView(View):
                 online_count=users.filter(last_heartbeat__gt=threshold).count(),
             ),
         )
+
+
+class SpaceAdminPhoneCodeView(View):
+    @auth.require_space
+    @analyse.json(SpacePhoneVerificationParams.phone)
+    def post(self, request: Request):
+        code = SpacePhoneVerificationCode.issue(request.space, request.json.phone)
+        try:
+            send_verification_sms(
+                code.phone,
+                code.code,
+                SpacePhoneVerificationCode.EXPIRE_SECONDS // 60,
+                'Sermo 空间管理员认证',
+                language='zh-CN',
+            )
+        except NotificatorAPIError as error:
+            raise SpaceErrors.NOTIFICATOR_FAILED(details=error)
+        return dict(expires_in=SpacePhoneVerificationCode.EXPIRE_SECONDS)
+
+
+class SpaceAdminPhoneVerifyView(View):
+    @auth.require_space
+    @analyse.json(SpacePhoneVerificationParams.phone, SpacePhoneVerificationParams.code)
+    def post(self, request: Request):
+        return SpacePhoneVerificationCode.verify(
+            request.space, request.json.phone, request.json.code,
+        ).json_private()
+
+
+class SpaceAdminIdentityUploadView(View):
+    @auth.require_space
+    @analyse.json(SpaceIdentityParams.file_name, SpaceIdentityParams.content_type)
+    def post(self, request: Request):
+        if request.space.admin_phone_verified_at is None:
+            raise SpaceErrors.TIER_FEATURE_RESTRICTED
+        return issue_space_identity_upload(
+            request.space.id, request.json.file_name, request.json.content_type,
+        )
+
+
+class SpaceAdminIdentitySubmitView(View):
+    @auth.require_space
+    @analyse.json(SpaceIdentityParams.key)
+    def post(self, request: Request):
+        space = request.space
+        if space.admin_phone_verified_at is None:
+            raise SpaceErrors.TIER_FEATURE_RESTRICTED
+        if space.identity_submitted_at is not None and space.identity_verified_at is None:
+            raise SpaceErrors.IDENTITY_ALREADY_SUBMITTED
+        space.identity_document_key = validate_space_identity_key(space.id, request.json.key)
+        space.identity_submitted_at = timezone.now()
+        space.identity_verified_at = None
+        space.save(update_fields=['identity_document_key', 'identity_submitted_at', 'identity_verified_at'])
+        transaction.on_commit(lambda: threading.Thread(
+            target=_send_identity_review_safely,
+            args=(space.id,),
+            daemon=True,
+        ).start())
+        return space.json_private()
 
 
 class SpaceLookupView(View):
@@ -478,6 +550,8 @@ class SpaceAdminBroadcastUploadView(View):
         MessageParams.content_type,
     )
     def post(self, request: Request):
+        if request.json.kind in {'video', 'file'} and request.space.verification_tier == 'email':
+            raise SpaceErrors.TIER_FEATURE_RESTRICTED
         return issue_message_upload(
             kind=request.json.kind,
             file_name=request.json.file_name,
