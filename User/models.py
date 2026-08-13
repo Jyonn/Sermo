@@ -6,6 +6,7 @@ import math
 import re
 import threading
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 
 from notificator import NotificatorAPIError
 from django.db import IntegrityError, close_old_connections, transaction
@@ -2739,6 +2740,9 @@ class NotificationDelivery(models.Model):
     @classmethod
     def enqueue_for_event(cls, event: NotificationEvent):
         deliveries = []
+        # Web Push is the time-sensitive route. Slow mail/Bark providers must
+        # never hold notifications for active device subscriptions.
+        deliveries.extend(WebPushDelivery.enqueue_for_event(event))
         prefs = NotificationPreference.ensure_defaults(event.user)
         for pref in prefs:
             status = NotificationDeliveryStatusChoice.PENDING
@@ -2774,7 +2778,6 @@ class NotificationDelivery(models.Model):
                 else:
                     delivery._attempt_send(pref)
             deliveries.append(delivery)
-        deliveries.extend(WebPushDelivery.enqueue_for_event(event))
         return deliveries
 
     @classmethod
@@ -2847,11 +2850,27 @@ class WebPushDelivery(models.Model):
         if not NotificationTopicPreference.is_enabled_for_event(event, NotificationRouteChannelChoice.WEB):
             return deliveries
         subscriptions = list(WebPushSubscription.active_for_user(event.user))
-        for subscription in subscriptions:
-            delivery = cls.objects.create(event=event, subscription=subscription)
-            delivery._attempt_send()
-            deliveries.append(delivery)
+        deliveries = [
+            cls.objects.create(event=event, subscription=subscription)
+            for subscription in subscriptions
+        ]
+        if deliveries:
+            # A stale FCM/APNs endpoint must not block another device. Keep the
+            # pool bounded because one event rarely has more than a few devices.
+            with ThreadPoolExecutor(
+                max_workers=min(4, len(deliveries)),
+                thread_name_prefix='web-push',
+            ) as executor:
+                list(executor.map(cls._attempt_send_isolated, deliveries))
         return deliveries
+
+    @staticmethod
+    def _attempt_send_isolated(delivery):
+        close_old_connections()
+        try:
+            return delivery._attempt_send()
+        finally:
+            close_old_connections()
 
     def _payload(self):
         payload = dict(self.event.payload or {})

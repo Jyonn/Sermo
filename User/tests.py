@@ -10,6 +10,7 @@ from User.models import (
     NotificationEvent,
     NotificationEventTypeChoice,
     NotificationDelivery,
+    WebPushDelivery,
     User,
     UserContactVerificationCode,
     UserNotificationChoice,
@@ -272,3 +273,14 @@ class NotificationEventDeliveryTests(SimpleTestCase):
             name='notification-delivery',
         )
         thread.return_value.start.assert_called_once_with()
+
+    @patch('User.models.NotificationPreference.ensure_defaults', return_value=[])
+    @patch('User.models.WebPushDelivery.enqueue_for_event', return_value=['web'])
+    def test_web_push_is_enqueued_before_slower_channels(self, web_push, ensure_defaults):
+        event = NotificationEvent(user=User(id=1))
+
+        deliveries = NotificationDelivery.enqueue_for_event(event)
+
+        web_push.assert_called_once_with(event)
+        ensure_defaults.assert_called_once_with(event.user)
+        self.assertEqual(deliveries, ['web'])

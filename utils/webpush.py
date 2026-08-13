@@ -29,6 +29,7 @@ def send_web_push(subscription, title: str, body: str, payload: dict):
         data=json.dumps(data, ensure_ascii=False),
         vapid_private_key=private_key,
         vapid_claims=dict(sub=subject),
+        timeout=8,
         ttl=300,
     )
 
