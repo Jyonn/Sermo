@@ -242,6 +242,7 @@ class User(models.Model):
     chat_bubble_style = models.CharField(max_length=16, default='default')
     avatar_frame_style = models.CharField(max_length=16, default='none')
     statement_card_style = models.CharField(max_length=16, default='default')
+    show_self_avatar = models.BooleanField(default=False)
     pinned_square_statement_id = models.PositiveIntegerField(null=True, blank=True)
     square_outfit_style = models.CharField(max_length=16, default='sunset')
     square_prop_style = models.CharField(max_length=16, default='none')
@@ -523,6 +524,8 @@ class User(models.Model):
         fields = ['chat_bubble_style', 'avatar_frame_style']
         if values.get('statement_card_style') is not None:
             fields.append('statement_card_style')
+        if values.get('show_self_avatar') is not None:
+            fields.append('show_self_avatar')
         changed = any(values[field] != getattr(self, field) for field in fields)
         discontinued = {
             'chat_bubble_style': {'xiaobai'},
@@ -544,6 +547,9 @@ class User(models.Model):
         if requested_bubble in CITY_BUBBLE_RULES and requested_bubble not in unlocked_city_bubble_styles(self):
             raise UserErrors.CITY_BUBBLE_CHECKIN_REQUIRED(region=city_bubble_requirement(requested_bubble))
         for field in fields:
+            if field == 'show_self_avatar':
+                setattr(self, field, bool(values[field]))
+                continue
             normalized = self.validators.personalization(field, values[field])
             if field in PERSONALIZATION_LEVELS and normalized in PERSONALIZATION_LEVELS[field] and normalized != getattr(self, field):
                 required_level = PERSONALIZATION_LEVELS[field][normalized]
@@ -1182,6 +1188,7 @@ class User(models.Model):
             'chat_bubble_style',
             'avatar_frame_style',
             'statement_card_style',
+            'show_self_avatar',
         )
         payload['chat_background_uri'] = (
             sign_private_download_url(self.chat_background_uri)

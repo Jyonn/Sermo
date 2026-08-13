@@ -58,6 +58,17 @@ class CityBubbleUnlockTests(TestCase):
         self.assertEqual(self.user.chat_bubble_style, 'city-jdz')
         self.assertIn('city-jdz', self.user.json_me()['city_bubble_styles'])
 
+    def test_self_avatar_preference_is_persisted_in_private_profile(self):
+        self.user.set_personalization(
+            chat_bubble_style='default',
+            avatar_frame_style='none',
+            show_self_avatar=True,
+        )
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.show_self_avatar)
+        self.assertTrue(self.user.json_me()['show_self_avatar'])
+        self.assertNotIn('show_self_avatar', self.user.tiny_json())
+
     def test_custom_plaza_greeting_takes_precedence(self):
         self.assertEqual(
             User(language='zh-CN', plaza_greeting='  今天也要尽兴  ').display_plaza_greeting(),

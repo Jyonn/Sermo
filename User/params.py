@@ -48,6 +48,10 @@ class UserParams(metaclass=Params):
     statement_card_style = Validator('statement_card_style').to(str).null().default(None).to(
         lambda value: User.validators.personalization('statement_card_style', value)
     )
+    show_self_avatar = Validator('show_self_avatar') \
+        .null().default(None) \
+        .to(lambda value: None if value is None else int(value)) \
+        .bool(lambda value: value is None or value in (0, 1), message=_('invalid avatar display preference'))
     language = Validator('language') \
         .to(str) \
         .null().default(None) \
