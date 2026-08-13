@@ -808,3 +808,33 @@ msgstr "当前空间不允许未认证成员发送群消息"
 
 msgid "You cannot delete this comment"
 msgstr "你无法删除这条评论"
+
+msgid "System message"
+msgstr "系统消息"
+
+msgid "、"
+msgstr "、"
+
+msgid "%(actor)s created the group"
+msgstr "%(actor)s 创建了群聊"
+
+msgid "%(actor)s created the group and invited %(names)s"
+msgstr "%(actor)s 创建群聊并邀请了 %(names)s"
+
+msgid "%(actor)s invited %(names)s to the group"
+msgstr "%(actor)s 邀请 %(names)s 加入群聊"
+
+msgid "%(actor)s removed %(names)s from the group"
+msgstr "%(actor)s 将 %(names)s 移出群聊"
+
+msgid "%(actor)s left the group"
+msgstr "%(actor)s 退出了群聊"
+
+msgid "%(actor)s renamed the group to “%(title)s”"
+msgstr "%(actor)s 将群名修改为“%(title)s”"
+
+msgid "%(actor)s pinned a message"
+msgstr "%(actor)s 置顶了一条消息"
+
+msgid "%(actor)s unpinned a message"
+msgstr "%(actor)s 取消置顶一条消息"

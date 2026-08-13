@@ -1,4 +1,5 @@
 import json
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.test import TestCase
@@ -108,6 +109,12 @@ class ChatNotificationPreferenceTests(TestCase):
         payload = next(item for item in chat_list.json()['body'] if item['chat_id'] == self.chat.id)
         self.assertEqual(payload['last_message']['message_id'], ordinary.id)
         self.assertEqual(payload['last_chat_at'], ordinary.created_at.timestamp())
+        self.assertEqual(self.chat.json()['last_message']['message_id'], ordinary.id)
+
+        self.recipient.language = 'zh-CN'
+        serialized = system.jsonl(request=SimpleNamespace(user=self.recipient))
+        self.assertEqual(serialized['content'], 'Sender 将群名修改为“Quiet rename”')
+        self.assertEqual(serialized['payload']['text'], serialized['content'])
 
     def test_pin_state_changes_create_system_messages_once(self):
         message = Message.create(self.chat, self.sender, MessageTypeChoice.TEXT, 'pin target')

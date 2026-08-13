@@ -770,6 +770,36 @@ msgstr "Map geometry is temporarily unavailable"
 msgid "Only the official account can pin its own statement"
 msgstr "Only the official account can pin its own statement"
 
+msgid "System message"
+msgstr "System message"
+
+msgid "、"
+msgstr ", "
+
+msgid "%(actor)s created the group"
+msgstr "%(actor)s created the group"
+
+msgid "%(actor)s created the group and invited %(names)s"
+msgstr "%(actor)s created the group and invited %(names)s"
+
+msgid "%(actor)s invited %(names)s to the group"
+msgstr "%(actor)s invited %(names)s to the group"
+
+msgid "%(actor)s removed %(names)s from the group"
+msgstr "%(actor)s removed %(names)s from the group"
+
+msgid "%(actor)s left the group"
+msgstr "%(actor)s left the group"
+
+msgid "%(actor)s renamed the group to “%(title)s”"
+msgstr "%(actor)s renamed the group to “%(title)s”"
+
+msgid "%(actor)s pinned a message"
+msgstr "%(actor)s pinned a message"
+
+msgid "%(actor)s unpinned a message"
+msgstr "%(actor)s unpinned a message"
+
 #~ msgid "Email verification code expired"
 #~ msgstr "Email verification code expired"
 

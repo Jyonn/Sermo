@@ -63,7 +63,7 @@ class Chat(models.Model):
 
     def _dictify_last_message(self):
         from Message.models import Message
-        message = Message.visible_in_chat(self).order_by('-created_at').first()
+        message = Message.latest_preview_for_user(self)
         if message is not None:
             return message.jsonl()
         return None

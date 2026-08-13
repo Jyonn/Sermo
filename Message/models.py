@@ -18,6 +18,7 @@ from django.db.models import Q
 from django.http import HttpRequest
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.translation import gettext as _, override
 
 from smartdjango import models, Choice
 
@@ -647,6 +648,43 @@ class Message(models.Model):
         MessageEvent.record_created(message)
         return message
 
+    @classmethod
+    def latest_preview_for_user(cls, chat: Chat, user: User = None):
+        queryset = cls.visible_for_user(chat, user) if user is not None else cls.visible_in_chat(chat)
+        return queryset.exclude(type=MessageTypeChoice.SYSTEM).order_by('-created_at').first()
+
+    def system_message_text(self, viewer: User = None):
+        payload = self._parse_payload(self.content)
+        if payload.get('kind') != 'system':
+            return _('System message')
+
+        actor = str(payload.get('actor_name') or self.user.name or '').strip()
+        member_names = [str(name).strip() for name in payload.get('member_names') or [] if str(name).strip()]
+        language = getattr(viewer, 'language', None)
+        with override(language):
+            names = _('、').join(member_names)
+            event = payload.get('event')
+            if event == 'group_created':
+                if member_names:
+                    return _('%(actor)s created the group and invited %(names)s') % dict(actor=actor, names=names)
+                return _('%(actor)s created the group') % dict(actor=actor)
+            if event == 'members_invited':
+                return _('%(actor)s invited %(names)s to the group') % dict(actor=actor, names=names)
+            if event == 'members_removed':
+                return _('%(actor)s removed %(names)s from the group') % dict(actor=actor, names=names)
+            if event == 'member_left':
+                return _('%(actor)s left the group') % dict(actor=actor)
+            if event == 'group_renamed':
+                return _('%(actor)s renamed the group to “%(title)s”') % dict(
+                    actor=actor,
+                    title=str(payload.get('new_title') or '').strip(),
+                )
+            if event == 'message_pinned':
+                return _('%(actor)s pinned a message') % dict(actor=actor)
+            if event == 'message_unpinned':
+                return _('%(actor)s unpinned a message') % dict(actor=actor)
+            return str(payload.get('text') or _('System message')).strip()
+
     def _award_interaction_growth(self):
         if not self.user.verified:
             return
@@ -912,8 +950,11 @@ class Message(models.Model):
         if self.type == MessageTypeChoice.SYSTEM:
             payload = self._parse_payload(self.content)
             if payload.get('kind') == 'system':
+                payload['text'] = self.system_message_text(
+                    getattr(request, 'user', None) if request is not None else None,
+                )
                 return payload
-            return dict(kind='system', text=self.content)
+            return dict(kind='system', text=self.system_message_text())
         if self.type == MessageTypeChoice.LOCATION:
             return self._parse_payload(self.content)
         if self.type == MessageTypeChoice.MAP_ACCESS:
@@ -1039,12 +1080,14 @@ class Message(models.Model):
         return urlparse(source_uri).path.lstrip('/') if source_uri else ''
 
     def jsonl(self, request: HttpRequest = None, include_deleted: bool = False):
+        viewer = getattr(request, 'user', None) if request is not None else None
+        content = self.system_message_text(viewer) if self.type == MessageTypeChoice.SYSTEM else self.preview_text()
         payload = dict(
             message_id=self.id,
             client_message_id=self.client_message_id,
             user=self.user.tiny_json(),
             type=self.type,
-            content=self.preview_text(),
+            content=content,
             payload=self._payload_for_type(request=request),
             reply_to=self._reply_to_payload(request=request),
             mentions=[mention.user.tiny_json() for mention in self.chat_mentions.all()],
