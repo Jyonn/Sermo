@@ -9,7 +9,7 @@ from django.utils import timezone
 
 from Config.models import CI, Config
 from PlatformAdmin.models import PlatformAdminEmailCode, PlatformAdminSecurity, PlatformAuditLog
-from PlatformAdmin.views import ChatMessageView, LoginView
+from PlatformAdmin.views import ChatMessageView, LoginView, MessageDeliveryView
 from Chat.models import Chat, ChatMember, ChatMemberStatusChoice, ChatTypeChoice
 from Space.models import Space
 from User.models import User, UserRoleChoice
@@ -86,3 +86,23 @@ class PlatformAdminSecurityTests(TestCase):
         self.assertTrue(first_page['has_more'])
         self.assertEqual(second_page['messages'][0]['message_id'], deleted.id)
         self.assertTrue(second_page['messages'][0]['is_deleted'])
+
+    def test_message_delivery_audit_is_read_only_and_logged(self):
+        space = Space.objects.create(name='Delivery Space', slug='delivery-space', email='owner@example.com')
+        user = User.objects.create(space=space, name='Sender', role=UserRoleChoice.MEMBER)
+        chat = Chat.objects.create(space=space, chat_type=ChatTypeChoice.GROUP, title='Delivery Chat', created_by=user)
+        message = Message.objects.create(chat=chat, user=user, type=MessageTypeChoice.TEXT, content='trace me')
+        request = RequestFactory().get(
+            f'/platform-admin/messages/{message.id}/deliveries?reason=delayed-push',
+            HTTP_AUTHORIZATION=f'Bearer {auth.get_platform_admin_token("admin@example.com")["auth"]}',
+        )
+
+        payload = MessageDeliveryView.as_view()(request, message_id=message.id)
+
+        self.assertEqual(payload['message']['message_id'], message.id)
+        self.assertEqual(payload['recipients'], [])
+        self.assertEqual(payload['totals']['deliveries'], 0)
+        self.assertTrue(PlatformAuditLog.objects.filter(
+            action='message.deliveries_viewed',
+            target_id=message.id,
+        ).exists())

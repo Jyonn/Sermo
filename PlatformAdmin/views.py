@@ -15,7 +15,17 @@ from Message.models import Message
 from PlatformAdmin.models import PlatformAdminEmailCode, PlatformAdminSecurity, PlatformAuditLog
 from PlatformAdmin.validators import PlatformAdminErrors
 from Space.models import Space
-from User.models import NotificationPreference, User, UserRoleChoice
+from User.models import (
+    NotificationDelivery,
+    NotificationDeliveryStatusChoice,
+    NotificationEvent,
+    NotificationPreference,
+    NotificationRouteChannelChoice,
+    User,
+    UserNotificationChoice,
+    UserRoleChoice,
+    WebPushDelivery,
+)
 from utils import auth
 from utils.notificator_integration import send_verification_mail
 from utils.qiniu import avatar_uri_for_key, sign_private_download_url
@@ -207,6 +217,99 @@ class ChatMessageView(View):
             messages=[item.jsonl(request=request, include_deleted=True) for item in messages],
             has_more=has_more,
             next_before=messages[-1].id if has_more and messages else None,
+        )
+
+
+def _delivery_status(value):
+    return {
+        NotificationDeliveryStatusChoice.PENDING: 'pending',
+        NotificationDeliveryStatusChoice.SENT: 'sent',
+        NotificationDeliveryStatusChoice.FAILED: 'failed',
+        NotificationDeliveryStatusChoice.SKIPPED: 'skipped',
+    }.get(value, 'unknown')
+
+
+def _delivery_channel(value):
+    return {
+        UserNotificationChoice.EMAIL: 'email',
+        UserNotificationChoice.SMS: 'sms',
+        UserNotificationChoice.BARK: 'bark',
+    }.get(value, 'unknown')
+
+
+def _delivery_payload(delivery, channel):
+    return dict(
+        delivery_id=delivery.id,
+        channel=channel,
+        status=_delivery_status(delivery.status),
+        detail=delivery.detail or '',
+        created_at=delivery.created_at.timestamp(),
+        attempted_at=delivery.attempted_at.timestamp() if delivery.attempted_at else None,
+    )
+
+
+class MessageDeliveryView(View):
+    @auth.require_platform_admin
+    def get(self, request, message_id):
+        message = Message.objects.select_related('chat', 'user').get(id=message_id)
+        reason = request.GET.get('reason', '').strip()
+        if not reason:
+            raise PlatformAdminErrors.ACCESS_DENIED
+        _audit(
+            request,
+            'message.deliveries_viewed',
+            'message',
+            message.id,
+            reason[:255],
+            metadata={'chat_id': message.chat_id},
+        )
+        events = list(
+            NotificationEvent.objects.filter(
+                space=message.chat.space,
+                payload__message_id=message.id,
+            ).select_related('user').prefetch_related(
+                'deliveries',
+                'web_push_deliveries__subscription',
+            ).order_by('created_at', 'id')
+        )
+        recipients = []
+        totals = dict(sent=0, pending=0, failed=0, skipped=0)
+        for event in events:
+            deliveries = [
+                _delivery_payload(delivery, _delivery_channel(delivery.channel))
+                for delivery in event.deliveries.all().order_by('created_at', 'id')
+            ]
+            for delivery in event.web_push_deliveries.all().order_by('created_at', 'id'):
+                item = _delivery_payload(delivery, 'web')
+                subscription = delivery.subscription
+                item['subscription'] = dict(
+                    digest=subscription.endpoint_digest[:12],
+                    origin=subscription.origin,
+                    user_agent=subscription.user_agent,
+                    enabled=subscription.enabled,
+                    last_seen_at=subscription.last_seen_at.timestamp(),
+                )
+                deliveries.append(item)
+            for delivery in deliveries:
+                if delivery['status'] in totals:
+                    totals[delivery['status']] += 1
+            recipients.append(dict(
+                event_id=event.id,
+                user=event.user.tiny_json(),
+                event_created_at=event.created_at.timestamp(),
+                deliveries=deliveries,
+            ))
+        return dict(
+            message=dict(
+                message_id=message.id,
+                chat_id=message.chat_id,
+                sender=message.user.tiny_json(),
+                created_at=message.created_at.timestamp(),
+                type=message.type,
+                preview=message.preview_text(),
+            ),
+            recipients=recipients,
+            totals=dict(recipients=len(recipients), deliveries=sum(totals.values()), **totals),
         )
 
 
