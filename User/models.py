@@ -2341,6 +2341,10 @@ class NotificationEvent(models.Model):
 
     @classmethod
     def emit_message_notifications(cls, message, actor: User, enqueue=True):
+        from Message.models import MessageTypeChoice
+
+        if message.type == MessageTypeChoice.SYSTEM:
+            return []
         event_type = cls._message_event_type(message.chat)
         payload = dict(
             chat_id=message.chat_id,

@@ -4,7 +4,7 @@ from smartdjango import analyse, OK
 from Chat.models import Chat, ChatMember, ChatReadState, ChatUserPreference
 from Chat.params import ChatParams, ChatMemberParams, ChatPreferenceParams
 from Chat.validators import ChatErrors
-from Message.models import Message
+from Message.models import Message, MessageTypeChoice
 from utils import auth
 
 
@@ -12,11 +12,15 @@ class ChatListView(View):
     @staticmethod
     def build_chat_payload(chat, user, request):
         data = chat.jsonl()
-        last_message = Message.visible_for_user(chat, user).order_by('-created_at').first()
+        last_message = Message.visible_for_user(chat, user).exclude(
+            type=MessageTypeChoice.SYSTEM,
+        ).order_by('-created_at').first()
         if last_message is not None:
             data['last_message'] = last_message.jsonl(request=request)
+            data['last_chat_at'] = last_message.created_at.timestamp()
         else:
             data['last_message'] = None
+            data['last_chat_at'] = chat.created_at.timestamp()
         preference = ChatUserPreference.objects.filter(chat=chat, user=user).first()
         data['unread_count'] = ChatReadState.unread_count(chat, user)
         data['has_unread_mention'] = ChatReadState.has_unread_mention(chat, user) if chat.group else False

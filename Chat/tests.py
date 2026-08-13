@@ -4,8 +4,8 @@ from unittest.mock import patch
 from django.test import TestCase
 from django.utils import timezone
 
-from Chat.models import Chat, ChatMember, ChatMemberRoleChoice, ChatMemberStatusChoice, ChatTypeChoice, ChatUserPreference
-from Message.models import Message, MessageTypeChoice
+from Chat.models import Chat, ChatMember, ChatMemberRoleChoice, ChatMemberStatusChoice, ChatReadState, ChatTypeChoice, ChatUserPreference
+from Message.models import Message, MessageTypeChoice, PinnedMessage
 from Space.models import Space
 from User.models import NotificationEvent, User
 from utils import auth
@@ -95,6 +95,38 @@ class ChatNotificationPreferenceTests(TestCase):
         with self.assertRaises(Exception) as raised:
             Message.create(self.chat, self.sender, MessageTypeChoice.SYSTEM, 'forged')
         self.assertIn('System messages cannot be managed by users', str(raised.exception))
+
+    def test_system_message_is_not_notified_unread_or_used_as_chat_preview(self):
+        ordinary = Message.create(self.chat, self.sender, MessageTypeChoice.TEXT, 'visible preview')
+        system = Message.create_system(self.chat, self.sender, 'group_renamed', new_title='Quiet rename')
+
+        events = NotificationEvent.emit_message_notifications(system, actor=self.sender, enqueue=False)
+        self.assertEqual(events, [])
+        self.assertEqual(ChatReadState.unread_count(self.chat, self.recipient), 1)
+
+        chat_list = self.client.get('/chats/', **self.authorization(self.recipient))
+        payload = next(item for item in chat_list.json()['body'] if item['chat_id'] == self.chat.id)
+        self.assertEqual(payload['last_message']['message_id'], ordinary.id)
+        self.assertEqual(payload['last_chat_at'], ordinary.created_at.timestamp())
+
+    def test_pin_state_changes_create_system_messages_once(self):
+        message = Message.create(self.chat, self.sender, MessageTypeChoice.TEXT, 'pin target')
+
+        PinnedMessage.pin(message, self.sender)
+        PinnedMessage.pin(message, self.sender)
+        PinnedMessage.unpin(message, self.sender)
+        PinnedMessage.unpin(message, self.sender)
+
+        events = list(
+            Message.objects.filter(chat=self.chat, type=MessageTypeChoice.SYSTEM)
+            .order_by('id')
+            .values_list('content', flat=True)
+        )
+        self.assertEqual(len(events), 2)
+        self.assertEqual([json.loads(content)['event'] for content in events], [
+            'message_pinned',
+            'message_unpinned',
+        ])
 
     def test_member_departure_creates_system_message_before_leaving(self):
         self.chat.leave(self.recipient)

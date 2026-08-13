@@ -1240,12 +1240,19 @@ class PinnedMessage(models.Model):
         ).values('message_id').distinct().count()
         if pinned_message_count >= cls.MAX_PER_CHAT and not cls.objects.filter(message=message).exists():
             raise MessageErrors.PIN_LIMIT_REACHED
-        pin, _created = cls.objects.get_or_create(
+        pin, created = cls.objects.get_or_create(
             message=message,
             pinned_by=user,
             defaults={'chat': message.chat},
         )
-        user.award_growth('explore:pin_message')
+        if created:
+            user.award_growth('explore:pin_message')
+            Message.create_system(
+                message.chat,
+                user,
+                'message_pinned',
+                target_message_id=message.id,
+            )
         return pin
 
     @classmethod
@@ -1253,7 +1260,14 @@ class PinnedMessage(models.Model):
         if message.type == MessageTypeChoice.SYSTEM:
             raise MessageErrors.SYSTEM_MESSAGE_FORBIDDEN
         cls.require_manage_permission(message.chat, user)
-        cls.objects.filter(message=message, pinned_by=user).delete()
+        deleted, _details = cls.objects.filter(message=message, pinned_by=user).delete()
+        if deleted:
+            Message.create_system(
+                message.chat,
+                user,
+                'message_unpinned',
+                target_message_id=message.id,
+            )
 
     @classmethod
     def list_for_chat(cls, chat, user=None):
