@@ -10,6 +10,7 @@ from User.models import (
     NotificationEvent,
     NotificationEventTypeChoice,
     NotificationDelivery,
+    WebPushSubscription,
     WebPushDelivery,
     User,
     UserContactVerificationCode,
@@ -87,6 +88,17 @@ class UserHeartbeatTests(TestCase):
         user.refresh_from_db()
 
         self.assertEqual(user.last_heartbeat, previous)
+
+
+class WebPushOriginTests(SimpleTestCase):
+    def test_space_subdomain_is_legacy(self):
+        self.assertTrue(WebPushSubscription.is_legacy_space_origin('https://yuanmeng.sermo.jyonn.space'))
+
+    def test_canonical_origin_is_not_legacy(self):
+        self.assertFalse(WebPushSubscription.is_legacy_space_origin('https://sermo.jyonn.space'))
+
+    def test_unrelated_subdomain_is_not_legacy(self):
+        self.assertFalse(WebPushSubscription.is_legacy_space_origin('https://api.example.com'))
 
 class AccountSwitchPhoneNormalizationTests(SimpleTestCase):
     def test_mainland_phone_variants_include_country_code(self):

@@ -1785,6 +1785,7 @@ class NotificationDeliveryStatusChoice(Choice):
 
 class WebPushSubscription(models.Model):
     ACTIVE_LEASE_DAYS = 45
+    CANONICAL_WEB_ORIGIN = 'https://sermo.jyonn.space'
 
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='web_push_subscriptions', db_index=True)
     space = models.ForeignKey('Space.Space', on_delete=models.CASCADE, related_name='web_push_subscriptions', db_index=True)
@@ -1797,6 +1798,11 @@ class WebPushSubscription(models.Model):
     enabled = models.BooleanField(default=True, db_index=True)
     last_seen_at = models.DateTimeField(auto_now=True)
     created_at = models.DateTimeField(auto_now_add=True)
+
+    @classmethod
+    def is_legacy_space_origin(cls, origin: str):
+        normalized = (origin or '').strip().lower().rstrip('/')
+        return normalized.endswith('.sermo.jyonn.space') and normalized != cls.CANONICAL_WEB_ORIGIN
 
     @classmethod
     def register(
@@ -1812,6 +1818,7 @@ class WebPushSubscription(models.Model):
         if not normalized_endpoint or not p256dh or not auth or not origin:
             raise UserErrors.WEB_PUSH_SUBSCRIPTION_INVALID
         endpoint_digest = hashlib.sha256(normalized_endpoint.encode('utf-8')).hexdigest()
+        normalized_origin = origin.strip().rstrip('/')
         subscription, _created = cls.objects.update_or_create(
             endpoint_digest=endpoint_digest,
             defaults=dict(
@@ -1820,9 +1827,9 @@ class WebPushSubscription(models.Model):
                 endpoint=normalized_endpoint,
                 p256dh=p256dh.strip(),
                 auth=auth.strip(),
-                origin=origin.strip(),
+                origin=normalized_origin,
                 user_agent=(user_agent or '')[:255],
-                enabled=True,
+                enabled=not cls.is_legacy_space_origin(normalized_origin),
             ),
         )
         return subscription
@@ -1830,6 +1837,12 @@ class WebPushSubscription(models.Model):
     @classmethod
     def active_for_user(cls, user: User):
         stale_before = timezone.now() - datetime.timedelta(days=cls.ACTIVE_LEASE_DAYS)
+        cls.objects.filter(
+            user=user,
+            space_id=user.space_id,
+            enabled=True,
+            origin__iendswith='.sermo.jyonn.space',
+        ).exclude(origin__iexact=cls.CANONICAL_WEB_ORIGIN).update(enabled=False)
         cls.objects.filter(
             user=user,
             space_id=user.space_id,
