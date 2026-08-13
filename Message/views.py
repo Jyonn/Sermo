@@ -135,6 +135,18 @@ class MessageBatchView(View):
         return dict(deleted_message_ids=message_ids)
 
 
+class MessageClearView(View):
+    @auth.require_user
+    @analyse.json(MessageParams.chat_id)
+    @auth.require_chat_member()
+    def delete(self, request: Request):
+        with transaction.atomic():
+            deleted_count = Message.clear_for_user(request.json.chat, request.user)
+            from Chat.models import ChatReadState
+            ChatReadState.mark_read(request.json.chat, request.user)
+        return dict(deleted_count=deleted_count)
+
+
 class MessageReconcileView(View):
     @auth.require_user
     @analyse.json(MessageParams.chat_id, MessageParams.message_ids)
@@ -156,7 +168,7 @@ class PinnedMessageView(View):
     def get(self, request: Request):
         return [
             PinnedMessage.aggregate_json(pin, request=request)
-            for pin in PinnedMessage.list_for_chat(request.query.chat)
+            for pin in PinnedMessage.list_for_chat(request.query.chat, request.user)
         ]
 
     @auth.require_user

@@ -543,6 +543,30 @@ class SpaceAdminApiTests(TestCase):
         self.assertIn(first.id, [row['message_id'] for row in official_rows])
         self.assertIn(other.id, [row['message_id'] for row in official_rows])
 
+    def test_clear_chat_history_only_hides_messages_for_actor(self):
+        chat = Chat.get_or_create_direct(self.official, self.member)
+        first = Message.create(chat, self.member, MessageTypeChoice.TEXT, 'Mine')
+        second = Message.create(chat, self.official, MessageTypeChoice.TEXT, 'Theirs')
+        system = Message.create_system(chat, self.official, 'group_renamed', new_title='History')
+        visible_message_ids = set(Message.visible_for_user(chat, self.member).values_list('id', flat=True))
+        self.assertTrue({first.id, second.id, system.id}.issubset(visible_message_ids))
+
+        response = self.client.delete(
+            '/messages/clear',
+            data=json.dumps({'chat_id': chat.id}),
+            content_type='application/json',
+            **self.user_authorization(self.member),
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json()['body']['deleted_count'], len(visible_message_ids))
+        self.assertFalse(Message.visible_for_user(chat, self.member).exists())
+        self.assertEqual(
+            set(Message.visible_for_user(chat, self.official).values_list('id', flat=True)),
+            visible_message_ids,
+        )
+        chat_payload = self.client.get('/chats/', **self.user_authorization(self.member)).json()['body'][0]
+        self.assertIsNone(chat_payload['last_message'])
+
     def test_message_can_be_hidden_for_one_member_without_recalling_it(self):
         chat = Chat.get_or_create_direct(self.official, self.member)
         message = Message.create(chat, self.official, MessageTypeChoice.TEXT, 'Only hide this copy')

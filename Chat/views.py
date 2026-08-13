@@ -15,6 +15,8 @@ class ChatListView(View):
         last_message = Message.visible_for_user(chat, user).order_by('-created_at').first()
         if last_message is not None:
             data['last_message'] = last_message.jsonl(request=request)
+        else:
+            data['last_message'] = None
         preference = ChatUserPreference.objects.filter(chat=chat, user=user).first()
         data['unread_count'] = ChatReadState.unread_count(chat, user)
         data['has_unread_mention'] = ChatReadState.has_unread_mention(chat, user) if chat.group else False

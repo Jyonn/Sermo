@@ -1086,6 +1086,35 @@ class Message(models.Model):
             MessageEvent.record_hidden(self, user)
         return state
 
+    @classmethod
+    def clear_for_user(cls, chat: Chat, user: User):
+        if not chat.has_active_member(user):
+            raise MessageErrors.NOT_A_MEMBER
+        messages = list(
+            cls.visible_for_user(chat, user)
+            .select_for_update()
+            .only('id', 'chat_id')
+        )
+        if not messages:
+            return 0
+        hidden_at = timezone.now()
+        MessageUserState.objects.bulk_create(
+            [MessageUserState(message=message, user=user, hidden_at=hidden_at) for message in messages],
+            ignore_conflicts=True,
+        )
+        MessageEvent.objects.bulk_create([
+            MessageEvent(
+                message=message,
+                chat=chat,
+                actor=user,
+                target_user=user,
+                type=MessageEventTypeChoice.HIDDEN,
+                created_at=hidden_at,
+            )
+            for message in messages
+        ])
+        return len(messages)
+
 
 class MessageUserState(models.Model):
     message = models.ForeignKey(Message, on_delete=models.CASCADE, related_name='hidden_states')
@@ -1227,11 +1256,13 @@ class PinnedMessage(models.Model):
         cls.objects.filter(message=message, pinned_by=user).delete()
 
     @classmethod
-    def list_for_chat(cls, chat):
+    def list_for_chat(cls, chat, user=None):
         rows = cls.objects.filter(
             chat=chat,
             message__is_deleted=False,
         ).select_related('message', 'message__user', 'pinned_by').order_by('-pinned_at')
+        if user is not None:
+            rows = rows.exclude(message__hidden_states__user=user)
         return cls.aggregate_rows(rows, limit=cls.MAX_PER_CHAT)
 
     @classmethod
