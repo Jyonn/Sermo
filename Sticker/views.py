@@ -84,6 +84,7 @@ class StickerPrepareView(View):
         request.user.require_growth_capability('create_sticker')
         asset = StickerAsset.objects.filter(content_hash=request.json.content_hash).first()
         if asset is not None:
+            asset.queue_missing_dimensions()
             sticker, _ = UserSticker.collect(request.user, asset)
             request.user.award_growth('explore:sticker_create')
             return dict(upload_required=False, sticker=sticker.jsonl(request=request))
@@ -110,7 +111,7 @@ class StickerCompleteView(View):
         expected_prefix = f'sermo/messages/sticker/{request.json.content_hash}.'
         if not request.json.storage_key.startswith(expected_prefix):
             raise StickerErrors.INVALID_HASH
-        asset, _ = StickerAsset.objects.get_or_create(
+        asset, created = StickerAsset.objects.get_or_create(
             content_hash=request.json.content_hash,
             defaults=dict(
                 storage_key=request.json.storage_key,
@@ -118,6 +119,8 @@ class StickerCompleteView(View):
                 file_size=request.json.file_size,
             ),
         )
+        if created or not (asset.pixel_width and asset.pixel_height):
+            asset.queue_missing_dimensions()
         sticker, _ = UserSticker.collect(request.user, asset)
         request.user.award_growth('explore:sticker_create')
         return sticker.jsonl(request=request)
