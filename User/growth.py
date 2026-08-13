@@ -194,7 +194,7 @@ LEVEL_REWARDS = {
     15: [_reward('background.blueprint', 15, 'background', '蓝图背景', 'rare', 'blueprint'), _reward('background.newsprint', 15, 'background', '新闻纸背景', 'rare', 'newsprint'), _reward('background.hologram', 15, 'background', '全息背景', 'epic', 'hologram')],
     16: [_reward('background.arcade', 16, 'background', '街机背景', 'epic', 'arcade'), _reward('background.jazz', 16, 'background', '爵士背景', 'rare', 'jazz'), _reward('bubble.niko', 16, 'bubble', 'Niko 气泡', 'legendary', 'niko'), _reward('frame.niko', 16, 'frame', 'Niko Run 头像框', 'legendary', 'niko-run'), _reward('growth.report', 16, 'identity', '成长报告', 'epic', status='planned')],
     17: [_reward('background.spaceport', 17, 'background', '太空港背景', 'epic', 'spaceport'), _reward('background.candy', 17, 'background', '糖果背景', 'rare', 'candy'), _reward('bubble.fufu', 17, 'bubble', 'Fufu 气泡', 'legendary', 'fufu'), _reward('frame.fufu', 17, 'frame', 'Fufu Wave 头像框', 'legendary', 'fufu-wave'), _reward('frame.collection', 17, 'identity', '头像框收藏入口', 'epic', status='planned')],
-    18: [_reward('background.noir', 18, 'background', '黑色电影背景', 'epic', 'noir-film'), _reward('identity.final_badge', 18, 'identity', '“尽兴”永久成长徽记', 'legendary', status='planned'), _reward('profile.final_slot', 18, 'identity', '满级个人名片展示位', 'legendary', status='planned')],
+    18: [_reward('background.noir', 18, 'background', '黑色电影背景', 'legendary', 'noir-film'), _reward('identity.final_badge', 18, 'identity', '“尽兴”永久成长徽记', 'legendary', status='planned'), _reward('profile.final_slot', 18, 'identity', '满级个人名片展示位', 'legendary', status='planned')],
 }
 
 

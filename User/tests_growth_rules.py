@@ -27,7 +27,7 @@ class GrowthRuleTests(SimpleTestCase):
         self.assertEqual(rewards['background.jazz']['rarity'], 'rare')
         self.assertEqual(rewards['bubble.niko']['rarity'], 'legendary')
         self.assertEqual(rewards['frame.niko']['rarity'], 'legendary')
-        self.assertEqual(rewards['background.noir']['rarity'], 'epic')
+        self.assertEqual(rewards['background.noir']['rarity'], 'legendary')
 
     def test_every_reward_has_structured_display_metadata(self):
         for rewards in LEVEL_REWARDS.values():
