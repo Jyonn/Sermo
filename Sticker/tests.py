@@ -1,4 +1,5 @@
 from unittest.mock import patch
+from types import SimpleNamespace
 
 from django.test import TestCase
 
@@ -40,3 +41,41 @@ class StickerAssetDimensionTests(TestCase):
         self.assertIsNone(asset.pixel_height)
         self.assertIsNotNone(asset.dimensions_checked_at)
         self.assertEqual(asset.dimensions_error, 'temporary failure')
+
+
+class StickerExplorePrivacyTests(TestCase):
+    def setUp(self):
+        self.asset = StickerAsset.objects.create(
+            content_hash='c' * 64,
+            storage_key='sermo/messages/sticker/privacy.png',
+        )
+
+    def test_same_space_source_exposes_only_public_identity(self):
+        source = SimpleNamespace(
+            space_id=7,
+            tiny_json=lambda: {
+                'user_id': 99,
+                'name': '同空间用户',
+                'avatar_uri': 'https://example.test/avatar.png',
+                'official': False,
+            },
+        )
+        request = SimpleNamespace(user=SimpleNamespace(space_id=7), build_absolute_uri=lambda path: f'https://api.test{path}')
+
+        payload = self.asset.jsonl(request=request, source_user=source)
+
+        self.assertEqual(payload['source_scope'], 'local')
+        self.assertEqual(payload['source_user'], {
+            'name': '同空间用户',
+            'avatar_uri': 'https://example.test/avatar.png',
+        })
+        self.assertNotIn('user_id', payload['source_user'])
+
+    def test_other_space_source_is_anonymous(self):
+        source = SimpleNamespace(space_id=8, tiny_json=lambda: {'name': '不应泄露', 'avatar_uri': 'secret'})
+        request = SimpleNamespace(user=SimpleNamespace(space_id=7), build_absolute_uri=lambda path: f'https://api.test{path}')
+
+        payload = self.asset.jsonl(request=request, source_user=source)
+
+        self.assertEqual(payload['source_scope'], 'external')
+        self.assertNotIn('source_user', payload)

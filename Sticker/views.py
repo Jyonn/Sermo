@@ -1,9 +1,11 @@
 from django.http import HttpResponseRedirect
+from django.db.models import OuterRef, Subquery
 from django.views import View
 from smartdjango import OK, analyse
 
 from Message.models import Message, MessageTypeChoice
 from Sticker.models import StickerAsset, UserSticker
+from User.models import User
 from Sticker.params import StickerParams
 from Sticker.validators import StickerErrors
 from utils import auth
@@ -60,8 +62,20 @@ class StickerExploreView(View):
     @auth.require_user
     def get(self, request: Request):
         owned_asset_ids = UserSticker.objects.filter(user=request.user).values('asset_id')
-        assets = StickerAsset.objects.exclude(id__in=owned_asset_ids).order_by('-created_at', '-id')[:60]
-        return [asset.jsonl(request=request) for asset in assets]
+        source_user_id = UserSticker.objects.filter(asset_id=OuterRef('pk')).order_by(
+            'created_at', 'id',
+        ).values('user_id')[:1]
+        assets = list(StickerAsset.objects.exclude(id__in=owned_asset_ids).annotate(
+            source_user_id=Subquery(source_user_id),
+        ).order_by('-created_at', '-id')[:60])
+        source_users = User.objects.in_bulk({asset.source_user_id for asset in assets if asset.source_user_id})
+        return [
+            asset.jsonl(
+                request=request,
+                source_user=source_users.get(asset.source_user_id),
+            )
+            for asset in assets
+        ]
 
 
 class StickerCollectView(View):

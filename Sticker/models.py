@@ -112,8 +112,8 @@ class StickerAsset(models.Model):
         path = f'/stickers/assets/{self.id}'
         return request.build_absolute_uri(path) if request is not None else path
 
-    def jsonl(self, request: HttpRequest = None):
-        return dict(
+    def jsonl(self, request: HttpRequest = None, source_user: User = None):
+        payload = dict(
             sticker_asset_id=self.id,
             content_hash=self.content_hash,
             uri=self.resource_uri(request=request),
@@ -122,6 +122,16 @@ class StickerAsset(models.Model):
             pixel_width=self.pixel_width,
             pixel_height=self.pixel_height,
         )
+        if source_user is not None and request is not None:
+            if source_user.space_id == request.user.space_id:
+                source = source_user.tiny_json()
+                payload.update(
+                    source_scope='local',
+                    source_user=dict(name=source['name'], avatar_uri=source['avatar_uri']),
+                )
+            else:
+                payload.update(source_scope='external')
+        return payload
 
 
 class UserSticker(models.Model):
