@@ -101,15 +101,18 @@ def _space_payload(space):
 class EmailCodeView(View):
     def post(self, request):
         email = _require_email(_value(_body(request), 'email'))
+        if PlatformAdminSecurity.primary().mfa_enabled:
+            _audit(request, 'auth.mfa_requested', summary='平台管理员进入 MFA 验证')
+            return dict(mfa_required=True, masked_email=_mask_email(email))
         now = timezone.now()
         recent = PlatformAdminEmailCode.objects.filter(email=email, created_at__gte=now - datetime.timedelta(seconds=45)).exists()
         if recent:
-            return dict(expires_in=600, masked_email=_mask_email(email))
+            return dict(expires_in=600, masked_email=_mask_email(email), mfa_required=False)
         code = f'{secrets.randbelow(1_000_000):06d}'
         PlatformAdminEmailCode.objects.create(email=email, code=code, expires_at=now + datetime.timedelta(minutes=10))
         send_verification_mail(email, code, 10, 'Sermo 超级管理员登录', language='zh-CN', recipient_name='Sermo 管理员')
         _audit(request, 'auth.code_sent', summary='平台管理员验证码已发送')
-        return dict(expires_in=600, masked_email=_mask_email(email))
+        return dict(expires_in=600, masked_email=_mask_email(email), mfa_required=False)
 
 
 def _mask_email(email):
@@ -122,12 +125,6 @@ class LoginView(View):
         data = _body(request)
         email = _require_email(_value(data, 'email'))
         now = timezone.now()
-        code = PlatformAdminEmailCode.objects.filter(
-            email=email, code=str(_value(data, 'code')).strip(), consumed_at__isnull=True, expires_at__gt=now,
-        ).order_by('-id').first()
-        if code is None:
-            _audit(request, 'auth.login_failed', summary='验证码错误')
-            raise PlatformAdminErrors.CODE_INVALID
         security = PlatformAdminSecurity.primary()
         mfa_code = str(_value(data, 'mfa_code')).strip()
         if security.mfa_enabled:
@@ -136,11 +133,19 @@ class LoginView(View):
             if not security.verify_totp(security.totp_secret, mfa_code):
                 recovery_hash = security.hash_recovery_code(mfa_code)
                 if recovery_hash not in security.recovery_code_hashes:
+                    _audit(request, 'auth.login_failed', summary='MFA 验证失败')
                     raise PlatformAdminErrors.MFA_INVALID
                 security.recovery_code_hashes = [item for item in security.recovery_code_hashes if item != recovery_hash]
                 security.save(update_fields=['recovery_code_hashes', 'updated_at'])
-        code.consumed_at = now
-        code.save(update_fields=['consumed_at'])
+        else:
+            code = PlatformAdminEmailCode.objects.filter(
+                email=email, code=str(_value(data, 'code')).strip(), consumed_at__isnull=True, expires_at__gt=now,
+            ).order_by('-id').first()
+            if code is None:
+                _audit(request, 'auth.login_failed', summary='验证码错误')
+                raise PlatformAdminErrors.CODE_INVALID
+            code.consumed_at = now
+            code.save(update_fields=['consumed_at'])
         _audit(request, 'auth.login', summary='平台管理员登录')
         return dict(**auth.get_platform_admin_token(email), mfa_enabled=security.mfa_enabled)
 

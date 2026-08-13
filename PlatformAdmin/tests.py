@@ -1,7 +1,9 @@
 import datetime
 import hashlib
 import hmac
+import json
 from base64 import b32decode
+from unittest.mock import patch
 
 from django.test import RequestFactory, TestCase
 from django.contrib.auth.models import AnonymousUser
@@ -9,7 +11,7 @@ from django.utils import timezone
 
 from Config.models import CI, Config
 from PlatformAdmin.models import PlatformAdminEmailCode, PlatformAdminSecurity, PlatformAuditLog
-from PlatformAdmin.views import ChatMessageView, LoginView, MessageDeliveryView
+from PlatformAdmin.views import ChatMessageView, EmailCodeView, LoginView, MessageDeliveryView
 from Chat.models import Chat, ChatMember, ChatMemberStatusChoice, ChatTypeChoice
 from Space.models import Space
 from User.models import User, UserRoleChoice
@@ -48,6 +50,37 @@ class PlatformAdminSecurityTests(TestCase):
         self.assertEqual(auth.decrypt(response['auth'], expected_type='platform_admin_access')['email'], 'admin@example.com')
         self.assertIsNotNone(PlatformAdminEmailCode.objects.get().consumed_at)
         self.assertTrue(PlatformAuditLog.objects.filter(action='auth.login').exists())
+
+    def test_mfa_enabled_skips_email_code_and_logs_in_with_totp(self):
+        secret = PlatformAdminSecurity.new_secret()
+        security = PlatformAdminSecurity.primary()
+        security.totp_secret = secret
+        security.mfa_enabled = True
+        security.save(update_fields=['totp_secret', 'mfa_enabled', 'updated_at'])
+
+        email_request = RequestFactory().post(
+            '/platform-admin/email-code',
+            data='{"email":"admin@example.com"}',
+            content_type='application/json',
+        )
+        email_response = EmailCodeView.as_view()(email_request)
+        self.assertTrue(email_response['mfa_required'])
+        self.assertFalse(PlatformAdminEmailCode.objects.exists())
+
+        at = timezone.now().replace(microsecond=0)
+        timestamp = int(at.timestamp())
+        padded = secret + '=' * ((8 - len(secret) % 8) % 8)
+        digest = hmac.new(b32decode(padded), (timestamp // 30).to_bytes(8, 'big'), hashlib.sha1).digest()
+        index = digest[-1] & 0x0F
+        mfa_code = f'{(int.from_bytes(digest[index:index + 4], "big") & 0x7FFFFFFF) % 1_000_000:06d}'
+        login_request = RequestFactory().post(
+            '/platform-admin/login',
+            data=json.dumps({'email': 'admin@example.com', 'mfa_code': mfa_code}),
+            content_type='application/json',
+        )
+        with patch('PlatformAdmin.models.timezone.now', return_value=at):
+            response = LoginView.as_view()(login_request)
+        self.assertIn('auth', response)
 
     def test_audit_serialization_ignores_anonymous_django_user(self):
         request = RequestFactory().get('/platform-admin/chats/1/messages')
