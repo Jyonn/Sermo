@@ -278,6 +278,15 @@ class Chat(models.Model):
                 if user.id == creator.id:
                     continue
                 ChatMember.invite(chat=chat, user=user, invited_by=creator)
+            from Message.models import Message
+            invited_names = [user.name for user in normalized.values() if user.id != creator.id]
+            Message.create_system(
+                chat,
+                creator,
+                'group_created',
+                member_names=invited_names,
+                member_count=len(invited_names),
+            )
             creator.award_growth('explore:create_group')
             return chat
 
@@ -315,6 +324,20 @@ class Chat(models.Model):
             self.space.require_group_join_allowed(user)
         return ChatMember.invite(chat=self, user=user, invited_by=inviter)
 
+    def invite_members(self, inviter: User, users: List[User]):
+        with transaction.atomic():
+            members = [self.invite_member(inviter, user) for user in users]
+            if members:
+                from Message.models import Message
+                Message.create_system(
+                    self,
+                    inviter,
+                    'members_invited',
+                    member_names=[member.user.name for member in members],
+                    member_count=len(members),
+                )
+            return members
+
     def respond_invite(self, user: User, accept: bool):
         if not self.group:
             raise ChatErrors.NOT_GROUP_CHAT(chat=self.id)
@@ -327,6 +350,20 @@ class Chat(models.Model):
             raise ChatErrors.FORBIDDEN
         return ChatMember.kick(chat=self, user=user)
 
+    def remove_members(self, operator: User, users: List[User]):
+        with transaction.atomic():
+            members = [self.remove_member(operator, user) for user in users]
+            if members:
+                from Message.models import Message
+                Message.create_system(
+                    self,
+                    operator,
+                    'members_removed',
+                    member_names=[member.user.name for member in members],
+                    member_count=len(members),
+                )
+            return members
+
     def leave(self, user: User):
         member = ChatMember.objects.filter(
             chat=self,
@@ -337,9 +374,13 @@ class Chat(models.Model):
             raise ChatMemberErrors.NOT_MEMBER(user=user.name, chat=self.id)
         if self.group and member.role == ChatMemberRoleChoice.OWNER:
             raise ChatMemberErrors.OWNER_LEAVE_FORBIDDEN
-        member.status = ChatMemberStatusChoice.LEFT
-        member.left_at = timezone.now()
-        member.save(update_fields=['status', 'left_at', 'updated_at'])
+        with transaction.atomic():
+            if self.group:
+                from Message.models import Message
+                Message.create_system(self, user, 'member_left')
+            member.status = ChatMemberStatusChoice.LEFT
+            member.left_at = timezone.now()
+            member.save(update_fields=['status', 'left_at', 'updated_at'])
         return member
 
 

@@ -95,3 +95,27 @@ class ChatNotificationPreferenceTests(TestCase):
         with self.assertRaises(Exception) as raised:
             Message.create(self.chat, self.sender, MessageTypeChoice.SYSTEM, 'forged')
         self.assertIn('System messages cannot be managed by users', str(raised.exception))
+
+    def test_member_departure_creates_system_message_before_leaving(self):
+        self.chat.leave(self.recipient)
+
+        message = Message.objects.filter(chat=self.chat, type=MessageTypeChoice.SYSTEM).get()
+        self.assertEqual(message.user_id, self.recipient.id)
+        self.assertEqual(message._payload_for_type()['event'], 'member_left')
+
+    def test_batch_member_removal_creates_one_combined_system_message(self):
+        another = User.create(self.space, 'Another', verified=True)
+        ChatMember.objects.create(
+            chat=self.chat,
+            user=another,
+            status=ChatMemberStatusChoice.ACTIVE,
+            joined_at=timezone.now(),
+        )
+
+        self.chat.remove_members(self.sender, [self.recipient, another])
+
+        messages = Message.objects.filter(chat=self.chat, type=MessageTypeChoice.SYSTEM)
+        self.assertEqual(messages.count(), 1)
+        payload = messages.get()._payload_for_type()
+        self.assertEqual(payload['event'], 'members_removed')
+        self.assertEqual(payload['member_names'], ['Recipient', 'Another'])

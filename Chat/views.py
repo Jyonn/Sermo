@@ -83,8 +83,7 @@ class GroupChatMemberView(View):
     @auth.require_chat_member()
     def post(self, request):
         chat: Chat = request.query.chat
-        for user in request.json.users:
-            chat.invite_member(request.user, user)
+        chat.invite_members(request.user, request.json.users)
         return chat.json()
 
     @auth.require_user
@@ -93,8 +92,7 @@ class GroupChatMemberView(View):
     @auth.require_chat_owner()
     def delete(self, request):
         chat: Chat = request.query.chat
-        for user in request.json.users:
-            chat.remove_member(request.user, user)
+        chat.remove_members(request.user, request.json.users)
         return chat.json()
 
 
