@@ -1784,6 +1784,8 @@ class NotificationDeliveryStatusChoice(Choice):
 
 
 class WebPushSubscription(models.Model):
+    ACTIVE_LEASE_DAYS = 45
+
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='web_push_subscriptions', db_index=True)
     space = models.ForeignKey('Space.Space', on_delete=models.CASCADE, related_name='web_push_subscriptions', db_index=True)
     endpoint = models.TextField()
@@ -1827,10 +1829,18 @@ class WebPushSubscription(models.Model):
 
     @classmethod
     def active_for_user(cls, user: User):
+        stale_before = timezone.now() - datetime.timedelta(days=cls.ACTIVE_LEASE_DAYS)
+        cls.objects.filter(
+            user=user,
+            space_id=user.space_id,
+            enabled=True,
+            last_seen_at__lt=stale_before,
+        ).update(enabled=False)
         return cls.objects.filter(
             user=user,
             space_id=user.space_id,
             enabled=True,
+            last_seen_at__gte=stale_before,
         )
 
     def json(self):
@@ -2745,34 +2755,24 @@ class NotificationDelivery(models.Model):
         deliveries.extend(WebPushDelivery.enqueue_for_event(event))
         prefs = NotificationPreference.ensure_defaults(event.user)
         for pref in prefs:
-            status = NotificationDeliveryStatusChoice.PENDING
-            detail = None
-            attempted_at = None
-
             if not NotificationTopicPreference.is_enabled_for_event(event, pref.channel):
-                status = NotificationDeliveryStatusChoice.SKIPPED
-                detail = 'topic_disabled'
-                attempted_at = timezone.now()
-            elif not pref.enabled:
-                status = NotificationDeliveryStatusChoice.SKIPPED
-                detail = 'channel_disabled'
-                attempted_at = timezone.now()
-            elif not cls._channel_available(event.user, pref.channel):
-                status = NotificationDeliveryStatusChoice.SKIPPED
-                detail = 'channel_unavailable'
-                attempted_at = timezone.now()
-            elif not cls._offline_threshold_reached(event.user, pref.offline_threshold_minutes):
-                status = NotificationDeliveryStatusChoice.PENDING
+                continue
+            if not pref.enabled:
+                continue
+            if not cls._channel_available(event.user, pref.channel):
+                continue
+
+            detail = None
+            if not cls._offline_threshold_reached(event.user, pref.offline_threshold_minutes):
                 detail = 'waiting_offline_threshold'
 
             delivery = cls.objects.create(
                 event=event,
                 channel=pref.channel,
-                status=status,
+                status=NotificationDeliveryStatusChoice.PENDING,
                 detail=detail,
-                attempted_at=attempted_at,
             )
-            if status == NotificationDeliveryStatusChoice.PENDING and detail is None:
+            if detail is None:
                 if cls._is_message_email_delivery(delivery):
                     cls._attempt_send_email_batch(event.user, pref)
                 else:

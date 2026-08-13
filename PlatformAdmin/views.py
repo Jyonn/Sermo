@@ -248,6 +248,14 @@ def _delivery_payload(delivery, channel):
     )
 
 
+_NON_DELIVERY_DETAILS = {
+    'channel_disabled',
+    'channel_unavailable',
+    'preference_missing',
+    'topic_disabled',
+}
+
+
 class MessageDeliveryView(View):
     @auth.require_platform_admin
     def get(self, request, message_id):
@@ -278,6 +286,7 @@ class MessageDeliveryView(View):
             deliveries = [
                 _delivery_payload(delivery, _delivery_channel(delivery.channel))
                 for delivery in event.deliveries.all().order_by('created_at', 'id')
+                if delivery.detail not in _NON_DELIVERY_DETAILS
             ]
             for delivery in event.web_push_deliveries.all().order_by('created_at', 'id'):
                 item = _delivery_payload(delivery, 'web')
