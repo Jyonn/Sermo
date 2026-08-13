@@ -741,6 +741,9 @@ msgstr "你不是此聊天室的所有者"
 msgid "You are not the owner of this message"
 msgstr "你不是此消息的所有者"
 
+msgid "System messages cannot be managed by users"
+msgstr "系统消息无法由用户操作"
+
 msgid "The message recall window has expired"
 msgstr "这条消息已超过可撤回时间"
 

@@ -475,6 +475,8 @@ class Message(models.Model):
 
     @classmethod
     def create(cls, chat: Chat, user: User, message_type, content, reply_to=None, client_message_id=None, mention_user_ids=None):
+        if message_type == MessageTypeChoice.SYSTEM:
+            raise MessageErrors.SYSTEM_MESSAGE_FORBIDDEN
         if chat.has_active_member(user):
             if (
                 user.space.verification_tier == 'email'
@@ -602,6 +604,28 @@ class Message(models.Model):
             MessageEvent.record_created(message)
             return message
         raise MessageErrors.NOT_A_MEMBER
+
+    @classmethod
+    def create_system(cls, chat: Chat, user: User, event: str, **details):
+        if not chat.has_active_member(user):
+            raise MessageErrors.NOT_A_MEMBER
+        payload = {
+            'kind': 'system',
+            'event': str(event).strip(),
+            'actor_name': user.name,
+            **{key: value for key, value in details.items() if value is not None},
+        }
+        content = json.dumps(payload, separators=(',', ':'), ensure_ascii=False)
+        if len(content) > cls.vldt.MAX_CONTENT_LENGTH:
+            raise MessageErrors.CONTENT_TOO_LONG
+        message = cls.objects.create(
+            chat=chat,
+            user=user,
+            type=MessageTypeChoice.SYSTEM,
+            content=content,
+        )
+        MessageEvent.record_created(message)
+        return message
 
     def _award_interaction_growth(self):
         if not self.user.verified:
@@ -866,6 +890,9 @@ class Message(models.Model):
                 payload['link_preview'] = link_preview.jsonl()
             return payload
         if self.type == MessageTypeChoice.SYSTEM:
+            payload = self._parse_payload(self.content)
+            if payload.get('kind') == 'system':
+                return payload
             return dict(kind='system', text=self.content)
         if self.type == MessageTypeChoice.LOCATION:
             return self._parse_payload(self.content)
@@ -1043,6 +1070,8 @@ class Message(models.Model):
         )
 
     def remove(self):
+        if self.type == MessageTypeChoice.SYSTEM:
+            raise MessageErrors.SYSTEM_MESSAGE_FORBIDDEN
         if self.is_deleted:
             return
         self.is_deleted = True
@@ -1050,6 +1079,8 @@ class Message(models.Model):
         MessageEvent.record_recalled(self)
 
     def hide_for(self, user: User):
+        if self.type == MessageTypeChoice.SYSTEM:
+            raise MessageErrors.SYSTEM_MESSAGE_FORBIDDEN
         state, created = MessageUserState.objects.get_or_create(message=self, user=user)
         if created:
             MessageEvent.record_hidden(self, user)
@@ -1168,6 +1199,8 @@ class PinnedMessage(models.Model):
 
     @classmethod
     def pin(cls, message, user):
+        if message.type == MessageTypeChoice.SYSTEM:
+            raise MessageErrors.SYSTEM_MESSAGE_FORBIDDEN
         cls.require_manage_permission(message.chat, user)
         existing = cls.objects.filter(message=message, pinned_by=user).first()
         if existing is not None:
@@ -1188,6 +1221,8 @@ class PinnedMessage(models.Model):
 
     @classmethod
     def unpin(cls, message, user):
+        if message.type == MessageTypeChoice.SYSTEM:
+            raise MessageErrors.SYSTEM_MESSAGE_FORBIDDEN
         cls.require_manage_permission(message.chat, user)
         cls.objects.filter(message=message, pinned_by=user).delete()
 

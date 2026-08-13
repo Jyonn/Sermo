@@ -1,4 +1,5 @@
 import json
+from unittest.mock import patch
 
 from django.test import TestCase
 from django.utils import timezone
@@ -76,3 +77,21 @@ class ChatNotificationPreferenceTests(TestCase):
         events = NotificationEvent.emit_message_notifications(message, actor=self.sender, enqueue=False)
         self.assertTrue(any(event.user_id == self.recipient.id for event in events))
         self.assertFalse(ChatUserPreference.ensure(self.chat, self.recipient).notifications_muted)
+
+    def test_group_rename_creates_attributed_system_message_once(self):
+        with patch.object(self.sender, 'require_growth_capability'):
+            self.chat.rename(self.sender, 'A clearer name')
+            self.chat.rename(self.sender, 'A clearer name')
+
+        messages = Message.objects.filter(chat=self.chat, type=MessageTypeChoice.SYSTEM)
+        self.assertEqual(messages.count(), 1)
+        message = messages.get()
+        self.assertEqual(message.user_id, self.sender.id)
+        self.assertEqual(message._payload_for_type()['event'], 'group_renamed')
+        self.assertEqual(message._payload_for_type()['old_title'], 'Muted group')
+        self.assertEqual(message._payload_for_type()['new_title'], 'A clearer name')
+
+    def test_user_message_factory_rejects_system_message(self):
+        with self.assertRaises(Exception) as raised:
+            Message.create(self.chat, self.sender, MessageTypeChoice.SYSTEM, 'forged')
+        self.assertIn('System messages cannot be managed by users', str(raised.exception))

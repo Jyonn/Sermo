@@ -50,6 +50,8 @@ class MessageView(View):
     )
     def post(self, request: Request):
         request.user.space.require_chat_enabled()
+        if request.json.type == MessageTypeChoice.SYSTEM:
+            raise MessageErrors.SYSTEM_MESSAGE_FORBIDDEN
         if request.json.kind in {'video', 'file'} and request.user.space.verification_tier == 'email':
             raise SpaceErrors.TIER_FEATURE_RESTRICTED
         if request.query.chat.group:
@@ -71,6 +73,8 @@ class MessageView(View):
     @analyse.query(MessageParams.message_id, MessageParams.delete_scope)
     def delete(self, request: Request):
         message: Message = request.query.message
+        if message.type == MessageTypeChoice.SYSTEM:
+            raise MessageErrors.SYSTEM_MESSAGE_FORBIDDEN
         if not message.chat.has_active_member(request.user):
             raise MessageErrors.NOT_A_MEMBER
         if request.query.delete_scope == 'me':
@@ -124,6 +128,8 @@ class MessageBatchView(View):
             for message in messages:
                 if not message.chat.has_active_member(request.user):
                     raise MessageErrors.NOT_A_MEMBER
+                if message.type == MessageTypeChoice.SYSTEM:
+                    raise MessageErrors.SYSTEM_MESSAGE_FORBIDDEN
             for message in messages:
                 message.hide_for(request.user)
         return dict(deleted_message_ids=message_ids)
@@ -156,6 +162,8 @@ class PinnedMessageView(View):
     @auth.require_user
     @analyse.query(MessageParams.message_id)
     def post(self, request: Request):
+        if request.query.message.type == MessageTypeChoice.SYSTEM:
+            raise MessageErrors.SYSTEM_MESSAGE_FORBIDDEN
         PinnedMessage.pin(request.query.message, request.user)
         pin = PinnedMessage.aggregate_for_message(request.query.message)
         return PinnedMessage.aggregate_json(pin, request=request)
@@ -163,6 +171,8 @@ class PinnedMessageView(View):
     @auth.require_user
     @analyse.query(MessageParams.message_id)
     def delete(self, request: Request):
+        if request.query.message.type == MessageTypeChoice.SYSTEM:
+            raise MessageErrors.SYSTEM_MESSAGE_FORBIDDEN
         PinnedMessage.unpin(request.query.message, request.user)
         return OK
 

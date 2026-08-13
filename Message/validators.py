@@ -20,6 +20,7 @@ class MessageErrors:
     PIN_LIMIT_REACHED = Error(message=_('This chat has reached the pinned message limit'), code=Code.BadRequest)
     MAP_ACCESS_DIRECT_ONLY = Error(message=_('Map access can only be shared in a direct chat'), code=Code.BadRequest)
     MAP_ACCESS_TARGET_INVALID = Error(message=_('The map access recipient is invalid'), code=Code.BadRequest)
+    SYSTEM_MESSAGE_FORBIDDEN = Error(message=_('System messages cannot be managed by users'), code=Code.Forbidden)
 
 
 class MessageValidator:

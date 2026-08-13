@@ -285,8 +285,21 @@ class Chat(models.Model):
         if not self.group:
             raise ChatErrors.NOT_GROUP_CHAT(chat=self.id)
         operator.require_growth_capability('rename_group')
-        self.title = (title or '').strip() or self.title
-        self.save(update_fields=['title'])
+        next_title = (title or '').strip() or self.title
+        if next_title == self.title:
+            return
+        previous_title = self.title
+        with transaction.atomic():
+            self.title = next_title
+            self.save(update_fields=['title'])
+            from Message.models import Message
+            Message.create_system(
+                self,
+                operator,
+                'group_renamed',
+                old_title=previous_title,
+                new_title=next_title,
+            )
 
     def invite_member(self, inviter: User, user: User):
         if not self.group:
