@@ -75,7 +75,7 @@ class MessageView(View):
         message: Message = request.query.message
         if message.type == MessageTypeChoice.SYSTEM:
             raise MessageErrors.SYSTEM_MESSAGE_FORBIDDEN
-        if not message.chat.has_active_member(request.user):
+        if not message.is_visible_to(request.user):
             raise MessageErrors.NOT_A_MEMBER
         if request.query.delete_scope == 'me':
             message.hide_for(request.user)
@@ -174,6 +174,8 @@ class PinnedMessageView(View):
     @auth.require_user
     @analyse.query(MessageParams.message_id)
     def post(self, request: Request):
+        if not request.query.message.is_visible_to(request.user):
+            raise MessageErrors.NOT_A_MEMBER
         if request.query.message.type == MessageTypeChoice.SYSTEM:
             raise MessageErrors.SYSTEM_MESSAGE_FORBIDDEN
         PinnedMessage.pin(request.query.message, request.user)
@@ -183,6 +185,8 @@ class PinnedMessageView(View):
     @auth.require_user
     @analyse.query(MessageParams.message_id)
     def delete(self, request: Request):
+        if not request.query.message.is_visible_to(request.user):
+            raise MessageErrors.NOT_A_MEMBER
         if request.query.message.type == MessageTypeChoice.SYSTEM:
             raise MessageErrors.SYSTEM_MESSAGE_FORBIDDEN
         PinnedMessage.unpin(request.query.message, request.user)
@@ -230,7 +234,7 @@ class MessageLinkPreviewView(View):
     @analyse.query(MessageParams.message_id)
     def get(self, request: Request):
         message: Message = request.query.message
-        if not message.chat.has_active_member(request.user):
+        if not message.is_visible_to(request.user):
             raise MessageErrors.NOT_A_MEMBER
         if message.type != MessageTypeChoice.TEXT:
             return dict(status='none')
@@ -245,7 +249,7 @@ class MessageImageMetadataView(View):
     @analyse.query(MessageParams.message_id)
     def get(self, request: Request):
         message: Message = request.query.message
-        if not message.chat.has_active_member(request.user):
+        if not message.is_visible_to(request.user):
             raise MessageErrors.NOT_A_MEMBER
         if message.type != MessageTypeChoice.IMAGE:
             raise MessageErrors.TYPE_INVALID
@@ -262,7 +266,7 @@ class MessageVideoMetadataView(View):
     @analyse.query(MessageParams.message_id)
     def get(self, request: Request):
         message: Message = request.query.message
-        if not message.chat.has_active_member(request.user):
+        if not message.is_visible_to(request.user):
             raise MessageErrors.NOT_A_MEMBER
         if message.type != MessageTypeChoice.VIDEO:
             raise MessageErrors.TYPE_INVALID

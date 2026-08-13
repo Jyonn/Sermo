@@ -568,7 +568,13 @@ class ChatReadState(models.Model):
     @classmethod
     def has_unread_mention(cls, chat: Chat, user: User):
         last_read_at = cls.get_last_read_at(chat, user)
-        mentions = ChatMessageMention.objects.filter(chat=chat, user=user, message__is_deleted=False)
+        from Message.models import Message
+        visible_message_ids = Message.visible_for_user(chat, user).values_list('id', flat=True)
+        mentions = ChatMessageMention.objects.filter(
+            chat=chat,
+            user=user,
+            message_id__in=visible_message_ids,
+        )
         if last_read_at is not None:
             mentions = mentions.filter(message__created_at__gt=last_read_at)
         return mentions.exists()

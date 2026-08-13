@@ -471,7 +471,23 @@ class Message(models.Model):
 
     @classmethod
     def visible_for_user(cls, chat: Chat, user: User):
-        return cls.visible_in_chat(chat).exclude(hidden_states__user=user)
+        queryset = cls.visible_in_chat(chat).exclude(hidden_states__user=user)
+        if not chat.group:
+            return queryset
+        from Chat.models import ChatMember, ChatMemberStatusChoice
+        membership = ChatMember.objects.filter(
+            chat=chat,
+            user=user,
+            status=ChatMemberStatusChoice.ACTIVE,
+        ).only('joined_at').first()
+        if membership is None:
+            return queryset.none()
+        # Legacy active memberships may predate joined_at; the chat creation time
+        # is the earliest safe boundary for those rows.
+        return queryset.filter(created_at__gte=membership.joined_at or chat.created_at)
+
+    def is_visible_to(self, user: User):
+        return self.visible_for_user(self.chat, user).filter(id=self.id).exists()
 
     @classmethod
     def create(cls, chat: Chat, user: User, message_type, content, reply_to=None, client_message_id=None, mention_user_ids=None):
@@ -496,7 +512,11 @@ class Message(models.Model):
             }.get(message_type)
             if capability:
                 user.require_growth_capability(capability)
-            if reply_to is not None and (reply_to.chat_id != chat.id or reply_to.is_deleted):
+            if reply_to is not None and (
+                reply_to.chat_id != chat.id
+                or reply_to.is_deleted
+                or not reply_to.is_visible_to(user)
+            ):
                 raise MessageErrors.REPLY_TARGET_INVALID
             normalized_client_id = (client_message_id or '').strip()[:cls.vldt.MAX_CLIENT_MESSAGE_ID_LENGTH] or None
             if normalized_client_id:
@@ -985,10 +1005,19 @@ class Message(models.Model):
     def _dictify_content(self):
         return self.preview_text()
 
-    def _reply_to_payload(self):
+    def _reply_to_payload(self, request: HttpRequest = None):
         if self.reply_to_id is None:
             return None
         reply_to = self.reply_to
+        viewer = getattr(request, 'user', None) if request is not None else None
+        if viewer is not None and not Message.visible_for_user(self.chat, viewer).filter(id=reply_to.id).exists():
+            return dict(
+                message_id=reply_to.id,
+                user=None,
+                type=reply_to.type,
+                content='消息不可见',
+                is_deleted=True,
+            )
         return dict(
             message_id=reply_to.id,
             user=reply_to.user.tiny_json(),
@@ -1017,7 +1046,7 @@ class Message(models.Model):
             type=self.type,
             content=self.preview_text(),
             payload=self._payload_for_type(request=request),
-            reply_to=self._reply_to_payload(),
+            reply_to=self._reply_to_payload(request=request),
             mentions=[mention.user.tiny_json() for mention in self.chat_mentions.all()],
             created_at=self.created_at.timestamp(),
         )
@@ -1167,10 +1196,21 @@ class MessageEvent(models.Model):
             MessageEventTypeChoice.HIDDEN: 'message.hidden',
             MessageEventTypeChoice.RECALLED: 'message.recalled',
         }
+        visible_created_message_ids = set()
+        created_rows_by_chat = {}
+        for row in rows:
+            if row.type == MessageEventTypeChoice.CREATED:
+                created_rows_by_chat.setdefault(row.chat_id, []).append(row.message_id)
+        for chat_id, message_ids in created_rows_by_chat.items():
+            chat = next(row.chat for row in rows if row.chat_id == chat_id)
+            visible_created_message_ids.update(
+                Message.visible_for_user(chat, user).filter(id__in=message_ids).values_list('id', flat=True)
+            )
+
         for row in rows:
             event = dict(event_id=row.id, type=names[row.type], chat_id=row.chat_id, message_id=row.message_id)
             if row.type == MessageEventTypeChoice.CREATED and not row.message.is_deleted:
-                if not MessageUserState.objects.filter(message=row.message, user=user).exists():
+                if row.message_id in visible_created_message_ids and not MessageUserState.objects.filter(message=row.message, user=user).exists():
                     event['message'] = row.message.jsonl(request=request)
                     event['message']['mentioned_me'] = row.message.chat_mentions.filter(user=user).exists()
             events.append(event)
@@ -1276,7 +1316,8 @@ class PinnedMessage(models.Model):
             message__is_deleted=False,
         ).select_related('message', 'message__user', 'pinned_by').order_by('-pinned_at')
         if user is not None:
-            rows = rows.exclude(message__hidden_states__user=user)
+            visible_message_ids = Message.visible_for_user(chat, user).values_list('id', flat=True)
+            rows = rows.filter(message_id__in=visible_message_ids)
         return cls.aggregate_rows(rows, limit=cls.MAX_PER_CHAT)
 
     @classmethod

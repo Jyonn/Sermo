@@ -151,3 +151,66 @@ class ChatNotificationPreferenceTests(TestCase):
         payload = messages.get()._payload_for_type()
         self.assertEqual(payload['event'], 'members_removed')
         self.assertEqual(payload['member_names'], ['Recipient', 'Another'])
+
+
+class GroupMessageVisibilityBoundaryTests(TestCase):
+    def setUp(self):
+        self.space = Space.objects.create(name='History Boundary', slug='history', email='admin@example.com')
+        self.owner = User.create(self.space, 'Owner', verified=True)
+        self.new_member = User.create(self.space, 'New Member', verified=True)
+        self.chat = Chat.objects.create(
+            space=self.space,
+            chat_type=ChatTypeChoice.GROUP,
+            title='Private history',
+            created_by=self.owner,
+        )
+        ChatMember.objects.create(
+            chat=self.chat,
+            user=self.owner,
+            role=ChatMemberRoleChoice.OWNER,
+            status=ChatMemberStatusChoice.ACTIVE,
+            joined_at=timezone.now(),
+        )
+        self.old_message = Message.create(self.chat, self.owner, MessageTypeChoice.TEXT, 'before joining')
+        PinnedMessage.objects.create(chat=self.chat, message=self.old_message, pinned_by=self.owner)
+        self.membership = ChatMember.objects.create(
+            chat=self.chat,
+            user=self.new_member,
+            status=ChatMemberStatusChoice.ACTIVE,
+            joined_at=timezone.now(),
+        )
+        self.new_message = Message.create(self.chat, self.owner, MessageTypeChoice.TEXT, 'after joining')
+
+    def authorization(self, user):
+        return {'HTTP_AUTHORIZATION': f"Bearer {auth.get_login_token(user)['auth']}"}
+
+    def test_history_search_unread_and_pins_start_at_joined_at(self):
+        visible_ids = list(Message.visible_for_user(self.chat, self.new_member).values_list('id', flat=True))
+        self.assertEqual(visible_ids, [self.new_message.id])
+        self.assertEqual(ChatReadState.unread_count(self.chat, self.new_member), 1)
+
+        history = self.client.get(
+            f'/messages/?chat_id={self.chat.id}&limit=50',
+            **self.authorization(self.new_member),
+        )
+        self.assertEqual([item['message_id'] for item in history.json()['body']], [self.new_message.id])
+
+        search = self.client.get(
+            f'/messages/search?chat_id={self.chat.id}&keyword=before&limit=30',
+            **self.authorization(self.new_member),
+        )
+        self.assertEqual(search.json()['body']['items'], [])
+
+        pins = self.client.get(
+            f'/messages/pins?chat_id={self.chat.id}',
+            **self.authorization(self.new_member),
+        )
+        self.assertEqual(pins.json()['body'], [])
+
+    def test_sync_does_not_deliver_pre_join_message_payload(self):
+        sync = self.client.get('/messages/sync-v2?after=0&limit=100', **self.authorization(self.new_member))
+        events = sync.json()['body']['events']
+        old_event = next(event for event in events if event['message_id'] == self.old_message.id)
+        new_event = next(event for event in events if event['message_id'] == self.new_message.id)
+        self.assertNotIn('message', old_event)
+        self.assertEqual(new_event['message']['message_id'], self.new_message.id)
