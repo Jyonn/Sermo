@@ -979,6 +979,11 @@ class Message(models.Model):
             return path
         return request.build_absolute_uri(path)
 
+    @staticmethod
+    def _viewer_from_request(request: HttpRequest = None):
+        viewer = getattr(request, 'user', None) if request is not None else None
+        return viewer if isinstance(viewer, User) else None
+
     def _payload_for_type(self, request: HttpRequest = None):
         if self.type == MessageTypeChoice.TEXT:
             payload = dict(kind='text', text=self.content)
@@ -990,7 +995,7 @@ class Message(models.Model):
             payload = self._parse_payload(self.content)
             if payload.get('kind') == 'system':
                 payload['text'] = self.system_message_text(
-                    getattr(request, 'user', None) if request is not None else None,
+                    self._viewer_from_request(request),
                 )
                 return payload
             return dict(kind='system', text=self.system_message_text())
@@ -999,9 +1004,7 @@ class Message(models.Model):
         if self.type == MessageTypeChoice.MAP_ACCESS:
             from TravelMap.models import MapAccessGrant, MapChatGrant
             payload = self._parse_payload(self.content)
-            viewer = getattr(request, 'user', None) if request is not None else None
-            if viewer is not None and not hasattr(viewer, 'space_id'):
-                viewer = None
+            viewer = self._viewer_from_request(request)
             response = dict(
                 kind='map_access',
                 owner=self.user.tiny_json(),
@@ -1016,9 +1019,7 @@ class Message(models.Model):
         if self.type == MessageTypeChoice.STATEMENT:
             from Square.models import Statement
             reference = self._parse_payload(self.content)
-            viewer = getattr(request, 'user', None) if request is not None else None
-            if viewer is not None and not hasattr(viewer, 'space_id'):
-                viewer = None
+            viewer = self._viewer_from_request(request)
             response = dict(
                 kind='statement',
                 statement_id=reference.get('statement_id'),
@@ -1089,7 +1090,7 @@ class Message(models.Model):
         if self.reply_to_id is None:
             return None
         reply_to = self.reply_to
-        viewer = getattr(request, 'user', None) if request is not None else None
+        viewer = self._viewer_from_request(request)
         if viewer is not None and not Message.visible_for_user(self.chat, viewer).filter(id=reply_to.id).exists():
             return dict(
                 message_id=reply_to.id,
@@ -1119,7 +1120,7 @@ class Message(models.Model):
         return urlparse(source_uri).path.lstrip('/') if source_uri else ''
 
     def jsonl(self, request: HttpRequest = None, include_deleted: bool = False):
-        viewer = getattr(request, 'user', None) if request is not None else None
+        viewer = self._viewer_from_request(request)
         content = self.system_message_text(viewer) if self.type == MessageTypeChoice.SYSTEM else self.preview_text()
         payload = dict(
             message_id=self.id,

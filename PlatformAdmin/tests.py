@@ -120,6 +120,31 @@ class PlatformAdminSecurityTests(TestCase):
         self.assertEqual(second_page['messages'][0]['message_id'], deleted.id)
         self.assertTrue(second_page['messages'][0]['is_deleted'])
 
+    def test_chat_audit_serializes_replies_without_normal_user_session(self):
+        space = Space.objects.create(name='Reply Audit Space', slug='replyaudit', email='owner@example.com')
+        user = User.objects.create(space=space, name='Audited User', role=UserRoleChoice.MEMBER)
+        chat = Chat.objects.create(space=space, chat_type=ChatTypeChoice.GROUP, title='Reply Audit', created_by=user)
+        ChatMember.objects.create(chat=chat, user=user, status=ChatMemberStatusChoice.ACTIVE)
+        original = Message.objects.create(chat=chat, user=user, type=MessageTypeChoice.TEXT, content='original')
+        reply = Message.objects.create(
+            chat=chat,
+            user=user,
+            type=MessageTypeChoice.TEXT,
+            content='reply',
+            reply_to=original,
+        )
+        request = RequestFactory().get(
+            f'/platform-admin/chats/{chat.id}/messages?reason=reply-audit&limit=50',
+            HTTP_AUTHORIZATION=f'Bearer {auth.get_platform_admin_token("admin@example.com")["auth"]}',
+        )
+        request.user = AnonymousUser()
+
+        payload = ChatMessageView.as_view()(request, chat_id=chat.id)
+
+        reply_payload = next(item for item in payload['messages'] if item['message_id'] == reply.id)
+        self.assertEqual(reply_payload['reply_to']['message_id'], original.id)
+        self.assertEqual(reply_payload['reply_to']['content'], 'original')
+
     def test_message_delivery_audit_is_read_only_and_logged(self):
         space = Space.objects.create(name='Delivery Space', slug='delivery-space', email='owner@example.com')
         user = User.objects.create(space=space, name='Sender', role=UserRoleChoice.MEMBER)
