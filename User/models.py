@@ -1823,7 +1823,7 @@ class WebPushSubscription(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='web_push_subscriptions', db_index=True)
     space = models.ForeignKey('Space.Space', on_delete=models.CASCADE, related_name='web_push_subscriptions', db_index=True)
     endpoint = models.TextField()
-    endpoint_digest = models.CharField(max_length=64, unique=True)
+    endpoint_digest = models.CharField(max_length=64, db_index=True)
     p256dh = models.CharField(max_length=255)
     auth = models.CharField(max_length=255)
     origin = models.CharField(max_length=255)
@@ -1831,6 +1831,13 @@ class WebPushSubscription(models.Model):
     enabled = models.BooleanField(default=True, db_index=True)
     last_seen_at = models.DateTimeField(auto_now=True)
     created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        default_manager_name = 'objects'
+        constraints = [models.UniqueConstraint(
+            fields=['user', 'endpoint_digest'],
+            name='unique_user_web_push_endpoint',
+        )]
 
     @classmethod
     def is_legacy_space_origin(cls, origin: str):
@@ -1853,9 +1860,9 @@ class WebPushSubscription(models.Model):
         endpoint_digest = hashlib.sha256(normalized_endpoint.encode('utf-8')).hexdigest()
         normalized_origin = origin.strip().rstrip('/')
         subscription, _created = cls.objects.update_or_create(
+            user=user,
             endpoint_digest=endpoint_digest,
             defaults=dict(
-                user=user,
                 space_id=user.space_id,
                 endpoint=normalized_endpoint,
                 p256dh=p256dh.strip(),

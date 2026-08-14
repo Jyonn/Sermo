@@ -155,6 +155,39 @@ class WebPushOriginTests(SimpleTestCase):
     def test_unrelated_subdomain_is_not_legacy(self):
         self.assertFalse(WebPushSubscription.is_legacy_space_origin('https://api.example.com'))
 
+
+class WebPushRegistrationTests(TestCase):
+    def setUp(self):
+        self.space = Space.objects.create(name='Push Space', slug='push-space', email='push@example.com')
+        self.first_user = User.create(space=self.space, name='First Device User')
+        self.second_user = User.create(space=self.space, name='Second Device User')
+
+    def register(self, user):
+        return WebPushSubscription.register(
+            user=user,
+            endpoint='https://push.example.test/shared-endpoint',
+            p256dh='p256dh-key',
+            auth='auth-key',
+            origin='https://sermo.jyonn.space',
+        )
+
+    def test_same_browser_endpoint_can_serve_multiple_accounts(self):
+        self.register(self.first_user)
+        self.register(self.second_user)
+
+        self.assertEqual(WebPushSubscription.objects.count(), 2)
+        self.assertSetEqual(
+            set(WebPushSubscription.objects.values_list('user_id', flat=True)),
+            {self.first_user.id, self.second_user.id},
+        )
+
+    def test_registering_again_refreshes_existing_user_subscription(self):
+        first = self.register(self.first_user)
+        second = self.register(self.first_user)
+
+        self.assertEqual(first.id, second.id)
+        self.assertEqual(WebPushSubscription.objects.count(), 1)
+
 class AccountSwitchPhoneNormalizationTests(SimpleTestCase):
     def test_mainland_phone_variants_include_country_code(self):
         self.assertEqual(
