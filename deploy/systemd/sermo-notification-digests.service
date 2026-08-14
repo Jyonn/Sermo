@@ -8,6 +8,7 @@ Type=oneshot
 User=ubuntu
 WorkingDirectory=/home/ubuntu/Sermo
 EnvironmentFile=-/home/ubuntu/Sermo/.env
+Environment="VIRTUAL_ENV=/home/ubuntu/envs/sermo"
+Environment="PATH=/home/ubuntu/envs/sermo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 ExecStart=/home/ubuntu/envs/sermo/bin/python manage.py process_notification_digests --limit-users 500
 Nice=5
-
