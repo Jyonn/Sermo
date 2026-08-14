@@ -109,6 +109,42 @@ class UserHeartbeatTests(TestCase):
         self.assertEqual(user.last_heartbeat, previous)
 
 
+class SquareNotificationReadTests(TestCase):
+    def setUp(self):
+        self.space = Space.objects.create(name='Notification Space', slug='notification-space', email='notify@example.com')
+        self.user = User.create(space=self.space, name='Reader')
+        self.actor = User.create(space=self.space, name='Actor')
+
+    def test_statement_payload_can_scope_all_related_unread_events(self):
+        from User.models import NotificationEvent
+
+        for event_type in (
+            NotificationEventTypeChoice.SQUARE_STATEMENT_LIKE,
+            NotificationEventTypeChoice.SQUARE_STATEMENT_COMMENT,
+            NotificationEventTypeChoice.SQUARE_COMMENT_LIKE,
+            NotificationEventTypeChoice.SQUARE_COMMENT_REPLY,
+        ):
+            NotificationEvent.objects.create(
+                space=self.space,
+                user=self.user,
+                actor=self.actor,
+                event_type=event_type,
+                payload={'statement_id': 42},
+            )
+        NotificationEvent.objects.create(
+            space=self.space,
+            user=self.user,
+            actor=self.actor,
+            event_type=NotificationEventTypeChoice.SQUARE_STATEMENT_LIKE,
+            payload={'statement_id': 43},
+        )
+
+        updated, unread_count = NotificationEvent.mark_square_events_read(self.user, 42)
+
+        self.assertEqual(updated, 4)
+        self.assertEqual(unread_count, 1)
+
+
 class WebPushOriginTests(SimpleTestCase):
     def test_space_subdomain_is_legacy(self):
         self.assertTrue(WebPushSubscription.is_legacy_space_origin('https://yuanmeng.sermo.jyonn.space'))

@@ -43,6 +43,7 @@ from User.params import (
     UserPasswordParams,
     NotificationPreferenceParams,
     NotificationTopicPreferenceParams,
+    NotificationEventParams,
     UserGestureLockPreferenceParams,
     UserWebReminderPreferenceParams,
     WebPushSubscriptionParams,
@@ -304,10 +305,13 @@ class NotificationEventView(View):
         return dict(events=[event.json() for event in rows], unread_count=queryset.filter(is_read=False).count())
 
     @auth.require_user
+    @analyse.json(NotificationEventParams.statement_id)
     def post(self, request: Request):
-        queryset = NotificationEvent.objects.filter(user=request.user, is_read=False)
-        queryset = queryset.filter(event_type__in=self.SQUARE_TYPES)
-        return dict(updated=queryset.update(is_read=True))
+        updated, unread_count = NotificationEvent.mark_square_events_read(
+            request.user,
+            request.json.statement_id,
+        )
+        return dict(updated=updated, unread_count=unread_count)
 
 
 class UserWebReminderPreferenceView(View):

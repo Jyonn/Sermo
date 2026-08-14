@@ -235,6 +235,10 @@ class NotificationTopicPreferenceParams(metaclass=Params):
     )
 
 
+class NotificationEventParams(metaclass=Params):
+    statement_id = Validator('statement_id').to(int).null().default(None)
+
+
 class UserWebReminderPreferenceParams(metaclass=Params):
     model_class = UserWebReminderPreference
 

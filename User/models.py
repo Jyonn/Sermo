@@ -2255,6 +2255,20 @@ class NotificationEvent(models.Model):
             created_at=self.created_at.timestamp(),
         )
 
+    @classmethod
+    def mark_square_events_read(cls, user, statement_id=None):
+        square_types = (
+            NotificationEventTypeChoice.SQUARE_STATEMENT_LIKE,
+            NotificationEventTypeChoice.SQUARE_STATEMENT_COMMENT,
+            NotificationEventTypeChoice.SQUARE_COMMENT_LIKE,
+            NotificationEventTypeChoice.SQUARE_COMMENT_REPLY,
+            NotificationEventTypeChoice.SQUARE_STATEMENT_REMOVED,
+        )
+        unread = cls.objects.filter(user=user, is_read=False, event_type__in=square_types)
+        target = unread.filter(payload__statement_id=statement_id) if statement_id is not None else unread
+        updated = target.update(is_read=True)
+        return updated, cls.objects.filter(user=user, is_read=False, event_type__in=square_types).count()
+
     def render_delivery_message(
         self,
         hide_message_content=False,
