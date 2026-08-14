@@ -125,7 +125,29 @@ class LinkPreview(models.Model):
     TRAILING_PUNCTUATION = '.,;:!?)]}，。！？、；：）】》'
     MOJIBAKE_MARKERS = ('ï¼', 'ï½', 'ã€', 'Ã', 'Â')
     RETRYABLE_ERROR_MARKERS = ('already consumed',)
-    USER_AGENT = 'SermoLinkPreviewBot/1.0'
+    USER_AGENT = (
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) '
+        'AppleWebKit/537.36 (KHTML, like Gecko) '
+        'Chrome/138.0.0.0 Safari/537.36'
+    )
+    BROWSER_HEADERS = {
+        'User-Agent': USER_AGENT,
+        'Accept': (
+            'text/html,application/xhtml+xml,application/xml;q=0.9,'
+            'image/avif,image/webp,image/apng,*/*;q=0.8'
+        ),
+        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+        'Cache-Control': 'no-cache',
+        'Pragma': 'no-cache',
+        'Sec-CH-UA': '"Not)A;Brand";v="8", "Chromium";v="138", "Google Chrome";v="138"',
+        'Sec-CH-UA-Mobile': '?0',
+        'Sec-CH-UA-Platform': '"macOS"',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'none',
+        'Sec-Fetch-User': '?1',
+        'Upgrade-Insecure-Requests': '1',
+    }
     MAX_HTML_BYTES = 256 * 1024
     MAX_REDIRECTS = 3
     READY_TTL = datetime.timedelta(days=7)
@@ -265,7 +287,7 @@ class LinkPreview(models.Model):
             cls.normalize_public_url(current_url)
             response = requests.get(
                 current_url,
-                headers={'User-Agent': cls.USER_AGENT, 'Accept': 'text/html,application/xhtml+xml'},
+                headers=cls.BROWSER_HEADERS,
                 timeout=(3, 5),
                 allow_redirects=False,
                 stream=True,
