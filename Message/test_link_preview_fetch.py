@@ -60,3 +60,38 @@ class LinkPreviewFetchTests(SimpleTestCase):
                 call('https://example.com/final', **expected_options),
             ],
         )
+
+    @patch.object(LinkPreview, '_require_public_host')
+    @patch('Message.models.requests.get')
+    def test_uses_largest_icon_as_image_fallback(self, get, _require_public_host):
+        get.return_value = self.response(
+            200,
+            html=(
+                b'<html><head><title>Icons</title>'
+                b'<link rel="icon" sizes="16x16" href="/favicon-16.png">'
+                b'<link rel="icon" sizes="192x192" href="/favicon-192.png">'
+                b'</head></html>'
+            ),
+        )
+
+        result = LinkPreview.fetch_preview_data('https://example.com/article')
+
+        self.assertEqual(result['image_url'], 'https://example.com/favicon-192.png')
+        self.assertEqual(result['favicon_url'], 'https://example.com/favicon-192.png')
+
+    @patch.object(LinkPreview, '_require_public_host')
+    @patch('Message.models.requests.get')
+    def test_open_graph_image_has_priority_over_icon(self, get, _require_public_host):
+        get.return_value = self.response(
+            200,
+            html=(
+                b'<html><head><meta property="og:image" content="/cover.jpg">'
+                b'<link rel="apple-touch-icon" sizes="180x180" href="/touch.png">'
+                b'</head></html>'
+            ),
+        )
+
+        result = LinkPreview.fetch_preview_data('https://example.com/article')
+
+        self.assertEqual(result['image_url'], 'https://example.com/cover.jpg')
+        self.assertEqual(result['favicon_url'], 'https://example.com/touch.png')

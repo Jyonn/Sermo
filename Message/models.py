@@ -103,7 +103,11 @@ class LinkPreviewHTMLParser(HTMLParser):
             rel = (attr_map.get('rel') or '').lower()
             href = (attr_map.get('href') or '').strip()
             if href and 'icon' in rel:
-                self.icons.append(href)
+                self.icons.append({
+                    'href': href,
+                    'rel': rel,
+                    'sizes': (attr_map.get('sizes') or '').lower(),
+                })
 
     def handle_endtag(self, tag):
         if tag.lower() == 'title':
@@ -116,6 +120,19 @@ class LinkPreviewHTMLParser(HTMLParser):
     @property
     def title(self):
         return ' '.join(''.join(self.title_parts).split())
+
+    @staticmethod
+    def _icon_score(icon):
+        dimensions = re.findall(r'(\d+)x(\d+)', icon.get('sizes') or '')
+        largest_area = max((int(width) * int(height) for width, height in dimensions), default=0)
+        touch_priority = 1_000_000 if 'apple-touch-icon' in (icon.get('rel') or '') else 0
+        return touch_priority + largest_area
+
+    @property
+    def best_icon(self):
+        if not self.icons:
+            return ''
+        return max(self.icons, key=self._icon_score)['href']
 
 
 class LinkPreview(models.Model):
@@ -324,8 +341,8 @@ class LinkPreview(models.Model):
 
         title = parser.meta.get('og:title') or parser.meta.get('twitter:title') or parser.title
         description = parser.meta.get('og:description') or parser.meta.get('description') or parser.meta.get('twitter:description')
-        image_url = parser.meta.get('og:image') or parser.meta.get('twitter:image') or ''
-        favicon_url = parser.icons[0] if parser.icons else ''
+        image_url = parser.meta.get('og:image') or parser.meta.get('twitter:image') or parser.best_icon
+        favicon_url = parser.best_icon
         parsed = urlparse(current_url)
         site_name = parser.meta.get('og:site_name') or parsed.hostname or ''
 
