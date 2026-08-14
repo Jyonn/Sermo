@@ -906,6 +906,14 @@ class User(models.Model):
             return build_avatar_display_uri(avatar_uri)
         return avatar_uri
 
+    def _dictify_avatar_cache_key(self):
+        """Expose a stable, opaque identity for client-side avatar caches."""
+        avatar_uri = (self.avatar_uri or '').strip()
+        if not avatar_uri:
+            return ''
+        identity = f'{self.avatar_type}:{avatar_uri}'
+        return hashlib.sha256(identity.encode('utf-8')).hexdigest()[:24]
+
     def _dictify_official(self):
         return self.is_official
 
@@ -1107,7 +1115,7 @@ class User(models.Model):
 
     def tiny_json(self):
         return self.dictify(
-            'name', 'user_id', 'official', 'avatar_type', 'avatar_uri', 'is_permanent_vip',
+            'name', 'user_id', 'official', 'avatar_type', 'avatar_uri', 'avatar_cache_key', 'is_permanent_vip',
             'chat_bubble_style', 'avatar_frame_style', 'statement_card_style', 'growth_level',
         )
 
@@ -1127,6 +1135,7 @@ class User(models.Model):
             'statement_card_style',
             'avatar_type',
             'avatar_uri',
+            'avatar_cache_key',
         )
         payload['plaza_greeting'] = self.display_plaza_greeting()
         return payload
@@ -1143,6 +1152,7 @@ class User(models.Model):
             'avatar_frame_style',
             'avatar_type',
             'avatar_uri',
+            'avatar_cache_key',
             'last_heartbeat',
         )
 
@@ -1172,6 +1182,7 @@ class User(models.Model):
             'verified',
             'avatar_type',
             'avatar_uri',
+            'avatar_cache_key',
             'email',
             'phone',
             'bark',

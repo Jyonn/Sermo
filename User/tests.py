@@ -35,6 +35,14 @@ class UserPresentationTests(SimpleTestCase):
         self.assertEqual(User(language='zh-CN').display_plaza_greeting(), '嗨，认识一下？')
         self.assertEqual(User(language='en').display_plaza_greeting(), 'Hi, nice to meet you.')
 
+    def test_avatar_cache_key_is_stable_and_changes_with_avatar(self):
+        user = User(avatar_type='custom', avatar_uri='https://cdn.example.com/avatar/a.png')
+        first = user._dictify_avatar_cache_key()
+        self.assertEqual(first, user._dictify_avatar_cache_key())
+
+        user.avatar_uri = 'https://cdn.example.com/avatar/b.png'
+        self.assertNotEqual(first, user._dictify_avatar_cache_key())
+
 
 class CityBubbleUnlockTests(TestCase):
     def setUp(self):
