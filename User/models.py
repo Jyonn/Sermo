@@ -10,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from notificator import NotificatorAPIError
 from django.db import IntegrityError, close_old_connections, transaction
-from django.db.models import F, Q
+from django.db.models import F, Max, Q
 from django.utils import timezone, translation
 from django.utils.crypto import get_random_string
 from django.utils.translation import gettext as _
@@ -1982,6 +1982,7 @@ class NotificationPreference(models.Model):
             ),
         )
         updates = []
+        was_enabled = pref.enabled
         if enabled is not None:
             pref.enabled = bool(enabled)
             updates.append('enabled')
@@ -2017,6 +2018,13 @@ class NotificationPreference(models.Model):
             updates.append('bark_icon_mode')
         if updates:
             pref.save(update_fields=updates)
+        if enabled is not None and bool(enabled) and not was_enabled:
+            from Message.models import Message
+            NotificationChannelCursor.objects.update_or_create(
+                user=user,
+                channel=channel,
+                defaults={'last_message_id': Message.objects.aggregate(value=Max('id'))['value'] or 0},
+            )
         return pref
 
     def json(self):
@@ -2410,6 +2418,12 @@ class NotificationEvent(models.Model):
         )
         created_events = []
         for user in cls._message_recipients(message.chat, actor):
+            for pref in NotificationPreference.ensure_defaults(user):
+                NotificationChannelCursor.objects.get_or_create(
+                    user=user,
+                    channel=pref.channel,
+                    defaults={'last_message_id': max(0, message.id - 1)},
+                )
             event = cls.objects.create(
                 space_id=user.space_id,
                 user=user,
@@ -2447,7 +2461,13 @@ class NotificationEvent(models.Model):
             for event_id in event_ids:
                 event = events_by_id.get(event_id)
                 if event is not None:
-                    NotificationDelivery.enqueue_for_event(event)
+                    if event.event_type in (
+                        NotificationEventTypeChoice.DIRECT_MESSAGE,
+                        NotificationEventTypeChoice.GROUP_MESSAGE,
+                    ):
+                        WebPushDelivery.enqueue_for_event(event)
+                    else:
+                        NotificationDelivery.enqueue_for_event(event)
         except Exception:
             logger.exception('Failed to enqueue notification deliveries for events %s', event_ids)
         finally:
@@ -2478,6 +2498,121 @@ class NotificationEvent(models.Model):
         )
         cls._enqueue_deliveries_after_commit([event.id])
         return event
+
+
+class NotificationChannelCursor(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notification_channel_cursors')
+    channel = models.IntegerField(choices=UserNotificationChoice.to_choices())
+    last_message_id = models.BigIntegerField(default=0)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ('user', 'channel')
+
+    @classmethod
+    def process_due(cls, limit_users=200):
+        from Chat.models import ChatReadState, ChatUserPreference
+        from Message.models import Message, MessageTypeChoice
+
+        snapshot_max_id = Message.objects.aggregate(value=Max('id'))['value'] or 0
+        if snapshot_max_id <= 0:
+            return dict(users=0, sent=0, failed=0, advanced=0, snapshot_message_id=0)
+
+        preferences = list(
+            NotificationPreference.objects.filter(enabled=True)
+            .select_related('user')
+            .order_by('user_id', 'channel')[:limit_users * len(NotificationPreference.supported_channels())]
+        )
+        summary = dict(users=0, sent=0, failed=0, advanced=0, snapshot_message_id=snapshot_max_id)
+        seen_users = set()
+        for pref in preferences:
+            user = pref.user
+            cursor, _created = cls.objects.get_or_create(
+                user=user,
+                channel=pref.channel,
+                defaults={'last_message_id': snapshot_max_id},
+            )
+            if cursor.last_message_id >= snapshot_max_id:
+                continue
+            if not NotificationDelivery._channel_available(user, pref.channel):
+                continue
+            if not NotificationDelivery._offline_threshold_reached(user, pref.offline_threshold_minutes):
+                continue
+
+            events = list(
+                NotificationEvent.objects.filter(
+                    user=user,
+                    event_type__in=NotificationDelivery.MESSAGE_EVENT_TYPES,
+                    payload__message_id__gt=cursor.last_message_id,
+                    payload__message_id__lte=snapshot_max_id,
+                ).select_related('actor', 'space').order_by('id')
+            )
+            message_ids = [int((event.payload or {}).get('message_id') or 0) for event in events]
+            messages = {
+                message.id: message for message in Message.objects.filter(
+                    id__in=message_ids,
+                    is_deleted=False,
+                ).exclude(type=MessageTypeChoice.SYSTEM).select_related('chat', 'user')
+            }
+            chat_ids = {message.chat_id for message in messages.values()}
+            read_at = {
+                state.chat_id: state.last_read_at
+                for state in ChatReadState.objects.filter(user=user, chat_id__in=chat_ids)
+            }
+            muted_chat_ids = set(ChatUserPreference.objects.filter(
+                user=user,
+                chat_id__in=chat_ids,
+                notifications_muted=True,
+            ).values_list('chat_id', flat=True))
+
+            deliverable_events = []
+            for event in events:
+                message_id = int((event.payload or {}).get('message_id') or 0)
+                message = messages.get(message_id)
+                if message is None or message.user_id == user.id or message.chat_id in muted_chat_ids:
+                    continue
+                if not NotificationTopicPreference.is_enabled_for_event(event, pref.channel):
+                    continue
+                last_read_at = read_at.get(message.chat_id)
+                if last_read_at is not None and last_read_at >= message.created_at:
+                    continue
+                if not Message.visible_for_user(message.chat, user).filter(id=message.id).exists():
+                    continue
+                deliverable_events.append(event)
+
+            if not deliverable_events:
+                cursor.last_message_id = snapshot_max_id
+                cursor.save(update_fields=['last_message_id', 'updated_at'])
+                summary['advanced'] += 1
+                continue
+
+            deliveries = []
+            for event in deliverable_events:
+                delivery = NotificationDelivery.objects.filter(event=event, channel=pref.channel).order_by('-id').first()
+                if delivery is None:
+                    delivery = NotificationDelivery.objects.create(event=event, channel=pref.channel)
+                elif delivery.status == NotificationDeliveryStatusChoice.SENT:
+                    continue
+                else:
+                    delivery.status = NotificationDeliveryStatusChoice.PENDING
+                    delivery.detail = None
+                    delivery.save(update_fields=['status', 'detail'])
+                deliveries.append(delivery)
+
+            if deliveries:
+                NotificationDelivery._attempt_send_message_digest(deliveries, pref)
+            if all(delivery.status == NotificationDeliveryStatusChoice.SENT for delivery in deliveries):
+                cursor.last_message_id = snapshot_max_id
+                cursor.save(update_fields=['last_message_id', 'updated_at'])
+                summary['sent'] += len(deliveries)
+                summary['advanced'] += 1
+            else:
+                summary['failed'] += sum(
+                    delivery.status == NotificationDeliveryStatusChoice.FAILED for delivery in deliveries
+                )
+            seen_users.add(user.id)
+        summary['users'] = len(seen_users)
+        return summary
 
 
 class NotificationDelivery(models.Model):
@@ -2670,6 +2805,76 @@ class NotificationDelivery(models.Model):
         if len(body) <= cls.EMAIL_BATCH_BODY_LIMIT:
             return body
         return body[:cls.EMAIL_BATCH_BODY_LIMIT - 1].rstrip() + '…'
+
+    @classmethod
+    def _render_message_digest_body(cls, deliveries, pref: NotificationPreference):
+        lines = []
+        for delivery in deliveries[:cls.EMAIL_BATCH_MESSAGE_LIMIT]:
+            _title, body = delivery.event.render_delivery_message(
+                hide_message_content=bool(pref.hide_message_content),
+                hidden_direct_message_title=pref.hidden_direct_message_title,
+                hidden_direct_message_text=pref.hidden_direct_message_text,
+                hidden_group_message_title=pref.hidden_group_message_title,
+                hidden_group_message_text=pref.hidden_group_message_text,
+            )
+            actor = delivery.event.actor
+            prefix = f'{actor.name}: ' if actor else ''
+            lines.append(f'{prefix}{cls._truncate_email_line(body, limit=72)}')
+        omitted = len(deliveries) - len(lines)
+        if omitted > 0:
+            lines.append(str(_('And {count} more messages.')).format(count=omitted))
+        return '\n'.join(lines)
+
+    @classmethod
+    def _attempt_send_message_digest(cls, deliveries, pref: NotificationPreference):
+        if not deliveries:
+            return []
+        user = deliveries[0].event.user
+        target = cls._channel_target(user, pref.channel)
+        attempted_at = timezone.now()
+        try:
+            with translation.override(user.language):
+                title = cls._render_email_batch_title(deliveries)
+                if pref.channel == UserNotificationChoice.EMAIL:
+                    body = cls._render_email_batch_body(deliveries, pref)
+                    result = notificator.mail(
+                        target,
+                        format='markdown',
+                        title=title,
+                        body=body,
+                        locale=notificator_locale(user.language),
+                        recipient_name=user.name,
+                        action_url=cls._email_action_url(deliveries),
+                        footer_note=str(_('You can adjust email reminders in Notification settings.')),
+                    )
+                    detail = notificator_result_detail(result)
+                elif pref.channel == UserNotificationChoice.SMS:
+                    notificator.sms(target, title=title, body=cls._render_message_digest_body(deliveries, pref))
+                    detail = None
+                elif pref.channel == UserNotificationChoice.BARK:
+                    first = deliveries[0]
+                    notificator.bark(
+                        target,
+                        title=title,
+                        body=cls._render_message_digest_body(deliveries, pref),
+                        icon=first._bark_icon_url(pref),
+                        url=cls._email_action_url(deliveries) if pref.open_chat_on_tap else None,
+                    )
+                    detail = None
+                else:
+                    raise ValueError('unsupported_channel')
+            status = NotificationDeliveryStatusChoice.SENT
+        except Exception as err:
+            status = NotificationDeliveryStatusChoice.FAILED
+            detail = str(err)
+        detail = str(detail)[:255] if detail else None
+        ids = [delivery.id for delivery in deliveries]
+        cls.objects.filter(id__in=ids).update(status=status, detail=detail, attempted_at=attempted_at)
+        for delivery in deliveries:
+            delivery.status = status
+            delivery.detail = detail
+            delivery.attempted_at = attempted_at
+        return deliveries
 
     @classmethod
     def _attempt_send_email_batch(cls, user: User, pref: NotificationPreference, limit=50):
