@@ -5,6 +5,7 @@ from django.test import TestCase
 from django.utils import timezone
 
 from Chat.models import Chat, ChatMember, ChatMemberStatusChoice, ChatReadState, ChatTypeChoice, ChatUserPreference
+from Friendship.models import Friendship
 from Message.models import Message, MessageTypeChoice
 from Space.models import Space
 from User.models import (
@@ -45,10 +46,28 @@ class NotificationDigestTests(TestCase):
             last_message_id=Message.objects.order_by('-id').values_list('id', flat=True).first() or 0,
         )
 
-    def create_notified_message(self, text):
-        message = Message.create(self.chat, self.sender, MessageTypeChoice.TEXT, text)
-        NotificationEvent.emit_message_notifications(message, actor=self.sender, enqueue=False)
+    def create_notified_message(self, text, chat=None, sender=None):
+        chat = chat or self.chat
+        sender = sender or self.sender
+        message = Message.create(chat, sender, MessageTypeChoice.TEXT, text)
+        NotificationEvent.emit_message_notifications(message, actor=sender, enqueue=False)
         return message
+
+    def create_direct_chat(self, sender):
+        Friendship.ensure_locked_friendship(sender, self.recipient)
+        return Chat.get_or_create_direct(sender, self.recipient)
+
+    def create_group_chat(self, title):
+        chat = Chat.objects.create(
+            space=self.space,
+            chat_type=ChatTypeChoice.GROUP,
+            title=title,
+            created_by=self.sender,
+        )
+        joined_at = timezone.now() - timedelta(minutes=1)
+        ChatMember.objects.create(chat=chat, user=self.sender, status=ChatMemberStatusChoice.ACTIVE, joined_at=joined_at)
+        ChatMember.objects.create(chat=chat, user=self.recipient, status=ChatMemberStatusChoice.ACTIVE, joined_at=joined_at)
+        return chat
 
     @patch('User.models.notificator.mail', return_value={'request_id': 'digest-1'})
     def test_due_messages_are_merged_and_cursor_advances(self, mail):
@@ -86,3 +105,31 @@ class NotificationDigestTests(TestCase):
         mail.assert_not_called()
         cursor = NotificationChannelCursor.objects.get(user=self.recipient, channel=UserNotificationChoice.EMAIL)
         self.assertEqual(cursor.last_message_id, message.id)
+
+    @patch('User.models.notificator.mail', return_value={'request_id': 'digest-order'})
+    def test_digest_prioritizes_pinned_then_direct_and_limits_each_chat(self, mail):
+        self.recipient.language = 'en'
+        self.recipient.save(update_fields=['language'])
+        self.create_notified_message('ordinary-group-omitted')
+        direct_sender_a = User.create(self.space, 'Direct A', verified=True)
+        direct_sender_b = User.create(self.space, 'Direct B', verified=True)
+        direct_a = self.create_direct_chat(direct_sender_a)
+        direct_b = self.create_direct_chat(direct_sender_b)
+        self.create_notified_message('direct-a-first', chat=direct_a, sender=direct_sender_a)
+        self.create_notified_message('direct-b-first', chat=direct_b, sender=direct_sender_b)
+        pinned = self.create_group_chat('Pinned group')
+        ChatUserPreference.update(pinned, self.recipient, pinned=True)
+        for index in range(1, 7):
+            self.create_notified_message(f'pinned-{index}', chat=pinned)
+
+        NotificationChannelCursor.process_due()
+
+        body = mail.call_args.kwargs['body']
+        self.assertLess(body.index('Pinned group'), body.index('Direct A'))
+        self.assertLess(body.index('Direct A'), body.index('Direct B'))
+        self.assertIn('pinned\\-1', body)
+        self.assertIn('pinned\\-5', body)
+        self.assertNotIn('pinned\\-6', body)
+        self.assertNotIn('ordinary\\-group\\-omitted', body)
+        self.assertIn('And 2 more messages.', body)
+        self.assertEqual(NotificationDelivery.objects.filter(status=1).count(), 9)

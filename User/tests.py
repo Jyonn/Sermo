@@ -233,7 +233,8 @@ class NotificatorIntegrationTests(SimpleTestCase):
             recipient_name='读者',
         )
 
-    def test_message_email_is_grouped_markdown_without_content_leak(self):
+    @patch('User.models.NotificationDelivery._message_digest_groups')
+    def test_message_email_is_grouped_markdown_without_content_leak(self, digest_groups):
         actor = SimpleNamespace(id=8, name='Fly')
         event = SimpleNamespace(
             actor=actor,
@@ -252,6 +253,13 @@ class NotificatorIntegrationTests(SimpleTestCase):
             friend_online_message_title='',
             friend_online_message_text='',
         )
+        digest_groups.return_value = ([dict(
+            name='Fly',
+            chat=SimpleNamespace(group=False),
+            deliveries=deliveries,
+            selected=deliveries,
+            total_count=2,
+        )], 0)
 
         body = NotificationDelivery._render_email_batch_body(deliveries, preference)
 

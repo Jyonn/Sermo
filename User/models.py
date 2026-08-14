@@ -2631,7 +2631,8 @@ class NotificationChannelCursor(models.Model):
 
 
 class NotificationDelivery(models.Model):
-    EMAIL_BATCH_MESSAGE_LIMIT = 8
+    DIGEST_CHAT_LIMIT = 3
+    DIGEST_MESSAGE_LIMIT_PER_CHAT = 5
     EMAIL_BATCH_BODY_LIMIT = 1200
     MESSAGE_EVENT_TYPES = (
         NotificationEventTypeChoice.DIRECT_MESSAGE,
@@ -2749,68 +2750,99 @@ class NotificationDelivery(models.Model):
 
     @classmethod
     def _render_email_batch_title(cls, deliveries):
-        names = []
-        seen = set()
-        for delivery in deliveries:
-            actor = delivery.event.actor
-            actor_id = getattr(delivery.event, 'actor_id', None)
-            name = actor.name if actor_id else ''
-            if not actor_id or not name or actor_id in seen:
-                continue
-            seen.add(actor_id)
-            names.append(name)
-
+        groups, _omitted = cls._message_digest_groups(deliveries)
+        names = [group['name'] for group in groups]
         if not names:
             return str(_('New messages'))
         if len(names) == 1:
-            return str(_('Messages from {name}').format(name=names[0]))
+            return str(_('New messages from {name}').format(name=names[0]))
         if len(names) == 2:
-            return str(_('Messages from {first} and {second}').format(first=names[0], second=names[1]))
-        return str(_('Messages from {name} and {count} people').format(name=names[0], count=len(names)))
+            return str(_('New messages from {first} and {second}').format(first=names[0], second=names[1]))
+        return str(_('New messages from {name} and {count} chats').format(name=names[0], count=len(names) - 1))
+
+    @classmethod
+    def _message_digest_groups(cls, deliveries):
+        from Chat.models import Chat, ChatTypeChoice, ChatUserPreference
+
+        if not deliveries:
+            return [], 0
+        user = deliveries[0].event.user
+        grouped = {}
+        for delivery in deliveries:
+            payload = delivery.event.payload or {}
+            chat_id = int(payload.get('chat_id') or 0)
+            if chat_id <= 0:
+                continue
+            message_id = int(payload.get('message_id') or 0)
+            group = grouped.setdefault(chat_id, dict(
+                chat_id=chat_id,
+                deliveries=[],
+                first_message_id=message_id or delivery.event_id,
+            ))
+            group['deliveries'].append(delivery)
+            group['first_message_id'] = min(group['first_message_id'], message_id or delivery.event_id)
+
+        chat_ids = list(grouped)
+        chats = Chat.objects.in_bulk(chat_ids)
+        pinned_chat_ids = set(ChatUserPreference.objects.filter(
+            user=user,
+            chat_id__in=chat_ids,
+            pinned=True,
+        ).values_list('chat_id', flat=True))
+        valid_groups = []
+        for chat_id, group in grouped.items():
+            chat = chats.get(chat_id)
+            if chat is None:
+                continue
+            group['chat'] = chat
+            group['pinned'] = chat_id in pinned_chat_ids
+            group['deliveries'].sort(key=lambda item: (
+                int((item.event.payload or {}).get('message_id') or 0),
+                item.event_id,
+            ))
+            if chat.chat_type == ChatTypeChoice.GROUP:
+                group['name'] = chat.title or str(_('Group chat'))
+            else:
+                actor = next((item.event.actor for item in group['deliveries'] if item.event.actor_id), None)
+                group['name'] = actor.name if actor else str(_('Direct chat'))
+            valid_groups.append(group)
+
+        valid_groups.sort(key=lambda group: (
+            0 if group['pinned'] else 1,
+            0 if group['chat'].chat_type == ChatTypeChoice.DIRECT else 1,
+            group['first_message_id'],
+        ))
+        selected_groups = valid_groups[:cls.DIGEST_CHAT_LIMIT]
+        selected_count = 0
+        for group in selected_groups:
+            group['total_count'] = len(group['deliveries'])
+            group['selected'] = group['deliveries'][:cls.DIGEST_MESSAGE_LIMIT_PER_CHAT]
+            selected_count += len(group['selected'])
+        omitted = max(0, len(deliveries) - selected_count)
+        return selected_groups, omitted
 
     @classmethod
     def _render_email_batch_body(cls, deliveries, pref: NotificationPreference):
-        grouped = []
-        indexes = {}
+        grouped, omitted = cls._message_digest_groups(deliveries)
         hide_message_content = bool(pref.hide_message_content)
-        for delivery in deliveries:
-            actor = delivery.event.actor
-            actor_key = getattr(delivery.event, 'actor_id', None) or f'event-{delivery.event_id}'
-            actor_name = actor.name if actor else str(_('Someone'))
-            if actor_key not in indexes:
-                indexes[actor_key] = len(grouped)
-                grouped.append(dict(name=actor_name, items=[]))
-            _title, body = delivery.event.render_delivery_message(
-                hide_message_content=hide_message_content,
-                hidden_direct_message_title=pref.hidden_direct_message_title,
-                hidden_direct_message_text=pref.hidden_direct_message_text,
-                hidden_group_message_title=pref.hidden_group_message_title,
-                hidden_group_message_text=pref.hidden_group_message_text,
-                friend_online_message_title=pref.friend_online_message_title,
-                friend_online_message_text=pref.friend_online_message_text,
-            )
-            grouped[indexes[actor_key]]['items'].append(body)
-
         total = len(deliveries)
         lines = [f'## {_("{count} unread messages").format(count=total)}', '']
-        remaining = cls.EMAIL_BATCH_MESSAGE_LIMIT
-        omitted = 0
         for group in grouped:
-            if remaining <= 0:
-                omitted += len(group['items'])
-                continue
-            items = group['items']
             safe_name = cls._escape_email_markdown(group['name'])
-            lines.append(f'**{safe_name}** · {_("{count} messages").format(count=len(items))}')
-            if hide_message_content:
-                remaining -= min(len(items), remaining)
-            else:
-                for item in items[:remaining]:
-                    preview = cls._escape_email_markdown(cls._truncate_email_line(item))
+            lines.append(f'**{safe_name}** · {_("{count} messages").format(count=group["total_count"])}')
+            if not hide_message_content:
+                for delivery in group['selected']:
+                    _title, body = delivery.event.render_delivery_message(
+                        hide_message_content=False,
+                        hidden_direct_message_title=pref.hidden_direct_message_title,
+                        hidden_direct_message_text=pref.hidden_direct_message_text,
+                        hidden_group_message_title=pref.hidden_group_message_title,
+                        hidden_group_message_text=pref.hidden_group_message_text,
+                    )
+                    actor = delivery.event.actor
+                    prefix = f'{actor.name}: ' if actor and group['chat'].group else ''
+                    preview = cls._escape_email_markdown(cls._truncate_email_line(f'{prefix}{body}'))
                     lines.append(f'> {preview}')
-                if len(items) > remaining:
-                    omitted += len(items) - remaining
-                remaining -= min(len(items), remaining)
             lines.append('')
 
         if omitted > 0:
@@ -2823,19 +2855,22 @@ class NotificationDelivery(models.Model):
 
     @classmethod
     def _render_message_digest_body(cls, deliveries, pref: NotificationPreference):
+        grouped, omitted = cls._message_digest_groups(deliveries)
         lines = []
-        for delivery in deliveries[:cls.EMAIL_BATCH_MESSAGE_LIMIT]:
-            _title, body = delivery.event.render_delivery_message(
-                hide_message_content=bool(pref.hide_message_content),
-                hidden_direct_message_title=pref.hidden_direct_message_title,
-                hidden_direct_message_text=pref.hidden_direct_message_text,
-                hidden_group_message_title=pref.hidden_group_message_title,
-                hidden_group_message_text=pref.hidden_group_message_text,
-            )
-            actor = delivery.event.actor
-            prefix = f'{actor.name}: ' if actor else ''
-            lines.append(f'{prefix}{cls._truncate_email_line(body, limit=72)}')
-        omitted = len(deliveries) - len(lines)
+        for group in grouped:
+            lines.append(f'{group["name"]} · {group["total_count"]}')
+            if not pref.hide_message_content:
+                for delivery in group['selected']:
+                    _title, body = delivery.event.render_delivery_message(
+                        hide_message_content=False,
+                        hidden_direct_message_title=pref.hidden_direct_message_title,
+                        hidden_direct_message_text=pref.hidden_direct_message_text,
+                        hidden_group_message_title=pref.hidden_group_message_title,
+                        hidden_group_message_text=pref.hidden_group_message_text,
+                    )
+                    actor = delivery.event.actor
+                    prefix = f'{actor.name}: ' if actor and group['chat'].group else ''
+                    lines.append(cls._truncate_email_line(f'{prefix}{body}', limit=72))
         if omitted > 0:
             lines.append(str(_('And {count} more messages.')).format(count=omitted))
         return '\n'.join(lines)

@@ -838,3 +838,18 @@ msgstr "%(actor)s 置顶了一条消息"
 
 msgid "%(actor)s unpinned a message"
 msgstr "%(actor)s 取消置顶一条消息"
+
+msgid "Group chat"
+msgstr "群聊"
+
+msgid "Direct chat"
+msgstr "私聊"
+
+msgid "New messages from {name}"
+msgstr "来自 {name} 的新消息"
+
+msgid "New messages from {first} and {second}"
+msgstr "来自 {first} 和 {second} 的新消息"
+
+msgid "New messages from {name} and {count} chats"
+msgstr "来自 {name} 等 {count} 个会话的新消息"
