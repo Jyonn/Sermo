@@ -9,6 +9,7 @@ from Chat.models import Chat, ChatMember, ChatMemberRoleChoice, ChatMemberStatus
 from Config.models import Config, ConfigInstance
 from Message.models import Message, MessageEvent, MessageTypeChoice, MessageUserState, PinnedMessage
 from Space.models import Space, SpacePhoneVerificationCode
+from Square.models import Statement, StatementComment, StatementCommentLike, StatementLike
 from User.models import GrowthEvent, NotificationPreference, User, UserEmojiUsage, UserNotificationChoice
 from User.growth import GROWTH_THRESHOLDS
 from utils import auth
@@ -121,6 +122,40 @@ class SpaceAdminApiTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 403, response.content)
+
+    def test_removing_member_hides_square_content_and_clears_reactions(self):
+        other = User.create(self.space, 'Other member', verified=True)
+        statement = Statement.create_statement(self.member, '即将被清理的发言', 'public', [])
+        other_statement = Statement.create_statement(other, '保留的发言', 'public', [])
+        comment = StatementComment.create_comment(self.member, other_statement.id, '即将被清理的评论')
+        StatementLike.objects.create(statement=other_statement, user=self.member)
+        StatementCommentLike.objects.create(comment=comment, user=self.member)
+
+        response = self.client.delete(
+            f'/spaces/admin/users/remove?user_id={self.member.id}',
+            **self.authorization(),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        statement.refresh_from_db()
+        comment.refresh_from_db()
+        self.assertTrue(statement.is_deleted)
+        self.assertTrue(comment.is_deleted)
+        self.assertFalse(StatementLike.objects.filter(user=self.member).exists())
+        self.assertFalse(StatementCommentLike.objects.filter(user=self.member).exists())
+        self.assertFalse(Statement.visible_for(other).filter(id=statement.id).exists())
+
+    def test_deleted_member_with_square_residue_can_be_removed_again(self):
+        statement = Statement.create_statement(self.member, '历史遗留发言', 'public', [])
+        self.member.is_deleted = True
+        self.member.save(update_fields=['is_deleted'])
+
+        self.assertTrue(self.member.has_removal_residue())
+        self.member.remove()
+
+        statement.refresh_from_db()
+        self.assertTrue(statement.is_deleted)
+        self.assertFalse(self.member.has_removal_residue())
 
     @patch('User.models.NotificationEvent._enqueue_deliveries_after_commit')
     def test_broadcast_is_idempotent(self, enqueue):

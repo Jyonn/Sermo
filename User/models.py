@@ -808,6 +808,7 @@ class User(models.Model):
     def _cleanup_relations_for_removal(self):
         from Friendship.models import Friendship, FriendshipStatusChoice
         from Chat.models import ChatMember, ChatMemberStatusChoice
+        from Square.models import Statement, StatementComment, StatementCommentLike, StatementLike
 
         current_time = timezone.now()
 
@@ -841,9 +842,15 @@ class User(models.Model):
             updated_at=current_time,
         )
 
+        Statement.objects.filter(user=self, is_deleted=False).update(is_deleted=True)
+        StatementComment.objects.filter(user=self, is_deleted=False).update(is_deleted=True)
+        StatementLike.objects.filter(user=self).delete()
+        StatementCommentLike.objects.filter(user=self).delete()
+
     def has_removal_residue(self):
         from Friendship.models import Friendship, FriendshipStatusChoice
         from Chat.models import ChatMember, ChatMemberStatusChoice
+        from Square.models import Statement, StatementComment, StatementCommentLike, StatementLike
 
         if Friendship.objects.filter(
             space=self.space,
@@ -854,10 +861,18 @@ class User(models.Model):
         ).exists():
             return True
 
-        return ChatMember.objects.filter(
+        if ChatMember.objects.filter(
             user=self,
             status__in=(ChatMemberStatusChoice.ACTIVE, ChatMemberStatusChoice.PENDING),
-        ).exists()
+        ).exists():
+            return True
+
+        return (
+            Statement.objects.filter(user=self, is_deleted=False).exists()
+            or StatementComment.objects.filter(user=self, is_deleted=False).exists()
+            or StatementLike.objects.filter(user=self).exists()
+            or StatementCommentLike.objects.filter(user=self).exists()
+        )
 
     def remove(self):
         if self.role == UserRoleChoice.OFFICIAL:
