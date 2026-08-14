@@ -332,6 +332,40 @@ class NotificationEventDeliveryTests(SimpleTestCase):
         self.assertEqual(title, '好友来了')
         self.assertEqual(body, '快去聊天')
 
+    def test_web_push_direct_message_uses_friend_name_and_natural_media_text(self):
+        recipient = User(id=1, language='zh-CN')
+        actor = User(id=2, name='Fly')
+        event = NotificationEvent(
+            user=recipient,
+            actor=actor,
+            event_type=NotificationEventTypeChoice.DIRECT_MESSAGE,
+            payload={'message_type': 1, 'content': '[图片]'},
+        )
+
+        title, body = WebPushDelivery(event=event)._notification_text()
+
+        self.assertEqual(title, 'Fly')
+        self.assertEqual(body, '发送了一张图片。')
+
+    def test_web_push_group_message_uses_group_name_and_sender_prefix(self):
+        recipient = User(id=1, language='zh-CN')
+        actor = User(id=2, name='Fly')
+        event = NotificationEvent(
+            user=recipient,
+            actor=actor,
+            event_type=NotificationEventTypeChoice.GROUP_MESSAGE,
+            payload={
+                'chat_name': '一百二十五星俱乐部',
+                'message_type': 0,
+                'content': '晚上集合',
+            },
+        )
+
+        title, body = WebPushDelivery(event=event)._notification_text()
+
+        self.assertEqual(title, '一百二十五星俱乐部')
+        self.assertEqual(body, 'Fly：晚上集合')
+
     @patch('User.models.threading.Thread')
     @patch('User.models.transaction.on_commit')
     def test_delivery_thread_starts_only_after_commit(self, on_commit, thread):

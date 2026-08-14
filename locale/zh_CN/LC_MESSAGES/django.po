@@ -853,3 +853,33 @@ msgstr "来自 {first} 和 {second} 的新消息"
 
 msgid "New messages from {name} and {count} chats"
 msgstr "来自 {name} 等 {count} 个会话的新消息"
+
+msgid "Sent a photo."
+msgstr "发送了一张图片。"
+
+msgid "Sent a video."
+msgstr "发送了一段视频。"
+
+msgid "Sent a voice message."
+msgstr "发送了一条语音。"
+
+msgid "Sent a file."
+msgstr "发送了一个文件。"
+
+msgid "Shared a location."
+msgstr "分享了一个位置。"
+
+msgid "Shared a footprint map."
+msgstr "分享了足迹地图。"
+
+msgid "Shared a statement."
+msgstr "分享了一条发言。"
+
+msgid "Sent a sticker."
+msgstr "发送了一个表情包。"
+
+msgid "Sent a message."
+msgstr "发送了一条消息。"
+
+msgid "{name}: {message}"
+msgstr "{name}：{message}"

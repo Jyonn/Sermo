@@ -2427,6 +2427,7 @@ class NotificationEvent(models.Model):
         event_type = cls._message_event_type(message.chat)
         payload = dict(
             chat_id=message.chat_id,
+            chat_name=message.chat.title or '',
             message_id=message.id,
             message_type=message.type,
             content=message.preview_text(),
@@ -3183,10 +3184,39 @@ class WebPushDelivery(models.Model):
         )
         return payload
 
+    def _notification_text(self):
+        from Message.models import MessageTypeChoice
+
+        event = self.event
+        payload = event.payload or {}
+        language = event.user.language if event.user_id else translation.get_language()
+        with translation.override(language):
+            actor_name = event.actor.name if event.actor_id else ''
+            message_type = payload.get('message_type')
+            natural_bodies = {
+                MessageTypeChoice.IMAGE: _('Sent a photo.'),
+                MessageTypeChoice.VIDEO: _('Sent a video.'),
+                MessageTypeChoice.AUDIO: _('Sent a voice message.'),
+                MessageTypeChoice.FILE: _('Sent a file.'),
+                MessageTypeChoice.LOCATION: _('Shared a location.'),
+                MessageTypeChoice.MAP_ACCESS: _('Shared a footprint map.'),
+                MessageTypeChoice.STATEMENT: _('Shared a statement.'),
+                MessageTypeChoice.STICKER: _('Sent a sticker.'),
+            }
+            body = natural_bodies.get(message_type) or payload.get('content') or _('Sent a message.')
+            if event.event_type == NotificationEventTypeChoice.DIRECT_MESSAGE:
+                return str(actor_name or _('New direct message')), str(body)
+            if event.event_type == NotificationEventTypeChoice.GROUP_MESSAGE:
+                title = payload.get('chat_name') or _('Group chat')
+                if actor_name:
+                    body = _('{name}: {message}').format(name=actor_name, message=body)
+                return str(title), str(body)
+            return event.render_delivery_message()
+
     def _attempt_send(self):
         from utils.webpush import WebPushNotConfigured, is_expired_subscription_error, send_web_push
 
-        title, body = self.event.render_delivery_message()
+        title, body = self._notification_text()
         try:
             send_web_push(
                 subscription=self.subscription,
