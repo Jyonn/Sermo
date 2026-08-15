@@ -365,6 +365,16 @@ msgstr "You have a new notification."
 msgid "New messages"
 msgstr "New messages"
 
+msgid "New message"
+msgstr "New message"
+
+msgid "You received a message."
+msgstr "You received a message."
+
+#, python-brace-format
+msgid "You received {message_count} messages from {chat_count} conversations."
+msgstr "You received {message_count} messages from {chat_count} conversations."
+
 #, python-brace-format
 msgid "Messages from {name}"
 msgstr "Messages from {name}"

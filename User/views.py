@@ -218,12 +218,6 @@ class NotificationPreferenceView(View):
         NotificationPreferenceParams.enabled,
         NotificationPreferenceParams.offline_threshold_minutes,
         NotificationPreferenceParams.hide_message_content,
-        NotificationPreferenceParams.hidden_direct_message_title,
-        NotificationPreferenceParams.hidden_direct_message_text,
-        NotificationPreferenceParams.hidden_group_message_title,
-        NotificationPreferenceParams.hidden_group_message_text,
-        NotificationPreferenceParams.friend_online_message_title,
-        NotificationPreferenceParams.friend_online_message_text,
         NotificationPreferenceParams.open_chat_on_tap,
         NotificationPreferenceParams.bark_icon_mode,
     )
@@ -232,28 +226,12 @@ class NotificationPreferenceView(View):
         enabled = request.json.enabled
         hide_message_content = request.json.hide_message_content
         open_chat_on_tap = request.json.open_chat_on_tap
-        custom_message_values = (
-            request.json.hidden_direct_message_title,
-            request.json.hidden_direct_message_text,
-            request.json.hidden_group_message_title,
-            request.json.hidden_group_message_text,
-            request.json.friend_online_message_title,
-            request.json.friend_online_message_text,
-        )
-        if any(value is not None for value in custom_message_values):
-            request.user.require_growth_capability('custom_notification_message')
         pref = NotificationPreference.set_preference(
             user=request.user,
             channel=request.json.channel,
             enabled=None if enabled is None else bool(enabled),
             offline_threshold_minutes=request.json.offline_threshold_minutes,
             hide_message_content=None if hide_message_content is None else bool(hide_message_content),
-            hidden_direct_message_title=request.json.hidden_direct_message_title,
-            hidden_direct_message_text=request.json.hidden_direct_message_text,
-            hidden_group_message_title=request.json.hidden_group_message_title,
-            hidden_group_message_text=request.json.hidden_group_message_text,
-            friend_online_message_title=request.json.friend_online_message_title,
-            friend_online_message_text=request.json.friend_online_message_text,
             open_chat_on_tap=None if open_chat_on_tap is None else bool(open_chat_on_tap),
             bark_icon_mode=request.json.bark_icon_mode,
         )

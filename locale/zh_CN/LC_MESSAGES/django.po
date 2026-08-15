@@ -366,6 +366,16 @@ msgstr "你有一条新通知。"
 msgid "New messages"
 msgstr "新消息"
 
+msgid "New message"
+msgstr "新消息"
+
+msgid "You received a message."
+msgstr "你收到了一条消息。"
+
+#, python-brace-format
+msgid "You received {message_count} messages from {chat_count} conversations."
+msgstr "收到来自{chat_count}个会话的{message_count}条消息。"
+
 #, python-brace-format
 msgid "Messages from {name}"
 msgstr "来自 {name} 的消息"

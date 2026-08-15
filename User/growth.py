@@ -111,7 +111,6 @@ GROWTH_CAPABILITY_LEVELS = {
     'download_audio': 8,
     'chat_background': 1,
     'custom_chat_background': 8,
-    'custom_notification_message': 10,
 }
 
 CHAT_BACKGROUND_LEVELS = {
@@ -186,7 +185,7 @@ LEVEL_REWARDS = {
     7: [_reward('capability.online', 7, 'capability', '好友上线提醒', 'rare', capability_key='online_reminder'), _reward('background.hero', 7, 'background', '英雄背景', 'uncommon', 'hero'), _reward('bubble.newspaper', 7, 'bubble', '报纸气泡', 'uncommon', 'newspaper'), _reward('frame.aurora', 7, 'frame', '极光头像框', 'epic', 'aurora')],
     8: [_reward('capability.audio_download', 8, 'capability', '下载语音', 'uncommon', capability_key='download_audio'), _reward('capability.nickname_30', 8, 'capability', '昵称每 30 天可改', 'rare', capability_key='rename_nickname'), _reward('capability.custom_background', 8, 'capability', '上传自定义聊天背景', 'epic', capability_key='custom_chat_background'), _reward('background.dragon', 8, 'background', '游龙背景', 'uncommon', 'dragon'), _reward('background.bauhaus', 8, 'background', '包豪斯背景', 'uncommon', 'bauhaus'), _reward('bubble.toybrick', 8, 'bubble', '玩具积木气泡', 'rare', 'toybrick'), _reward('frame.moon', 8, 'frame', '月相头像框', 'rare', 'moon')],
     9: [_reward('background.mosaic', 9, 'background', '马赛克背景', 'uncommon', 'mosaic'), _reward('background.tidepool', 9, 'background', '潮池背景', 'rare', 'tidepool'), _reward('bubble.hero', 9, 'bubble', '英雄气泡', 'rare', 'hero'), _reward('frame.papercut', 9, 'frame', '剪纸头像框', 'rare', 'papercut')],
-    10: [_reward('capability.notification', 10, 'capability', '自定义消息通知', 'epic', capability_key='custom_notification_message'), _reward('background.forest', 10, 'background', '森林背景', 'rare', 'forest'), _reward('background.desert', 10, 'background', '沙漠背景', 'rare', 'desert'), _reward('bubble.bauhaus', 10, 'bubble', '包豪斯气泡', 'rare', 'bauhaus'), _reward('frame.comet', 10, 'frame', '彗星头像框', 'legendary', 'comet')],
+    10: [_reward('background.forest', 10, 'background', '森林背景', 'rare', 'forest'), _reward('background.desert', 10, 'background', '沙漠背景', 'rare', 'desert'), _reward('bubble.bauhaus', 10, 'bubble', '包豪斯气泡', 'rare', 'bauhaus'), _reward('frame.comet', 10, 'frame', '彗星头像框', 'legendary', 'comet')],
     11: [_reward('background.sunrise', 11, 'background', '日出背景', 'rare', 'sunrise'), _reward('background.snowfield', 11, 'background', '雪原背景', 'rare', 'snowfield'), _reward('bubble.receipt', 11, 'bubble', '小票气泡', 'rare', 'receipt'), _reward('frame.snowfall', 11, 'frame', '落雪头像框', 'epic', 'snowfall')],
     12: [_reward('capability.nickname_7', 12, 'capability', '昵称每 7 天可改', 'epic', capability_key='rename_nickname'), _reward('background.sakura', 12, 'background', '樱花背景', 'rare', 'sakura'), _reward('background.midnight', 12, 'background', '午夜背景', 'rare', 'midnight'), _reward('bubble.dragon', 12, 'bubble', '游龙气泡', 'epic', 'dragon'), _reward('frame.portal', 12, 'frame', '传送门头像框', 'epic', 'portal'), _reward('profile.card_theme', 12, 'identity', '个人名片主题系统', 'legendary', status='planned')],
     13: [_reward('background.rain', 13, 'background', '雨幕背景', 'rare', 'rain'), _reward('background.galaxy', 13, 'background', '星系背景', 'rare', 'galaxy'), _reward('bubble.mosaic', 13, 'bubble', '马赛克气泡', 'epic', 'mosaic'), _reward('frame.mechanical', 13, 'frame', '机械头像框', 'epic', 'mechanical')],

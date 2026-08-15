@@ -492,8 +492,6 @@ class User(models.Model):
         return min(self._growth_level_for_score(score), self.growth_level_cap()[0])
 
     def has_growth_capability(self, capability):
-        if capability == 'custom_notification_message' and self.is_permanent_vip:
-            return True
         return self.effective_growth_level() >= GROWTH_CAPABILITY_LEVELS[capability]
 
     def require_growth_capability(self, capability):
@@ -1109,7 +1107,6 @@ class User(models.Model):
                     required_level=required_level,
                     available=(
                         level >= required_level
-                        or (key == 'custom_notification_message' and self.is_permanent_vip)
                     ),
                 )
                 for key, required_level in GROWTH_CAPABILITY_LEVELS.items()
@@ -1921,12 +1918,6 @@ class NotificationPreference(models.Model):
     enabled = models.BooleanField(default=False)
     offline_threshold_minutes = models.PositiveIntegerField(default=30)
     hide_message_content = models.BooleanField(default=False)
-    hidden_direct_message_title = models.CharField(max_length=80, blank=True, default='')
-    hidden_direct_message_text = models.CharField(max_length=255, blank=True, default='')
-    hidden_group_message_title = models.CharField(max_length=80, blank=True, default='')
-    hidden_group_message_text = models.CharField(max_length=255, blank=True, default='')
-    friend_online_message_title = models.CharField(max_length=80, blank=True, default='')
-    friend_online_message_text = models.CharField(max_length=255, blank=True, default='')
     open_chat_on_tap = models.BooleanField(default=True)
     bark_icon_mode = models.PositiveSmallIntegerField(default=BARK_ICON_SPACE)
     updated_at = models.DateTimeField(auto_now=True)
@@ -1977,12 +1968,6 @@ class NotificationPreference(models.Model):
         enabled=None,
         offline_threshold_minutes=None,
         hide_message_content=None,
-        hidden_direct_message_title=None,
-        hidden_direct_message_text=None,
-        hidden_group_message_title=None,
-        hidden_group_message_text=None,
-        friend_online_message_title=None,
-        friend_online_message_text=None,
         open_chat_on_tap=None,
         bark_icon_mode=None,
     ):
@@ -1993,12 +1978,6 @@ class NotificationPreference(models.Model):
                 enabled=cls._default_enabled(user, channel),
                 offline_threshold_minutes=cls._default_threshold(channel),
                 hide_message_content=False,
-                hidden_direct_message_title='',
-                hidden_direct_message_text='',
-                hidden_group_message_title='',
-                hidden_group_message_text='',
-                friend_online_message_title='',
-                friend_online_message_text='',
                 open_chat_on_tap=True,
                 bark_icon_mode=cls.BARK_ICON_SPACE,
             ),
@@ -2014,24 +1993,6 @@ class NotificationPreference(models.Model):
         if hide_message_content is not None:
             pref.hide_message_content = bool(hide_message_content)
             updates.append('hide_message_content')
-        if hidden_direct_message_title is not None:
-            pref.hidden_direct_message_title = hidden_direct_message_title.strip()
-            updates.append('hidden_direct_message_title')
-        if hidden_direct_message_text is not None:
-            pref.hidden_direct_message_text = hidden_direct_message_text.strip()
-            updates.append('hidden_direct_message_text')
-        if hidden_group_message_title is not None:
-            pref.hidden_group_message_title = hidden_group_message_title.strip()
-            updates.append('hidden_group_message_title')
-        if hidden_group_message_text is not None:
-            pref.hidden_group_message_text = hidden_group_message_text.strip()
-            updates.append('hidden_group_message_text')
-        if friend_online_message_title is not None:
-            pref.friend_online_message_title = friend_online_message_title.strip()
-            updates.append('friend_online_message_title')
-        if friend_online_message_text is not None:
-            pref.friend_online_message_text = friend_online_message_text.strip()
-            updates.append('friend_online_message_text')
         if open_chat_on_tap is not None:
             pref.open_chat_on_tap = bool(open_chat_on_tap)
             updates.append('open_chat_on_tap')
@@ -2055,12 +2016,6 @@ class NotificationPreference(models.Model):
             'enabled',
             'offline_threshold_minutes',
             'hide_message_content',
-            'hidden_direct_message_title',
-            'hidden_direct_message_text',
-            'hidden_group_message_title',
-            'hidden_group_message_text',
-            'friend_online_message_title',
-            'friend_online_message_text',
             'open_chat_on_tap',
             'bark_icon_mode',
         )
@@ -2302,43 +2257,23 @@ class NotificationEvent(models.Model):
     def render_delivery_message(
         self,
         hide_message_content=False,
-        hidden_direct_message_title='',
-        hidden_direct_message_text='',
-        hidden_group_message_title='',
-        hidden_group_message_text='',
-        friend_online_message_title='',
-        friend_online_message_text='',
     ):
         language = self.user.language if self.user_id else translation.get_language()
         with translation.override(language):
             return self._render_delivery_message(
                 hide_message_content=hide_message_content,
-                hidden_direct_message_title=hidden_direct_message_title,
-                hidden_direct_message_text=hidden_direct_message_text,
-                hidden_group_message_title=hidden_group_message_title,
-                hidden_group_message_text=hidden_group_message_text,
-                friend_online_message_title=friend_online_message_title,
-                friend_online_message_text=friend_online_message_text,
             )
 
     def _render_delivery_message(
         self,
         hide_message_content=False,
-        hidden_direct_message_title='',
-        hidden_direct_message_text='',
-        hidden_group_message_title='',
-        hidden_group_message_text='',
-        friend_online_message_title='',
-        friend_online_message_text='',
     ):
         payload = self.payload or {}
         actor_name = self.actor.name if self.actor_id else None
 
         if self.event_type == NotificationEventTypeChoice.DIRECT_MESSAGE:
             if hide_message_content:
-                return str(hidden_direct_message_title.strip() or _('New direct message')), str(
-                    hidden_direct_message_text.strip() or _('You received a new direct message.')
-                )
+                return str(_('New message')), str(_('You received a message.'))
             title = _('New direct message')
             body = payload.get('content') or _('You have received a new direct message.')
             if actor_name:
@@ -2347,9 +2282,7 @@ class NotificationEvent(models.Model):
 
         if self.event_type == NotificationEventTypeChoice.GROUP_MESSAGE:
             if hide_message_content:
-                return str(hidden_group_message_title.strip() or _('New group message')), str(
-                    hidden_group_message_text.strip() or _('You received a new group message.')
-                )
+                return str(_('New message')), str(_('You received a message.'))
             title = _('New group message')
             body = payload.get('content') or _('You have received a new group message.')
             if actor_name:
@@ -2384,8 +2317,8 @@ class NotificationEvent(models.Model):
                 body = _('A user rejected your group invite.')
             return str(title), str(body)
         if kind == 'peer_online':
-            title = friend_online_message_title.strip() or _('Friend online')
-            body = friend_online_message_text.strip() or _('{name} is online now.').format(name=actor_name or _('Your friend'))
+            title = _('Friend online')
+            body = _('{name} is online now.').format(name=actor_name or _('Your friend'))
             return str(title), str(body)
 
         square_messages = {
@@ -2757,7 +2690,9 @@ class NotificationDelivery(models.Model):
         return f'{FRONTEND_BASE_URL}/{space_slug}/app/menu'
 
     @classmethod
-    def _render_email_batch_title(cls, deliveries):
+    def _render_email_batch_title(cls, deliveries, hide_message_content=False):
+        if hide_message_content:
+            return str(_('New messages'))
         groups, _omitted = cls._message_digest_groups(deliveries)
         names = [group['name'] for group in groups]
         if not names:
@@ -2834,6 +2769,16 @@ class NotificationDelivery(models.Model):
         grouped, omitted = cls._message_digest_groups(deliveries)
         hide_message_content = bool(pref.hide_message_content)
         total = len(deliveries)
+        if hide_message_content:
+            chat_count = len({
+                int((delivery.event.payload or {}).get('chat_id') or 0)
+                for delivery in deliveries
+                if int((delivery.event.payload or {}).get('chat_id') or 0) > 0
+            })
+            return str(_('You received {message_count} messages from {chat_count} conversations.')).format(
+                message_count=total,
+                chat_count=chat_count,
+            )
         lines = [f'## {_("{count} unread messages").format(count=total)}', '']
         for group in grouped:
             safe_name = cls._escape_email_markdown(group['name'])
@@ -2842,10 +2787,6 @@ class NotificationDelivery(models.Model):
                 for delivery in group['selected']:
                     _title, body = delivery.event.render_delivery_message(
                         hide_message_content=False,
-                        hidden_direct_message_title=pref.hidden_direct_message_title,
-                        hidden_direct_message_text=pref.hidden_direct_message_text,
-                        hidden_group_message_title=pref.hidden_group_message_title,
-                        hidden_group_message_text=pref.hidden_group_message_text,
                     )
                     actor = delivery.event.actor
                     prefix = f'{actor.name}: ' if actor and group['chat'].group else ''
@@ -2864,6 +2805,16 @@ class NotificationDelivery(models.Model):
     @classmethod
     def _render_message_digest_body(cls, deliveries, pref: NotificationPreference):
         grouped, omitted = cls._message_digest_groups(deliveries)
+        if pref.hide_message_content:
+            chat_count = len({
+                int((delivery.event.payload or {}).get('chat_id') or 0)
+                for delivery in deliveries
+                if int((delivery.event.payload or {}).get('chat_id') or 0) > 0
+            })
+            return str(_('You received {message_count} messages from {chat_count} conversations.')).format(
+                message_count=len(deliveries),
+                chat_count=chat_count,
+            )
         lines = []
         for group in grouped:
             lines.append(f'{group["name"]} · {group["total_count"]}')
@@ -2871,10 +2822,6 @@ class NotificationDelivery(models.Model):
                 for delivery in group['selected']:
                     _title, body = delivery.event.render_delivery_message(
                         hide_message_content=False,
-                        hidden_direct_message_title=pref.hidden_direct_message_title,
-                        hidden_direct_message_text=pref.hidden_direct_message_text,
-                        hidden_group_message_title=pref.hidden_group_message_title,
-                        hidden_group_message_text=pref.hidden_group_message_text,
                     )
                     actor = delivery.event.actor
                     prefix = f'{actor.name}: ' if actor and group['chat'].group else ''
@@ -2892,7 +2839,7 @@ class NotificationDelivery(models.Model):
         attempted_at = timezone.now()
         try:
             with translation.override(user.language):
-                title = cls._render_email_batch_title(deliveries)
+                title = cls._render_email_batch_title(deliveries, hide_message_content=pref.hide_message_content)
                 if pref.channel == UserNotificationChoice.EMAIL:
                     body = cls._render_email_batch_body(deliveries, pref)
                     result = notificator.mail(
@@ -2954,7 +2901,7 @@ class NotificationDelivery(models.Model):
             return []
 
         with translation.override(user.language):
-            title = cls._render_email_batch_title(deliveries)
+            title = cls._render_email_batch_title(deliveries, hide_message_content=pref.hide_message_content)
             body = cls._render_email_batch_body(deliveries, pref)
             footer_note = str(_('You can adjust email reminders in Notification settings.'))
         attempted_at = timezone.now()
@@ -2994,18 +2941,9 @@ class NotificationDelivery(models.Model):
             self.save(update_fields=['status', 'detail', 'attempted_at'])
             return self
 
-        hide_message_content = bool(pref.hide_message_content) and self.channel in (
-            UserNotificationChoice.EMAIL,
-            UserNotificationChoice.BARK,
-        )
+        hide_message_content = bool(pref.hide_message_content)
         title, body = self.event.render_delivery_message(
             hide_message_content=hide_message_content,
-            hidden_direct_message_title=pref.hidden_direct_message_title,
-            hidden_direct_message_text=pref.hidden_direct_message_text,
-            hidden_group_message_title=pref.hidden_group_message_title,
-            hidden_group_message_text=pref.hidden_group_message_text,
-            friend_online_message_title=pref.friend_online_message_title,
-            friend_online_message_text=pref.friend_online_message_text,
         )
         with translation.override(self.event.user.language):
             email_footer_note = str(_('You can adjust email reminders in Notification settings.'))

@@ -273,18 +273,12 @@ class NotificatorIntegrationTests(SimpleTestCase):
             actor=actor,
             actor_id=actor.id,
             id=21,
-            payload={'content': 'secret'},
+            payload={'chat_id': 7, 'content': 'secret'},
             render_delivery_message=lambda **_kwargs: ('New message', 'secret'),
         )
         deliveries = [SimpleNamespace(event=event, event_id=event.id)] * 2
         preference = SimpleNamespace(
             hide_message_content=True,
-            hidden_direct_message_title='',
-            hidden_direct_message_text='',
-            hidden_group_message_title='',
-            hidden_group_message_text='',
-            friend_online_message_title='',
-            friend_online_message_text='',
         )
         digest_groups.return_value = ([dict(
             name='Fly',
@@ -296,8 +290,8 @@ class NotificatorIntegrationTests(SimpleTestCase):
 
         body = NotificationDelivery._render_email_batch_body(deliveries, preference)
 
-        self.assertIn('## 2 unread messages', body)
-        self.assertIn('**Fly** · 2 messages', body)
+        self.assertEqual(body, 'You received 2 messages from 1 conversations.')
+        self.assertNotIn('Fly', body)
         self.assertNotIn('secret', body)
 
 
@@ -336,34 +330,27 @@ class NotificationEventDeliveryTests(SimpleTestCase):
         self.assertEqual(title, '新私聊消息')
         self.assertEqual(body, '你收到了一条新的私聊消息。')
 
-    def test_hidden_message_uses_custom_title_and_body(self):
+    def test_hidden_message_uses_anonymous_title_and_body(self):
         event = NotificationEvent(
             event_type=NotificationEventTypeChoice.DIRECT_MESSAGE,
             payload={'content': 'secret'},
         )
 
-        title, body = event.render_delivery_message(
-            hide_message_content=True,
-            hidden_direct_message_title='自定义标题',
-            hidden_direct_message_text='自定义内容',
-        )
+        title, body = event.render_delivery_message(hide_message_content=True)
 
-        self.assertEqual(title, '自定义标题')
-        self.assertEqual(body, '自定义内容')
+        self.assertEqual(title, 'New message')
+        self.assertEqual(body, 'You received a message.')
 
-    def test_online_message_uses_custom_title_and_body(self):
+    def test_online_message_uses_default_title_and_body(self):
         event = NotificationEvent(
             event_type=NotificationEventTypeChoice.SYSTEM,
             payload={'kind': 'peer_online'},
         )
 
-        title, body = event.render_delivery_message(
-            friend_online_message_title='好友来了',
-            friend_online_message_text='快去聊天',
-        )
+        title, body = event.render_delivery_message()
 
-        self.assertEqual(title, '好友来了')
-        self.assertEqual(body, '快去聊天')
+        self.assertEqual(title, 'Friend online')
+        self.assertEqual(body, 'Your friend is online now.')
 
     def test_web_push_direct_message_uses_friend_name_and_natural_media_text(self):
         recipient = User(id=1, language='zh-CN')
