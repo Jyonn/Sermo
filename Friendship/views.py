@@ -4,6 +4,7 @@ from smartdjango import analyse, OK
 from Friendship.models import Friendship, FriendshipStatusChoice
 from Friendship.params import FriendshipParams
 from Friendship.validators import FriendshipErrors
+from User.models import User
 from utils import auth
 from utils.auth import Request
 
