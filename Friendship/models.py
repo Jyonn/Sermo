@@ -23,6 +23,11 @@ class Friendship(models.Model):
     vldt = FriendshipValidator
     INVITE_TOKEN_EXPIRE_SECONDS = 7 * 24 * 60 * 60
     INVITE_TOKEN_ALGORITHM = 'HS256'
+    SOURCE_DIRECT = 'direct'
+    SOURCE_QR = 'qr'
+    SOURCE_SQUARE = 'square'
+    SOURCE_SEARCH = 'search'
+    SOURCES = {SOURCE_DIRECT, SOURCE_QR, SOURCE_SQUARE, SOURCE_SEARCH}
 
     space = models.ForeignKey('Space.Space', on_delete=models.CASCADE, related_name='friendships', db_index=True)
     user_low = models.ForeignKey(User, on_delete=models.CASCADE, related_name='friendships_as_low')
@@ -198,10 +203,11 @@ class Friendship(models.Model):
         return item
 
     @classmethod
-    def create(cls, from_user: User, to_user: User, allow_unverified: bool = False):
+    def create(cls, from_user: User, to_user: User, allow_unverified: bool = False, source: str = SOURCE_DIRECT):
         if not allow_unverified and not from_user.verified:
             raise FriendshipErrors.REQUEST_FORBIDDEN
 
+        source = source if source in cls.SOURCES else cls.SOURCE_DIRECT
         space, user_low, user_high = cls._pair(from_user, to_user)
         item = cls.objects.filter(space=space, user_low=user_low, user_high=user_high).first()
 
@@ -212,6 +218,7 @@ class Friendship(models.Model):
                 user_high=user_high,
                 requested_by=from_user,
                 status=FriendshipStatusChoice.PENDING,
+                source=source,
             )
         else:
             if item.status == FriendshipStatusChoice.ACCEPTED:
@@ -221,7 +228,8 @@ class Friendship(models.Model):
             item.requested_by = from_user
             item.status = FriendshipStatusChoice.PENDING
             item.responded_at = None
-            item.save(update_fields=['requested_by', 'status', 'responded_at', 'updated_at'])
+            item.source = source
+            item.save(update_fields=['requested_by', 'status', 'source', 'responded_at', 'updated_at'])
 
         from User.models import NotificationEvent
         NotificationEvent.emit_system_event(
@@ -445,6 +453,7 @@ class Friendship(models.Model):
             'id->request_id',
             'status',
             'is_system_locked',
+            'source',
             'from_user',
             'to_user',
             'created_at',

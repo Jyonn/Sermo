@@ -9,12 +9,14 @@ from Friendship.views import (
     FriendshipInviteTokenView,
     FriendshipInvitePreviewView,
     FriendshipInviteRedeemView,
+    FriendshipExactSearchView,
 )
 
 urlpatterns = [
     path('', FriendshipListView.as_view(), name='friends'),
     path('status', FriendshipStatusView.as_view(), name='friend status'),
     path('requests', FriendshipRequestView.as_view(), name='friend requests'),
+    path('search', FriendshipExactSearchView.as_view(), name='friend exact search'),
     path('requests/respond', FriendshipRequestRespondView.as_view(), name='friend request respond'),
     path('requests/remove', FriendshipRemoveView.as_view(), name='friend remove'),
     path('invites/token', FriendshipInviteTokenView.as_view(), name='friend invite token'),

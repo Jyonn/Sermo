@@ -35,12 +35,36 @@ class FriendshipStatusView(View):
 
 class FriendshipRequestView(View):
     @auth.require_user
-    @analyse.json(FriendshipParams.to_user_id)
+    @analyse.json(FriendshipParams.to_user_id, FriendshipParams.source)
     def post(self, request: Request):
         item = Friendship.create(
             from_user=request.user,
             to_user=request.json.to_user,
+            source=request.json.source,
         )
+
+
+class FriendshipExactSearchView(View):
+    @auth.require_user
+    @analyse.query(FriendshipParams.exact_name)
+    def get(self, request: Request):
+        if not request.user.verified:
+            raise FriendshipErrors.REQUEST_FORBIDDEN
+        target = User.objects.filter(
+            space_id=request.user.space_id,
+            is_deleted=False,
+            lower_name=request.query.name.lower(),
+        ).exclude(id=request.user.id).first()
+        if target is None:
+            return dict(user=None, relationship='none')
+        relation = Friendship.between(request.user, target)
+        relationship = 'none'
+        if relation is not None:
+            relationship = {
+                FriendshipStatusChoice.PENDING: 'pending',
+                FriendshipStatusChoice.ACCEPTED: 'friend',
+            }.get(relation.status, 'none')
+        return dict(user=target.json_friend(), relationship=relationship)
         return item.json()
 
     @auth.require_user
