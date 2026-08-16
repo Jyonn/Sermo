@@ -42,6 +42,16 @@ class FriendshipRequestView(View):
             to_user=request.json.to_user,
             source=request.json.source,
         )
+        return item.json()
+
+    @auth.require_user
+    def get(self, request: Request):
+        incoming = Friendship.request_history_incoming(request.user)
+        outgoing = Friendship.request_history_outgoing(request.user)
+        return dict(
+            incoming=[item.json() for item in incoming],
+            outgoing=[item.json() for item in outgoing],
+        )
 
 
 class FriendshipExactSearchView(View):
@@ -50,10 +60,11 @@ class FriendshipExactSearchView(View):
     def get(self, request: Request):
         if not request.user.verified:
             raise FriendshipErrors.REQUEST_FORBIDDEN
+        normalized_name = User.normalizers.lower_name(request.query.name)
         target = User.objects.filter(
-            space_id=request.user.space_id,
+            space=request.user.space,
             is_deleted=False,
-            lower_name=request.query.name.lower(),
+            lower_name=normalized_name,
         ).exclude(id=request.user.id).first()
         if target is None:
             return dict(user=None, relationship='none')
@@ -65,16 +76,6 @@ class FriendshipExactSearchView(View):
                 FriendshipStatusChoice.ACCEPTED: 'friend',
             }.get(relation.status, 'none')
         return dict(user=target.json_friend(), relationship=relationship)
-        return item.json()
-
-    @auth.require_user
-    def get(self, request: Request):
-        incoming = Friendship.request_history_incoming(request.user)
-        outgoing = Friendship.request_history_outgoing(request.user)
-        return dict(
-            incoming=[item.json() for item in incoming],
-            outgoing=[item.json() for item in outgoing],
-        )
 
 
 class FriendshipRequestRespondView(View):
