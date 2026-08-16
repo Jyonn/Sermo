@@ -585,6 +585,7 @@ class ChatUserPreference(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='chat_preferences', db_index=True)
     pinned = models.BooleanField(default=False)
     online_reminder_enabled = models.BooleanField(default=False)
+    statement_reminder_enabled = models.BooleanField(default=False)
     notifications_muted = models.BooleanField(default=False)
     unread_badge_muted = models.BooleanField(default=False)
     updated_at = models.DateTimeField(auto_now=True)
@@ -598,7 +599,7 @@ class ChatUserPreference(models.Model):
         return preference
 
     @classmethod
-    def update(cls, chat: Chat, user: User, pinned=None, online_reminder_enabled=None, notifications_muted=None, unread_badge_muted=None):
+    def update(cls, chat: Chat, user: User, pinned=None, online_reminder_enabled=None, statement_reminder_enabled=None, notifications_muted=None, unread_badge_muted=None):
         preference = cls.ensure(chat, user)
         updates = []
         if pinned is not None:
@@ -609,6 +610,11 @@ class ChatUserPreference(models.Model):
                 raise ChatErrors.NOT_DIRECT_CHAT(chat=chat.id)
             preference.online_reminder_enabled = bool(online_reminder_enabled)
             updates.append('online_reminder_enabled')
+        if statement_reminder_enabled is not None:
+            if chat.group and bool(statement_reminder_enabled):
+                raise ChatErrors.NOT_DIRECT_CHAT(chat=chat.id)
+            preference.statement_reminder_enabled = bool(statement_reminder_enabled)
+            updates.append('statement_reminder_enabled')
         if notifications_muted is not None:
             if not chat.group and bool(notifications_muted):
                 raise ChatErrors.NOT_GROUP_CHAT(chat=chat.id)
@@ -630,7 +636,28 @@ class ChatUserPreference(models.Model):
         return preference
 
     def json(self):
-        return self.dictify('pinned', 'online_reminder_enabled', 'notifications_muted', 'unread_badge_muted')
+        return self.dictify('pinned', 'online_reminder_enabled', 'statement_reminder_enabled', 'notifications_muted', 'unread_badge_muted')
+
+    @classmethod
+    def emit_peer_statement_events(cls, statement):
+        from User.models import NotificationEvent
+
+        preferences = cls.objects.filter(
+            statement_reminder_enabled=True,
+            chat__chat_type=ChatTypeChoice.DIRECT,
+            chat__is_deleted=False,
+            chat__chat_members__user=statement.user,
+            chat__chat_members__status=ChatMemberStatusChoice.ACTIVE,
+            user__is_deleted=False,
+        ).select_related('chat', 'user').distinct()
+        for preference in preferences:
+            if preference.user_id == statement.user_id or not preference.chat.has_active_member(preference.user):
+                continue
+            NotificationEvent.emit_system_event(
+                user=preference.user,
+                actor=statement.user,
+                payload=dict(kind='friend_statement', statement_id=statement.id),
+            )
 
     @classmethod
     def emit_peer_online_events(cls, peer: User):

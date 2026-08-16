@@ -26,6 +26,7 @@ class ChatListView(View):
         data['last_read_at'] = last_read_at.timestamp() if last_read_at else None
         data['pinned'] = bool(preference and preference.pinned)
         data['online_reminder_enabled'] = bool(preference and preference.online_reminder_enabled)
+        data['statement_reminder_enabled'] = bool(preference and preference.statement_reminder_enabled)
         data['notifications_muted'] = bool(preference and preference.notifications_muted)
         data['unread_badge_muted'] = bool(preference and preference.unread_badge_muted)
         return data
@@ -147,6 +148,7 @@ class ChatPreferenceView(View):
     @analyse.json(
         ChatPreferenceParams.pinned,
         ChatPreferenceParams.online_reminder_enabled,
+        ChatPreferenceParams.statement_reminder_enabled,
         ChatPreferenceParams.notifications_muted,
         ChatPreferenceParams.unread_badge_muted,
     )
@@ -159,6 +161,7 @@ class ChatPreferenceView(View):
             request.user,
             pinned=request.json.pinned,
             online_reminder_enabled=request.json.online_reminder_enabled,
+            statement_reminder_enabled=request.json.statement_reminder_enabled,
             notifications_muted=request.json.notifications_muted,
             unread_badge_muted=request.json.unread_badge_muted,
         )

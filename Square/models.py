@@ -177,6 +177,8 @@ class Statement(models.Model):
                 user.award_growth(media_events[kind])
         media_ids = list(statement.media.values_list('id', flat=True))
         transaction.on_commit(lambda: [StatementMedia.fetch_metadata_async(media_id) for media_id in media_ids])
+        from Chat.models import ChatUserPreference
+        transaction.on_commit(lambda: ChatUserPreference.emit_peer_statement_events(statement))
         return cls.objects.select_related('user').prefetch_related(statement_media_prefetch()).get(id=statement.id)
 
     def jsonl(self, request=None):

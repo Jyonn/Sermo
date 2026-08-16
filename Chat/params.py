@@ -47,6 +47,10 @@ class ChatPreferenceParams(metaclass=Params):
         .to(int) \
         .null().default(None) \
         .bool(lambda x: x is None or x in (0, 1), message=_('online_reminder_enabled should be 0 or 1'))
+    statement_reminder_enabled = Validator('statement_reminder_enabled') \
+        .to(int) \
+        .null().default(None) \
+        .bool(lambda x: x is None or x in (0, 1), message=_('statement_reminder_enabled should be 0 or 1'))
     notifications_muted = Validator('notifications_muted') \
         .to(int) \
         .null().default(None) \

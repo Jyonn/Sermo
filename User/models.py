@@ -2316,6 +2316,9 @@ class NotificationEvent(models.Model):
             elif accepted is False:
                 body = _('A user rejected your group invite.')
             return str(title), str(body)
+        if kind == 'friend_statement':
+            title = _('{name} posted a statement').format(name=actor_name or _('A friend'))
+            return str(title), str(_('Open Sermo to view it.'))
         if kind == 'peer_online':
             title = _('Friend online')
             body = _('{name} is online now.').format(name=actor_name or _('Your friend'))
