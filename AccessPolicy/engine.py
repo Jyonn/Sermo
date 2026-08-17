@@ -113,7 +113,7 @@ def subject_context(user=None, space=None, overrides=None):
             and getattr(space, 'verification_tier', 'phone') != 'email'
         ),
         'square_explore_enabled': bool(getattr(space, 'square_explore_enabled', True)),
-        'space_phone_verified': bool(getattr(space, 'admin_phone_verified_at', True)),
+        'space_phone_verified': bool(getattr(space, 'admin_phone_verified_at', None)),
         'space_identity_verified': bool(getattr(space, 'identity_verified_at', False)),
         'unverified_group_policy': int(getattr(space, 'unverified_group_policy', 2)),
         'qr_invite': False,

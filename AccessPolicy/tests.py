@@ -4,6 +4,7 @@ from AccessPolicy.catalog import get_capability
 from AccessPolicy.engine import evaluate_capability, evaluate_expression, validate_expression
 from AccessPolicy.models import PlatformCapabilityPolicy, SpaceCapabilityPolicy
 from AccessPolicy.validators import AccessPolicyErrors
+from AccessPolicy.views import _simulate
 from Space.models import Space
 from User.models import User, UserAccountLevelChoice, UserRoleChoice
 
@@ -58,6 +59,57 @@ class CapabilityDecisionTests(TestCase):
         self.assertTrue(evaluate_capability(
             'chat.message.send.image', user=self.user, context={'growth_level': 2},
         ).allowed)
+
+    def test_video_requires_level_five_and_a_phone_verified_space(self):
+        self.space.admin_phone_verified_at = None
+        self.space.save(update_fields=['admin_phone_verified_at'])
+        self.assertFalse(evaluate_capability(
+            'chat.message.send.video', user=self.user, context={'growth_level': 18},
+        ).allowed)
+
+        self.space.admin_phone_verified_at = '2026-01-01T00:00:00Z'
+        self.space.save(update_fields=['admin_phone_verified_at'])
+        self.assertFalse(evaluate_capability(
+            'chat.message.send.video', user=self.user, context={'growth_level': 4},
+        ).allowed)
+        self.assertTrue(evaluate_capability(
+            'chat.message.send.video', user=self.user,
+            context={
+                'growth_level': 5,
+                'verified': False,
+                'email_verified': False,
+                'phone_verified': False,
+                'dual_verified': False,
+            },
+        ).allowed)
+
+    def test_platform_preview_models_space_verification_separately(self):
+        policy = PlatformCapabilityPolicy.objects.get(capability_key='chat.message.send.video')
+        data = {
+            'capability_key': 'chat.message.send.video',
+            'policy': {
+                'requirement': policy.requirement,
+                'denial': policy.denial,
+                'limits': policy.limits,
+            },
+        }
+        email_space = _simulate(None, data, 'platform')
+        phone_space = _simulate(
+            None, {**data, 'space_verification': 'phone'}, 'platform',
+        )
+
+        self.assertFalse(next(
+            row['allowed'] for row in email_space['rows']
+            if row['growth_level'] == 18
+            and row['verification'] == 'dual'
+            and not row['permanent_vip']
+        ))
+        self.assertTrue(next(
+            row['allowed'] for row in phone_space['rows']
+            if row['growth_level'] == 5
+            and row['verification'] == 'none'
+            and not row['permanent_vip']
+        ))
 
     def test_qr_friend_request_exception_is_explicit_in_platform_policy(self):
         self.user.account_level = UserAccountLevelChoice.BASIC

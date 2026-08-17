@@ -64,6 +64,19 @@ def _model_snapshot(policy):
     return _policy_payload(policy) or {}
 
 
+def _simulation_space_context(space, data, scope):
+    if scope == 'space':
+        tier = getattr(space, 'verification_tier', 'email')
+    else:
+        tier = data.get('space_verification', 'email')
+        if tier not in {'email', 'phone', 'identity'}:
+            raise AccessPolicyErrors.POLICY_INVALID
+    return tier, {
+        'space_phone_verified': tier in {'phone', 'identity'},
+        'space_identity_verified': tier == 'identity',
+    }
+
+
 def _simulate(space, data, scope):
     capability_key = str(data.get('capability_key') or '')
     if get_capability(capability_key) is None:
@@ -75,6 +88,7 @@ def _simulate(space, data, scope):
     space_policies = {
         item.capability_key: item for item in SpaceCapabilityPolicy.objects.filter(space=space)
     } if space is not None else {}
+    space_verification, space_context = _simulation_space_context(space, data, scope)
     rows = []
     verification_states = (
         ('none', False, False), ('email', True, False),
@@ -92,6 +106,7 @@ def _simulate(space, data, scope):
                     'dual_verified': email_verified and phone_verified,
                     'permanent_vip': permanent_vip,
                     'official': False,
+                    **space_context,
                 }
                 decision = evaluate_capability(
                     capability_key,
@@ -108,7 +123,11 @@ def _simulate(space, data, scope):
                     'permanent_vip': permanent_vip,
                     'allowed': decision.allowed,
                 })
-    return {'capability_key': capability_key, 'rows': rows}
+    return {
+        'capability_key': capability_key,
+        'space_verification': space_verification,
+        'rows': rows,
+    }
 
 
 class UserCapabilityView(View):
