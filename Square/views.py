@@ -118,6 +118,7 @@ class StatementUploadView(View):
             raise SquareErrors.PUBLISH_REQUIRES_VERIFICATION
         if request.json.kind not in {'image', 'audio', 'video'}:
             raise SquareErrors.MEDIA_INVALID
+        request.user.require_capability(f'square.statement.publish.{request.json.kind}')
         return issue_message_upload(
             kind=request.json.kind,
             file_name=request.json.file_name,
@@ -159,6 +160,7 @@ class StatementLikeView(View):
         request.user.space.require_square_enabled()
         if not request.user.verified:
             raise SquareErrors.PUBLISH_REQUIRES_VERIFICATION
+        request.user.require_capability('square.interaction.like')
         try:
             statement = Statement.visible_for(request.user).get(id=statement_id)
         except Statement.DoesNotExist:
@@ -188,6 +190,7 @@ class StatementCommentLikeView(View):
         request.user.space.require_square_enabled()
         if not request.user.verified:
             raise SquareErrors.PUBLISH_REQUIRES_VERIFICATION
+        request.user.require_capability('square.interaction.like')
         try:
             comment = StatementComment.objects.select_related('statement').get(id=comment_id, is_deleted=False)
         except StatementComment.DoesNotExist:

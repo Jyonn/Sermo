@@ -552,6 +552,8 @@ class Message(models.Model):
             }.get(message_type)
             if capability:
                 user.require_growth_capability(capability)
+            elif message_type == MessageTypeChoice.FILE:
+                user.require_capability('chat.message.send.file')
             if reply_to is not None and (
                 reply_to.chat_id != chat.id
                 or reply_to.is_deleted

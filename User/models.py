@@ -492,12 +492,31 @@ class User(models.Model):
         return min(self._growth_level_for_score(score), self.growth_level_cap()[0])
 
     def has_growth_capability(self, capability):
-        return self.effective_growth_level() >= GROWTH_CAPABILITY_LEVELS[capability]
+        from AccessPolicy.catalog import LEGACY_GROWTH_CAPABILITY_KEYS
+
+        return self.has_capability(LEGACY_GROWTH_CAPABILITY_KEYS[capability])
 
     def require_growth_capability(self, capability):
+        from AccessPolicy.catalog import LEGACY_GROWTH_CAPABILITY_KEYS
+
         required_level = GROWTH_CAPABILITY_LEVELS[capability]
-        if not self.has_growth_capability(capability):
+        if self.effective_growth_level() < required_level:
             raise UserErrors.GROWTH_LEVEL_REQUIRED(level=required_level)
+        self.require_capability(LEGACY_GROWTH_CAPABILITY_KEYS[capability])
+        return self
+
+    def capability_decision(self, capability, context=None):
+        from AccessPolicy.engine import evaluate_capability
+
+        return evaluate_capability(capability, user=self, context=context)
+
+    def has_capability(self, capability, context=None):
+        return self.capability_decision(capability, context=context).allowed
+
+    def require_capability(self, capability, context=None):
+        from AccessPolicy.engine import require_capability
+
+        require_capability(capability, user=self, context=context)
         return self
 
     def set_chat_background(self, theme, uri=''):
@@ -505,6 +524,8 @@ class User(models.Model):
         required_level = CHAT_BACKGROUND_LEVELS[normalized_theme]
         if normalized_theme != self.chat_background_theme and self.effective_growth_level() < required_level:
             raise UserErrors.GROWTH_LEVEL_REQUIRED(level=required_level)
+        if normalized_theme != self.chat_background_theme:
+            self.require_capability(f'menu.personalization.background.use.{normalized_theme}')
         normalized_uri = (uri or '').strip() if normalized_theme == 'custom' else ''
         previous_uri = self.chat_background_uri
         self.chat_background_theme = normalized_theme
@@ -554,6 +575,14 @@ class User(models.Model):
                 vip_override = (field, normalized) in VIP_OR_LEVEL_PERSONALIZATION and self.is_permanent_vip
                 if not vip_override and self.effective_growth_level() < required_level:
                     raise UserErrors.GROWTH_LEVEL_REQUIRED(level=required_level)
+            if normalized != getattr(self, field):
+                capability_group = {
+                    'chat_bubble_style': 'bubble',
+                    'avatar_frame_style': 'frame',
+                    'statement_card_style': 'statement',
+                }.get(field)
+                if capability_group:
+                    self.require_capability(f'menu.personalization.{capability_group}.use.{normalized}')
             setattr(self, field, normalized)
         self.save(update_fields=fields)
         if changed:
@@ -683,6 +712,8 @@ class User(models.Model):
         raise UserErrors.CONTACT_CHANNEL_INVALID
 
     def set_private_account(self, enabled: bool):
+        if enabled:
+            self.require_capability('menu.security.private_account')
         if enabled and not (
             self.phone
             and self.phone_verified_at is not None

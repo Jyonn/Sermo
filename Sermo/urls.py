@@ -26,4 +26,5 @@ urlpatterns = [
     path('maps/', include('TravelMap.urls')),
     path('square/', include('Square.urls')),
     path('platform-admin/', include('PlatformAdmin.urls')),
+    path('capabilities/', include('AccessPolicy.urls')),
 ]

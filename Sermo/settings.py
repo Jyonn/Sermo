@@ -53,6 +53,7 @@ INSTALLED_APPS = [
     'Sticker',
     'Square',
     'PlatformAdmin',
+    'AccessPolicy',
 ]
 
 MIDDLEWARE = [

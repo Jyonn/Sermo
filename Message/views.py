@@ -210,6 +210,8 @@ class MessageUploadView(View):
         }.get(request.json.kind)
         if capability:
             request.user.require_growth_capability(capability)
+        elif request.json.kind == 'file':
+            request.user.require_capability('chat.message.send.file')
         return issue_message_upload(
             kind=request.json.kind,
             file_name=request.json.file_name,

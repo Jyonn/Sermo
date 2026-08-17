@@ -5,6 +5,9 @@ from PlatformAdmin.views import (
     IdentityDocumentView, IdentityReviewView, LoginView, MemberListView, MessageDeliveryView,
     MfaDisableView, MfaSetupView, MfaVerifyView, SpaceListView,
 )
+from AccessPolicy.views import (
+    PlatformPolicyDetailView, PlatformPolicyListView, PlatformPolicySimulateView,
+)
 
 urlpatterns = [
     path('email-code', EmailCodeView.as_view()),
@@ -21,4 +24,7 @@ urlpatterns = [
     path('mfa/verify', MfaVerifyView.as_view()),
     path('mfa/disable', MfaDisableView.as_view()),
     path('audit', AuditLogView.as_view()),
+    path('permissions', PlatformPolicyListView.as_view()),
+    path('permissions/simulate', PlatformPolicySimulateView.as_view()),
+    path('permissions/<path:capability_key>', PlatformPolicyDetailView.as_view()),
 ]

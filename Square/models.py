@@ -41,8 +41,11 @@ def _frequency_limits(level):
 
 def frequency_limits_for_user(user):
     if user.is_permanent_vip:
-        return _frequency_limits(18)
-    return _frequency_limits(user.effective_growth_level())
+        daily, weekly = _frequency_limits(18)
+    else:
+        daily, weekly = _frequency_limits(user.effective_growth_level())
+    policy_limits = user.capability_decision('square.statement.publish').limits
+    return min(daily, policy_limits.get('daily', daily)), min(weekly, policy_limits.get('weekly', weekly))
 
 
 def _enforce_frequency(queryset, user, multiplier=1):
@@ -134,6 +137,7 @@ class Statement(models.Model):
     def create_statement(cls, user, text, visibility, media):
         if not user.verified:
             raise SquareErrors.PUBLISH_REQUIRES_VERIFICATION
+        user.require_capability('square.statement.publish')
         _enforce_frequency(cls.objects.filter(space=user.space, is_deleted=False), user)
         normalized_text = (text or '').strip()
         if len(normalized_text) > 140:
@@ -151,6 +155,15 @@ class Statement(models.Model):
             raise SquareErrors.AUDIO_LEVEL_REQUIRED
         if any(item['kind'] == StatementMediaKindChoice.VIDEO for item in normalized_media) and level < 8 and not user.is_official:
             raise SquareErrors.VIDEO_LEVEL_REQUIRED
+        media_capabilities = {
+            StatementMediaKindChoice.IMAGE: 'square.statement.publish.image',
+            StatementMediaKindChoice.AUDIO: 'square.statement.publish.audio',
+            StatementMediaKindChoice.VIDEO: 'square.statement.publish.video',
+        }
+        if not normalized_media:
+            user.require_capability('square.statement.publish.text')
+        for media_kind in {item['kind'] for item in normalized_media}:
+            user.require_capability(media_capabilities[media_kind])
         if not normalized_text and not normalized_media:
             raise SquareErrors.CONTENT_REQUIRED
         StatementMedia.attach_assets(normalized_media)
@@ -266,6 +279,7 @@ class StatementComment(models.Model):
     def create_comment(cls, user, statement_id, text, parent_id=None):
         if not user.verified:
             raise SquareErrors.PUBLISH_REQUIRES_VERIFICATION
+        user.require_capability('square.interaction.reply' if parent_id is not None else 'square.interaction.comment')
         _enforce_frequency(cls.objects.filter(statement__space=user.space, is_deleted=False), user, multiplier=5)
         normalized_text = (text or '').strip()
         if not normalized_text:

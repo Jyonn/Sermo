@@ -22,6 +22,7 @@ from Space.views import (
     SpaceMeView,
     SpaceUserListView,
 )
+from AccessPolicy.views import SpacePolicyDetailView, SpacePolicyListView, SpacePolicySimulateView
 
 urlpatterns = [
     path('email-code', SpaceEmailCodeRequestView.as_view(), name='space email verification code'),
@@ -38,6 +39,9 @@ urlpatterns = [
     path('admin/identity/submit', SpaceAdminIdentitySubmitView.as_view(), name='space admin identity submit'),
     path('admin/users', SpaceAdminUserListView.as_view(), name='space admin users'),
     path('admin/users/remove', SpaceAdminUserRemoveView.as_view(), name='space admin user remove'),
+    path('admin/permissions', SpacePolicyListView.as_view(), name='space admin permissions'),
+    path('admin/permissions/simulate', SpacePolicySimulateView.as_view(), name='space admin permission simulation'),
+    path('admin/permissions/<path:capability_key>', SpacePolicyDetailView.as_view(), name='space admin permission detail'),
     path('lookup', SpaceLookupView.as_view(), name='space lookup'),
     path('login', SpaceLoginView.as_view(), name='space email login'),
     path('official-login/exchange', SpaceOfficialLoginExchangeView.as_view(), name='space official login exchange'),
