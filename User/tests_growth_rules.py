@@ -9,10 +9,23 @@ from User.growth import (
     resolve_event_rule,
 )
 from User.growth_notifications import begin_growth_awards, growth_award_total, reset_growth_awards
-from User.models import GrowthEvent, User, UserFeatureDiscovery
+from User.models import GrowthEvent, PermanentVipCampaign, User, UserFeatureDiscovery
 
 
 class GrowthRuleTests(SimpleTestCase):
+    def test_permanent_vip_level_thresholds_follow_claim_order(self):
+        expected = {
+            1: 4,
+            20: 4,
+            21: 5,
+            50: 5,
+            51: 6,
+            100: 6,
+        }
+        for slot, required_level in expected.items():
+            with self.subTest(slot=slot):
+                self.assertEqual(PermanentVipCampaign.required_level_for_slot(slot), required_level)
+
     def test_growth_curve_and_every_level_reward_are_complete(self):
         self.assertEqual(GROWTH_THRESHOLDS[-1], 5300)
         self.assertEqual(set(LEVEL_REWARDS), set(range(1, 19)))

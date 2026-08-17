@@ -1325,20 +1325,33 @@ class UserFeatureDiscovery(models.Model):
 
 class PermanentVipCampaign(models.Model):
     LIMIT = 100
+    LEVEL_THRESHOLDS = (
+        (20, 4),
+        (50, 5),
+        (100, 6),
+    )
 
     key = models.CharField(max_length=32, primary_key=True, default='founding-100')
     claimed_count = models.PositiveSmallIntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
 
     @classmethod
+    def required_level_for_slot(cls, slot):
+        for last_slot, required_level in cls.LEVEL_THRESHOLDS:
+            if slot <= last_slot:
+                return required_level
+        return cls.LEVEL_THRESHOLDS[-1][1]
+
+    @classmethod
     def status_for(cls, user):
         campaign, _ = cls.objects.get_or_create(key='founding-100')
         claim = PermanentVipClaim.objects.filter(user=user).first()
         level = user.effective_growth_level()
+        required_level = cls.required_level_for_slot(min(campaign.claimed_count + 1, cls.LIMIT))
         requirements = dict(
             email=bool(user.email_verified_at),
             phone=bool(user.phone_verified_at),
-            level=level >= 6,
+            level=level >= required_level,
         )
         return dict(
             limit=cls.LIMIT,
@@ -1346,7 +1359,11 @@ class PermanentVipCampaign(models.Model):
             remaining=max(0, cls.LIMIT - campaign.claimed_count),
             eligible=all(requirements.values()),
             requirements=requirements,
-            required_level=6,
+            required_level=required_level,
+            level_thresholds=[
+                dict(last_slot=last_slot, required_level=tier_level)
+                for last_slot, tier_level in cls.LEVEL_THRESHOLDS
+            ],
             claimed_by_user=claim is not None,
             slot=claim.slot if claim else None,
             active=claim is None and campaign.claimed_count < cls.LIMIT,
@@ -1360,7 +1377,12 @@ class PermanentVipCampaign(models.Model):
             if not existing:
                 if campaign.claimed_count >= cls.LIMIT:
                     raise UserErrors.PERMANENT_VIP_CAMPAIGN_FULL
-                if not user.email_verified_at or not user.phone_verified_at or user.effective_growth_level() < 6:
+                required_level = cls.required_level_for_slot(campaign.claimed_count + 1)
+                if (
+                    not user.email_verified_at
+                    or not user.phone_verified_at
+                    or user.effective_growth_level() < required_level
+                ):
                     raise UserErrors.PERMANENT_VIP_NOT_ELIGIBLE
 
                 slot = campaign.claimed_count + 1
