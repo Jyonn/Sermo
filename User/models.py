@@ -27,14 +27,11 @@ from utils.qiniu import (
 )
 from User.validators import UserValidator, UserErrors
 from User.growth import (
-    CHAT_BACKGROUND_LEVELS,
     DAILY_GROWTH_LIMIT,
     EVENT_RULES,
     GROWTH_CAPABILITY_LEVELS,
     GROWTH_THRESHOLDS,
     LEVEL_REWARDS,
-    PERSONALIZATION_LEVELS,
-    VIP_OR_LEVEL_PERSONALIZATION,
     WEEKLY_GROWTH_LIMIT,
     level_unlock_titles,
     resolve_event_rule,
@@ -496,12 +493,23 @@ class User(models.Model):
 
         return self.has_capability(LEGACY_GROWTH_CAPABILITY_KEYS[capability])
 
+    def growth_capability_required_level(self, capability):
+        from AccessPolicy.catalog import LEGACY_GROWTH_CAPABILITY_KEYS
+
+        return self.capability_required_level(
+            LEGACY_GROWTH_CAPABILITY_KEYS[capability],
+            fallback=GROWTH_CAPABILITY_LEVELS[capability],
+        )
+
+    def capability_required_level(self, capability, fallback=1):
+        for candidate in range(1, 19):
+            if self.has_capability(capability, context={'growth_level': candidate}):
+                return candidate
+        return fallback
+
     def require_growth_capability(self, capability):
         from AccessPolicy.catalog import LEGACY_GROWTH_CAPABILITY_KEYS
 
-        required_level = GROWTH_CAPABILITY_LEVELS[capability]
-        if self.effective_growth_level() < required_level:
-            raise UserErrors.GROWTH_LEVEL_REQUIRED(level=required_level)
         self.require_capability(LEGACY_GROWTH_CAPABILITY_KEYS[capability])
         return self
 
@@ -521,9 +529,6 @@ class User(models.Model):
 
     def set_chat_background(self, theme, uri=''):
         normalized_theme = self.validators.chat_background_theme(theme)
-        required_level = CHAT_BACKGROUND_LEVELS[normalized_theme]
-        if normalized_theme != self.chat_background_theme and self.effective_growth_level() < required_level:
-            raise UserErrors.GROWTH_LEVEL_REQUIRED(level=required_level)
         if normalized_theme != self.chat_background_theme:
             self.require_capability(f'menu.personalization.background.use.{normalized_theme}')
         normalized_uri = (uri or '').strip() if normalized_theme == 'custom' else ''
@@ -553,15 +558,6 @@ class User(models.Model):
         for field, unavailable_values in discontinued.items():
             if values[field] in unavailable_values and values[field] != getattr(self, field):
                 raise UserErrors.PERSONALIZATION_UNAVAILABLE
-        if values['chat_bubble_style'] == 'vip' and not self.is_permanent_vip:
-            raise UserErrors.PERMANENT_VIP_NOT_ELIGIBLE
-        if values['avatar_frame_style'] == 'vip' and not self.is_permanent_vip:
-            raise UserErrors.PERMANENT_VIP_NOT_ELIGIBLE
-        requested_statement = values.get('statement_card_style')
-        if requested_statement == 'vip' and not self.is_permanent_vip:
-            raise UserErrors.PERMANENT_VIP_NOT_ELIGIBLE
-        if requested_statement in {'niko', 'fufu'} and not self.is_permanent_vip and self.effective_growth_level() < 16:
-            raise UserErrors.GROWTH_LEVEL_REQUIRED(level=16)
         requested_bubble = values['chat_bubble_style']
         if requested_bubble in CITY_BUBBLE_RULES and requested_bubble not in unlocked_city_bubble_styles(self):
             raise UserErrors.CITY_BUBBLE_CHECKIN_REQUIRED(region=city_bubble_requirement(requested_bubble))
@@ -570,11 +566,6 @@ class User(models.Model):
                 setattr(self, field, bool(values[field]))
                 continue
             normalized = self.validators.personalization(field, values[field])
-            if field in PERSONALIZATION_LEVELS and normalized in PERSONALIZATION_LEVELS[field] and normalized != getattr(self, field):
-                required_level = PERSONALIZATION_LEVELS[field][normalized]
-                vip_override = (field, normalized) in VIP_OR_LEVEL_PERSONALIZATION and self.is_permanent_vip
-                if not vip_override and self.effective_growth_level() < required_level:
-                    raise UserErrors.GROWTH_LEVEL_REQUIRED(level=required_level)
             if normalized != getattr(self, field):
                 capability_group = {
                     'chat_bubble_style': 'bubble',
@@ -714,11 +705,6 @@ class User(models.Model):
     def set_private_account(self, enabled: bool):
         if enabled:
             self.require_capability('menu.security.private_account')
-        if enabled and not (
-            self.phone
-            and self.phone_verified_at is not None
-        ):
-            raise UserErrors.PRIVATE_ACCOUNT_CONTACTS_REQUIRED
         self.is_private_account = bool(enabled)
         self.save(update_fields=['is_private_account'])
         return self
@@ -1135,12 +1121,10 @@ class User(models.Model):
             ],
             capabilities={
                 key: dict(
-                    required_level=required_level,
-                    available=(
-                        level >= required_level
-                    ),
+                    required_level=self.growth_capability_required_level(key),
+                    available=self.has_growth_capability(key),
                 )
-                for key, required_level in GROWTH_CAPABILITY_LEVELS.items()
+                for key in GROWTH_CAPABILITY_LEVELS
             },
         )
 

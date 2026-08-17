@@ -9,7 +9,7 @@ ALLOWED_FIELDS = {
     'growth_level', 'has_password', 'verified', 'email_verified', 'phone_verified',
     'dual_verified', 'permanent_vip', 'official', 'chat_enabled', 'square_enabled',
     'square_explore_enabled', 'space_phone_verified', 'space_identity_verified',
-    'unverified_group_policy',
+    'unverified_group_policy', 'qr_invite',
 }
 ALLOWED_OPERATORS = {'eq', 'neq', 'gte', 'gt', 'lte', 'lt', 'in', 'not_in', 'exists'}
 MAX_DEPTH = 8
@@ -101,7 +101,7 @@ def subject_context(user=None, space=None, overrides=None):
     values = {
         'growth_level': user.effective_growth_level() if user is not None else 1,
         'has_password': bool(getattr(user, 'has_password', False)),
-        'verified': bool(getattr(user, 'verified', False)),
+        'verified': bool(getattr(user, 'verified', False)) or email_verified or phone_verified,
         'email_verified': email_verified,
         'phone_verified': phone_verified,
         'dual_verified': email_verified and phone_verified,
@@ -116,6 +116,7 @@ def subject_context(user=None, space=None, overrides=None):
         'space_phone_verified': bool(getattr(space, 'admin_phone_verified_at', True)),
         'space_identity_verified': bool(getattr(space, 'identity_verified_at', False)),
         'unverified_group_policy': int(getattr(space, 'unverified_group_policy', 2)),
+        'qr_invite': False,
     }
     values.update(overrides or {})
     return values

@@ -467,7 +467,7 @@ class SpaceAdminApiTests(TestCase):
             **self.user_authorization(self.member),
         )
         self.assertEqual(denied.status_code, 403, denied.content)
-        self.assertEqual(denied.json()['identifier'], 'USER@GROWTH_LEVEL_REQUIRED')
+        self.assertEqual(denied.json()['identifier'], 'ACCESSPOLICY@CAPABILITY_DENIED')
 
         self.member.is_permanent_vip = True
         self.member.save(update_fields=['is_permanent_vip'])
@@ -941,7 +941,7 @@ class SpaceAdminApiTests(TestCase):
             **self.user_authorization(self.member),
         )
         self.assertEqual(locked_image.status_code, 403)
-        self.assertEqual(locked_image.json()['identifier'], 'USER@GROWTH_LEVEL_REQUIRED')
+        self.assertEqual(locked_image.json()['identifier'], 'ACCESSPOLICY@CAPABILITY_DENIED')
 
         self.member.set_password('safe-password')
         self.grant_growth_level(self.member, 4)
@@ -996,7 +996,7 @@ class SpaceAdminApiTests(TestCase):
             **self.user_authorization(self.member),
         )
         self.assertEqual(locked.status_code, 403, locked.content)
-        self.assertEqual(locked.json()['identifier'], 'USER@GROWTH_LEVEL_REQUIRED')
+        self.assertEqual(locked.json()['identifier'], 'ACCESSPOLICY@CAPABILITY_DENIED')
 
         self.member.set_password('safe-password')
         self.grant_growth_level(self.member, 5)

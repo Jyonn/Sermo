@@ -80,7 +80,7 @@ class ChatNotificationPreferenceTests(TestCase):
         self.assertFalse(ChatUserPreference.ensure(self.chat, self.recipient).notifications_muted)
 
     def test_group_rename_creates_attributed_system_message_once(self):
-        with patch.object(self.sender, 'require_growth_capability'):
+        with patch.object(self.sender, 'require_capability'):
             self.chat.rename(self.sender, 'A clearer name')
             self.chat.rename(self.sender, 'A clearer name')
 

@@ -1,5 +1,6 @@
 from django.test import TestCase
 
+from AccessPolicy.catalog import get_capability
 from AccessPolicy.engine import evaluate_capability, evaluate_expression, validate_expression
 from AccessPolicy.models import PlatformCapabilityPolicy, SpaceCapabilityPolicy
 from AccessPolicy.validators import AccessPolicyErrors
@@ -47,10 +48,30 @@ class CapabilityDecisionTests(TestCase):
             growth_score=5300, growth_level=18,
         )
 
+    def test_default_level_gate_is_a_platform_policy(self):
+        self.assertEqual(get_capability('chat.message.send.image').requirement, {})
+        policy = PlatformCapabilityPolicy.objects.get(capability_key='chat.message.send.image')
+        self.assertEqual(policy.requirement, {'field': 'growth_level', 'op': 'gte', 'value': 2})
+        self.assertFalse(evaluate_capability(
+            'chat.message.send.image', user=self.user, context={'growth_level': 1},
+        ).allowed)
+        self.assertTrue(evaluate_capability(
+            'chat.message.send.image', user=self.user, context={'growth_level': 2},
+        ).allowed)
+
+    def test_qr_friend_request_exception_is_explicit_in_platform_policy(self):
+        self.user.account_level = UserAccountLevelChoice.BASIC
+        self.user.email_verified_at = None
+        self.user.phone_verified_at = None
+        self.assertFalse(evaluate_capability('contacts.friend_request', user=self.user).allowed)
+        self.assertTrue(evaluate_capability(
+            'contacts.friend_request', user=self.user, context={'qr_invite': True},
+        ).allowed)
+
     def test_space_policy_can_only_add_a_constraint(self):
-        PlatformCapabilityPolicy.objects.create(
+        PlatformCapabilityPolicy.objects.update_or_create(
             capability_key='chat.message.send.image',
-            requirement={'field': 'growth_level', 'op': 'gte', 'value': 10},
+            defaults={'requirement': {'field': 'growth_level', 'op': 'gte', 'value': 10}},
         )
         SpaceCapabilityPolicy.objects.create(
             space=self.space,
@@ -74,8 +95,9 @@ class CapabilityDecisionTests(TestCase):
         self.assertEqual(decision.denied_by[0]['key'], 'chat.message.send')
 
     def test_limits_merge_using_the_stricter_numeric_value(self):
-        PlatformCapabilityPolicy.objects.create(
-            capability_key='square.statement.publish', limits={'daily': 5, 'weekly': 20},
+        PlatformCapabilityPolicy.objects.update_or_create(
+            capability_key='square.statement.publish',
+            defaults={'limits': {'daily': 5, 'weekly': 20}},
         )
         SpaceCapabilityPolicy.objects.create(
             space=self.space, capability_key='square.statement.publish',

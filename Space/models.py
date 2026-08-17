@@ -284,13 +284,9 @@ class Space(models.Model):
             raise SpaceErrors.SQUARE_EXPLORE_DISABLED
 
     def require_group_join_allowed(self, user):
-        if not user.verified and self.unverified_group_policy < 1:
-            raise SpaceErrors.UNVERIFIED_GROUP_JOIN_DISABLED
         user.require_capability('chat.group.join')
 
     def require_group_send_allowed(self, user):
-        if not user.verified and self.unverified_group_policy < 2:
-            raise SpaceErrors.UNVERIFIED_GROUP_SEND_DISABLED
         user.require_capability('chat.group.send')
 
     def json(self):

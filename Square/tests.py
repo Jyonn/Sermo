@@ -74,7 +74,7 @@ class StatementApiTests(TestCase):
 
         denied = self.post_statement(self.stranger, {'text': '不能发布', 'visibility': 'public', 'media': []})
         self.assertEqual(denied.status_code, 403, denied.content)
-        self.assertEqual(denied.json()['identifier'], 'SQUARE@PUBLISH_REQUIRES_VERIFICATION')
+        self.assertEqual(denied.json()['identifier'], 'ACCESSPOLICY@CAPABILITY_DENIED')
 
     def test_friends_only_statement_is_filtered_by_relationship(self):
         Statement.create_statement(self.author, '朋友可见', 'friends', [])

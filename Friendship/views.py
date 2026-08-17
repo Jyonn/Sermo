@@ -38,7 +38,6 @@ class FriendshipRequestView(View):
     @auth.require_user
     @analyse.json(FriendshipParams.to_user_id, FriendshipParams.source)
     def post(self, request: Request):
-        request.user.require_capability('contacts.friend_request')
         item = Friendship.create(
             from_user=request.user,
             to_user=request.json.to_user,
@@ -61,8 +60,6 @@ class FriendshipExactSearchView(View):
     @analyse.query(FriendshipParams.exact_name)
     def get(self, request: Request):
         request.user.require_capability('contacts.search')
-        if not request.user.verified:
-            raise FriendshipErrors.REQUEST_FORBIDDEN
         normalized_name = User.normalizers.lower_name(request.query.name)
         target = User.objects.filter(
             space=request.user.space,
@@ -111,7 +108,6 @@ class FriendshipInviteTokenView(View):
     @auth.require_user
     @analyse.json(FriendshipParams.permanent)
     def post(self, request: Request):
-        request.user.require_capability('contacts.qr')
         return Friendship.issue_invite_token(request.user, permanent=bool(request.json.permanent))
 
 
@@ -131,7 +127,6 @@ class FriendshipInviteRedeemView(View):
     @auth.require_user
     @analyse.json(FriendshipParams.token)
     def post(self, request: Request):
-        request.user.require_capability('contacts.friend_request')
         item = Friendship.redeem_invite_token(
             token=request.json.token,
             requester=request.user,

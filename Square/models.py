@@ -135,8 +135,6 @@ class Statement(models.Model):
 
     @classmethod
     def create_statement(cls, user, text, visibility, media):
-        if not user.verified:
-            raise SquareErrors.PUBLISH_REQUIRES_VERIFICATION
         user.require_capability('square.statement.publish')
         _enforce_frequency(cls.objects.filter(space=user.space, is_deleted=False), user)
         normalized_text = (text or '').strip()
@@ -150,11 +148,6 @@ class Statement(models.Model):
             raise SquareErrors.VISIBILITY_INVALID
 
         normalized_media = StatementMedia.normalize_payload(media)
-        level = user.effective_growth_level()
-        if any(item['kind'] == StatementMediaKindChoice.AUDIO for item in normalized_media) and level < 6 and not user.is_official:
-            raise SquareErrors.AUDIO_LEVEL_REQUIRED
-        if any(item['kind'] == StatementMediaKindChoice.VIDEO for item in normalized_media) and level < 8 and not user.is_official:
-            raise SquareErrors.VIDEO_LEVEL_REQUIRED
         media_capabilities = {
             StatementMediaKindChoice.IMAGE: 'square.statement.publish.image',
             StatementMediaKindChoice.AUDIO: 'square.statement.publish.audio',
@@ -277,8 +270,6 @@ class StatementComment(models.Model):
 
     @classmethod
     def create_comment(cls, user, statement_id, text, parent_id=None):
-        if not user.verified:
-            raise SquareErrors.PUBLISH_REQUIRES_VERIFICATION
         user.require_capability('square.interaction.reply' if parent_id is not None else 'square.interaction.comment')
         _enforce_frequency(cls.objects.filter(statement__space=user.space, is_deleted=False), user, multiplier=5)
         normalized_text = (text or '').strip()

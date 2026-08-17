@@ -114,8 +114,6 @@ class StatementUploadView(View):
     @analyse.json(SquareParams.kind, SquareParams.file_name, SquareParams.content_type)
     def post(self, request: Request):
         request.user.space.require_square_enabled()
-        if not request.user.verified:
-            raise SquareErrors.PUBLISH_REQUIRES_VERIFICATION
         if request.json.kind not in {'image', 'audio', 'video'}:
             raise SquareErrors.MEDIA_INVALID
         request.user.require_capability(f'square.statement.publish.{request.json.kind}')
@@ -158,8 +156,6 @@ class StatementLikeView(View):
     @auth.require_user
     def post(self, request: Request, statement_id: int):
         request.user.space.require_square_enabled()
-        if not request.user.verified:
-            raise SquareErrors.PUBLISH_REQUIRES_VERIFICATION
         request.user.require_capability('square.interaction.like')
         try:
             statement = Statement.visible_for(request.user).get(id=statement_id)
@@ -188,8 +184,6 @@ class StatementCommentLikeView(View):
     @auth.require_user
     def post(self, request: Request, comment_id: int):
         request.user.space.require_square_enabled()
-        if not request.user.verified:
-            raise SquareErrors.PUBLISH_REQUIRES_VERIFICATION
         request.user.require_capability('square.interaction.like')
         try:
             comment = StatementComment.objects.select_related('statement').get(id=comment_id, is_deleted=False)

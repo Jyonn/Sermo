@@ -20,6 +20,10 @@ def quota_for_user(user):
     statements = Statement.objects.filter(space=user.space, user=user, is_deleted=False)
     comments = StatementComment.objects.filter(statement__space=user.space, user=user, is_deleted=False)
     unlimited = bool(user.is_official)
+    text_allowed = user.has_capability('square.statement.publish.text')
+    image_allowed = user.has_capability('square.statement.publish.image')
+    audio_allowed = user.has_capability('square.statement.publish.audio')
+    video_allowed = user.has_capability('square.statement.publish.video')
 
     return dict(
         level=level,
@@ -46,11 +50,11 @@ def quota_for_user(user):
             unlimited=True,
         ),
         media=dict(
-            text=True,
-            image=True,
-            audio=unlimited or level >= 6,
-            audio_level=6,
-            video=unlimited or level >= 8,
-            video_level=8,
+            text=unlimited or text_allowed,
+            image=unlimited or image_allowed,
+            audio=unlimited or audio_allowed,
+            audio_level=user.capability_required_level('square.statement.publish.audio', fallback=6),
+            video=unlimited or video_allowed,
+            video_level=user.capability_required_level('square.statement.publish.video', fallback=8),
         ),
     )

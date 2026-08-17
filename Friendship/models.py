@@ -87,8 +87,7 @@ class Friendship(models.Model):
 
     @classmethod
     def issue_invite_token(cls, inviter: User, permanent: bool = False):
-        if not inviter.verified:
-            raise FriendshipErrors.REQUEST_FORBIDDEN
+        inviter.require_capability('contacts.qr')
 
         now = int(time.time())
         payload = dict(
@@ -162,11 +161,7 @@ class Friendship(models.Model):
         if payload['space'].id != requester.space_id:
             raise FriendshipErrors.INVITE_TOKEN_SPACE_MISMATCH
         inviter = payload['inviter']
-        item = cls.create(from_user=requester, to_user=inviter, allow_unverified=True)
-        if item.source != 'qr':
-            item.source = 'qr'
-            item.save(update_fields=['source', 'updated_at'])
-        return item
+        return cls.create(from_user=requester, to_user=inviter, source=cls.SOURCE_QR)
 
     def _is_participant(self, user: User):
         return user.id in (self.user_low_id, self.user_high_id)
@@ -203,11 +198,12 @@ class Friendship(models.Model):
         return item
 
     @classmethod
-    def create(cls, from_user: User, to_user: User, allow_unverified: bool = False, source: str = SOURCE_DIRECT):
-        if not allow_unverified and not from_user.verified:
-            raise FriendshipErrors.REQUEST_FORBIDDEN
-
+    def create(cls, from_user: User, to_user: User, source: str = SOURCE_DIRECT):
         source = source if source in cls.SOURCES else cls.SOURCE_DIRECT
+        from_user.require_capability(
+            'contacts.friend_request',
+            context={'qr_invite': source == cls.SOURCE_QR},
+        )
         space, user_low, user_high = cls._pair(from_user, to_user)
         item = cls.objects.filter(space=space, user_low=user_low, user_high=user_high).first()
 

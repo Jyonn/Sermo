@@ -137,7 +137,7 @@ class Chat(models.Model):
         return [
             chat for chat in chats
             if chat.has_active_member(user)
-            and not (chat.group and not user.verified and user.space.unverified_group_policy < 1)
+            and (not chat.group or user.has_capability('chat.group.join'))
         ]
 
     @classmethod
@@ -165,11 +165,6 @@ class Chat(models.Model):
     def _require_friendship(cls, user_low: User, user_high: User):
         if not cls._has_friendship(user_low, user_high):
             raise ChatErrors.NOT_FRIENDS
-
-    @classmethod
-    def _require_verified_group_operator(cls, operator: User):
-        if not operator.verified:
-            raise ChatErrors.CREATOR_NOT_VERIFIED
 
     @classmethod
     def _require_friend_of(cls, owner: User, target: User):
@@ -242,9 +237,7 @@ class Chat(models.Model):
     @classmethod
     def create_group(cls, creator: User, users: List[User], title: str = None):
         creator.space.require_chat_enabled()
-        creator.require_growth_capability('create_group')
         creator.require_capability('chat.group.create')
-        cls._require_verified_group_operator(creator)
         normalized = {creator.id: creator}
         for user in users:
             if user.space_id != creator.space_id:
@@ -294,7 +287,6 @@ class Chat(models.Model):
     def rename(self, operator: User, title: str):
         if not self.group:
             raise ChatErrors.NOT_GROUP_CHAT(chat=self.id)
-        operator.require_growth_capability('rename_group')
         operator.require_capability('chat.group.rename')
         next_title = (title or '').strip() or self.title
         if next_title == self.title:
@@ -315,9 +307,7 @@ class Chat(models.Model):
     def invite_member(self, inviter: User, user: User):
         if not self.group:
             raise ChatErrors.NOT_GROUP_CHAT(chat=self.id)
-        inviter.require_growth_capability('invite_group_member')
         inviter.require_capability('chat.group.invite')
-        self._require_verified_group_operator(inviter)
         if user.space_id != self.space_id:
             raise ChatErrors.UNALIGNED_SPACE
         if user.is_deleted:

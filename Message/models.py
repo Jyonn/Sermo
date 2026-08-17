@@ -24,7 +24,6 @@ from smartdjango import models, Choice
 
 from Chat.models import Chat, ChatMember, ChatMemberStatusChoice
 from Message.validators import MessageErrors, MessageValidator
-from Space.validators import SpaceErrors
 from User.models import User, UserEmojiUsage
 from utils.qiniu import sign_private_download_url, avatar_uri_for_key, build_message_image_thumbnail_uri, build_message_video_thumbnail_uri, validate_message_media_key
 
@@ -534,11 +533,6 @@ class Message(models.Model):
         if message_type == MessageTypeChoice.SYSTEM:
             raise MessageErrors.SYSTEM_MESSAGE_FORBIDDEN
         if chat.has_active_member(user):
-            if (
-                user.space.verification_tier == 'email'
-                and message_type in {MessageTypeChoice.VIDEO, MessageTypeChoice.FILE}
-            ):
-                raise SpaceErrors.TIER_FEATURE_RESTRICTED
             if message_type == MessageTypeChoice.TEXT:
                 statement_reference = cls.statement_reference_from_text(content, user)
                 if statement_reference is not None:
