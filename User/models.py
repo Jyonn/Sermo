@@ -2024,7 +2024,7 @@ class NotificationPreference(models.Model):
         if enabled is not None:
             pref.enabled = bool(enabled)
             updates.append('enabled')
-        if offline_threshold_minutes is not None:
+        if offline_threshold_minutes is not None and channel != UserNotificationChoice.BARK:
             pref.offline_threshold_minutes = offline_threshold_minutes
             updates.append('offline_threshold_minutes')
         if hide_message_content is not None:
@@ -2038,7 +2038,12 @@ class NotificationPreference(models.Model):
             updates.append('bark_icon_mode')
         if updates:
             pref.save(update_fields=updates)
-        if enabled is not None and bool(enabled) and not was_enabled:
+        if (
+            enabled is not None
+            and bool(enabled)
+            and not was_enabled
+            and channel != UserNotificationChoice.BARK
+        ):
             from Message.models import Message
             NotificationChannelCursor.objects.update_or_create(
                 user=user,
@@ -2048,7 +2053,7 @@ class NotificationPreference(models.Model):
         return pref
 
     def json(self):
-        return self.dictify(
+        payload = self.dictify(
             'channel',
             'enabled',
             'offline_threshold_minutes',
@@ -2056,6 +2061,9 @@ class NotificationPreference(models.Model):
             'open_chat_on_tap',
             'bark_icon_mode',
         )
+        if self.channel == UserNotificationChoice.BARK:
+            payload['offline_threshold_minutes'] = None
+        return payload
 
 
 class NotificationTopicPreference(models.Model):
@@ -2415,6 +2423,8 @@ class NotificationEvent(models.Model):
         created_events = []
         for user in cls._message_recipients(message.chat, actor):
             for pref in NotificationPreference.ensure_defaults(user):
+                if pref.channel == UserNotificationChoice.BARK:
+                    continue
                 NotificationChannelCursor.objects.get_or_create(
                     user=user,
                     channel=pref.channel,
@@ -2462,6 +2472,7 @@ class NotificationEvent(models.Model):
                         NotificationEventTypeChoice.GROUP_MESSAGE,
                     ):
                         WebPushDelivery.enqueue_for_event(event)
+                        NotificationDelivery.enqueue_bark_for_event(event)
                     else:
                         NotificationDelivery.enqueue_for_event(event)
         except Exception:
@@ -2515,7 +2526,7 @@ class NotificationChannelCursor(models.Model):
             return dict(users=0, sent=0, failed=0, advanced=0, snapshot_message_id=0)
 
         preferences = list(
-            NotificationPreference.objects.filter(enabled=True)
+            NotificationPreference.objects.filter(enabled=True).exclude(channel=UserNotificationChoice.BARK)
             .select_related('user')
             .order_by('user_id', 'channel')[:limit_users * len(NotificationPreference.supported_channels())]
         )
@@ -2656,6 +2667,27 @@ class NotificationDelivery(models.Model):
         threshold_seconds = max(1, int(threshold_minutes)) * 60
         offline_seconds = (timezone.now() - user.last_heartbeat).total_seconds()
         return offline_seconds >= threshold_seconds
+
+    @classmethod
+    def enqueue_bark_for_event(cls, event: NotificationEvent):
+        pref = next((
+            item for item in NotificationPreference.ensure_defaults(event.user)
+            if item.channel == UserNotificationChoice.BARK
+        ), None)
+        if (
+            pref is None
+            or event.user.is_alive
+            or not pref.enabled
+            or not cls._channel_available(event.user, UserNotificationChoice.BARK)
+            or not NotificationTopicPreference.is_enabled_for_event(event, UserNotificationChoice.BARK)
+        ):
+            return []
+        delivery = cls.objects.create(
+            event=event,
+            channel=UserNotificationChoice.BARK,
+        )
+        delivery._attempt_send(pref)
+        return [delivery]
 
     def _bark_chat_url(self, pref: NotificationPreference):
         if not pref.open_chat_on_tap:
@@ -3036,11 +3068,14 @@ class NotificationDelivery(models.Model):
     @classmethod
     def enqueue_for_event(cls, event: NotificationEvent):
         deliveries = []
-        # Web Push is the time-sensitive route. Slow mail/Bark providers must
-        # never hold notifications for active device subscriptions.
+        # Web Push and Bark are time-sensitive routes. Bark is sent per event
+        # only while the recipient is offline; it never enters the digest.
         deliveries.extend(WebPushDelivery.enqueue_for_event(event))
+        deliveries.extend(cls.enqueue_bark_for_event(event))
         prefs = NotificationPreference.ensure_defaults(event.user)
         for pref in prefs:
+            if pref.channel == UserNotificationChoice.BARK:
+                continue
             if not NotificationTopicPreference.is_enabled_for_event(event, pref.channel):
                 continue
             if not pref.enabled:
@@ -3101,6 +3136,12 @@ class NotificationDelivery(models.Model):
             if not cls._channel_available(delivery.event.user, delivery.channel):
                 delivery.status = NotificationDeliveryStatusChoice.SKIPPED
                 delivery.detail = 'channel_unavailable'
+                delivery.attempted_at = timezone.now()
+                delivery.save(update_fields=['status', 'detail', 'attempted_at'])
+                continue
+            if delivery.channel == UserNotificationChoice.BARK:
+                delivery.status = NotificationDeliveryStatusChoice.SKIPPED
+                delivery.detail = 'instant_not_deferred'
                 delivery.attempted_at = timezone.now()
                 delivery.save(update_fields=['status', 'detail', 'attempted_at'])
                 continue

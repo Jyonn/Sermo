@@ -33,6 +33,7 @@ from User.models import (
     NotificationPreference,
     OfficialLoginTicket,
     User,
+    UserNotificationChoice,
     UserRoleChoice,
 )
 from User.params import UserParams
@@ -422,9 +423,11 @@ class SpaceAdminUserListView(SpaceUserListView):
                 channel=channel,
                 enabled=pref.enabled if pref else NotificationPreference._default_enabled(user, channel),
                 offline_threshold_minutes=(
-                    pref.offline_threshold_minutes
-                    if pref
-                    else NotificationPreference._default_threshold(channel)
+                    None if channel == UserNotificationChoice.BARK else (
+                        pref.offline_threshold_minutes
+                        if pref
+                        else NotificationPreference._default_threshold(channel)
+                    )
                 ),
             ))
         return rows

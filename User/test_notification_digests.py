@@ -69,6 +69,17 @@ class NotificationDigestTests(TestCase):
         ChatMember.objects.create(chat=chat, user=self.recipient, status=ChatMemberStatusChoice.ACTIVE, joined_at=joined_at)
         return chat
 
+    def enable_bark(self):
+        self.recipient.bark = 'https://api.day.app/test-device'
+        self.recipient.bark_verified_at = timezone.now()
+        self.recipient.save(update_fields=['bark', 'bark_verified_at'])
+        return NotificationPreference.set_preference(
+            self.recipient,
+            UserNotificationChoice.BARK,
+            enabled=True,
+            offline_threshold_minutes=60,
+        )
+
     @patch('User.models.notificator.mail', return_value={'request_id': 'digest-1'})
     def test_due_messages_are_merged_and_cursor_advances(self, mail):
         first = self.create_notified_message('first')
@@ -82,6 +93,52 @@ class NotificationDigestTests(TestCase):
         self.assertEqual(cursor.last_message_id, second.id)
         self.assertEqual(summary['sent'], 2)
         self.assertLess(first.id, cursor.last_message_id)
+
+    @patch('User.models.notificator.bark')
+    def test_bark_is_not_processed_by_digest_cursor(self, bark):
+        self.enable_bark()
+        self.create_notified_message('instant only')
+
+        NotificationChannelCursor.process_due()
+
+        bark.assert_not_called()
+        self.assertFalse(NotificationDelivery.objects.filter(channel=UserNotificationChoice.BARK).exists())
+
+    @patch('User.models.notificator.bark')
+    def test_offline_bark_is_sent_immediately_per_message(self, bark):
+        self.enable_bark()
+        first = self.create_notified_message('first instant')
+        second = self.create_notified_message('second instant')
+        events = list(NotificationEvent.objects.filter(
+            user=self.recipient,
+            payload__message_id__in=[first.id, second.id],
+        ).order_by('id'))
+
+        for event in events:
+            NotificationDelivery.enqueue_bark_for_event(event)
+
+        self.assertEqual(bark.call_count, 2)
+        self.assertEqual(
+            NotificationDelivery.objects.filter(
+                channel=UserNotificationChoice.BARK,
+                status=1,
+            ).count(),
+            2,
+        )
+
+    @patch('User.models.notificator.bark')
+    def test_online_user_does_not_queue_bark_for_later(self, bark):
+        self.enable_bark()
+        self.recipient.last_heartbeat = timezone.now()
+        self.recipient.save(update_fields=['last_heartbeat'])
+        message = self.create_notified_message('seen while online')
+        event = NotificationEvent.objects.get(user=self.recipient, payload__message_id=message.id)
+
+        deliveries = NotificationDelivery.enqueue_bark_for_event(event)
+
+        self.assertEqual(deliveries, [])
+        bark.assert_not_called()
+        self.assertFalse(NotificationDelivery.objects.filter(channel=UserNotificationChoice.BARK).exists())
 
     @patch('User.models.notificator.mail')
     def test_read_messages_are_skipped_without_delivery(self, mail):
