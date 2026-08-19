@@ -322,12 +322,19 @@ class InstantNotificationEndpointCodeView(View):
                     body=body,
                     token=verification.secret,
                 )
-            else:
+            elif verification.provider == InstantNotificationProviderChoice.GOTIFY:
                 notificator.gotify(
                     verification.target,
                     verification.secret,
                     title=title,
                     body=body,
+                )
+            else:
+                notificator.pushdeer(
+                    verification.target,
+                    title=title,
+                    body=body,
+                    server=verification.secret,
                 )
         except Exception as error:
             verification.used_at = timezone.now()

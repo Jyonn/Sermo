@@ -121,6 +121,7 @@ class InstantNotificationProviderChoice(Choice):
     BARK = 'bark'
     NTFY = 'ntfy'
     GOTIFY = 'gotify'
+    PUSHDEER = 'pushdeer'
 
 
 class UserAccountLevelChoice(Choice):
@@ -1793,8 +1794,17 @@ class InstantNotificationEndpoint(models.Model):
             InstantNotificationProviderChoice.BARK,
             InstantNotificationProviderChoice.NTFY,
             InstantNotificationProviderChoice.GOTIFY,
+            InstantNotificationProviderChoice.PUSHDEER,
         ):
             raise ValueError('invalid instant notification provider')
+        if provider == InstantNotificationProviderChoice.PUSHDEER:
+            if not target or any(character.isspace() for character in target):
+                raise ValueError('invalid pushdeer pushkey')
+            if secret:
+                parsed_server = urlparse(secret)
+                if parsed_server.scheme not in ('http', 'https') or not parsed_server.netloc:
+                    raise ValueError('invalid pushdeer server')
+            return provider, target, secret
         if provider == InstantNotificationProviderChoice.BARK:
             target = normalize_bark_endpoint(target)
         parsed = urlparse(target)
@@ -1812,6 +1822,8 @@ class InstantNotificationEndpoint(models.Model):
 
     @staticmethod
     def mask_target(target):
+        if (target or '').startswith('PDU'):
+            return f'{target[:6]}••••{target[-4:]}' if len(target) > 10 else 'PDU••••'
         parsed = urlparse(target or '')
         if not parsed.netloc:
             return '***'
@@ -3270,6 +3282,13 @@ class NotificationDelivery(models.Model):
                         title=title,
                         body=body,
                         click=action_url,
+                    )
+                elif endpoint.provider == InstantNotificationProviderChoice.PUSHDEER:
+                    notificator.pushdeer(
+                        target,
+                        title=title,
+                        body=body,
+                        server=endpoint.secret,
                     )
                 else:
                     raise ValueError('unsupported instant provider')

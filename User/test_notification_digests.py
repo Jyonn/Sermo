@@ -147,10 +147,11 @@ class NotificationDigestTests(TestCase):
         bark.assert_not_called()
         self.assertFalse(NotificationDelivery.objects.filter(channel=UserNotificationChoice.BARK).exists())
 
+    @patch('User.models.notificator.pushdeer', create=True)
     @patch('User.models.notificator.gotify', create=True)
     @patch('User.models.notificator.ntfy', create=True)
     @patch('User.models.notificator.bark')
-    def test_all_enabled_instant_receivers_are_sent_independently(self, bark, ntfy, gotify):
+    def test_all_enabled_instant_receivers_are_sent_independently(self, bark, ntfy, gotify, pushdeer):
         self.enable_bark()
         InstantNotificationEndpoint.objects.create(
             user=self.recipient,
@@ -165,15 +166,22 @@ class NotificationDigestTests(TestCase):
             secret='app-token',
             verified_at=timezone.now(),
         )
+        InstantNotificationEndpoint.objects.create(
+            user=self.recipient,
+            provider='pushdeer',
+            target='PDU_sermo-test-pushkey',
+            verified_at=timezone.now(),
+        )
         message = self.create_notified_message('multi receiver')
         event = NotificationEvent.objects.get(user=self.recipient, payload__message_id=message.id)
 
         deliveries = NotificationDelivery.enqueue_instant_for_event(event)
 
-        self.assertEqual(len(deliveries), 3)
+        self.assertEqual(len(deliveries), 4)
         bark.assert_called_once()
         ntfy.assert_called_once()
         gotify.assert_called_once()
+        pushdeer.assert_called_once()
 
     @patch('User.models.notificator.mail')
     def test_read_messages_are_skipped_without_delivery(self, mail):
