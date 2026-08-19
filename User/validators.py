@@ -112,7 +112,7 @@ class UserValidator:
     PERSONALIZATION_OPTIONS = {
         'chat_bubble_style': {
             'default', 'comic', 'vip', 'zen', 'hero', 'dragon', 'bauhaus', 'mosaic',
-            'typewriter', 'newspaper', 'receipt', 'sticker', 'toybrick', 'niko', 'fufu', 'xiaobai',
+            'typewriter', 'newspaper', 'receipt', 'niko', 'fufu', 'xiaobai',
             'baxian-lv', 'baxian-zhongli', 'baxian-he',
             'city-jdz', 'city-shanghai', 'city-nyc', 'city-beijing',
         },
