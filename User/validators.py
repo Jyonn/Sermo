@@ -106,10 +106,8 @@ class UserValidator:
     AVATAR_PRESET_MIN_ID = 1
     AVATAR_PRESET_MAX_ID = 36
     CHAT_BACKGROUND_THEMES = {
-        'default', 'paper', 'mint', 'dusk', 'comic', 'zen', 'hero', 'dragon', 'bauhaus', 'mosaic',
-        'tidepool', 'forest', 'desert', 'snowfield', 'sakura', 'sunrise', 'midnight', 'rain', 'galaxy',
-        'aurora-sky', 'linen', 'terrazzo', 'blueprint', 'newsprint', 'hologram', 'arcade', 'jazz',
-        'spaceport', 'candy', 'noir-film', 'custom',
+        'default', 'paper', 'mint', 'comic', 'bauhaus', 'dragon', 'zen', 'mosaic', 'newsprint',
+        'aurora-sky', 'hologram', 'spaceport', 'noir-film', 'custom',
     }
     PERSONALIZATION_OPTIONS = {
         'chat_bubble_style': {

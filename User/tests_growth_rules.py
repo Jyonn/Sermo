@@ -43,14 +43,27 @@ class GrowthRuleTests(SimpleTestCase):
         self.assertEqual(rewards['capability.image']['rarity'], 'rare')
         self.assertEqual(rewards['frame.butterfly']['rarity'], 'legendary')
         self.assertEqual(rewards['frame.comet']['rarity'], 'legendary')
-        self.assertEqual(rewards['background.arcade']['rarity'], 'epic')
-        self.assertEqual(rewards['background.jazz']['rarity'], 'rare')
+        self.assertEqual(rewards['background.zen']['rarity'], 'rare')
+        self.assertEqual(rewards['background.aurora_sky']['rarity'], 'epic')
         self.assertEqual(rewards['bubble.niko']['rarity'], 'legendary')
         self.assertEqual(rewards['bubble.baxian_lv']['rarity'], 'legendary')
         self.assertEqual(rewards['bubble.baxian_zhongli']['rarity'], 'legendary')
         self.assertEqual(rewards['bubble.baxian_he']['rarity'], 'legendary')
         self.assertEqual(rewards['frame.niko']['rarity'], 'legendary')
         self.assertEqual(rewards['background.noir']['rarity'], 'legendary')
+
+    def test_background_catalog_only_contains_active_themes(self):
+        rewards = {
+            reward['asset_key']
+            for items in LEVEL_REWARDS.values()
+            for reward in items
+            if reward['category'] == 'background'
+        }
+        self.assertEqual(rewards, {
+            'default', 'paper', 'mint', 'comic', 'bauhaus', 'dragon',
+            'zen', 'mosaic', 'newsprint', 'aurora-sky', 'hologram',
+            'spaceport', 'noir-film',
+        })
 
     def test_every_reward_has_structured_display_metadata(self):
         for rewards in LEVEL_REWARDS.values():
