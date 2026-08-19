@@ -9,7 +9,7 @@ from User.growth import (
     resolve_event_rule,
 )
 from User.growth_notifications import begin_growth_awards, growth_award_total, reset_growth_awards
-from User.models import GrowthEvent, PermanentVipCampaign, User, UserFeatureDiscovery
+from User.models import GrowthEvent, PermanentVipCampaign, User, UserFeatureDiscovery, UserResourceInventory
 
 
 class GrowthRuleTests(SimpleTestCase):
@@ -127,6 +127,26 @@ class GrowthReconciliationTests(TestCase):
         self.assertFalse(GrowthEvent.objects.filter(id=invalid.id).exists())
         self.user.refresh_from_db()
         self.assertEqual(self.user.growth_score, 20)
+
+    def test_growth_level_resources_are_granted_once_and_retained(self):
+        self.assertEqual(self.user.award_growth('explore:install_webapp'), 40)
+        self.assertTrue(UserResourceInventory.owns(self.user, 'background', 'paper'))
+        self.assertTrue(UserResourceInventory.owns(self.user, 'bubble', 'comic'))
+        self.assertTrue(UserResourceInventory.owns(self.user, 'frame', 'orbit'))
+
+        self.user.calculate_growth()
+        self.assertEqual(
+            UserResourceInventory.objects.filter(user=self.user, reward_id='bubble.comic').count(),
+            1,
+        )
+
+    def test_permanent_vip_bundle_uses_the_same_inventory(self):
+        UserResourceInventory.grant_permanent_vip_resources(self.user, 7)
+
+        self.assertTrue(UserResourceInventory.owns(self.user, 'vip', 'founding-100'))
+        self.assertTrue(UserResourceInventory.owns(self.user, 'bubble', 'vip'))
+        self.assertTrue(UserResourceInventory.owns(self.user, 'frame', 'vip'))
+        self.assertEqual(PermanentVipCampaign.status_for(self.user)['slot'], 7)
 
     def test_daily_events_share_the_global_daily_cap(self):
         day = '2026-08-04'

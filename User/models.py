@@ -32,6 +32,8 @@ from User.growth import (
     GROWTH_CAPABILITY_LEVELS,
     GROWTH_THRESHOLDS,
     LEVEL_REWARDS,
+    PERMANENT_VIP_RESOURCES,
+    RESOURCE_REWARD_CATEGORIES,
     WEEKLY_GROWTH_LIMIT,
     level_unlock_titles,
     resolve_event_rule,
@@ -127,6 +129,21 @@ class UserRoleChoice(Choice):
 class UserAvatarTypeChoice(Choice):
     PRESET = 'preset'
     CUSTOM = 'custom'
+
+
+class UserResourceTypeChoice(Choice):
+    BACKGROUND = 'background'
+    BUBBLE = 'bubble'
+    FRAME = 'frame'
+    STATEMENT = 'statement'
+    IDENTITY = 'identity'
+    VIP = 'vip'
+
+
+class UserResourceSourceChoice(Choice):
+    GROWTH = 'growth'
+    VIP_CAMPAIGN = 'vip_campaign'
+    SYSTEM = 'system'
 
 
 class UserNormalizers:
@@ -992,6 +1009,7 @@ class User(models.Model):
             locked.save(update_fields=['growth_score', 'growth_level'])
             self.growth_score = locked.growth_score
             self.growth_level = locked.growth_level
+            UserResourceInventory.grant_growth_rewards(locked, locked.growth_level)
         record_growth_award(awarded)
         return awarded
 
@@ -1035,6 +1053,7 @@ class User(models.Model):
                 locked.save(update_fields=['growth_score', 'growth_level'])
             self.growth_score = total
             self.growth_level = level
+            UserResourceInventory.grant_growth_rewards(locked, level)
         return total
 
     @staticmethod
@@ -1062,6 +1081,8 @@ class User(models.Model):
             self.growth_score = score
             self.growth_level = level
             self.save(update_fields=['growth_score', 'growth_level'])
+        if save:
+            UserResourceInventory.grant_growth_rewards(self, level)
         names = self.space.level_names or []
         next_score = GROWTH_THRESHOLDS[level] if level < len(GROWTH_THRESHOLDS) else None
         current_threshold = GROWTH_THRESHOLDS[level - 1]
@@ -1234,6 +1255,7 @@ class User(models.Model):
             else ''
         )
         payload['growth'] = self.calculate_growth()
+        payload['resource_inventory'] = UserResourceInventory.payload_for(self)
         from TravelMap.unlocks import unlocked_city_bubble_styles
         payload['city_bubble_styles'] = unlocked_city_bubble_styles(self)
         payload['permanent_vip_campaign'] = PermanentVipCampaign.status_for(self)
@@ -1338,6 +1360,91 @@ class UserFeatureDiscovery(models.Model):
         return cls.status_for(user)
 
 
+class UserResourceInventory(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='resource_inventory')
+    resource_type = models.CharField(max_length=24, choices=UserResourceTypeChoice.to_choices(), db_index=True)
+    reward_id = models.CharField(max_length=80)
+    resource_key = models.CharField(max_length=80, default='', blank=True)
+    source = models.CharField(max_length=24, choices=UserResourceSourceChoice.to_choices(), db_index=True)
+    source_reference = models.CharField(max_length=80, default='', blank=True)
+    metadata = models.JSONField(default=dict, blank=True)
+    acquired_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['user', 'reward_id'], name='user_resource_inventory_unique'),
+        ]
+        indexes = [
+            models.Index(fields=['user', 'resource_type', 'resource_key'], name='user_resource_lookup'),
+        ]
+
+    @classmethod
+    def grant(cls, user, resource_type, reward_id, resource_key='', source=UserResourceSourceChoice.SYSTEM,
+              source_reference='', metadata=None):
+        item, created = cls.objects.get_or_create(
+            user=user,
+            reward_id=reward_id,
+            defaults=dict(
+                resource_type=resource_type,
+                resource_key=resource_key or '',
+                source=source,
+                source_reference=source_reference or '',
+                metadata=metadata or {},
+            ),
+        )
+        return item, created
+
+    @classmethod
+    def grant_growth_rewards(cls, user, level):
+        resources = [
+            cls(
+                user=user,
+                resource_type=reward['category'],
+                reward_id=reward['id'],
+                resource_key=reward.get('asset_key') or '',
+                source=UserResourceSourceChoice.GROWTH,
+                source_reference=f'level:{reward["level"]}',
+            )
+            for rewards in LEVEL_REWARDS.values()
+            for reward in rewards
+            if reward['level'] <= level
+            and reward['category'] in RESOURCE_REWARD_CATEGORIES
+            and reward['implementation_status'] != 'planned'
+        ]
+        if resources:
+            cls.objects.bulk_create(resources, ignore_conflicts=True, batch_size=100)
+
+    @classmethod
+    def grant_permanent_vip_resources(cls, user, slot):
+        resources = [
+            cls(
+                user=user,
+                resource_type=resource_type,
+                reward_id=reward_id,
+                resource_key=resource_key,
+                source=UserResourceSourceChoice.VIP_CAMPAIGN,
+                source_reference='founding-100',
+                metadata={'slot': slot},
+            )
+            for resource_type, reward_id, resource_key in PERMANENT_VIP_RESOURCES
+        ]
+        cls.objects.bulk_create(resources, ignore_conflicts=True, batch_size=20)
+
+    @classmethod
+    def owns(cls, user, resource_type, resource_key):
+        return cls.objects.filter(
+            user=user,
+            resource_type=resource_type,
+            resource_key=resource_key,
+        ).exists()
+
+    @classmethod
+    def payload_for(cls, user):
+        return [item.dictify(
+            'resource_type', 'reward_id', 'resource_key', 'source', 'source_reference', 'metadata', 'acquired_at',
+        ) for item in cls.objects.filter(user=user).order_by('acquired_at', 'id')]
+
+
 class PermanentVipCampaign(models.Model):
     LIMIT = 100
     LEVEL_THRESHOLDS = (
@@ -1360,7 +1467,7 @@ class PermanentVipCampaign(models.Model):
     @classmethod
     def status_for(cls, user):
         campaign, _ = cls.objects.get_or_create(key='founding-100')
-        claim = PermanentVipClaim.objects.filter(user=user).first()
+        claim = UserResourceInventory.objects.filter(user=user, reward_id='vip.permanent').first()
         level = user.effective_growth_level()
         required_level = cls.required_level_for_slot(min(campaign.claimed_count + 1, cls.LIMIT))
         requirements = dict(
@@ -1380,7 +1487,7 @@ class PermanentVipCampaign(models.Model):
                 for last_slot, tier_level in cls.LEVEL_THRESHOLDS
             ],
             claimed_by_user=claim is not None,
-            slot=claim.slot if claim else None,
+            slot=(claim.metadata or {}).get('slot') if claim else None,
             active=claim is None and campaign.claimed_count < cls.LIMIT,
         )
 
@@ -1388,8 +1495,11 @@ class PermanentVipCampaign(models.Model):
     def claim_for(cls, user):
         with transaction.atomic():
             campaign, _ = cls.objects.select_for_update().get_or_create(key='founding-100')
-            existing = PermanentVipClaim.objects.filter(user=user).first()
-            if not existing:
+            existing = UserResourceInventory.objects.filter(user=user, reward_id='vip.permanent').first()
+            if existing:
+                slot = (existing.metadata or {}).get('slot')
+                UserResourceInventory.grant_permanent_vip_resources(user, slot)
+            else:
                 if campaign.claimed_count >= cls.LIMIT:
                     raise UserErrors.PERMANENT_VIP_CAMPAIGN_FULL
                 required_level = cls.required_level_for_slot(campaign.claimed_count + 1)
@@ -1401,21 +1511,13 @@ class PermanentVipCampaign(models.Model):
                     raise UserErrors.PERMANENT_VIP_NOT_ELIGIBLE
 
                 slot = campaign.claimed_count + 1
-                PermanentVipClaim.objects.create(user=user, slot=slot)
+                UserResourceInventory.grant_permanent_vip_resources(user, slot)
                 campaign.claimed_count = slot
                 campaign.save(update_fields=['claimed_count'])
                 User.objects.filter(id=user.id).update(is_permanent_vip=True)
                 user.is_permanent_vip = True
         user.award_growth('vip:permanent')
         return cls.status_for(user)
-
-
-class PermanentVipClaim(models.Model):
-    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='permanent_vip_claim')
-    slot = models.PositiveSmallIntegerField(unique=True)
-    claimed_at = models.DateTimeField(auto_now_add=True)
-
-
 class UserEmojiUsage(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='emoji_usages')
     emoji = models.CharField(max_length=64)

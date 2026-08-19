@@ -145,6 +145,21 @@ VIP_OR_LEVEL_PERSONALIZATION = {
     ('avatar_frame_style', 'niko-run'), ('avatar_frame_style', 'fufu-wave'),
 }
 
+RESOURCE_REWARD_CATEGORIES = {'background', 'bubble', 'frame', 'statement', 'identity'}
+
+PERMANENT_VIP_RESOURCES = (
+    ('vip', 'vip.permanent', 'founding-100'),
+    ('bubble', 'bubble.vip', 'vip'),
+    ('frame', 'frame.vip', 'vip'),
+    ('statement', 'statement.vip', 'vip'),
+    ('bubble', 'bubble.niko.vip', 'niko'),
+    ('bubble', 'bubble.fufu.vip', 'fufu'),
+    ('frame', 'frame.niko.vip', 'niko-run'),
+    ('frame', 'frame.fufu.vip', 'fufu-wave'),
+    ('statement', 'statement.niko.vip', 'niko'),
+    ('statement', 'statement.fufu.vip', 'fufu'),
+)
+
 
 def _reward(reward_id, level, category, title, rarity, asset_key=None, capability_key=None, status='live'):
     preview_kind = 'live' if category in {'background', 'bubble', 'frame'} else 'image'

@@ -34,6 +34,7 @@ from User.models import (
     AccountSwitchTicket,
     UserEmojiUsage,
     PermanentVipCampaign,
+    UserResourceInventory,
     UserFeatureDiscovery,
 )
 from User.params import (
@@ -117,7 +118,11 @@ class UserGrowthEventView(View):
     def post(self, request: Request):
         key = self.EVENTS[request.json.event]
         awarded = request.user.award_growth(key)
-        return dict(awarded=awarded, growth=request.user.calculate_growth())
+        return dict(
+            awarded=awarded,
+            growth=request.user.calculate_growth(),
+            resource_inventory=UserResourceInventory.payload_for(request.user),
+        )
 
 
 class UserGrowthAcknowledgementView(View):
@@ -149,7 +154,9 @@ class PermanentVipCampaignView(View):
 
     @auth.require_user
     def post(self, request: Request):
-        return PermanentVipCampaign.claim_for(request.user)
+        payload = PermanentVipCampaign.claim_for(request.user)
+        payload['resource_inventory'] = UserResourceInventory.payload_for(request.user)
+        return payload
 
 
 class RefreshView(View):
