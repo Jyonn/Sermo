@@ -601,19 +601,6 @@ class WelcomeMessageView(View):
         return dict(welcome_message=request.user.welcome_message)
 
 
-class PlazaGreetingView(View):
-    @auth.require_user
-    def get(self, request: Request):
-        return dict(plaza_greeting=request.user.plaza_greeting)
-
-    @auth.require_user
-    @analyse.json(UserParams.plaza_greeting)
-    def post(self, request: Request):
-        _require_password_enabled(request.user)
-        request.user.set_plaza_greeting(request.json.plaza_greeting)
-        return dict(plaza_greeting=request.user.plaza_greeting)
-
-
 class UserNameView(View):
     @auth.require_user
     @analyse.json(UserParams.name)
@@ -639,7 +626,7 @@ class AvatarCustomUploadView(View):
     )
     def post(self, request: Request):
         _require_password_enabled(request.user)
-        request.user.require_growth_capability('custom_avatar')
+        request.user.require_capability('menu.profile.avatar.custom')
         return issue_avatar_upload(
             file_name=request.json.file_name,
             content_type=request.json.content_type,
@@ -663,7 +650,7 @@ class ChatBackgroundUploadView(View):
         UserParams.avatar_content_type,
     )
     def post(self, request: Request):
-        request.user.require_growth_capability('custom_chat_background')
+        request.user.require_capability('menu.personalization.background.use.custom')
         return issue_chat_background_upload(
             file_name=request.json.file_name,
             content_type=request.json.content_type,

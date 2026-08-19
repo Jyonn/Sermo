@@ -189,15 +189,6 @@ class UserValidator:
         return message
 
     @classmethod
-    def plaza_greeting(cls, value):
-        message = (value or '').strip()
-        if not message:
-            raise UserErrors.WELCOME_MESSAGE_EMPTY
-        if len(message) > cls.PLAZA_GREETING_MAX_LENGTH:
-            raise UserErrors.WELCOME_MESSAGE_TOO_LONG
-        return message
-
-    @classmethod
     def avatar_preset_id(cls, value):
         preset_id = int(value)
         if not (cls.AVATAR_PRESET_MIN_ID <= preset_id <= cls.AVATAR_PRESET_MAX_ID):

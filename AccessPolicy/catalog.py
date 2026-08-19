@@ -135,26 +135,6 @@ for style in ('niko', 'fufu'):
 
 CAPABILITIES = {definition.key: definition for definition in _DEFINITIONS}
 
-LEGACY_GROWTH_CAPABILITY_KEYS = {
-    'send_image': 'chat.message.send.image',
-    'send_audio': 'chat.message.send.audio',
-    'send_location': 'chat.message.send.location',
-    'send_video': 'chat.message.send.video',
-    'custom_avatar': 'menu.profile.avatar.custom',
-    'create_group': 'chat.group.create',
-    'invite_group_member': 'chat.group.invite',
-    'rename_nickname': 'menu.profile.nickname',
-    'rename_group': 'chat.group.rename',
-    'welcome_message': 'menu.profile.welcome',
-    'plaza_greeting': 'menu.profile.welcome',
-    'create_sticker': 'menu.sticker.create',
-    'online_reminder': 'chat.reminder.online',
-    'download_audio': 'chat.message.download.audio',
-    'chat_background': 'menu.personalization.background',
-    'custom_chat_background': 'menu.personalization.background.use.custom',
-}
-
-
 def get_capability(key):
     return CAPABILITIES.get(key)
 

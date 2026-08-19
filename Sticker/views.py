@@ -21,7 +21,7 @@ class StickerView(View):
     @auth.require_user
     @analyse.json(StickerParams.message_id)
     def post(self, request: Request):
-        request.user.require_growth_capability('create_sticker')
+        request.user.require_capability('menu.sticker.create')
         message = request.json.message
         if message.type != MessageTypeChoice.IMAGE:
             raise StickerErrors.INVALID_IMAGE
@@ -95,7 +95,7 @@ class StickerPrepareView(View):
         StickerParams.file_size,
     )
     def post(self, request: Request):
-        request.user.require_growth_capability('create_sticker')
+        request.user.require_capability('menu.sticker.create')
         asset = StickerAsset.objects.filter(content_hash=request.json.content_hash).first()
         if asset is not None:
             asset.queue_missing_dimensions()
@@ -121,7 +121,7 @@ class StickerCompleteView(View):
         StickerParams.file_size,
     )
     def post(self, request: Request):
-        request.user.require_growth_capability('create_sticker')
+        request.user.require_capability('menu.sticker.create')
         expected_prefix = f'sermo/messages/sticker/{request.json.content_hash}.'
         if not request.json.storage_key.startswith(expected_prefix):
             raise StickerErrors.INVALID_HASH

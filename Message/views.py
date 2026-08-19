@@ -200,13 +200,13 @@ class MessageUploadView(View):
     def post(self, request: Request):
         request.user.space.require_chat_enabled()
         capability = {
-            'image': 'send_image',
-            'audio': 'send_audio',
-            'location': 'send_location',
-            'video': 'send_video',
+            'image': 'chat.message.send.image',
+            'audio': 'chat.message.send.audio',
+            'location': 'chat.message.send.location',
+            'video': 'chat.message.send.video',
         }.get(request.json.kind)
         if capability:
-            request.user.require_growth_capability(capability)
+            request.user.require_capability(capability)
         elif request.json.kind == 'file':
             request.user.require_capability('chat.message.send.file')
         return issue_message_upload(
@@ -243,36 +243,23 @@ class MessageLinkPreviewView(View):
         return link_preview.jsonl()
 
 
-class MessageImageMetadataView(View):
+class MessageMediaMetadataView(View):
     @auth.require_user
     @analyse.query(MessageParams.message_id)
     def get(self, request: Request):
         message: Message = request.query.message
         if not message.is_visible_to(request.user):
             raise MessageErrors.NOT_A_MEMBER
-        if message.type != MessageTypeChoice.IMAGE:
+        kind = {
+            MessageTypeChoice.IMAGE: MediaAsset.KIND_IMAGE,
+            MessageTypeChoice.VIDEO: MediaAsset.KIND_VIDEO,
+        }.get(message.type)
+        if kind is None:
             raise MessageErrors.TYPE_INVALID
         metadata = message.media_asset
         if metadata is None:
             metadata = MediaAsset.queue(
-                message.source_media_key(), message.source_media_uri(), MediaAsset.KIND_IMAGE,
-            )
-        return metadata.jsonl()
-
-
-class MessageVideoMetadataView(View):
-    @auth.require_user
-    @analyse.query(MessageParams.message_id)
-    def get(self, request: Request):
-        message: Message = request.query.message
-        if not message.is_visible_to(request.user):
-            raise MessageErrors.NOT_A_MEMBER
-        if message.type != MessageTypeChoice.VIDEO:
-            raise MessageErrors.TYPE_INVALID
-        metadata = message.media_asset
-        if metadata is None:
-            metadata = MediaAsset.queue(
-                message.source_media_key(), message.source_media_uri(), MediaAsset.KIND_VIDEO,
+                message.source_media_key(), message.source_media_uri(), kind,
             )
         return metadata.jsonl()
 

@@ -155,7 +155,7 @@ class ChatPreferenceView(View):
     @auth.require_chat_member()
     def post(self, request):
         if request.json.online_reminder_enabled:
-            request.user.require_growth_capability('online_reminder')
+            request.user.require_capability('chat.reminder.online')
         preference = ChatUserPreference.update(
             request.query.chat,
             request.user,

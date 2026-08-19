@@ -2,6 +2,7 @@ from django.test import SimpleTestCase, TestCase
 
 from Space.models import Space
 from User.growth import (
+    CAPABILITY_LEVEL_FALLBACKS,
     EVENT_RULES,
     GROWTH_THRESHOLDS,
     LEVEL_REWARDS,
@@ -13,6 +14,12 @@ from User.models import GrowthEvent, PermanentVipCampaign, User, UserFeatureDisc
 
 
 class GrowthRuleTests(SimpleTestCase):
+    def test_growth_capability_payload_uses_canonical_policy_keys(self):
+        self.assertTrue(CAPABILITY_LEVEL_FALLBACKS)
+        self.assertTrue(all('.' in key for key in CAPABILITY_LEVEL_FALLBACKS))
+        self.assertIn('chat.message.send.image', CAPABILITY_LEVEL_FALLBACKS)
+        self.assertIn('menu.profile.avatar.custom', CAPABILITY_LEVEL_FALLBACKS)
+
     def test_permanent_vip_level_thresholds_follow_claim_order(self):
         expected = {
             1: 4,

@@ -94,23 +94,22 @@ def resolve_event_rule(event_key):
     return None
 
 
-GROWTH_CAPABILITY_LEVELS = {
-    'send_image': 2,
-    'send_audio': 3,
-    'send_location': 3,
-    'custom_avatar': 4,
-    'create_group': 4,
-    'invite_group_member': 4,
-    'rename_nickname': 5,
-    'rename_group': 5,
-    'send_video': 5,
-    'welcome_message': 6,
-    'plaza_greeting': 6,
-    'create_sticker': 6,
-    'online_reminder': 7,
-    'download_audio': 8,
-    'chat_background': 1,
-    'custom_chat_background': 8,
+CAPABILITY_LEVEL_FALLBACKS = {
+    'chat.message.send.image': 2,
+    'chat.message.send.audio': 3,
+    'chat.message.send.location': 3,
+    'menu.profile.avatar.custom': 4,
+    'chat.group.create': 4,
+    'chat.group.invite': 4,
+    'menu.profile.nickname': 5,
+    'chat.group.rename': 5,
+    'chat.message.send.video': 5,
+    'menu.profile.welcome': 6,
+    'menu.sticker.create': 6,
+    'chat.reminder.online': 7,
+    'chat.message.download.audio': 8,
+    'menu.personalization.background': 1,
+    'menu.personalization.background.use.custom': 8,
 }
 
 CHAT_BACKGROUND_LEVELS = {

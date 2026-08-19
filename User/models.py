@@ -29,7 +29,7 @@ from User.validators import UserValidator, UserErrors
 from User.growth import (
     DAILY_GROWTH_LIMIT,
     EVENT_RULES,
-    GROWTH_CAPABILITY_LEVELS,
+    CAPABILITY_LEVEL_FALLBACKS,
     GROWTH_THRESHOLDS,
     LEVEL_REWARDS,
     PERMANENT_VIP_RESOURCES,
@@ -482,7 +482,7 @@ class User(models.Model):
         return self
 
     def set_name(self, name, save=True):
-        self.require_growth_capability('rename_nickname')
+        self.require_capability('menu.profile.nickname')
         available_at = self.nickname_change_available_at()
         if available_at and timezone.now() < available_at:
             raise UserErrors.NICKNAME_CHANGE_COOLDOWN(available_at=available_at.isoformat())
@@ -505,30 +505,11 @@ class User(models.Model):
         score = GROWTH_THRESHOLDS[-1] if self.is_official else self.growth_score
         return min(self._growth_level_for_score(score), self.growth_level_cap()[0])
 
-    def has_growth_capability(self, capability):
-        from AccessPolicy.catalog import LEGACY_GROWTH_CAPABILITY_KEYS
-
-        return self.has_capability(LEGACY_GROWTH_CAPABILITY_KEYS[capability])
-
-    def growth_capability_required_level(self, capability):
-        from AccessPolicy.catalog import LEGACY_GROWTH_CAPABILITY_KEYS
-
-        return self.capability_required_level(
-            LEGACY_GROWTH_CAPABILITY_KEYS[capability],
-            fallback=GROWTH_CAPABILITY_LEVELS[capability],
-        )
-
     def capability_required_level(self, capability, fallback=1):
         for candidate in range(1, 19):
             if self.has_capability(capability, context={'growth_level': candidate}):
                 return candidate
         return fallback
-
-    def require_growth_capability(self, capability):
-        from AccessPolicy.catalog import LEGACY_GROWTH_CAPABILITY_KEYS
-
-        self.require_capability(LEGACY_GROWTH_CAPABILITY_KEYS[capability])
-        return self
 
     def capability_decision(self, capability, context=None):
         from AccessPolicy.engine import evaluate_capability
@@ -650,18 +631,11 @@ class User(models.Model):
         )
 
     def set_welcome_message(self, welcome_message, save=True):
-        self.require_growth_capability('welcome_message')
+        self.require_capability('menu.profile.welcome')
         normalized = self.vldt.welcome_message(welcome_message)
         self.welcome_message = normalized
         if save:
             self.save(update_fields=['welcome_message'])
-        return self
-
-    def set_plaza_greeting(self, plaza_greeting, save=True):
-        self.require_growth_capability('plaza_greeting')
-        self.plaza_greeting = self.vldt.plaza_greeting(plaza_greeting)
-        if save:
-            self.save(update_fields=['plaza_greeting'])
         return self
 
     def ensure_contact_available(self, channel: int, target: str):
@@ -783,7 +757,7 @@ class User(models.Model):
         return self
 
     def set_custom_avatar(self, avatar_uri: str, save=True):
-        self.require_growth_capability('custom_avatar')
+        self.require_capability('menu.profile.avatar.custom')
         previous_avatar_type = self.avatar_type
         previous_avatar_uri = self.avatar_uri
         self.avatar_type = UserAvatarTypeChoice.CUSTOM
@@ -1142,10 +1116,10 @@ class User(models.Model):
             ],
             capabilities={
                 key: dict(
-                    required_level=self.growth_capability_required_level(key),
-                    available=self.has_growth_capability(key),
+                    required_level=self.capability_required_level(key, fallback=fallback),
+                    available=self.has_capability(key),
                 )
-                for key in GROWTH_CAPABILITY_LEVELS
+                for key, fallback in CAPABILITY_LEVEL_FALLBACKS.items()
             },
         )
 

@@ -539,13 +539,13 @@ class Message(models.Model):
                     message_type = MessageTypeChoice.STATEMENT
                     content = json.dumps(statement_reference, separators=(',', ':'), ensure_ascii=False)
             capability = {
-                MessageTypeChoice.IMAGE: 'send_image',
-                MessageTypeChoice.AUDIO: 'send_audio',
-                MessageTypeChoice.LOCATION: 'send_location',
-                MessageTypeChoice.VIDEO: 'send_video',
+                MessageTypeChoice.IMAGE: 'chat.message.send.image',
+                MessageTypeChoice.AUDIO: 'chat.message.send.audio',
+                MessageTypeChoice.LOCATION: 'chat.message.send.location',
+                MessageTypeChoice.VIDEO: 'chat.message.send.video',
             }.get(message_type)
             if capability:
-                user.require_growth_capability(capability)
+                user.require_capability(capability)
             elif message_type == MessageTypeChoice.FILE:
                 user.require_capability('chat.message.send.file')
             if reply_to is not None and (
