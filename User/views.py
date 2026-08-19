@@ -28,6 +28,9 @@ from User.models import (
     RefreshToken,
     UserGestureLockPreference,
     UserContactVerificationCode,
+    InstantNotificationEndpoint,
+    InstantNotificationVerification,
+    InstantNotificationProviderChoice,
     UserPasswordRecoveryChallenge,
     UserNotificationChoice,
     UserWebReminderPreference,
@@ -43,6 +46,7 @@ from User.params import (
     UserDeleteParams,
     UserPasswordParams,
     NotificationPreferenceParams,
+    InstantNotificationEndpointParams,
     NotificationTopicPreferenceParams,
     NotificationEventParams,
     UserGestureLockPreferenceParams,
@@ -243,6 +247,124 @@ class NotificationPreferenceView(View):
             bark_icon_mode=request.json.bark_icon_mode,
         )
         return pref.json()
+
+
+class InstantNotificationEndpointView(View):
+    @auth.require_user
+    def get(self, request: Request):
+        _require_password_enabled(request.user)
+        return [item.json() for item in request.user.instant_notification_endpoints.order_by('provider')]
+
+    @auth.require_user
+    @analyse.json(
+        InstantNotificationEndpointParams.verification_id,
+        InstantNotificationEndpointParams.code,
+    )
+    def post(self, request: Request):
+        _require_password_enabled(request.user)
+        try:
+            verification = InstantNotificationVerification.verify(
+                request.user,
+                request.json.verification_id,
+                request.json.code,
+            )
+        except ValueError:
+            raise UserErrors.INSTANT_ENDPOINT_CODE_INVALID
+        endpoint, _created = InstantNotificationEndpoint.objects.update_or_create(
+            user=request.user,
+            provider=verification.provider,
+            defaults=dict(
+                target=verification.target,
+                secret=verification.secret,
+                enabled=True,
+                verified_at=timezone.now(),
+            ),
+        )
+        NotificationPreference.set_preference(
+            request.user,
+            UserNotificationChoice.BARK,
+            enabled=True,
+        )
+        return endpoint.json()
+
+
+class InstantNotificationEndpointCodeView(View):
+    @auth.require_user
+    @analyse.json(
+        InstantNotificationEndpointParams.provider,
+        InstantNotificationEndpointParams.target,
+        InstantNotificationEndpointParams.secret,
+    )
+    def post(self, request: Request):
+        _require_password_enabled(request.user)
+        try:
+            verification = InstantNotificationVerification.issue(
+                request.user,
+                request.json.provider,
+                request.json.target,
+                request.json.secret,
+            )
+        except ValueError:
+            raise UserErrors.INSTANT_ENDPOINT_INVALID
+        title = verification_title('contact', request.user.language)
+        body = verification_message_text(
+            verification.code,
+            InstantNotificationVerification.EXPIRE_SECONDS // 60,
+            request.user.language,
+        )
+        try:
+            if verification.provider == InstantNotificationProviderChoice.BARK:
+                notificator.bark(verification.target, title=title, body=body)
+            elif verification.provider == InstantNotificationProviderChoice.NTFY:
+                notificator.ntfy(
+                    verification.target,
+                    title=title,
+                    body=body,
+                    token=verification.secret,
+                )
+            else:
+                notificator.gotify(
+                    verification.target,
+                    verification.secret,
+                    title=title,
+                    body=body,
+                )
+        except Exception as error:
+            verification.used_at = timezone.now()
+            verification.save(update_fields=['used_at'])
+            raise UserErrors.CONTACT_SEND_FAILED(details=error)
+        return dict(
+            verification_id=verification.id,
+            expires_in=InstantNotificationVerification.EXPIRE_SECONDS,
+        )
+
+
+class InstantNotificationEndpointDetailView(View):
+    @auth.require_user
+    @analyse.json(InstantNotificationEndpointParams.enabled)
+    def post(self, request: Request, endpoint_id: int):
+        _require_password_enabled(request.user)
+        endpoint = InstantNotificationEndpoint.objects.filter(id=endpoint_id, user=request.user).first()
+        if endpoint is None:
+            raise UserErrors.INSTANT_ENDPOINT_INVALID
+        endpoint.enabled = bool(request.json.enabled)
+        endpoint.save(update_fields=['enabled', 'updated_at'])
+        return endpoint.json()
+
+    @auth.require_user
+    def delete(self, request: Request, endpoint_id: int):
+        _require_password_enabled(request.user)
+        endpoint = InstantNotificationEndpoint.objects.filter(id=endpoint_id, user=request.user).first()
+        if endpoint is None:
+            raise UserErrors.INSTANT_ENDPOINT_INVALID
+        endpoint.delete()
+        if not InstantNotificationEndpoint.active_for_user(request.user).exists():
+            NotificationPreference.set_preference(
+                request.user,
+                UserNotificationChoice.BARK,
+                enabled=False,
+            )
+        return OK
 
 
 class NotificationTopicPreferenceView(View):

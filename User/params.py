@@ -166,6 +166,19 @@ class NotificationPreferenceParams(metaclass=Params):
         .bool(lambda x: x is None or x in (0, 1, 2), message=_('bark_icon_mode should be 0, 1 or 2'))
 
 
+class InstantNotificationEndpointParams(metaclass=Params):
+    provider = Validator('provider').to(str).to(lambda value: value.strip().lower())
+    target = Validator('target').to(str).to(lambda value: value.strip())
+    secret = Validator('secret').to(str).null().default(None).to(
+        lambda value: value.strip() if value else None
+    )
+    verification_id = Validator('verification_id').to(int)
+    code = Validator('code').to(str).to(lambda value: value.strip())
+    enabled = Validator('enabled').to(int).bool(
+        lambda value: value in (0, 1), message=_('enabled should be 0 or 1')
+    )
+
+
 class NotificationTopicPreferenceParams(metaclass=Params):
     channel = Validator('channel').to(int).bool(
         lambda value: value in range(4), message=_('Invalid notification channel'),

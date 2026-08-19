@@ -38,6 +38,8 @@ class UserErrors:
     CONTACT_CODE_EXPIRED = Error(message=_('Contact verification code expired'), code=Code.BadRequest)
     CONTACT_CHANNEL_INVALID = Error(message=_('Invalid contact channel'), code=Code.BadRequest)
     CONTACT_SEND_FAILED = Error(message=_('Failed to send contact verification message'), code=Code.InternalServerError)
+    INSTANT_ENDPOINT_INVALID = Error(message=_('Invalid instant notification endpoint'), code=Code.BadRequest)
+    INSTANT_ENDPOINT_CODE_INVALID = Error(message=_('Invalid or expired instant notification verification code'), code=Code.BadRequest)
     CONTACT_ALREADY_BOUND = Error(message=_('Contact is already bound in this space'), code=Code.BadRequest)
     CONTACT_NOT_BOUND = Error(message=_('Contact is not bound'), code=Code.BadRequest)
     CONTACT_UNBIND_TARGET_MISMATCH = Error(message=_('Contact verification target does not match current binding'), code=Code.BadRequest)

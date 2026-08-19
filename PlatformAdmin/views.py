@@ -234,11 +234,13 @@ def _delivery_status(value):
     }.get(value, 'unknown')
 
 
-def _delivery_channel(value):
+def _delivery_channel(value, delivery=None):
+    if value == UserNotificationChoice.BARK and delivery is not None and delivery.instant_endpoint_id:
+        return delivery.instant_endpoint.provider
     return {
         UserNotificationChoice.EMAIL: 'email',
         UserNotificationChoice.SMS: 'sms',
-        UserNotificationChoice.BARK: 'bark',
+        UserNotificationChoice.BARK: 'instant',
     }.get(value, 'unknown')
 
 
@@ -281,7 +283,7 @@ class MessageDeliveryView(View):
                 space=message.chat.space,
                 payload__message_id=message.id,
             ).select_related('user').prefetch_related(
-                'deliveries',
+                'deliveries__instant_endpoint',
                 'web_push_deliveries__subscription',
             ).order_by('created_at', 'id')
         )
@@ -289,7 +291,7 @@ class MessageDeliveryView(View):
         totals = dict(sent=0, pending=0, failed=0, skipped=0)
         for event in events:
             deliveries = [
-                _delivery_payload(delivery, _delivery_channel(delivery.channel))
+                _delivery_payload(delivery, _delivery_channel(delivery.channel, delivery))
                 for delivery in event.deliveries.all().order_by('created_at', 'id')
                 if delivery.detail not in _NON_DELIVERY_DETAILS
             ]

@@ -7,6 +7,7 @@ import re
 import threading
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
+from urllib.parse import urlparse
 
 from notificator import NotificatorAPIError
 from django.db import IntegrityError, close_old_connections, transaction
@@ -114,6 +115,12 @@ class UserNotificationChoice(Choice):
     EMAIL = 1
     SMS = 2
     BARK = 3
+
+
+class InstantNotificationProviderChoice(Choice):
+    BARK = 'bark'
+    NTFY = 'ntfy'
+    GOTIFY = 'gotify'
 
 
 class UserAccountLevelChoice(Choice):
@@ -689,6 +696,11 @@ class User(models.Model):
             self.bark = normalize_bark_endpoint(target)
             self.bark_verified_at = now
             self.save(update_fields=['bark', 'bark_verified_at'])
+            InstantNotificationEndpoint.objects.update_or_create(
+                user=self,
+                provider=InstantNotificationProviderChoice.BARK,
+                defaults=dict(target=self.bark, secret=None, enabled=True, verified_at=now),
+            )
             self.award_growth('security:bark')
             return self
         raise UserErrors.CONTACT_CHANNEL_INVALID
@@ -737,6 +749,10 @@ class User(models.Model):
             self.bark = None
             self.bark_verified_at = None
             self.bark_unbound_at = now
+            InstantNotificationEndpoint.objects.filter(
+                user=self,
+                provider=InstantNotificationProviderChoice.BARK,
+            ).delete()
             fields = ['bark', 'bark_verified_at', 'bark_unbound_at']
         else:
             raise UserErrors.CONTACT_CHANNEL_INVALID
@@ -1752,6 +1768,110 @@ class UserContactVerificationCode(models.Model):
         return item
 
 
+class InstantNotificationEndpoint(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='instant_notification_endpoints')
+    provider = models.CharField(max_length=16, choices=InstantNotificationProviderChoice.to_choices())
+    target = models.CharField(max_length=500)
+    secret = models.CharField(max_length=500, null=True, blank=True)
+    enabled = models.BooleanField(default=True)
+    verified_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(
+            fields=['user', 'provider'],
+            name='unique_user_instant_provider',
+        )]
+
+    @classmethod
+    def normalize(cls, provider, target, secret=None):
+        provider = (provider or '').strip().lower()
+        target = (target or '').strip().rstrip('/')
+        secret = (secret or '').strip() or None
+        if provider not in (
+            InstantNotificationProviderChoice.BARK,
+            InstantNotificationProviderChoice.NTFY,
+            InstantNotificationProviderChoice.GOTIFY,
+        ):
+            raise ValueError('invalid instant notification provider')
+        if provider == InstantNotificationProviderChoice.BARK:
+            target = normalize_bark_endpoint(target)
+        parsed = urlparse(target)
+        if parsed.scheme not in ('http', 'https') or not parsed.netloc:
+            raise ValueError('invalid instant notification endpoint')
+        if provider == InstantNotificationProviderChoice.NTFY and not parsed.path.strip('/'):
+            raise ValueError('ntfy topic is required')
+        if provider == InstantNotificationProviderChoice.GOTIFY and not secret:
+            raise ValueError('gotify token is required')
+        return provider, target, secret
+
+    @classmethod
+    def active_for_user(cls, user):
+        return cls.objects.filter(user=user, enabled=True, verified_at__isnull=False).order_by('provider')
+
+    @staticmethod
+    def mask_target(target):
+        parsed = urlparse(target or '')
+        if not parsed.netloc:
+            return '***'
+        path = parsed.path.strip('/')
+        suffix = f'/{path[:3]}•••' if path else ''
+        return f'{parsed.scheme}://{parsed.netloc}{suffix}'
+
+    def json(self):
+        return dict(
+            endpoint_id=self.id,
+            provider=self.provider,
+            target=self.target,
+            masked_target=self.mask_target(self.target),
+            enabled=self.enabled,
+            verified_at=self.verified_at,
+        )
+
+
+class InstantNotificationVerification(models.Model):
+    CODE_LENGTH = 6
+    EXPIRE_SECONDS = 10 * 60
+
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='instant_notification_verifications')
+    provider = models.CharField(max_length=16, choices=InstantNotificationProviderChoice.to_choices())
+    target = models.CharField(max_length=500)
+    secret = models.CharField(max_length=500, null=True, blank=True)
+    code = models.CharField(max_length=CODE_LENGTH)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField(db_index=True)
+    used_at = models.DateTimeField(null=True, blank=True)
+
+    @classmethod
+    def issue(cls, user, provider, target, secret=None):
+        provider, target, secret = InstantNotificationEndpoint.normalize(provider, target, secret)
+        now = timezone.now()
+        cls.objects.filter(user=user, provider=provider, used_at__isnull=True).update(used_at=now)
+        return cls.objects.create(
+            user=user,
+            provider=provider,
+            target=target,
+            secret=secret,
+            code=get_random_string(cls.CODE_LENGTH, allowed_chars='0123456789'),
+            expires_at=now + datetime.timedelta(seconds=cls.EXPIRE_SECONDS),
+        )
+
+    @classmethod
+    def verify(cls, user, verification_id, code):
+        item = cls.objects.filter(
+            id=verification_id,
+            user=user,
+            code=(code or '').strip(),
+            used_at__isnull=True,
+        ).first()
+        if item is None or item.expires_at <= timezone.now():
+            raise ValueError('invalid or expired instant notification verification')
+        item.used_at = timezone.now()
+        item.save(update_fields=['used_at'])
+        return item
+
+
 class UserPasswordRecoveryChallenge(models.Model):
     CODE_LENGTH = 6
     CODE_EXPIRE_SECONDS = 10 * 60
@@ -2709,6 +2829,13 @@ class NotificationDelivery(models.Model):
 
     event = models.ForeignKey(NotificationEvent, on_delete=models.CASCADE, related_name='deliveries', db_index=True)
     channel = models.IntegerField(choices=UserNotificationChoice.to_choices())
+    instant_endpoint = models.ForeignKey(
+        InstantNotificationEndpoint,
+        on_delete=models.SET_NULL,
+        related_name='deliveries',
+        null=True,
+        blank=True,
+    )
     status = models.IntegerField(
         choices=NotificationDeliveryStatusChoice.to_choices(),
         default=NotificationDeliveryStatusChoice.PENDING,
@@ -2725,7 +2852,7 @@ class NotificationDelivery(models.Model):
         if channel == UserNotificationChoice.SMS:
             return bool(user.phone) and user.phone_verified_at is not None
         if channel == UserNotificationChoice.BARK:
-            return bool(user.bark) and user.bark_verified_at is not None
+            return InstantNotificationEndpoint.active_for_user(user).exists()
         return False
 
     @classmethod
@@ -2745,7 +2872,7 @@ class NotificationDelivery(models.Model):
         return offline_seconds >= threshold_seconds
 
     @classmethod
-    def enqueue_bark_for_event(cls, event: NotificationEvent):
+    def enqueue_instant_for_event(cls, event: NotificationEvent):
         pref = next((
             item for item in NotificationPreference.ensure_defaults(event.user)
             if item.channel == UserNotificationChoice.BARK
@@ -2758,14 +2885,19 @@ class NotificationDelivery(models.Model):
             or not NotificationTopicPreference.is_enabled_for_event(event, UserNotificationChoice.BARK)
         ):
             return []
-        delivery = cls.objects.create(
-            event=event,
-            channel=UserNotificationChoice.BARK,
-        )
-        delivery._attempt_send(pref)
-        return [delivery]
+        deliveries = [
+            cls.objects.create(
+                event=event,
+                channel=UserNotificationChoice.BARK,
+                instant_endpoint=endpoint,
+            )
+            for endpoint in InstantNotificationEndpoint.active_for_user(event.user)
+        ]
+        for delivery in deliveries:
+            delivery._attempt_send(pref)
+        return deliveries
 
-    def _bark_chat_url(self, pref: NotificationPreference):
+    def _instant_chat_url(self, pref: NotificationPreference):
         if not pref.open_chat_on_tap:
             return None
         if self.event.event_type not in (
@@ -2781,7 +2913,7 @@ class NotificationDelivery(models.Model):
             return None
         return f'{FRONTEND_BASE_URL}/{space_slug}/app/chats/{chat_id}'
 
-    def _bark_icon_url(self, pref: NotificationPreference):
+    def _instant_icon_url(self, pref: NotificationPreference):
         if pref.bark_icon_mode == NotificationPreference.BARK_ICON_SPACE:
             official_user = self.event.space.official_user
             return official_user.tiny_json().get('avatar_uri') if official_user else None
@@ -3081,7 +3213,7 @@ class NotificationDelivery(models.Model):
         return deliveries
 
     def _attempt_send(self, pref: NotificationPreference):
-        target = self._channel_target(self.event.user, self.channel)
+        target = self.instant_endpoint.target if self.instant_endpoint_id else self._channel_target(self.event.user, self.channel)
         if not target:
             self.status = NotificationDeliveryStatusChoice.SKIPPED
             self.detail = 'channel_unavailable'
@@ -3115,13 +3247,32 @@ class NotificationDelivery(models.Model):
                     body=body,
                 )
             elif self.channel == UserNotificationChoice.BARK:
-                notificator.bark(
-                    target,
-                    title=title,
-                    body=body,
-                    icon=self._bark_icon_url(pref),
-                    url=self._bark_chat_url(pref),
-                )
+                endpoint = self.instant_endpoint
+                if endpoint is None or not endpoint.enabled or endpoint.verified_at is None:
+                    raise ValueError('instant endpoint unavailable')
+                action_url = self._instant_chat_url(pref)
+                icon_url = self._instant_icon_url(pref)
+                if endpoint.provider == InstantNotificationProviderChoice.BARK:
+                    notificator.bark(target, title=title, body=body, icon=icon_url, url=action_url)
+                elif endpoint.provider == InstantNotificationProviderChoice.NTFY:
+                    notificator.ntfy(
+                        target,
+                        title=title,
+                        body=body,
+                        token=endpoint.secret,
+                        click=action_url,
+                        icon=icon_url,
+                    )
+                elif endpoint.provider == InstantNotificationProviderChoice.GOTIFY:
+                    notificator.gotify(
+                        target,
+                        endpoint.secret,
+                        title=title,
+                        body=body,
+                        click=action_url,
+                    )
+                else:
+                    raise ValueError('unsupported instant provider')
             else:
                 self.status = NotificationDeliveryStatusChoice.FAILED
                 self.detail = 'unsupported_channel'
@@ -3144,10 +3295,10 @@ class NotificationDelivery(models.Model):
     @classmethod
     def enqueue_for_event(cls, event: NotificationEvent):
         deliveries = []
-        # Web Push and Bark are time-sensitive routes. Bark is sent per event
-        # only while the recipient is offline; it never enters the digest.
+        # Web Push and instant receivers are time-sensitive routes. Instant
+        # notifications are sent per event while offline, never via digest.
         deliveries.extend(WebPushDelivery.enqueue_for_event(event))
-        deliveries.extend(cls.enqueue_bark_for_event(event))
+        deliveries.extend(cls.enqueue_instant_for_event(event))
         prefs = NotificationPreference.ensure_defaults(event.user)
         for pref in prefs:
             if pref.channel == UserNotificationChoice.BARK:

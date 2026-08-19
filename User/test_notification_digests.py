@@ -13,6 +13,7 @@ from User.models import (
     NotificationDelivery,
     NotificationEvent,
     NotificationPreference,
+    InstantNotificationEndpoint,
     User,
     UserNotificationChoice,
 )
@@ -73,6 +74,12 @@ class NotificationDigestTests(TestCase):
         self.recipient.bark = 'https://api.day.app/test-device'
         self.recipient.bark_verified_at = timezone.now()
         self.recipient.save(update_fields=['bark', 'bark_verified_at'])
+        InstantNotificationEndpoint.objects.create(
+            user=self.recipient,
+            provider='bark',
+            target=self.recipient.bark,
+            verified_at=self.recipient.bark_verified_at,
+        )
         return NotificationPreference.set_preference(
             self.recipient,
             UserNotificationChoice.BARK,
@@ -115,7 +122,7 @@ class NotificationDigestTests(TestCase):
         ).order_by('id'))
 
         for event in events:
-            NotificationDelivery.enqueue_bark_for_event(event)
+            NotificationDelivery.enqueue_instant_for_event(event)
 
         self.assertEqual(bark.call_count, 2)
         self.assertEqual(
@@ -134,11 +141,39 @@ class NotificationDigestTests(TestCase):
         message = self.create_notified_message('seen while online')
         event = NotificationEvent.objects.get(user=self.recipient, payload__message_id=message.id)
 
-        deliveries = NotificationDelivery.enqueue_bark_for_event(event)
+        deliveries = NotificationDelivery.enqueue_instant_for_event(event)
 
         self.assertEqual(deliveries, [])
         bark.assert_not_called()
         self.assertFalse(NotificationDelivery.objects.filter(channel=UserNotificationChoice.BARK).exists())
+
+    @patch('User.models.notificator.gotify', create=True)
+    @patch('User.models.notificator.ntfy', create=True)
+    @patch('User.models.notificator.bark')
+    def test_all_enabled_instant_receivers_are_sent_independently(self, bark, ntfy, gotify):
+        self.enable_bark()
+        InstantNotificationEndpoint.objects.create(
+            user=self.recipient,
+            provider='ntfy',
+            target='https://ntfy.sh/sermo-test',
+            verified_at=timezone.now(),
+        )
+        InstantNotificationEndpoint.objects.create(
+            user=self.recipient,
+            provider='gotify',
+            target='https://push.example.com',
+            secret='app-token',
+            verified_at=timezone.now(),
+        )
+        message = self.create_notified_message('multi receiver')
+        event = NotificationEvent.objects.get(user=self.recipient, payload__message_id=message.id)
+
+        deliveries = NotificationDelivery.enqueue_instant_for_event(event)
+
+        self.assertEqual(len(deliveries), 3)
+        bark.assert_called_once()
+        ntfy.assert_called_once()
+        gotify.assert_called_once()
 
     @patch('User.models.notificator.mail')
     def test_read_messages_are_skipped_without_delivery(self, mail):
