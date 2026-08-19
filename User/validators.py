@@ -117,8 +117,8 @@ class UserValidator:
             'city-jdz', 'city-shanghai', 'city-nyc', 'city-beijing',
         },
         'avatar_frame_style': {
-            'none', 'orbit', 'aurora', 'polaroid', 'soundwave', 'portal', 'butterfly',
-            'moon', 'camera', 'comet', 'snowfall', 'papercut', 'mechanical', 'niko-run', 'fufu-wave', 'xiaobai-run', 'vip',
+            'none', 'orbit', 'aurora', 'polaroid', 'papercut', 'mechanical',
+            'niko-run', 'fufu-wave', 'xiaobai-run', 'vip',
         },
         'statement_card_style': {
             'default', 'editorial', 'mosaic', 'hero', 'comic', 'receipt', 'vip', 'niko', 'fufu',

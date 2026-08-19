@@ -41,8 +41,10 @@ class GrowthRuleTests(SimpleTestCase):
     def test_reward_rarity_follows_the_product_reward_audit(self):
         rewards = {reward['id']: reward for items in LEVEL_REWARDS.values() for reward in items}
         self.assertEqual(rewards['capability.image']['rarity'], 'rare')
-        self.assertEqual(rewards['frame.butterfly']['rarity'], 'legendary')
-        self.assertEqual(rewards['frame.comet']['rarity'], 'legendary')
+        self.assertEqual(rewards['frame.polaroid']['rarity'], 'common')
+        self.assertEqual(rewards['frame.papercut']['rarity'], 'uncommon')
+        self.assertEqual(rewards['frame.mechanical']['rarity'], 'uncommon')
+        self.assertEqual(rewards['frame.aurora']['rarity'], 'epic')
         self.assertEqual(rewards['background.zen']['rarity'], 'rare')
         self.assertEqual(rewards['background.aurora_sky']['rarity'], 'epic')
         self.assertEqual(rewards['bubble.niko']['rarity'], 'legendary')
@@ -51,6 +53,18 @@ class GrowthRuleTests(SimpleTestCase):
         self.assertEqual(rewards['bubble.baxian_he']['rarity'], 'legendary')
         self.assertEqual(rewards['frame.niko']['rarity'], 'legendary')
         self.assertEqual(rewards['background.noir']['rarity'], 'legendary')
+
+    def test_avatar_frame_catalog_only_contains_active_styles(self):
+        rewards = {
+            reward['asset_key']
+            for items in LEVEL_REWARDS.values()
+            for reward in items
+            if reward['category'] == 'frame'
+        }
+        self.assertEqual(rewards, {
+            'none', 'orbit', 'polaroid', 'aurora', 'papercut',
+            'mechanical', 'niko-run', 'fufu-wave',
+        })
 
     def test_background_catalog_only_contains_active_themes(self):
         rewards = {
