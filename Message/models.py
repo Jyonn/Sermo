@@ -25,6 +25,8 @@ from smartdjango import models, Choice
 from Chat.models import Chat, ChatMember, ChatMemberStatusChoice
 from Message.validators import MessageErrors, MessageValidator
 from User.models import User, UserEmojiUsage
+from User.validators import UserErrors
+from utils import function
 from utils.qiniu import sign_private_download_url, avatar_uri_for_key, build_message_image_thumbnail_uri, build_message_video_thumbnail_uri, validate_message_media_key
 
 
@@ -1259,20 +1261,25 @@ class MessageHistoryRecovery(models.Model):
         ).count()
         return dict(
             eligible=limit > 0,
+            has_password=user.has_password,
             limit=limit,
             used=used,
             remaining=max(0, limit - used),
             hidden_count=hidden_count,
-            can_restore=limit > used and hidden_count > 0,
+            can_restore=limit > used and hidden_count > 0 and user.has_password,
         )
 
     @classmethod
-    def restore(cls, chat, user):
+    def restore(cls, chat, user, password):
         if not chat.has_active_member(user):
             raise MessageErrors.NOT_A_MEMBER
         with transaction.atomic():
-            User.objects.select_for_update().get(id=user.id)
-            status = cls.status_for(chat, user)
+            locked_user = User.objects.select_for_update().get(id=user.id)
+            if not locked_user.has_password:
+                raise UserErrors.PASSWORD_NOT_SET
+            if not function.verify_password(password, locked_user.salt, locked_user.password):
+                raise UserErrors.PASSWORD_ERROR
+            status = cls.status_for(chat, locked_user)
             if not status['eligible']:
                 raise MessageErrors.HISTORY_RECOVERY_VERIFICATION_REQUIRED
             if status['remaining'] <= 0:
@@ -1298,7 +1305,7 @@ class MessageHistoryRecovery(models.Model):
             ])
             restored_count = len(states)
             MessageUserState.objects.filter(id__in=[state.id for state in states]).delete()
-            cls.objects.create(user=user, chat=chat, restored_count=restored_count)
+            cls.objects.create(user=locked_user, chat=chat, restored_count=restored_count)
         result = cls.status_for(chat, user)
         result['restored_count'] = restored_count
         return result

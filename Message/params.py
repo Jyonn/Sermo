@@ -33,6 +33,7 @@ class MessageParams(metaclass=Params):
     kind = Validator('kind').to(str)
     file_name = Validator('file_name').to(str)
     content_type = Validator('content_type').to(str).null().default(None)
+    password = Validator('password').to(str)
 
     limit = Validator('limit').to(int) \
         .bool(lambda x: x >= 5, message=_('limit should be greater than 5')) \

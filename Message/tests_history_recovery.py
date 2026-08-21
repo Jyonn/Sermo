@@ -14,6 +14,7 @@ from Message.models import (
 from Message.validators import MessageErrors
 from Space.models import Space
 from User.models import User
+from User.validators import UserErrors
 
 
 class MessageHistoryRecoveryTests(TestCase):
@@ -24,7 +25,7 @@ class MessageHistoryRecoveryTests(TestCase):
             email='admin@example.com',
             admin_phone_verified_at=timezone.now(),
         )
-        self.user = User.create(self.space, 'Member', email='member@example.com', verified=True)
+        self.user = User.create(self.space, 'Member', password='secret1', email='member@example.com', verified=True)
         self.peer = User.create(self.space, 'Peer', email='peer@example.com', verified=True)
         Friendship.ensure_locked_friendship(self.user, self.peer)
         self.chat = Chat.get_or_create_direct(self.user, self.peer)
@@ -42,7 +43,7 @@ class MessageHistoryRecoveryTests(TestCase):
         self.assertEqual(before['remaining'], 1)
         self.assertEqual(before['hidden_count'], 1)
 
-        result = MessageHistoryRecovery.restore(self.chat, self.user)
+        result = MessageHistoryRecovery.restore(self.chat, self.user, 'secret1')
 
         self.assertEqual(result['restored_count'], 1)
         self.assertEqual(result['remaining'], 0)
@@ -56,7 +57,7 @@ class MessageHistoryRecoveryTests(TestCase):
 
         self.hide_message('Hidden again')
         with self.assertRaises(MessageErrors.HISTORY_RECOVERY_LIMIT_REACHED.__class__):
-            MessageHistoryRecovery.restore(self.chat, self.user)
+            MessageHistoryRecovery.restore(self.chat, self.user, 'secret1')
 
     def test_permanent_vip_receives_five_additional_recoveries(self):
         self.user.is_permanent_vip = True
@@ -64,23 +65,42 @@ class MessageHistoryRecoveryTests(TestCase):
 
         for index in range(6):
             self.hide_message(f'VIP hidden {index}')
-            result = MessageHistoryRecovery.restore(self.chat, self.user)
+            result = MessageHistoryRecovery.restore(self.chat, self.user, 'secret1')
             self.assertEqual(result['remaining'], 5 - index)
 
         self.hide_message('Seventh hidden')
         with self.assertRaises(MessageErrors.HISTORY_RECOVERY_LIMIT_REACHED.__class__):
-            MessageHistoryRecovery.restore(self.chat, self.user)
+            MessageHistoryRecovery.restore(self.chat, self.user, 'secret1')
 
     def test_unverified_user_cannot_restore_history(self):
-        unverified = User.create(self.space, 'Basic')
+        unverified = User.create(self.space, 'Basic', password='secret2')
         Friendship.ensure_locked_friendship(unverified, self.peer)
         chat = Chat.get_or_create_direct(unverified, self.peer)
         message = Message.create(chat, self.peer, MessageTypeChoice.TEXT, 'Private')
         message.hide_for(unverified)
 
         with self.assertRaises(MessageErrors.HISTORY_RECOVERY_VERIFICATION_REQUIRED.__class__):
-            MessageHistoryRecovery.restore(chat, unverified)
+            MessageHistoryRecovery.restore(chat, unverified, 'secret2')
         self.assertTrue(MessageUserState.objects.filter(message=message, user=unverified).exists())
+
+    def test_password_is_required_for_every_recovery(self):
+        message = self.hide_message('Protected')
+
+        with self.assertRaises(UserErrors.PASSWORD_ERROR.__class__) as wrong_password:
+            MessageHistoryRecovery.restore(self.chat, self.user, 'wrong-password')
+        self.assertEqual(wrong_password.exception.identifier, UserErrors.PASSWORD_ERROR.identifier)
+        self.assertTrue(MessageUserState.objects.filter(message=message, user=self.user).exists())
+        self.assertFalse(MessageHistoryRecovery.objects.filter(user=self.user).exists())
+
+        no_password = User.create(self.space, 'NoPassword', email='none@example.com', verified=True)
+        Friendship.ensure_locked_friendship(no_password, self.peer)
+        no_password_chat = Chat.get_or_create_direct(no_password, self.peer)
+        no_password_message = Message.create(no_password_chat, self.peer, MessageTypeChoice.TEXT, 'No password')
+        no_password_message.hide_for(no_password)
+        with self.assertRaises(UserErrors.PASSWORD_NOT_SET.__class__) as password_not_set:
+            MessageHistoryRecovery.restore(no_password_chat, no_password, '')
+        self.assertEqual(password_not_set.exception.identifier, UserErrors.PASSWORD_NOT_SET.identifier)
+        self.assertTrue(MessageUserState.objects.filter(message=no_password_message, user=no_password).exists())
 
     def test_recovery_does_not_revive_globally_recalled_message(self):
         recalled = self.hide_message('Recalled')
@@ -89,7 +109,7 @@ class MessageHistoryRecoveryTests(TestCase):
 
         status = MessageHistoryRecovery.status_for(self.chat, self.user)
         self.assertEqual(status['hidden_count'], 1)
-        result = MessageHistoryRecovery.restore(self.chat, self.user)
+        result = MessageHistoryRecovery.restore(self.chat, self.user, 'secret1')
 
         self.assertEqual(result['restored_count'], 1)
         self.assertTrue(MessageUserState.objects.filter(message=recalled, user=self.user).exists())
