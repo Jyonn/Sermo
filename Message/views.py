@@ -6,7 +6,8 @@ from django.utils import timezone
 from django.views import View
 from smartdjango import analyse, OK
 
-from Message.models import LinkPreview, MediaAsset, MediaAssetAlias, Message, MessageEvent, MessageHistoryRecovery, MessageTypeChoice, PinnedMessage
+from Chat.models import Chat
+from Message.models import ForwardBundle, LinkPreview, MediaAsset, MediaAssetAlias, Message, MessageEvent, MessageHistoryRecovery, MessageTypeChoice, PinnedMessage
 from Message.params import MessageParams
 from Message.validators import MessageErrors
 from utils.qiniu import issue_message_upload, build_message_image_thumbnail_uri, build_message_video_thumbnail_uri, sign_private_download_url
@@ -49,7 +50,7 @@ class MessageView(View):
     )
     def post(self, request: Request):
         request.user.space.require_chat_enabled()
-        if request.json.type == MessageTypeChoice.SYSTEM:
+        if request.json.type in (MessageTypeChoice.SYSTEM, MessageTypeChoice.FORWARD_BUNDLE):
             raise MessageErrors.SYSTEM_MESSAGE_FORBIDDEN
         if request.query.chat.group:
             request.user.space.require_group_send_allowed(request.user)
@@ -130,6 +131,61 @@ class MessageBatchView(View):
             for message in messages:
                 message.hide_for(request.user)
         return dict(deleted_message_ids=message_ids)
+
+
+class MessageForwardView(View):
+    @auth.require_user
+    @analyse.json(MessageParams.message_ids, MessageParams.target_chat_ids, MessageParams.forward_mode)
+    def post(self, request: Request):
+        request.user.space.require_chat_enabled()
+        message_ids = list(request.json.message_ids)
+        target_chat_ids = list(request.json.target_chat_ids)
+        source_messages = list(
+            Message.objects.select_related('chat', 'user', 'media_asset', 'forward_bundle')
+            .filter(id__in=message_ids, is_deleted=False)
+            .order_by('created_at', 'id')
+        )
+        if len(source_messages) != len(message_ids):
+            raise MessageErrors.NOT_EXISTS
+        source_chat_ids = {message.chat_id for message in source_messages}
+        if len(source_chat_ids) != 1:
+            raise MessageErrors.FORWARD_TARGET_INVALID
+        allowed_types = {
+            MessageTypeChoice.TEXT, MessageTypeChoice.IMAGE, MessageTypeChoice.FILE,
+            MessageTypeChoice.VIDEO, MessageTypeChoice.AUDIO, MessageTypeChoice.LOCATION,
+            MessageTypeChoice.STATEMENT, MessageTypeChoice.STICKER,
+        }
+        for message in source_messages:
+            if message.type not in allowed_types:
+                raise MessageErrors.FORWARD_UNSUPPORTED
+            if not message.is_visible_to(request.user):
+                raise MessageErrors.NOT_A_MEMBER
+
+        targets = list(Chat.objects.filter(
+            id__in=target_chat_ids,
+            space_id=request.user.space_id,
+            is_deleted=False,
+        ).select_related('space'))
+        if len(targets) != len(target_chat_ids):
+            raise MessageErrors.FORWARD_TARGET_INVALID
+        for target in targets:
+            if not target.has_active_member(request.user):
+                raise MessageErrors.NOT_A_MEMBER
+            if target.group:
+                target.space.require_group_send_allowed(request.user)
+
+        created = []
+        with transaction.atomic():
+            bundle = ForwardBundle.create_from_messages(source_messages, request.user, request=request) \
+                if request.json.forward_mode == 'bundle' else None
+            for target in targets:
+                if bundle is not None:
+                    created.append(Message.forward_bundle_message(bundle, target, request.user))
+                else:
+                    created.extend(Message.forward_individual(source, target, request.user) for source in source_messages)
+            for message in created:
+                NotificationEvent.emit_message_notifications(message, actor=request.user)
+        return dict(messages=[dict(chat_id=message.chat_id, message=message.jsonl(request=request)) for message in created])
 
 
 class MessageClearView(View):
@@ -289,7 +345,10 @@ class MessageBlobView(View):
 
     def get(self, request: Request, blob_slug: str):
         asset = MediaAssetAlias.resolve(blob_slug)
-        if asset is None or not asset.messages.filter(is_deleted=False).exists():
+        if asset is None or not (
+            asset.messages.filter(is_deleted=False).exists()
+            or asset.forward_items.filter(bundle__messages__is_deleted=False).exists()
+        ):
             raise MessageErrors.NOT_EXISTS
         return self._redirect(sign_private_download_url(asset.source_uri))
 
@@ -297,7 +356,10 @@ class MessageBlobView(View):
 class MessageBlobThumbnailView(View):
     def get(self, request: Request, blob_slug: str):
         asset = MediaAssetAlias.resolve(blob_slug)
-        if asset is None or asset.kind not in (MediaAsset.KIND_IMAGE, MediaAsset.KIND_VIDEO) or not asset.messages.filter(is_deleted=False).exists():
+        if asset is None or asset.kind not in (MediaAsset.KIND_IMAGE, MediaAsset.KIND_VIDEO) or not (
+            asset.messages.filter(is_deleted=False).exists()
+            or asset.forward_items.filter(bundle__messages__is_deleted=False).exists()
+        ):
             raise MessageErrors.NOT_EXISTS
         if asset.kind == MediaAsset.KIND_VIDEO:
             return MessageBlobView._redirect(build_message_video_thumbnail_uri(asset.source_uri))

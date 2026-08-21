@@ -1,6 +1,6 @@
 from django.urls import path
 
-from Message.views import MessageView, MessageBatchView, MessageClearView, MessageEventSyncView, MessageHistoryRecoveryView, MessageReconcileView, MessageSearchView, MessageUploadView, MessageBlobView, MessageBlobThumbnailView, MessageMediaMetadataView, MessageLinkPreviewView, PinnedMessageView
+from Message.views import MessageView, MessageBatchView, MessageClearView, MessageEventSyncView, MessageForwardView, MessageHistoryRecoveryView, MessageReconcileView, MessageSearchView, MessageUploadView, MessageBlobView, MessageBlobThumbnailView, MessageMediaMetadataView, MessageLinkPreviewView, PinnedMessageView
 
 urlpatterns = [
     path('blob/<slug:blob_slug>/thumbnail', MessageBlobThumbnailView.as_view(), name='message blob thumbnail'),
@@ -11,6 +11,7 @@ urlpatterns = [
     path('sync-v2', MessageEventSyncView.as_view(), name='message event sync'),
     path('pins', PinnedMessageView.as_view(), name='pinned messages'),
     path('batch', MessageBatchView.as_view(), name='message batch'),
+    path('forward', MessageForwardView.as_view(), name='message forward'),
     path('clear', MessageClearView.as_view(), name='message clear'),
     path('restore', MessageHistoryRecoveryView.as_view(), name='message history restore'),
     path('reconcile', MessageReconcileView.as_view(), name='message reconcile'),

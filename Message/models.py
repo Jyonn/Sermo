@@ -69,6 +69,7 @@ class MessageTypeChoice(Choice):
     MAP_ACCESS = 7
     STATEMENT = 8
     STICKER = 9
+    FORWARD_BUNDLE = 10
 
 
 class MessageEventTypeChoice(Choice):
@@ -472,6 +473,7 @@ class Message(models.Model):
         MessageTypeChoice.MAP_ACCESS: '[地图邀请]',
         MessageTypeChoice.STATEMENT: '[发言]',
         MessageTypeChoice.STICKER: '[表情包]',
+        MessageTypeChoice.FORWARD_BUNDLE: '[聊天记录]',
     }
 
     chat = models.ForeignKey(Chat, on_delete=models.CASCADE, db_index=True)
@@ -489,6 +491,9 @@ class Message(models.Model):
     content = models.CharField(max_length=vldt.MAX_CONTENT_LENGTH)
     media_asset = models.ForeignKey(
         'MediaAsset', on_delete=models.SET_NULL, null=True, blank=True, related_name='messages',
+    )
+    forward_bundle = models.ForeignKey(
+        'ForwardBundle', on_delete=models.SET_NULL, null=True, blank=True, related_name='messages',
     )
 
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
@@ -533,7 +538,7 @@ class Message(models.Model):
 
     @classmethod
     def create(cls, chat: Chat, user: User, message_type, content, reply_to=None, client_message_id=None, mention_user_ids=None):
-        if message_type == MessageTypeChoice.SYSTEM:
+        if message_type in (MessageTypeChoice.SYSTEM, MessageTypeChoice.FORWARD_BUNDLE):
             raise MessageErrors.SYSTEM_MESSAGE_FORBIDDEN
         if chat.has_active_member(user):
             if message_type == MessageTypeChoice.TEXT:
@@ -683,6 +688,40 @@ class Message(models.Model):
             type=MessageTypeChoice.SYSTEM,
             content=content,
         )
+        MessageEvent.record_created(message)
+        return message
+
+    @classmethod
+    def forward_individual(cls, source, chat: Chat, user: User):
+        if source.type in (MessageTypeChoice.SYSTEM, MessageTypeChoice.MAP_ACCESS, MessageTypeChoice.FORWARD_BUNDLE):
+            raise MessageErrors.FORWARD_UNSUPPORTED
+        if not chat.has_active_member(user):
+            raise MessageErrors.NOT_A_MEMBER
+        message = cls.objects.create(
+            chat=chat,
+            user=user,
+            type=source.type,
+            content=source.content,
+            media_asset=source.media_asset,
+        )
+        message._was_created = True
+        message._award_interaction_growth()
+        MessageEvent.record_created(message)
+        return message
+
+    @classmethod
+    def forward_bundle_message(cls, bundle, chat: Chat, user: User):
+        if not chat.has_active_member(user):
+            raise MessageErrors.NOT_A_MEMBER
+        message = cls.objects.create(
+            chat=chat,
+            user=user,
+            type=MessageTypeChoice.FORWARD_BUNDLE,
+            content=json.dumps(dict(kind='forward_bundle'), separators=(',', ':')),
+            forward_bundle=bundle,
+        )
+        message._was_created = True
+        message._award_interaction_growth()
         MessageEvent.record_created(message)
         return message
 
@@ -1038,6 +1077,10 @@ class Message(models.Model):
             response = asset.jsonl(request=request)
             response['kind'] = 'sticker'
             return response
+        if self.type == MessageTypeChoice.FORWARD_BUNDLE:
+            if self.forward_bundle_id is None:
+                return dict(kind='forward_bundle', unavailable=True, items=[])
+            return self.forward_bundle.jsonl(request=request)
         if self.type == MessageTypeChoice.FILE and not self.content.lstrip().startswith('{'):
             return dict(kind='file', text=self.content)
         if self.type in self.MEDIA_KIND_BY_TYPE:
@@ -1146,24 +1189,24 @@ class Message(models.Model):
     @classmethod
     def latest(cls, chat: Chat, limit: int, request: HttpRequest = None, user: User = None):
         queryset = cls.visible_for_user(chat, user) if user is not None else cls.visible_in_chat(chat)
-        messages = queryset.select_related('user', 'reply_to', 'reply_to__user', 'media_asset').prefetch_related('chat_mentions__user').order_by('-id')[:limit]
+        messages = queryset.select_related('user', 'reply_to', 'reply_to__user', 'media_asset', 'forward_bundle').prefetch_related('chat_mentions__user', 'forward_bundle__items__media_asset').order_by('-id')[:limit]
         return [message.jsonl(request=request) for message in messages]
 
     @classmethod
     def older(cls, chat: Chat, message_id, limit: int, request: HttpRequest = None, user: User = None):
         queryset = cls.visible_for_user(chat, user) if user is not None else cls.visible_in_chat(chat)
-        messages = queryset.select_related('user', 'reply_to', 'reply_to__user', 'media_asset').prefetch_related('chat_mentions__user').filter(id__lt=message_id).order_by('-id')[:limit]
+        messages = queryset.select_related('user', 'reply_to', 'reply_to__user', 'media_asset', 'forward_bundle').prefetch_related('chat_mentions__user', 'forward_bundle__items__media_asset').filter(id__lt=message_id).order_by('-id')[:limit]
         return [message.jsonl(request=request) for message in messages]
 
     @classmethod
     def newer(cls, chat: Chat, message_id, limit: int, request: HttpRequest = None, user: User = None):
         queryset = cls.visible_for_user(chat, user) if user is not None else cls.visible_in_chat(chat)
-        messages = queryset.select_related('user', 'reply_to', 'reply_to__user', 'media_asset').prefetch_related('chat_mentions__user').filter(id__gt=message_id).order_by('id')[:limit]
+        messages = queryset.select_related('user', 'reply_to', 'reply_to__user', 'media_asset', 'forward_bundle').prefetch_related('chat_mentions__user', 'forward_bundle__items__media_asset').filter(id__gt=message_id).order_by('id')[:limit]
         return [message.jsonl(request=request) for message in messages]
 
     @classmethod
     def search(cls, chat: Chat, user: User, keyword=None, message_type=None, before=None, limit=30, request=None):
-        queryset = cls.visible_for_user(chat, user).select_related('user', 'reply_to', 'reply_to__user', 'media_asset').prefetch_related('chat_mentions__user')
+        queryset = cls.visible_for_user(chat, user).select_related('user', 'reply_to', 'reply_to__user', 'media_asset', 'forward_bundle').prefetch_related('chat_mentions__user', 'forward_bundle__items__media_asset')
         normalized_keyword = (keyword or '').strip()
         if normalized_keyword:
             queryset = queryset.filter(content__icontains=normalized_keyword)
@@ -1732,6 +1775,94 @@ class MediaAsset(models.Model):
             geocoding_status=self.geocoding_status,
             detail_metadata_checked_at=self.detail_metadata_checked_at.timestamp() if self.detail_metadata_checked_at else None,
             detail_metadata_error=self.detail_metadata_error,
+        )
+
+
+class ForwardBundle(models.Model):
+    created_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='forward_bundles')
+    source_chat = models.ForeignKey(Chat, on_delete=models.SET_NULL, null=True, blank=True, related_name='forward_bundles')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    @classmethod
+    def create_from_messages(cls, messages, user, request=None):
+        ordered = sorted(messages, key=lambda message: (message.created_at, message.id))
+        source_chat = ordered[0].chat if ordered else None
+        bundle = cls.objects.create(created_by=user, source_chat=source_chat)
+        ForwardBundleItem.objects.bulk_create([
+            ForwardBundleItem(
+                bundle=bundle,
+                position=position,
+                original_message=message,
+                media_asset=message.media_asset,
+                message_type=message.type,
+                author=message.user.tiny_json(),
+                content=message.preview_text(),
+                payload=message._payload_for_type(request=request) or {},
+                sent_at=message.created_at,
+            )
+            for position, message in enumerate(ordered)
+        ])
+        return bundle
+
+    def jsonl(self, request=None):
+        prefetched = getattr(self, '_prefetched_objects_cache', {}).get('items')
+        bundle_items = prefetched if prefetched is not None else self.items.select_related('media_asset').order_by('position')
+        items = [item.jsonl(request=request) for item in bundle_items]
+        authors = []
+        for item in items:
+            name = str((item.get('author') or {}).get('name') or '').strip()
+            if name and name not in authors:
+                authors.append(name)
+        return dict(
+            kind='forward_bundle',
+            bundle_id=self.id,
+            title=_('Chat history'),
+            summary=', '.join(authors[:3]),
+            item_count=len(items),
+            items=items,
+        )
+
+
+class ForwardBundleItem(models.Model):
+    bundle = models.ForeignKey(ForwardBundle, on_delete=models.CASCADE, related_name='items')
+    position = models.PositiveIntegerField(default=0)
+    original_message = models.ForeignKey(
+        Message, on_delete=models.SET_NULL, null=True, blank=True, related_name='forward_snapshots',
+    )
+    media_asset = models.ForeignKey(
+        MediaAsset, on_delete=models.PROTECT, null=True, blank=True, related_name='forward_items',
+    )
+    message_type = models.IntegerField()
+    author = models.JSONField(default=dict)
+    content = models.CharField(max_length=512, blank=True, default='')
+    payload = models.JSONField(default=dict)
+    sent_at = models.DateTimeField()
+
+    class Meta:
+        ordering = ['position']
+        constraints = [
+            models.UniqueConstraint(fields=['bundle', 'position'], name='forward_bundle_unique_position'),
+        ]
+
+    def jsonl(self, request=None):
+        payload = dict(self.payload or {})
+        if self.media_asset_id:
+            path = reverse('message blob', kwargs={'blob_slug': self.media_asset.blob_slug})
+            payload['uri'] = request.build_absolute_uri(path) if request is not None else path
+            if self.message_type in (MessageTypeChoice.IMAGE, MessageTypeChoice.VIDEO):
+                thumbnail_path = reverse('message blob thumbnail', kwargs={'blob_slug': self.media_asset.blob_slug})
+                payload['thumbnail_uri'] = request.build_absolute_uri(thumbnail_path) if request is not None else thumbnail_path
+            if self.message_type == MessageTypeChoice.IMAGE:
+                payload['image_metadata'] = self.media_asset.jsonl()
+            elif self.message_type == MessageTypeChoice.VIDEO:
+                payload['video_metadata'] = self.media_asset.jsonl()
+        return dict(
+            position=self.position,
+            type=self.message_type,
+            author=self.author,
+            content=self.content,
+            payload=payload,
+            sent_at=self.sent_at.timestamp(),
         )
 
 
