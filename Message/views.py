@@ -134,7 +134,7 @@ class MessageBatchView(View):
 
 class MessageClearView(View):
     @auth.require_user
-    @analyse.json(MessageParams.chat_id, MessageParams.password)
+    @analyse.json(MessageParams.chat_id)
     @auth.require_chat_member()
     def delete(self, request: Request):
         with transaction.atomic():
@@ -152,7 +152,7 @@ class MessageHistoryRecoveryView(View):
         return MessageHistoryRecovery.status_for(request.query.chat, request.user)
 
     @auth.require_user
-    @analyse.json(MessageParams.chat_id)
+    @analyse.json(MessageParams.chat_id, MessageParams.password)
     @auth.require_chat_member()
     def post(self, request: Request):
         return MessageHistoryRecovery.restore(request.json.chat, request.user, request.json.password)

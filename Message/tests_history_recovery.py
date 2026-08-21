@@ -1,3 +1,5 @@
+import json
+
 from django.test import TestCase
 from django.utils import timezone
 
@@ -15,6 +17,7 @@ from Message.validators import MessageErrors
 from Space.models import Space
 from User.models import User
 from User.validators import UserErrors
+from utils import auth
 
 
 class MessageHistoryRecoveryTests(TestCase):
@@ -34,6 +37,30 @@ class MessageHistoryRecoveryTests(TestCase):
         message = Message.create(self.chat, self.peer, MessageTypeChoice.TEXT, content)
         message.hide_for(self.user)
         return message
+
+    def authorization(self):
+        token = auth.get_login_token(self.user)['auth']
+        return dict(HTTP_AUTHORIZATION=f'Bearer {token}')
+
+    def test_restore_endpoint_accepts_password_and_clear_does_not_require_it(self):
+        message = self.hide_message('Restore through API')
+        response = self.client.post(
+            '/messages/restore',
+            data=json.dumps({'chat_id': self.chat.id, 'password': 'secret1'}),
+            content_type='application/json',
+            **self.authorization(),
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertFalse(MessageUserState.objects.filter(message=message, user=self.user).exists())
+
+        Message.create(self.chat, self.peer, MessageTypeChoice.TEXT, 'Clear through API')
+        clear_response = self.client.delete(
+            '/messages/clear',
+            data=json.dumps({'chat_id': self.chat.id}),
+            content_type='application/json',
+            **self.authorization(),
+        )
+        self.assertEqual(clear_response.status_code, 200, clear_response.content)
 
     def test_verified_user_can_restore_hidden_history_once(self):
         message = self.hide_message()
