@@ -6,7 +6,7 @@ from django.utils import timezone
 from django.views import View
 from smartdjango import analyse, OK
 
-from Message.models import LinkPreview, MediaAsset, MediaAssetAlias, Message, MessageEvent, MessageTypeChoice, PinnedMessage
+from Message.models import LinkPreview, MediaAsset, MediaAssetAlias, Message, MessageEvent, MessageHistoryRecovery, MessageTypeChoice, PinnedMessage
 from Message.params import MessageParams
 from Message.validators import MessageErrors
 from utils.qiniu import issue_message_upload, build_message_image_thumbnail_uri, build_message_video_thumbnail_uri, sign_private_download_url
@@ -142,6 +142,20 @@ class MessageClearView(View):
             from Chat.models import ChatReadState
             ChatReadState.mark_read(request.json.chat, request.user)
         return dict(deleted_count=deleted_count)
+
+
+class MessageHistoryRecoveryView(View):
+    @auth.require_user
+    @analyse.query(MessageParams.chat_id)
+    @auth.require_chat_member()
+    def get(self, request: Request):
+        return MessageHistoryRecovery.status_for(request.query.chat, request.user)
+
+    @auth.require_user
+    @analyse.json(MessageParams.chat_id)
+    @auth.require_chat_member()
+    def post(self, request: Request):
+        return MessageHistoryRecovery.restore(request.json.chat, request.user)
 
 
 class MessageReconcileView(View):

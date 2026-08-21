@@ -73,6 +73,7 @@ class MessageEventTypeChoice(Choice):
     CREATED = 0
     HIDDEN = 1
     RECALLED = 2
+    RESTORED = 3
 
 
 class LinkPreviewStatusChoice(Choice):
@@ -1235,6 +1236,74 @@ class MessageUserState(models.Model):
         ]
 
 
+class MessageHistoryRecovery(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='message_history_recoveries')
+    chat = models.ForeignKey(Chat, on_delete=models.CASCADE, related_name='message_history_recoveries')
+    restored_count = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    @classmethod
+    def allowance_for(cls, user):
+        if not user.verified:
+            return 0
+        return 6 if user.is_permanent_vip else 1
+
+    @classmethod
+    def status_for(cls, chat, user):
+        limit = cls.allowance_for(user)
+        used = cls.objects.filter(user=user).count()
+        hidden_count = MessageUserState.objects.filter(
+            user=user,
+            message__chat=chat,
+            message__is_deleted=False,
+        ).count()
+        return dict(
+            eligible=limit > 0,
+            limit=limit,
+            used=used,
+            remaining=max(0, limit - used),
+            hidden_count=hidden_count,
+            can_restore=limit > used and hidden_count > 0,
+        )
+
+    @classmethod
+    def restore(cls, chat, user):
+        if not chat.has_active_member(user):
+            raise MessageErrors.NOT_A_MEMBER
+        with transaction.atomic():
+            User.objects.select_for_update().get(id=user.id)
+            status = cls.status_for(chat, user)
+            if not status['eligible']:
+                raise MessageErrors.HISTORY_RECOVERY_VERIFICATION_REQUIRED
+            if status['remaining'] <= 0:
+                raise MessageErrors.HISTORY_RECOVERY_LIMIT_REACHED
+            states = list(
+                MessageUserState.objects.select_for_update()
+                .select_related('message')
+                .filter(user=user, message__chat=chat, message__is_deleted=False)
+            )
+            if not states:
+                raise MessageErrors.HISTORY_RECOVERY_EMPTY
+            restored_at = timezone.now()
+            MessageEvent.objects.bulk_create([
+                MessageEvent(
+                    message=state.message,
+                    chat=chat,
+                    actor=user,
+                    target_user=user,
+                    type=MessageEventTypeChoice.RESTORED,
+                    created_at=restored_at,
+                )
+                for state in states
+            ])
+            restored_count = len(states)
+            MessageUserState.objects.filter(id__in=[state.id for state in states]).delete()
+            cls.objects.create(user=user, chat=chat, restored_count=restored_count)
+        result = cls.status_for(chat, user)
+        result['restored_count'] = restored_count
+        return result
+
+
 class MessageEvent(models.Model):
     message = models.ForeignKey(Message, on_delete=models.CASCADE, related_name='sync_events')
     chat = models.ForeignKey(Chat, on_delete=models.CASCADE, related_name='message_events')
@@ -1274,11 +1343,12 @@ class MessageEvent(models.Model):
             MessageEventTypeChoice.CREATED: 'message.created',
             MessageEventTypeChoice.HIDDEN: 'message.hidden',
             MessageEventTypeChoice.RECALLED: 'message.recalled',
+            MessageEventTypeChoice.RESTORED: 'message.restored',
         }
         visible_created_message_ids = set()
         created_rows_by_chat = {}
         for row in rows:
-            if row.type == MessageEventTypeChoice.CREATED:
+            if row.type in (MessageEventTypeChoice.CREATED, MessageEventTypeChoice.RESTORED):
                 created_rows_by_chat.setdefault(row.chat_id, []).append(row.message_id)
         for chat_id, message_ids in created_rows_by_chat.items():
             chat = next(row.chat for row in rows if row.chat_id == chat_id)
@@ -1288,7 +1358,7 @@ class MessageEvent(models.Model):
 
         for row in rows:
             event = dict(event_id=row.id, type=names[row.type], chat_id=row.chat_id, message_id=row.message_id)
-            if row.type == MessageEventTypeChoice.CREATED and not row.message.is_deleted:
+            if row.type in (MessageEventTypeChoice.CREATED, MessageEventTypeChoice.RESTORED) and not row.message.is_deleted:
                 if row.message_id in visible_created_message_ids and not MessageUserState.objects.filter(message=row.message, user=user).exists():
                     event['message'] = row.message.jsonl(request=request)
                     event['message']['mentioned_me'] = row.message.chat_mentions.filter(user=user).exists()

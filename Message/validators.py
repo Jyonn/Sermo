@@ -21,6 +21,9 @@ class MessageErrors:
     MAP_ACCESS_DIRECT_ONLY = Error(message=_('Map access can only be shared in a direct chat'), code=Code.BadRequest)
     MAP_ACCESS_TARGET_INVALID = Error(message=_('The map access recipient is invalid'), code=Code.BadRequest)
     SYSTEM_MESSAGE_FORBIDDEN = Error(message=_('System messages cannot be managed by users'), code=Code.Forbidden)
+    HISTORY_RECOVERY_VERIFICATION_REQUIRED = Error(message=_('Verify your account before restoring chat history'), code=Code.Forbidden)
+    HISTORY_RECOVERY_LIMIT_REACHED = Error(message=_('Chat history recovery limit reached'), code=Code.Forbidden)
+    HISTORY_RECOVERY_EMPTY = Error(message=_('There are no hidden messages to restore'), code=Code.BadRequest)
 
 
 class MessageValidator:
