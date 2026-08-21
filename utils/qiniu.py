@@ -38,10 +38,7 @@ MESSAGE_MEDIA_ALLOWED_EXTENSIONS = {
     'image': {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.svg'},
     'video': {'.mp4', '.mov', '.m4v', '.webm', '.ogv'},
     'audio': {'.mp3', '.wav', '.m4a', '.ogg', '.aac', '.webm'},
-    'file': {
-        '.pdf', '.txt', '.md', '.doc', '.docx', '.xls', '.xlsx', '.csv',
-        '.ppt', '.pptx', '.zip', '.rar', '.7z', '.tar', '.gz', '.json',
-    },
+    'file': None,
     'sticker': {'.jpg', '.jpeg', '.png', '.gif', '.webp'},
 }
 ALLOWED_IMAGE_EXTENSIONS = {
@@ -146,9 +143,15 @@ def _guess_extension(file_name: str, content_type: str = None):
 
 
 def _guess_extension_by_kind(kind: str, file_name: str, content_type: str = None):
-    allowed_extensions = MESSAGE_MEDIA_ALLOWED_EXTENSIONS.get(kind)
-    if not allowed_extensions:
+    if kind not in MESSAGE_MEDIA_ALLOWED_EXTENSIONS:
         raise MessageErrors.MEDIA_KIND_INVALID
+
+    allowed_extensions = MESSAGE_MEDIA_ALLOWED_EXTENSIONS[kind]
+    if kind == 'file':
+        extension = os.path.splitext(os.path.basename((file_name or '').strip()))[1].lower()
+        if extension and len(extension) <= 32 and re.fullmatch(r'\.[a-z0-9][a-z0-9._+-]*', extension):
+            return extension
+        return '.bin'
 
     extension = os.path.splitext((file_name or '').strip())[1].lower()
     if extension in allowed_extensions:
@@ -339,8 +342,13 @@ def validate_message_media_key(kind: str, key: str):
     if not normalized_key.startswith(prefix):
         raise MessageErrors.PAYLOAD_INVALID
 
-    extension = os.path.splitext(normalized_key)[1].lower()
-    if extension not in MESSAGE_MEDIA_ALLOWED_EXTENSIONS[normalized_kind]:
+    key_name = normalized_key[len(prefix):]
+    if not re.fullmatch(r'[a-f0-9]{32}(?:\.[A-Za-z0-9][A-Za-z0-9._+-]{0,31})?', key_name):
+        raise MessageErrors.PAYLOAD_INVALID
+
+    extension = os.path.splitext(key_name)[1].lower()
+    allowed_extensions = MESSAGE_MEDIA_ALLOWED_EXTENSIONS[normalized_kind]
+    if allowed_extensions is not None and extension not in allowed_extensions:
         raise MessageErrors.PAYLOAD_INVALID
     return normalized_key
 

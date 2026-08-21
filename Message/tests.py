@@ -7,7 +7,24 @@ from django.test import SimpleTestCase, TestCase
 from Message.image_metadata import _reverse_geocode_opencage, parse_image_info, reverse_geocode
 from Message.video_metadata import parse_avinfo
 from Message.models import MediaAsset, MediaAssetAlias, Message, MessageTypeChoice, random_point_within_radius
+from utils.qiniu import build_message_media_key, validate_message_media_key
 from utils.global_settings import Globals
+
+
+class MessageFileUploadTests(SimpleTestCase):
+    def test_arbitrary_file_extension_is_preserved(self):
+        key = build_message_media_key('file', 'scene.blend1', 'application/octet-stream')
+
+        self.assertTrue(key.endswith('.blend1'))
+        self.assertEqual(validate_message_media_key('file', key), key)
+
+    def test_unsafe_or_missing_extension_uses_bin(self):
+        self.assertTrue(build_message_media_key('file', 'README', '').endswith('.bin'))
+        self.assertTrue(build_message_media_key('file', 'archive.超长格式', '').endswith('.bin'))
+
+    def test_file_key_still_rejects_forged_paths(self):
+        with self.assertRaises(Exception):
+            validate_message_media_key('file', 'sermo/messages/file/../image/unsafe.exe')
 
 
 class ImageMetadataTests(SimpleTestCase):
