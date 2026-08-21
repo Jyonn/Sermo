@@ -893,3 +893,12 @@ msgstr "发送了一条消息。"
 
 msgid "{name}: {message}"
 msgstr "{name}：{message}"
+
+msgid "The cloud resource is unavailable"
+msgstr "该云端资源已不可用"
+
+msgid "Cloud storage is full"
+msgstr "云端空间已满"
+
+msgid "This resource is still used by messages"
+msgstr "该资源仍被消息引用"

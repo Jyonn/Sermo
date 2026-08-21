@@ -31,7 +31,7 @@ MESSAGE_MEDIA_MAX_FILE_SIZE = {
     'image': 10 * 1024 * 1024,
     'video': 500 * 1024 * 1024,
     'audio': 20 * 1024 * 1024,
-    'file': 100 * 1024 * 1024,
+    'file': 1024 * 1024 * 1024,
     'sticker': 10 * 1024 * 1024,
 }
 MESSAGE_MEDIA_ALLOWED_EXTENSIONS = {

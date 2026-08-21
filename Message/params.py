@@ -50,6 +50,11 @@ class MessageParams(metaclass=Params):
     kind = Validator('kind').to(str)
     file_name = Validator('file_name').to(str)
     content_type = Validator('content_type').to(str).null().default(None)
+    file_size = Validator('file_size').to(int).null().default(None)
+    content_hash = Validator('content_hash').to(str).null().default(None)
+    duration_seconds = Validator('duration_seconds').to(float).null().default(None)
+    asset_id = Validator('asset_id').to(int).null().default(None)
+    resource_kind = Validator('kind', final_name='resource_kind').to(str).null().default(None)
     password = Validator('password').to(str)
 
     limit = Validator('limit').to(int) \
