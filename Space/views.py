@@ -409,8 +409,8 @@ class SpaceAdminUserListView(SpaceUserListView):
                 verified=user.phone_verified_at is not None,
             ),
             bark=dict(
-                bound=bool(user.bark),
-                verified=user.bark_verified_at is not None,
+                bound=user.instant_notification_endpoints.exists(),
+                verified=user.instant_notification_endpoints.filter(verified_at__isnull=False).exists(),
             ),
         )
 

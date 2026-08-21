@@ -71,14 +71,11 @@ class NotificationDigestTests(TestCase):
         return chat
 
     def enable_bark(self):
-        self.recipient.bark = 'https://api.day.app/test-device'
-        self.recipient.bark_verified_at = timezone.now()
-        self.recipient.save(update_fields=['bark', 'bark_verified_at'])
         InstantNotificationEndpoint.objects.create(
             user=self.recipient,
             provider='bark',
-            target=self.recipient.bark,
-            verified_at=self.recipient.bark_verified_at,
+            target='https://api.day.app/test-device',
+            verified_at=timezone.now(),
         )
         return NotificationPreference.set_preference(
             self.recipient,
@@ -110,6 +107,44 @@ class NotificationDigestTests(TestCase):
 
         bark.assert_not_called()
         self.assertFalse(NotificationDelivery.objects.filter(channel=UserNotificationChoice.BARK).exists())
+
+    @patch('User.models.notificator.ntfy')
+    def test_ntfy_only_receiver_is_sent_without_legacy_bark_fields(self, ntfy):
+        endpoint = InstantNotificationEndpoint.objects.create(
+            user=self.recipient,
+            provider='ntfy',
+            target='https://ntfy.sh/sermo-test',
+            verified_at=timezone.now(),
+        )
+        endpoint.set_enabled(True)
+        message = self.create_notified_message('ntfy only')
+        event = NotificationEvent.objects.get(user=self.recipient, payload__message_id=message.id)
+
+        deliveries = NotificationDelivery.enqueue_instant_for_event(event)
+
+        self.assertEqual(len(deliveries), 1)
+        self.assertEqual(deliveries[0].instant_endpoint_id, endpoint.id)
+        ntfy.assert_called_once()
+
+    def test_endpoint_switch_keeps_general_instant_preference_in_sync(self):
+        endpoint = InstantNotificationEndpoint.objects.create(
+            user=self.recipient,
+            provider='ntfy',
+            target='https://ntfy.sh/sermo-test',
+            verified_at=timezone.now(),
+        )
+
+        endpoint.set_enabled(True)
+        self.assertTrue(NotificationPreference.objects.get(
+            user=self.recipient,
+            channel=UserNotificationChoice.BARK,
+        ).enabled)
+
+        endpoint.set_enabled(False)
+        self.assertFalse(NotificationPreference.objects.get(
+            user=self.recipient,
+            channel=UserNotificationChoice.BARK,
+        ).enabled)
 
     @patch('User.models.notificator.bark')
     def test_offline_bark_is_sent_immediately_per_message(self, bark):

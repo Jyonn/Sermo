@@ -233,11 +233,8 @@ class User(models.Model):
     email_verified_at = models.DateTimeField(null=True, blank=True)
     phone = models.CharField(max_length=20, null=True, blank=True)
     phone_verified_at = models.DateTimeField(null=True, blank=True)
-    bark = models.CharField(max_length=100, null=True, blank=True)
-    bark_verified_at = models.DateTimeField(null=True, blank=True)
     email_unbound_at = models.DateTimeField(null=True, blank=True)
     phone_unbound_at = models.DateTimeField(null=True, blank=True)
-    bark_unbound_at = models.DateTimeField(null=True, blank=True)
     is_private_account = models.BooleanField(default=False)
     welcome_message = models.CharField(
         max_length=vldt.WELCOME_MESSAGE_MAX_LENGTH,
@@ -654,8 +651,6 @@ class User(models.Model):
         elif channel == UserNotificationChoice.SMS:
             normalized = target
             field = 'phone'
-        elif channel == UserNotificationChoice.BARK:
-            return normalize_bark_endpoint(target)
         else:
             raise UserErrors.CONTACT_CHANNEL_INVALID
 
@@ -692,17 +687,6 @@ class User(models.Model):
                 self.phone_verified_at = now
                 self.save(update_fields=['phone', 'phone_verified_at'])
             self.award_growth('security:phone')
-            return self
-        if channel == UserNotificationChoice.BARK:
-            self.bark = normalize_bark_endpoint(target)
-            self.bark_verified_at = now
-            self.save(update_fields=['bark', 'bark_verified_at'])
-            InstantNotificationEndpoint.objects.update_or_create(
-                user=self,
-                provider=InstantNotificationProviderChoice.BARK,
-                defaults=dict(target=self.bark, secret=None, enabled=True, verified_at=now),
-            )
-            self.award_growth('security:bark')
             return self
         raise UserErrors.CONTACT_CHANNEL_INVALID
 
@@ -744,17 +728,6 @@ class User(models.Model):
             if not self.is_official:
                 self.is_private_account = False
             fields = ['phone', 'phone_verified_at', 'phone_unbound_at', 'is_private_account']
-        elif channel == UserNotificationChoice.BARK:
-            if not self.bark or self.bark_verified_at is None:
-                raise UserErrors.CONTACT_NOT_BOUND
-            self.bark = None
-            self.bark_verified_at = None
-            self.bark_unbound_at = now
-            InstantNotificationEndpoint.objects.filter(
-                user=self,
-                provider=InstantNotificationProviderChoice.BARK,
-            ).delete()
-            fields = ['bark', 'bark_verified_at', 'bark_unbound_at']
         else:
             raise UserErrors.CONTACT_CHANNEL_INVALID
 
@@ -930,11 +903,6 @@ class User(models.Model):
         if self.phone_verified_at is None:
             return None
         return self.phone_verified_at.timestamp()
-
-    def _dictify_bark_verified_at(self):
-        if self.bark_verified_at is None:
-            return None
-        return self.bark_verified_at.timestamp()
 
     def _dictify_avatar_uri(self):
         avatar_uri = (self.avatar_uri or '').strip()
@@ -1224,14 +1192,11 @@ class User(models.Model):
             'avatar_cache_key',
             'email',
             'phone',
-            'bark',
             'last_heartbeat',
             'email_verified_at',
             'phone_verified_at',
-            'bark_verified_at',
             'email_unbound_at',
             'phone_unbound_at',
-            'bark_unbound_at',
             'is_private_account',
             'is_permanent_vip',
             'chat_background_theme',
@@ -1724,8 +1689,6 @@ class UserContactVerificationCode(models.Model):
         target = (target or '').strip()
         if channel == UserNotificationChoice.EMAIL:
             return target.lower()
-        if channel == UserNotificationChoice.BARK:
-            return normalize_bark_endpoint(target)
         return target
 
     @classmethod
@@ -1819,6 +1782,16 @@ class InstantNotificationEndpoint(models.Model):
     @classmethod
     def active_for_user(cls, user):
         return cls.objects.filter(user=user, enabled=True, verified_at__isnull=False).order_by('provider')
+
+    def set_enabled(self, enabled):
+        self.enabled = bool(enabled)
+        self.save(update_fields=['enabled', 'updated_at'])
+        NotificationPreference.set_preference(
+            self.user,
+            UserNotificationChoice.BARK,
+            enabled=self.enabled or self.active_for_user(self.user).exists(),
+        )
+        return self
 
     @staticmethod
     def mask_target(target):
@@ -2873,8 +2846,6 @@ class NotificationDelivery(models.Model):
             return user.email
         if channel == UserNotificationChoice.SMS:
             return user.phone
-        if channel == UserNotificationChoice.BARK:
-            return user.bark
         return None
 
     @classmethod

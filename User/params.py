@@ -245,7 +245,10 @@ class UserGestureLockPreferenceParams(metaclass=Params):
 class UserContactVerificationCodeParams(metaclass=Params):
     model_class = UserContactVerificationCode
 
-    channel = NotificationPreferenceParams.channel.copy()
+    channel = NotificationPreferenceParams.channel.copy().bool(
+        lambda x: x in (UserNotificationChoice.EMAIL, UserNotificationChoice.SMS),
+        message=_('Invalid contact channel'),
+    )
     target: Validator
     code: Validator
 

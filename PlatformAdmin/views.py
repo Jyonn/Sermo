@@ -187,7 +187,11 @@ class MemberListView(View):
             item['friend_count'] = Friendship.objects.filter(space=space, status=FriendshipStatusChoice.ACCEPTED).filter(Q(user_low=user) | Q(user_high=user)).count()
             item['chat_count'] = ChatMember.objects.filter(user=user, status=ChatMemberStatusChoice.ACTIVE, chat__is_deleted=False).count()
             item['statement_count'] = user.statements.filter(is_deleted=False).count()
-            item['contacts'] = dict(email=bool(user.email_verified_at), phone=bool(user.phone_verified_at), bark=bool(user.bark_verified_at))
+            item['contacts'] = dict(
+                email=bool(user.email_verified_at),
+                phone=bool(user.phone_verified_at),
+                bark=user.instant_notification_endpoints.filter(verified_at__isnull=False).exists(),
+            )
             item['notifications_enabled'] = NotificationPreference.objects.filter(user=user, enabled=True).count()
             payload.append(item)
         return payload

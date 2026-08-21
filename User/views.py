@@ -354,8 +354,7 @@ class InstantNotificationEndpointDetailView(View):
         endpoint = InstantNotificationEndpoint.objects.filter(id=endpoint_id, user=request.user).first()
         if endpoint is None:
             raise UserErrors.INSTANT_ENDPOINT_INVALID
-        endpoint.enabled = bool(request.json.enabled)
-        endpoint.save(update_fields=['enabled', 'updated_at'])
+        endpoint.set_enabled(request.json.enabled)
         return endpoint.json()
 
     @auth.require_user
@@ -651,14 +650,6 @@ class ContactVerificationCodeRequestView(View):
                     time=expire_minutes,
                     title=title,
                     language=request.user.language,
-                )
-            elif channel == UserNotificationChoice.BARK:
-                body = verification_message_text(code_obj.code, expire_minutes, request.user.language)
-                notificator.bark(
-                    code_obj.target,
-                    title=title,
-                    body=body,
-                    locale='en-US' if request.user.language == 'en' else 'zh-CN',
                 )
             else:
                 raise UserErrors.CONTACT_CHANNEL_INVALID
