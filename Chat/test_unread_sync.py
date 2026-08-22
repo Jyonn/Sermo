@@ -67,3 +67,15 @@ class ChatUnreadSyncTests(TestCase):
 
         ChatReadState.mark_read(self.chat, self.me)
         self.assertFalse(ChatReadState.has_unread_mention(self.chat, self.me))
+
+    def test_structured_mention_token_records_user_and_renders_readable_text(self):
+        message = Message.create(
+            self.chat,
+            self.peer,
+            MessageTypeChoice.TEXT,
+            f'<@{self.me.id}>不加空格也能识别',
+        )
+
+        self.assertEqual(list(message.chat_mentions.values_list('user_id', flat=True)), [self.me.id])
+        self.assertEqual(message.preview_text(), '@Me不加空格也能识别')
+        self.assertEqual(message.jsonl()['content'], '@Me不加空格也能识别')

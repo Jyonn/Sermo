@@ -456,6 +456,7 @@ class LinkPreview(models.Model):
 
 
 class Message(models.Model):
+    MENTION_TOKEN_RE = re.compile(r'<@(\d+)>')
     validators = MessageValidator
     vldt = MessageValidator
     MEDIA_KIND_BY_TYPE = {
@@ -683,9 +684,10 @@ class Message(models.Model):
                 user.award_growth('explore:message_reply')
             if message.type != MessageTypeChoice.SYSTEM:
                 message._award_interaction_growth()
-            if message.type == MessageTypeChoice.TEXT and mention_user_ids:
+            if message.type == MessageTypeChoice.TEXT:
                 from Chat.models import ChatMessageMention
-                ChatMessageMention.record(message, mention_user_ids)
+                token_user_ids = cls.mention_user_ids_from_content(message.content)
+                ChatMessageMention.record(message, token_user_ids or mention_user_ids)
             MessageEvent.record_created(message)
             return message
         raise MessageErrors.NOT_A_MEMBER
@@ -1028,6 +1030,22 @@ class Message(models.Model):
 
         raise MessageErrors.TYPE_INVALID
 
+    @classmethod
+    def mention_user_ids_from_content(cls, content):
+        return list(dict.fromkeys(int(match.group(1)) for match in cls.MENTION_TOKEN_RE.finditer(content or '')))
+
+    def readable_text(self):
+        if self.type != MessageTypeChoice.TEXT or '<@' not in self.content:
+            return self.content
+        mention_names = {
+            mention.user_id: mention.user.name
+            for mention in self.chat_mentions.all()
+        }
+        return self.MENTION_TOKEN_RE.sub(
+            lambda match: '@' + mention_names.get(int(match.group(1)), _('unknown user')),
+            self.content,
+        )
+
     def _blob_path(self, thumbnail: bool = False):
         if not self.media_resource_id:
             return ''
@@ -1144,6 +1162,8 @@ class Message(models.Model):
         return None
 
     def preview_text(self):
+        if self.type == MessageTypeChoice.TEXT:
+            return self.readable_text()
         return self.PREVIEW_TEXT_BY_TYPE.get(self.type, self.content)
 
     def _dictify_user(self):
