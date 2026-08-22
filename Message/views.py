@@ -310,27 +310,33 @@ class MessageUploadView(View):
 
 class MessageResourceView(View):
     @auth.require_user
-    @analyse.query(MessageParams.resource_kind)
+    @analyse.query(
+        MessageParams.resource_kind,
+        MessageParams.resource_offset,
+        MessageParams.resource_limit,
+    )
     def get(self, request: Request):
         kind_name = request.query.resource_kind
         if kind_name not in (None, 'image', 'video', 'file'):
             raise MessageErrors.MEDIA_KIND_INVALID
         kinds = [kind_name] if kind_name else ['image', 'video', 'file']
-        resources = []
-        for name in kinds:
-            kind = MediaAsset.kind_for_name(name)
-            queryset = MediaResource.objects.select_related('asset').filter(
-                owner=request.user,
-                kind=kind,
-                library_active=True,
-            ).exclude(asset__status=MediaAsset.STATUS_FAILED).filter(
-                MediaResource.available_reference_q(),
-            ).distinct()
-            resources.extend(queryset.order_by('-asset__created_at', '-id')[:200])
-        resources.sort(key=lambda resource: (resource.asset.created_at, resource.id), reverse=True)
+        offset = request.query.resource_offset
+        limit = request.query.resource_limit
+        queryset = MediaResource.objects.select_related('asset').filter(
+            owner=request.user,
+            kind__in=[MediaAsset.kind_for_name(name) for name in kinds],
+            library_active=True,
+        ).exclude(asset__status=MediaAsset.STATUS_FAILED).filter(
+            MediaResource.available_reference_q(),
+        ).distinct().order_by('-asset__created_at', '-id')
+        page = list(queryset[offset:offset + limit + 1])
+        has_more = len(page) > limit
+        resources = page[:limit]
         return dict(
             items=[resource.resource_jsonl(request=request) for resource in resources],
             quota=MediaResource.quota_for(request.user),
+            has_more=has_more,
+            next_offset=offset + len(resources),
         )
 
     @auth.require_user

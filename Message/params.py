@@ -55,6 +55,11 @@ class MessageParams(metaclass=Params):
     duration_seconds = Validator('duration_seconds').to(float).null().default(None)
     resource_id = Validator('resource_id').to(int).null().default(None)
     resource_kind = Validator('kind', final_name='resource_kind').to(str).null().default(None)
+    resource_offset = Validator('offset', final_name='resource_offset').to(int) \
+        .bool(lambda value: value >= 0, message=_('offset should not be negative')).default(0)
+    resource_limit = Validator('limit', final_name='resource_limit').to(int) \
+        .bool(lambda value: value >= 1, message=_('limit should be positive')) \
+        .bool(lambda value: value <= 100, message=_('limit should be at most 100')).default(60)
     password = Validator('password').to(str)
 
     limit = Validator('limit').to(int) \

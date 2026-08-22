@@ -89,6 +89,30 @@ class CloudResourceTests(TestCase):
         self.assertEqual([item['resource_id'] for item in items], [newer.id, older.id])
         self.assertEqual(items[1]['created_at'], older_time.timestamp())
 
+    def test_resource_list_supports_offset_pagination(self):
+        resources = []
+        now = timezone.now()
+        for index in range(3):
+            asset = self.create_asset(
+                source_key=f'sermo/messages/file/page-{index}.pdf',
+                source_uri=f'https://example.com/sermo/messages/file/page-{index}.pdf',
+                content_hash=str(index + 1) * 64,
+            )
+            resource = self.create_resource(asset=asset, file_name=f'page-{index}.pdf')
+            Message.create(self.chat, self.user, MessageTypeChoice.FILE, '', media_resource=resource)
+            MediaAsset.objects.filter(id=asset.id).update(created_at=now - timedelta(days=index))
+            resources.append(resource)
+
+        first = self.client.get('/messages/resources?kind=file&offset=0&limit=2', **self.authorization()).json()['body']
+        second = self.client.get('/messages/resources?kind=file&offset=2&limit=2', **self.authorization()).json()['body']
+
+        self.assertEqual([item['resource_id'] for item in first['items']], [resource.id for resource in resources[:2]])
+        self.assertTrue(first['has_more'])
+        self.assertEqual(first['next_offset'], 2)
+        self.assertEqual([item['resource_id'] for item in second['items']], [resources[2].id])
+        self.assertFalse(second['has_more'])
+        self.assertEqual(second['next_offset'], 3)
+
     def test_image_resource_includes_shared_media_metadata(self):
         asset = self.create_asset(
             source_key='sermo/messages/image/camera.jpg',
