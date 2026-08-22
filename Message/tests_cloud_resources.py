@@ -134,3 +134,20 @@ class CloudResourceTests(TestCase):
         self.assertEqual(MediaAssetAlias.resolve(old_slug), canonical)
         self.assertFalse(MediaAsset.objects.filter(source_key='sermo/messages/file/duplicate.pdf').exists())
         delete_file.assert_called_once()
+
+    @patch.object(BackfillCommand, '_digest', return_value=('b' * 64, 2048, 'application/pdf'))
+    def test_backfill_includes_empty_hash_images_and_fills_file_details(self, digest):
+        asset = self.create_asset(
+            source_key='sermo/messages/image/empty.jpg',
+            source_uri='https://example.com/sermo/messages/image/empty.jpg',
+            kind=MediaAsset.KIND_IMAGE,
+            content_hash=None,
+            file_size=None,
+            mime_type='',
+        )
+        BackfillCommand().handle(limit=0, force=False, dry_run=False)
+        asset.refresh_from_db()
+        self.assertEqual(asset.content_hash, 'b' * 64)
+        self.assertEqual(asset.file_size, 2048)
+        self.assertEqual(asset.mime_type, 'application/pdf')
+        digest.assert_called_once()
