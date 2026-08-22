@@ -113,6 +113,24 @@ class CloudResourceTests(TestCase):
         self.assertFalse(second['has_more'])
         self.assertEqual(second['next_offset'], 3)
 
+    def test_resource_list_searches_file_names(self):
+        report = self.create_resource(file_name='quarterly-report.pdf')
+        notes_asset = self.create_asset(
+            source_key='sermo/messages/file/notes.txt',
+            source_uri='https://example.com/sermo/messages/file/notes.txt',
+            content_hash='9' * 64,
+        )
+        notes = self.create_resource(asset=notes_asset, file_name='meeting-notes.txt')
+        Message.create(self.chat, self.user, MessageTypeChoice.FILE, '', media_resource=report)
+        Message.create(self.chat, self.user, MessageTypeChoice.FILE, '', media_resource=notes)
+
+        response = self.client.get('/messages/resources?kind=file&keyword=REPORT', **self.authorization())
+
+        self.assertEqual(
+            [item['resource_id'] for item in response.json()['body']['items']],
+            [report.id],
+        )
+
     def test_image_resource_includes_shared_media_metadata(self):
         asset = self.create_asset(
             source_key='sermo/messages/image/camera.jpg',

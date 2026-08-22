@@ -312,6 +312,7 @@ class MessageResourceView(View):
     @auth.require_user
     @analyse.query(
         MessageParams.resource_kind,
+        MessageParams.resource_keyword,
         MessageParams.resource_offset,
         MessageParams.resource_limit,
     )
@@ -328,7 +329,10 @@ class MessageResourceView(View):
             library_active=True,
         ).exclude(asset__status=MediaAsset.STATUS_FAILED).filter(
             MediaResource.available_reference_q(),
-        ).distinct().order_by('-asset__created_at', '-id')
+        )
+        if request.query.resource_keyword:
+            queryset = queryset.filter(file_name__icontains=request.query.resource_keyword.strip())
+        queryset = queryset.distinct().order_by('-asset__created_at', '-id')
         page = list(queryset[offset:offset + limit + 1])
         has_more = len(page) > limit
         resources = page[:limit]
