@@ -60,6 +60,7 @@ class UserErrors:
     CHAT_BACKGROUND_THEME_INVALID = Error(message=_('Invalid chat background theme'), code=Code.BadRequest)
     PERSONALIZATION_INVALID = Error(message=_('Invalid personalization option'), code=Code.BadRequest)
     PERSONALIZATION_UNAVAILABLE = Error(message=_('This personalization option is no longer available'), code=Code.Forbidden)
+    PERSONALIZATION_NOT_OWNED = Error(message=_('This personalization item has not been unlocked'), code=Code.Forbidden)
     CITY_BUBBLE_CHECKIN_REQUIRED = Error(message=_('Check in to {region} to unlock this city bubble'), code=Code.Forbidden)
     WEB_PUSH_SUBSCRIPTION_INVALID = Error(message=_('Invalid web push subscription'), code=Code.BadRequest)
     EMAIL_NOT_VERIFIED = Error(message=_('Email is not verified'), code=Code.Forbidden)

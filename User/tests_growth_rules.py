@@ -48,9 +48,6 @@ class GrowthRuleTests(SimpleTestCase):
         self.assertEqual(rewards['background.zen']['rarity'], 'rare')
         self.assertEqual(rewards['background.aurora_sky']['rarity'], 'epic')
         self.assertEqual(rewards['bubble.niko']['rarity'], 'legendary')
-        self.assertEqual(rewards['bubble.baxian_lv']['rarity'], 'legendary')
-        self.assertEqual(rewards['bubble.baxian_zhongli']['rarity'], 'legendary')
-        self.assertEqual(rewards['bubble.baxian_he']['rarity'], 'legendary')
         self.assertEqual(rewards['frame.niko']['rarity'], 'legendary')
         self.assertEqual(rewards['background.noir']['rarity'], 'legendary')
 
@@ -94,6 +91,14 @@ class GrowthRuleTests(SimpleTestCase):
             self.assertEqual(rewards[('bubble', style)], level)
         for style, level in PERSONALIZATION_LEVELS['avatar_frame_style'].items():
             self.assertEqual(rewards[('frame', style)], level)
+
+    def test_baxian_bubbles_are_not_growth_rewards(self):
+        reward_assets = {
+            reward.get('asset_key')
+            for rewards in LEVEL_REWARDS.values()
+            for reward in rewards
+        }
+        self.assertTrue({'baxian-lv', 'baxian-zhongli', 'baxian-he'}.isdisjoint(reward_assets))
 
     def test_unknown_and_retired_events_are_invalid(self):
         self.assertIsNone(resolve_event_rule('daily:chat:2026-08-04'))

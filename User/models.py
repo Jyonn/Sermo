@@ -28,6 +28,7 @@ from utils.qiniu import (
 )
 from User.validators import UserValidator, UserErrors
 from User.growth import (
+    ACTIVITY_PERSONALIZATION,
     DAILY_GROWTH_LIMIT,
     EVENT_RULES,
     CAPABILITY_LEVEL_FALLBACKS,
@@ -150,6 +151,7 @@ class UserResourceTypeChoice(Choice):
 
 class UserResourceSourceChoice(Choice):
     GROWTH = 'growth'
+    ACTIVITY = 'activity'
     VIP_CAMPAIGN = 'vip_campaign'
     SYSTEM = 'system'
 
@@ -577,6 +579,9 @@ class User(models.Model):
                 }.get(field)
                 if capability_group:
                     self.require_capability(f'menu.personalization.{capability_group}.use.{normalized}')
+                if normalized in ACTIVITY_PERSONALIZATION.get(field, set()) and not UserResourceInventory.owns(
+                        self, capability_group, normalized):
+                    raise UserErrors.PERSONALIZATION_NOT_OWNED
             setattr(self, field, normalized)
         self.save(update_fields=fields)
         if changed:
@@ -1349,6 +1354,18 @@ class UserResourceInventory(models.Model):
             ),
         )
         return item, created
+
+    @classmethod
+    def grant_activity_resource(cls, user, resource_type, reward_id, resource_key, activity_key, metadata=None):
+        return cls.grant(
+            user=user,
+            resource_type=resource_type,
+            reward_id=reward_id,
+            resource_key=resource_key,
+            source=UserResourceSourceChoice.ACTIVITY,
+            source_reference=activity_key,
+            metadata=metadata,
+        )
 
     @classmethod
     def grant_growth_rewards(cls, user, level):

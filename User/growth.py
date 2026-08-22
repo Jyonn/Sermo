@@ -126,12 +126,15 @@ PERSONALIZATION_LEVELS = {
         'zen': 6, 'newspaper': 7, 'hero': 9,
         'bauhaus': 10, 'receipt': 11, 'dragon': 12, 'mosaic': 13,
         'niko': 16, 'fufu': 17,
-        'baxian-lv': 18, 'baxian-zhongli': 18, 'baxian-he': 18,
     },
     'avatar_frame_style': {
         'none': 1, 'orbit': 2, 'polaroid': 3, 'aurora': 7,
         'papercut': 9, 'mechanical': 13, 'niko-run': 16, 'fufu-wave': 17,
     },
+}
+
+ACTIVITY_PERSONALIZATION = {
+    'chat_bubble_style': {'baxian-lv', 'baxian-zhongli', 'baxian-he'},
 }
 
 VIP_OR_LEVEL_PERSONALIZATION = {
@@ -203,7 +206,7 @@ LEVEL_REWARDS = {
     15: [_reward('background.newsprint', 15, 'background', '报刊背景', 'rare', 'newsprint'), _reward('background.hologram', 15, 'background', '幻彩膜背景', 'epic', 'hologram')],
     16: [_reward('bubble.niko', 16, 'bubble', 'Niko 气泡', 'legendary', 'niko'), _reward('frame.niko', 16, 'frame', 'Niko Run 头像框', 'legendary', 'niko-run'), _reward('growth.report', 16, 'identity', '成长报告', 'epic', status='planned')],
     17: [_reward('background.spaceport', 17, 'background', '太空港背景', 'epic', 'spaceport'), _reward('bubble.fufu', 17, 'bubble', 'Fufu 气泡', 'legendary', 'fufu'), _reward('frame.fufu', 17, 'frame', 'Fufu Wave 头像框', 'legendary', 'fufu-wave'), _reward('frame.collection', 17, 'identity', '头像框收藏入口', 'epic', status='planned')],
-    18: [_reward('background.noir', 18, 'background', '黑色电影背景', 'legendary', 'noir-film'), _reward('bubble.baxian_lv', 18, 'bubble', '吕洞宾·青锋气泡', 'legendary', 'baxian-lv'), _reward('bubble.baxian_zhongli', 18, 'bubble', '钟离权·逍遥气泡', 'legendary', 'baxian-zhongli'), _reward('bubble.baxian_he', 18, 'bubble', '何仙姑·凌风气泡', 'legendary', 'baxian-he'), _reward('identity.final_badge', 18, 'identity', '“尽兴”永久成长徽记', 'legendary', status='planned'), _reward('profile.final_slot', 18, 'identity', '满级个人名片展示位', 'legendary', status='planned')],
+    18: [_reward('background.noir', 18, 'background', '黑色电影背景', 'legendary', 'noir-film'), _reward('identity.final_badge', 18, 'identity', '“尽兴”永久成长徽记', 'legendary', status='planned'), _reward('profile.final_slot', 18, 'identity', '满级个人名片展示位', 'legendary', status='planned')],
 }
 
 

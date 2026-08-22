@@ -13,6 +13,7 @@ from User.models import (
     WebPushSubscription,
     WebPushDelivery,
     User,
+    UserResourceInventory,
     UserContactVerificationCode,
     UserNotificationChoice,
     account_switch_phone_variants,
@@ -65,6 +66,21 @@ class CityBubbleUnlockTests(TestCase):
         self.user.refresh_from_db()
         self.assertEqual(self.user.chat_bubble_style, 'city-jdz')
         self.assertIn('city-jdz', self.user.json_me()['city_bubble_styles'])
+
+    def test_baxian_bubble_requires_activity_inventory(self):
+        with self.assertRaises(UserErrors.PERSONALIZATION_NOT_OWNED.__class__):
+            self.user.set_personalization(chat_bubble_style='baxian-lv', avatar_frame_style='none')
+
+        UserResourceInventory.grant_activity_resource(
+            self.user,
+            resource_type='bubble',
+            reward_id='activity.baxian.lv',
+            resource_key='baxian-lv',
+            activity_key='baxian-2026',
+        )
+        self.user.set_personalization(chat_bubble_style='baxian-lv', avatar_frame_style='none')
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.chat_bubble_style, 'baxian-lv')
 
     def test_self_avatar_preference_is_persisted_in_private_profile(self):
         self.user.set_personalization(

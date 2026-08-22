@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from User.growth import CHAT_BACKGROUND_LEVELS, PERSONALIZATION_LEVELS
+from User.growth import ACTIVITY_PERSONALIZATION, CHAT_BACKGROUND_LEVELS, PERSONALIZATION_LEVELS
 
 
 @dataclass(frozen=True)
@@ -113,6 +113,12 @@ for style in PERSONALIZATION_LEVELS['chat_bubble_style']:
     register(
         f'menu.personalization.bubble.use.{style}', style, style,
         'menu.personalization.bubble', 'chat_bubble', asset_key=style,
+    )
+
+for style in ACTIVITY_PERSONALIZATION['chat_bubble_style']:
+    register(
+        f'menu.personalization.bubble.use.{style}', style, style,
+        'menu.personalization.bubble', 'celebration', asset_key=style,
     )
 
 register('menu.personalization.bubble.use.vip', '永久 VIP', 'Permanent VIP', 'menu.personalization.bubble', 'workspace_premium', asset_key='vip')
