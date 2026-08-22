@@ -219,12 +219,11 @@ class UnifiedMediaAssetTests(TestCase):
             )
             file = MediaAsset.queue(
                 'sermo/messages/file/report.pdf', 'https://resource.example.com/sermo/messages/file/report.pdf',
-                MediaAsset.KIND_FILE, mime_type='application/pdf', file_name='report.pdf', file_size=2048,
+                MediaAsset.KIND_FILE, mime_type='application/pdf', file_size=2048,
             )
 
         self.assertEqual(audio.status, MediaAsset.STATUS_READY)
         self.assertEqual(audio.duration_seconds, 12)
-        self.assertEqual(file.file_name, 'report.pdf')
         self.assertEqual(file.file_size, 2048)
         fetch.assert_not_called()
 

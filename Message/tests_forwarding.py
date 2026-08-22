@@ -5,7 +5,7 @@ from django.utils import timezone
 
 from Chat.models import Chat
 from Friendship.models import Friendship
-from Message.models import ForwardBundleItem, MediaAsset, Message, MessageTypeChoice
+from Message.models import ForwardBundleItem, MediaAsset, MediaResource, Message, MessageTypeChoice
 from Space.models import Space
 from User.models import User
 from utils import auth
@@ -46,22 +46,23 @@ class MessageForwardingTests(TestCase):
             kind=MediaAsset.KIND_IMAGE,
             status=MediaAsset.STATUS_READY,
         )
+        resource = MediaResource.acquire(self.peer, asset, MediaAsset.KIND_IMAGE, 'source.jpg')
         source = Message.objects.create(
             chat=self.source_chat,
             user=self.peer,
             type=MessageTypeChoice.IMAGE,
             content=json.dumps({'kind': 'image', 'uri': asset.source_uri}),
-            media_asset=asset,
+            media_resource=resource,
         )
 
         response = self.post_forward([source.id], 'individual')
 
         self.assertEqual(response.status_code, 200, response.content)
         forwarded = Message.objects.get(chat=self.target_chat, type=MessageTypeChoice.IMAGE)
-        self.assertEqual(forwarded.media_asset_id, asset.id)
+        self.assertEqual(forwarded.media_resource.asset_id, asset.id)
         source.remove()
         self.assertFalse(forwarded.is_deleted)
-        self.assertEqual(forwarded.media_asset_id, asset.id)
+        self.assertEqual(forwarded.media_resource.asset_id, asset.id)
 
     def test_bundle_keeps_snapshot_after_original_is_recalled(self):
         first = Message.create(self.source_chat, self.peer, MessageTypeChoice.TEXT, 'First line')

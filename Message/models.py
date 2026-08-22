@@ -489,8 +489,8 @@ class Message(models.Model):
 
     type = models.IntegerField(choices=MessageTypeChoice.to_choices())
     content = models.CharField(max_length=vldt.MAX_CONTENT_LENGTH, blank=True, default='')
-    media_asset = models.ForeignKey(
-        'MediaAsset', on_delete=models.SET_NULL, null=True, blank=True, related_name='messages',
+    media_resource = models.ForeignKey(
+        'MediaResource', on_delete=models.SET_NULL, null=True, blank=True, related_name='messages',
     )
     forward_bundle = models.ForeignKey(
         'ForwardBundle', on_delete=models.SET_NULL, null=True, blank=True, related_name='messages',
@@ -537,7 +537,7 @@ class Message(models.Model):
         return self.visible_for_user(self.chat, user).filter(id=self.id).exists()
 
     @classmethod
-    def create(cls, chat: Chat, user: User, message_type, content, reply_to=None, client_message_id=None, mention_user_ids=None, media_asset=None):
+    def create(cls, chat: Chat, user: User, message_type, content, reply_to=None, client_message_id=None, mention_user_ids=None, media_resource=None):
         if message_type in (MessageTypeChoice.SYSTEM, MessageTypeChoice.FORWARD_BUNDLE):
             raise MessageErrors.SYSTEM_MESSAGE_FORBIDDEN
         if chat.has_active_member(user):
@@ -572,14 +572,14 @@ class Message(models.Model):
                 if existing is not None:
                     existing._was_created = False
                     return existing
-            if media_asset is not None:
+            if media_resource is not None:
                 expected_kind = cls.MEDIA_KIND_BY_TYPE.get(message_type)
                 if (
                     expected_kind is None
-                    or not media_asset.can_be_used_by(user)
-                    or media_asset.kind != MediaAsset.kind_for_name(expected_kind)
-                    or media_asset.status == MediaAsset.STATUS_FAILED
-                    or not media_asset.library_active
+                    or not media_resource.can_be_used_by(user)
+                    or media_resource.kind != MediaAsset.kind_for_name(expected_kind)
+                    or media_resource.asset.status == MediaAsset.STATUS_FAILED
+                    or not media_resource.library_active
                 ):
                     raise MessageErrors.MEDIA_ASSET_INVALID
                 normalized_content = ''
@@ -629,7 +629,7 @@ class Message(models.Model):
                         user=user,
                         type=message_type,
                         content=normalized_content,
-                        media_asset=media_asset,
+                        media_resource=media_resource,
                         reply_to=reply_to,
                         client_message_id=normalized_client_id,
                     )
@@ -643,21 +643,25 @@ class Message(models.Model):
             if message.type == MessageTypeChoice.MAP_ACCESS and map_access_viewer is not None:
                 from TravelMap.models import MapAccessGrant
                 MapAccessGrant.grant(user, map_access_viewer)
-            if message.type in cls.MEDIA_KIND_BY_TYPE and message.media_asset_id is None:
+            if message.type in cls.MEDIA_KIND_BY_TYPE and message.media_resource_id is None:
                 payload = cls._parse_payload(message.content)
-                message.media_asset = MediaAsset.queue(
+                asset = MediaAsset.queue(
                     message.source_media_key(), message.source_media_uri(),
                     MediaAsset.kind_for_name(cls.MEDIA_KIND_BY_TYPE[message.type]),
                     mime_type=payload.get('mime_type'),
                     duration_seconds=payload.get('duration_seconds'),
                     file_size=payload.get('file_size'),
-                    file_name=payload.get('file_name'),
+                )
+                message.media_resource = MediaResource.acquire(
                     owner=user,
+                    asset=asset,
+                    kind=MediaAsset.kind_for_name(cls.MEDIA_KIND_BY_TYPE[message.type]),
+                    file_name=payload.get('file_name'),
                 )
                 message.content = ''
-                message.save(update_fields=['media_asset', 'content'])
-            if message.media_asset_id:
-                message.media_asset.recalculate_reference_count()
+                message.save(update_fields=['media_resource', 'content'])
+            if message.media_resource_id:
+                message.media_resource.recalculate_reference_count()
             if message.type == MessageTypeChoice.TEXT:
                 link_preview = LinkPreview.queue_for_text(message.content)
                 UserEmojiUsage.record_text(user, message.content)
@@ -719,13 +723,13 @@ class Message(models.Model):
             user=user,
             type=source.type,
             content=source.content,
-            media_asset=source.media_asset,
+            media_resource=source.media_resource.clone_for(user) if source.media_resource_id else None,
         )
         message._was_created = True
         message._award_interaction_growth()
         MessageEvent.record_created(message)
-        if message.media_asset_id:
-            message.media_asset.recalculate_reference_count()
+        if message.media_resource_id:
+            message.media_resource.recalculate_reference_count()
         return message
 
     @classmethod
@@ -742,8 +746,8 @@ class Message(models.Model):
         message._was_created = True
         message._award_interaction_growth()
         MessageEvent.record_created(message)
-        for asset_id in bundle.items.exclude(media_asset__isnull=True).values_list('media_asset_id', flat=True).distinct():
-            MediaAsset.objects.get(id=asset_id).recalculate_reference_count()
+        for resource_id in bundle.items.exclude(media_resource__isnull=True).values_list('media_resource_id', flat=True).distinct():
+            MediaResource.objects.get(id=resource_id).recalculate_reference_count()
         return message
 
     @classmethod
@@ -1025,10 +1029,10 @@ class Message(models.Model):
         raise MessageErrors.TYPE_INVALID
 
     def _blob_path(self, thumbnail: bool = False):
-        if not self.media_asset_id:
+        if not self.media_resource_id:
             return ''
         route_name = 'message blob thumbnail' if thumbnail else 'message blob'
-        return reverse(route_name, kwargs={'blob_slug': self.media_asset.blob_slug})
+        return reverse(route_name, kwargs={'blob_slug': self.media_resource.asset.blob_slug})
 
     def media_blob_uri(self, request: HttpRequest = None, thumbnail: bool = False):
         path = self._blob_path(thumbnail=thumbnail)
@@ -1102,13 +1106,13 @@ class Message(models.Model):
             if self.forward_bundle_id is None:
                 return dict(kind='forward_bundle', unavailable=True, items=[])
             return self.forward_bundle.jsonl(request=request)
-        if self.type == MessageTypeChoice.FILE and not self.media_asset_id and not self.content.lstrip().startswith('{'):
+        if self.type == MessageTypeChoice.FILE and not self.media_resource_id and not self.content.lstrip().startswith('{'):
             return dict(kind='file', text=self.content)
         if self.type in self.MEDIA_KIND_BY_TYPE:
             payload = self._parse_payload(self.content) if self.content else {}
             uri = (payload.get('uri') or '').strip()
             response = dict(kind=payload.get('kind') or self.MEDIA_KIND_BY_TYPE[self.type])
-            if self.media_asset_id:
+            if self.media_resource_id:
                 response['uri'] = self.media_blob_uri(request=request)
                 if self.type in (MessageTypeChoice.IMAGE, MessageTypeChoice.VIDEO):
                     response['thumbnail_uri'] = self.media_blob_uri(request=request, thumbnail=True)
@@ -1118,21 +1122,22 @@ class Message(models.Model):
                     response['thumbnail_uri'] = build_message_image_thumbnail_uri(uri)
                 elif self.type == MessageTypeChoice.VIDEO:
                     response['thumbnail_uri'] = build_message_video_thumbnail_uri(uri)
-            metadata = self.media_asset
+            resource = self.media_resource
+            metadata = resource.asset if resource is not None else None
             mime_type = (metadata.mime_type if metadata is not None else str(payload.get('mime_type') or '').strip())[:100]
             if mime_type:
                 response['mime_type'] = mime_type
             if self.type == MessageTypeChoice.AUDIO:
                 response['duration_seconds'] = metadata.duration_seconds if metadata is not None else payload.get('duration_seconds')
             if self.type == MessageTypeChoice.FILE:
-                response['file_name'] = (metadata.file_name if metadata is not None else payload.get('file_name')) or '文件'
+                response['file_name'] = (resource.file_name if resource is not None else payload.get('file_name')) or '文件'
                 response['file_size'] = (metadata.file_size if metadata is not None else payload.get('file_size')) or 0
             if self.type == MessageTypeChoice.IMAGE:
-                metadata = self.media_asset
+                metadata = self.media_resource.asset if self.media_resource_id else None
                 if metadata is not None:
                     response['image_metadata'] = metadata.jsonl()
             elif self.type == MessageTypeChoice.VIDEO:
-                metadata = self.media_asset
+                metadata = self.media_resource.asset if self.media_resource_id else None
                 if metadata is not None:
                     response['video_metadata'] = metadata.jsonl()
             return response
@@ -1174,16 +1179,16 @@ class Message(models.Model):
     def source_media_uri(self):
         if self.type not in self.MEDIA_KIND_BY_TYPE:
             return ''
-        if self.media_asset_id:
-            return self.media_asset.source_uri
+        if self.media_resource_id:
+            return self.media_resource.asset.source_uri
         if self.type == MessageTypeChoice.FILE and not self.content.lstrip().startswith('{'):
             return ''
         payload = self._parse_payload(self.content)
         return (payload.get('uri') or '').strip()
 
     def source_media_key(self):
-        if self.media_asset_id:
-            return self.media_asset.source_key
+        if self.media_resource_id:
+            return self.media_resource.asset.source_key
         source_uri = self.source_media_uri()
         return urlparse(source_uri).path.lstrip('/') if source_uri else ''
 
@@ -1215,24 +1220,24 @@ class Message(models.Model):
     @classmethod
     def latest(cls, chat: Chat, limit: int, request: HttpRequest = None, user: User = None):
         queryset = cls.visible_for_user(chat, user) if user is not None else cls.visible_in_chat(chat)
-        messages = queryset.select_related('user', 'reply_to', 'reply_to__user', 'media_asset', 'forward_bundle').prefetch_related('chat_mentions__user', 'forward_bundle__items__media_asset').order_by('-id')[:limit]
+        messages = queryset.select_related('user', 'reply_to', 'reply_to__user', 'media_resource__asset', 'forward_bundle').prefetch_related('chat_mentions__user', 'forward_bundle__items__media_resource__asset').order_by('-id')[:limit]
         return [message.jsonl(request=request) for message in messages]
 
     @classmethod
     def older(cls, chat: Chat, message_id, limit: int, request: HttpRequest = None, user: User = None):
         queryset = cls.visible_for_user(chat, user) if user is not None else cls.visible_in_chat(chat)
-        messages = queryset.select_related('user', 'reply_to', 'reply_to__user', 'media_asset', 'forward_bundle').prefetch_related('chat_mentions__user', 'forward_bundle__items__media_asset').filter(id__lt=message_id).order_by('-id')[:limit]
+        messages = queryset.select_related('user', 'reply_to', 'reply_to__user', 'media_resource__asset', 'forward_bundle').prefetch_related('chat_mentions__user', 'forward_bundle__items__media_resource__asset').filter(id__lt=message_id).order_by('-id')[:limit]
         return [message.jsonl(request=request) for message in messages]
 
     @classmethod
     def newer(cls, chat: Chat, message_id, limit: int, request: HttpRequest = None, user: User = None):
         queryset = cls.visible_for_user(chat, user) if user is not None else cls.visible_in_chat(chat)
-        messages = queryset.select_related('user', 'reply_to', 'reply_to__user', 'media_asset', 'forward_bundle').prefetch_related('chat_mentions__user', 'forward_bundle__items__media_asset').filter(id__gt=message_id).order_by('id')[:limit]
+        messages = queryset.select_related('user', 'reply_to', 'reply_to__user', 'media_resource__asset', 'forward_bundle').prefetch_related('chat_mentions__user', 'forward_bundle__items__media_resource__asset').filter(id__gt=message_id).order_by('id')[:limit]
         return [message.jsonl(request=request) for message in messages]
 
     @classmethod
     def search(cls, chat: Chat, user: User, keyword=None, message_type=None, before=None, limit=30, request=None):
-        queryset = cls.visible_for_user(chat, user).select_related('user', 'reply_to', 'reply_to__user', 'media_asset', 'forward_bundle').prefetch_related('chat_mentions__user', 'forward_bundle__items__media_asset')
+        queryset = cls.visible_for_user(chat, user).select_related('user', 'reply_to', 'reply_to__user', 'media_resource__asset', 'forward_bundle').prefetch_related('chat_mentions__user', 'forward_bundle__items__media_resource__asset')
         normalized_keyword = (keyword or '').strip()
         if normalized_keyword:
             queryset = queryset.filter(content__icontains=normalized_keyword)
@@ -1257,11 +1262,11 @@ class Message(models.Model):
         self.is_deleted = True
         self.save(update_fields=['is_deleted'])
         MessageEvent.record_recalled(self)
-        if self.media_asset_id:
-            self.media_asset.recalculate_reference_count()
+        if self.media_resource_id:
+            self.media_resource.recalculate_reference_count()
         if self.forward_bundle_id:
-            for asset_id in self.forward_bundle.items.exclude(media_asset__isnull=True).values_list('media_asset_id', flat=True).distinct():
-                MediaAsset.objects.get(id=asset_id).recalculate_reference_count()
+            for resource_id in self.forward_bundle.items.exclude(media_resource__isnull=True).values_list('media_resource_id', flat=True).distinct():
+                MediaResource.objects.get(id=resource_id).recalculate_reference_count()
 
     def hide_for(self, user: User):
         if self.type == MessageTypeChoice.SYSTEM:
@@ -1586,7 +1591,6 @@ class PinnedMessage(models.Model):
 
 
 class MediaAsset(models.Model):
-    STORAGE_LIMIT_BYTES = 1024 * 1024 * 1024
     KIND_IMAGE = 0
     KIND_VIDEO = 1
     KIND_AUDIO = 2
@@ -1605,12 +1609,8 @@ class MediaAsset(models.Model):
     source_uri = models.CharField(max_length=500)
     blob_slug = models.CharField(max_length=32, unique=True, db_index=True, default=generate_media_blob_slug)
     kind = models.IntegerField(db_index=True)
-    owner = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='media_assets')
-    content_hash = models.CharField(max_length=64, blank=True, default='', db_index=True)
-    library_active = models.BooleanField(default=True, db_index=True)
-    reference_count = models.IntegerField(default=0)
+    content_hash = models.CharField(max_length=64, null=True, blank=True, unique=True)
     mime_type = models.CharField(max_length=100, blank=True, default='')
-    file_name = models.CharField(max_length=180, blank=True, default='')
     status = models.IntegerField(default=STATUS_PENDING, db_index=True)
     raw_metadata = models.JSONField(default=dict, blank=True)
     duration_seconds = models.FloatField(null=True, blank=True)
@@ -1642,38 +1642,38 @@ class MediaAsset(models.Model):
     def kind_for_name(cls, kind):
         return {'image': cls.KIND_IMAGE, 'video': cls.KIND_VIDEO, 'audio': cls.KIND_AUDIO, 'file': cls.KIND_FILE}[kind]
 
-    def can_be_used_by(self, user):
-        if self.owner_id == user.id:
-            return True
-        # Images already visible in the sender's own history may be reused even
-        # when the original asset owner is another participant.
-        return self.kind == self.KIND_IMAGE and self.messages.filter(
-            user=user,
-            is_deleted=False,
-        ).exists()
-
     @classmethod
-    def queue(cls, source_key, source_uri, kind, mime_type=None, duration_seconds=None, file_size=None, file_name=None, owner=None, content_hash=None):
+    def queue(cls, source_key, source_uri, kind, mime_type=None, duration_seconds=None, file_size=None, content_hash=None):
         normalized_uri = str(source_uri or '').strip()
         normalized_key = urlparse(str(source_key or '').strip()).path.lstrip('/')
         if not normalized_key:
             normalized_key = urlparse(normalized_uri).path.lstrip('/')
         if not normalized_key or not normalized_uri:
             raise ValueError('media source key and URI are required')
+        normalized_hash = str(content_hash or '').strip().lower() or None
+        if normalized_hash:
+            duplicate = cls.find_duplicate(normalized_hash, file_size=file_size)
+            if duplicate is not None:
+                cls._promote_kind(duplicate, kind)
+                return duplicate
         try:
             metadata, _created = cls.objects.get_or_create(
                 source_key=normalized_key,
                 defaults=dict(
                     source_uri=normalized_uri, kind=kind,
-                    mime_type=str(mime_type or '')[:100], file_name=str(file_name or '')[:180],
+                    mime_type=str(mime_type or '')[:100],
                     duration_seconds=duration_seconds, file_size=file_size,
                     status=cls.STATUS_PENDING if kind in {cls.KIND_IMAGE, cls.KIND_VIDEO} else cls.STATUS_READY,
                     geocoding_status=cls.GEOCODING_PENDING if kind in {cls.KIND_IMAGE, cls.KIND_VIDEO} else cls.GEOCODING_UNAVAILABLE,
-                    owner=owner, content_hash=str(content_hash or '')[:64],
+                    content_hash=normalized_hash,
                 ),
             )
         except IntegrityError:
-            metadata = cls.objects.get(source_key=normalized_key)
+            metadata = cls.objects.filter(source_key=normalized_key).first()
+            if metadata is None and normalized_hash:
+                metadata = cls.find_duplicate(normalized_hash, file_size=file_size)
+            if metadata is None:
+                raise
         updates = []
         if metadata.source_uri != normalized_uri:
             metadata.source_uri = normalized_uri
@@ -1682,9 +1682,9 @@ class MediaAsset(models.Model):
             metadata.kind = kind
             updates.append('kind')
         for field, value in (
-            ('mime_type', str(mime_type or '')[:100]), ('file_name', str(file_name or '')[:180]),
+            ('mime_type', str(mime_type or '')[:100]),
             ('duration_seconds', duration_seconds), ('file_size', file_size),
-            ('owner', owner), ('content_hash', str(content_hash or '')[:64]),
+            ('content_hash', normalized_hash),
         ):
             if value not in (None, '') and getattr(metadata, field) != value:
                 setattr(metadata, field, value)
@@ -1696,60 +1696,37 @@ class MediaAsset(models.Model):
         return metadata
 
     @classmethod
-    def quota_for(cls, user):
-        from django.db.models import Sum
-        used = cls.objects.filter(
-            owner=user,
-            library_active=True,
-            kind__in=(cls.KIND_VIDEO, cls.KIND_FILE),
-        ).aggregate(total=Sum('file_size'))['total'] or 0
-        return dict(limit=cls.STORAGE_LIMIT_BYTES, used=int(used), remaining=max(0, cls.STORAGE_LIMIT_BYTES - int(used)))
+    def _promote_kind(cls, asset, requested_kind):
+        """Keep one physical object while retaining the richest metadata parser."""
+        priority = {
+            cls.KIND_FILE: 0,
+            cls.KIND_AUDIO: 1,
+            cls.KIND_IMAGE: 2,
+            cls.KIND_VIDEO: 2,
+        }
+        if priority.get(requested_kind, 0) <= priority.get(asset.kind, 0):
+            return asset
+        asset.kind = requested_kind
+        asset.status = cls.STATUS_PENDING if requested_kind in {cls.KIND_IMAGE, cls.KIND_VIDEO} else cls.STATUS_READY
+        asset.geocoding_status = (
+            cls.GEOCODING_PENDING
+            if requested_kind in {cls.KIND_IMAGE, cls.KIND_VIDEO}
+            else cls.GEOCODING_UNAVAILABLE
+        )
+        asset.save(update_fields=['kind', 'status', 'geocoding_status', 'updated_at'])
+        if requested_kind in {cls.KIND_IMAGE, cls.KIND_VIDEO}:
+            transaction.on_commit(lambda: cls.fetch_async(asset.id))
+        return asset
 
     @classmethod
-    def require_capacity(cls, user, file_size):
-        requested = max(0, int(file_size or 0))
-        if requested > cls.quota_for(user)['remaining']:
-            raise MessageErrors.MEDIA_STORAGE_EXCEEDED
-
-    @classmethod
-    def find_duplicate(cls, user, kind, content_hash, file_size=None):
+    def find_duplicate(cls, content_hash, file_size=None):
         normalized_hash = str(content_hash or '').strip().lower()
         if len(normalized_hash) != 64:
             return None
-        queryset = cls.objects.filter(
-            owner=user, kind=kind, content_hash=normalized_hash,
-            library_active=True, status=cls.STATUS_READY,
-        )
+        queryset = cls.objects.filter(content_hash=normalized_hash)
         if file_size is not None:
             queryset = queryset.filter(file_size=int(file_size))
         return queryset.order_by('-id').first()
-
-    def recalculate_reference_count(self):
-        count = self.messages.filter(is_deleted=False).count()
-        count += self.forward_items.filter(bundle__messages__is_deleted=False).count()
-        if self.reference_count != count:
-            type(self).objects.filter(id=self.id).update(reference_count=count)
-            self.reference_count = count
-        return count
-
-    def resource_jsonl(self, request=None):
-        path = reverse('message blob', kwargs={'blob_slug': self.blob_slug})
-        thumbnail_path = reverse('message blob thumbnail', kwargs={'blob_slug': self.blob_slug})
-        return dict(
-            asset_id=self.id,
-            kind={self.KIND_IMAGE: 'image', self.KIND_VIDEO: 'video', self.KIND_AUDIO: 'audio', self.KIND_FILE: 'file'}.get(self.kind),
-            uri=request.build_absolute_uri(path) if request is not None else path,
-            thumbnail_uri=(request.build_absolute_uri(thumbnail_path) if request is not None else thumbnail_path) if self.kind in {self.KIND_IMAGE, self.KIND_VIDEO} else None,
-            mime_type=self.mime_type,
-            file_name=self.file_name,
-            file_size=self.file_size or 0,
-            duration_seconds=self.duration_seconds,
-            pixel_width=self.pixel_width,
-            pixel_height=self.pixel_height,
-            reference_count=self.recalculate_reference_count(),
-            status=self.status,
-            created_at=self.created_at.timestamp(),
-        )
 
     @classmethod
     def fetch_async(cls, metadata_id):
@@ -1883,6 +1860,102 @@ class MediaAsset(models.Model):
         )
 
 
+class MediaResource(models.Model):
+    STORAGE_LIMIT_BYTES = 1024 * 1024 * 1024
+
+    asset = models.ForeignKey(MediaAsset, on_delete=models.PROTECT, related_name='resources')
+    owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name='media_resources')
+    kind = models.IntegerField(db_index=True)
+    file_name = models.CharField(max_length=180, blank=True, default='')
+    library_active = models.BooleanField(default=True, db_index=True)
+    reference_count = models.IntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['owner', 'asset', 'kind', 'file_name'],
+                name='media_resource_owner_asset_kind_name_unique',
+            ),
+        ]
+
+    @classmethod
+    def acquire(cls, owner, asset, kind, file_name=None):
+        normalized_name = os.path.basename(str(file_name or '').strip())[:180]
+        resource, _created = cls.objects.get_or_create(
+            owner=owner,
+            asset=asset,
+            kind=kind,
+            file_name=normalized_name,
+            defaults={'library_active': True},
+        )
+        if not resource.library_active:
+            resource.library_active = True
+            resource.save(update_fields=['library_active'])
+        return resource
+
+    def clone_for(self, user):
+        return type(self).acquire(user, self.asset, self.kind, self.file_name)
+
+    def can_be_used_by(self, user):
+        return self.owner_id == user.id
+
+    @classmethod
+    def quota_for(cls, user):
+        from django.db.models import Sum
+        asset_ids = cls.objects.filter(
+            owner=user,
+            library_active=True,
+            kind__in=(MediaAsset.KIND_VIDEO, MediaAsset.KIND_FILE),
+        ).values_list('asset_id', flat=True).distinct()
+        used = MediaAsset.objects.filter(id__in=asset_ids).aggregate(total=Sum('file_size'))['total'] or 0
+        return dict(
+            limit=cls.STORAGE_LIMIT_BYTES,
+            used=int(used),
+            remaining=max(0, cls.STORAGE_LIMIT_BYTES - int(used)),
+        )
+
+    @classmethod
+    def require_capacity(cls, user, file_size, asset=None):
+        if asset is not None and cls.objects.filter(
+            owner=user,
+            asset=asset,
+            library_active=True,
+            kind__in=(MediaAsset.KIND_VIDEO, MediaAsset.KIND_FILE),
+        ).exists():
+            return
+        requested = max(0, int(file_size or 0))
+        if requested > cls.quota_for(user)['remaining']:
+            raise MessageErrors.MEDIA_STORAGE_EXCEEDED
+
+    def recalculate_reference_count(self):
+        count = self.messages.filter(is_deleted=False).count()
+        count += self.forward_items.filter(bundle__messages__is_deleted=False).count()
+        if self.reference_count != count:
+            type(self).objects.filter(id=self.id).update(reference_count=count)
+            self.reference_count = count
+        return count
+
+    def resource_jsonl(self, request=None):
+        path = reverse('message blob', kwargs={'blob_slug': self.asset.blob_slug})
+        thumbnail_path = reverse('message blob thumbnail', kwargs={'blob_slug': self.asset.blob_slug})
+        return dict(
+            resource_id=self.id,
+            kind={MediaAsset.KIND_IMAGE: 'image', MediaAsset.KIND_VIDEO: 'video', MediaAsset.KIND_AUDIO: 'audio', MediaAsset.KIND_FILE: 'file'}.get(self.kind),
+            uri=request.build_absolute_uri(path) if request is not None else path,
+            thumbnail_uri=(request.build_absolute_uri(thumbnail_path) if request is not None else thumbnail_path) if self.kind in {MediaAsset.KIND_IMAGE, MediaAsset.KIND_VIDEO} else None,
+            mime_type=self.asset.mime_type,
+            file_name=self.file_name,
+            file_size=self.asset.file_size or 0,
+            duration_seconds=self.asset.duration_seconds,
+            pixel_width=self.asset.pixel_width,
+            pixel_height=self.asset.pixel_height,
+            reference_count=self.recalculate_reference_count(),
+            status=self.asset.status,
+            created_at=self.created_at.timestamp(),
+        )
+
+
 class ForwardBundle(models.Model):
     created_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='forward_bundles')
     source_chat = models.ForeignKey(Chat, on_delete=models.SET_NULL, null=True, blank=True, related_name='forward_bundles')
@@ -1898,7 +1971,7 @@ class ForwardBundle(models.Model):
                 bundle=bundle,
                 position=position,
                 original_message=message,
-                media_asset=message.media_asset,
+                media_resource=message.media_resource,
                 message_type=message.type,
                 author=message.user.tiny_json(),
                 content=message.preview_text(),
@@ -1908,13 +1981,13 @@ class ForwardBundle(models.Model):
             for position, message in enumerate(ordered)
         ]
         ForwardBundleItem.objects.bulk_create(items)
-        for asset_id in {item.media_asset_id for item in items if item.media_asset_id}:
-            MediaAsset.objects.get(id=asset_id).recalculate_reference_count()
+        for resource_id in {item.media_resource_id for item in items if item.media_resource_id}:
+            MediaResource.objects.get(id=resource_id).recalculate_reference_count()
         return bundle
 
     def jsonl(self, request=None):
         prefetched = getattr(self, '_prefetched_objects_cache', {}).get('items')
-        bundle_items = prefetched if prefetched is not None else self.items.select_related('media_asset').order_by('position')
+        bundle_items = prefetched if prefetched is not None else self.items.select_related('media_resource__asset').order_by('position')
         items = [item.jsonl(request=request) for item in bundle_items]
         authors = []
         for item in items:
@@ -1937,8 +2010,8 @@ class ForwardBundleItem(models.Model):
     original_message = models.ForeignKey(
         Message, on_delete=models.SET_NULL, null=True, blank=True, related_name='forward_snapshots',
     )
-    media_asset = models.ForeignKey(
-        MediaAsset, on_delete=models.PROTECT, null=True, blank=True, related_name='forward_items',
+    media_resource = models.ForeignKey(
+        MediaResource, on_delete=models.PROTECT, null=True, blank=True, related_name='forward_items',
     )
     message_type = models.IntegerField()
     author = models.JSONField(default=dict)
@@ -1954,16 +2027,19 @@ class ForwardBundleItem(models.Model):
 
     def jsonl(self, request=None):
         payload = dict(self.payload or {})
-        if self.media_asset_id:
-            path = reverse('message blob', kwargs={'blob_slug': self.media_asset.blob_slug})
+        if self.media_resource_id:
+            asset = self.media_resource.asset
+            path = reverse('message blob', kwargs={'blob_slug': asset.blob_slug})
             payload['uri'] = request.build_absolute_uri(path) if request is not None else path
             if self.message_type in (MessageTypeChoice.IMAGE, MessageTypeChoice.VIDEO):
-                thumbnail_path = reverse('message blob thumbnail', kwargs={'blob_slug': self.media_asset.blob_slug})
+                thumbnail_path = reverse('message blob thumbnail', kwargs={'blob_slug': asset.blob_slug})
                 payload['thumbnail_uri'] = request.build_absolute_uri(thumbnail_path) if request is not None else thumbnail_path
             if self.message_type == MessageTypeChoice.IMAGE:
-                payload['image_metadata'] = self.media_asset.jsonl()
+                payload['image_metadata'] = asset.jsonl()
             elif self.message_type == MessageTypeChoice.VIDEO:
-                payload['video_metadata'] = self.media_asset.jsonl()
+                payload['video_metadata'] = asset.jsonl()
+            elif self.message_type == MessageTypeChoice.FILE:
+                payload['file_name'] = self.media_resource.file_name or payload.get('file_name') or '文件'
         return dict(
             position=self.position,
             type=self.message_type,

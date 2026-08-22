@@ -214,8 +214,8 @@ class SpaceAdminApiTests(TestCase):
             client_message_id=payload['broadcast_id'],
         )
         self.assertEqual(message.type, 1)
-        self.assertIsNotNone(message.media_asset)
-        self.assertTrue(message.media_asset.blob_slug)
+        self.assertIsNotNone(message.media_resource)
+        self.assertTrue(message.media_resource.asset.blob_slug)
         self.assertEqual(message.preview_text(), '[图片]')
         enqueue.assert_called()
 

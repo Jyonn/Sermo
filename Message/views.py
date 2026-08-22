@@ -7,7 +7,7 @@ from django.views import View
 from smartdjango import analyse, OK
 
 from Chat.models import Chat
-from Message.models import ForwardBundle, LinkPreview, MediaAsset, MediaAssetAlias, Message, MessageEvent, MessageHistoryRecovery, MessageTypeChoice, PinnedMessage
+from Message.models import ForwardBundle, LinkPreview, MediaAsset, MediaAssetAlias, MediaResource, Message, MessageEvent, MessageHistoryRecovery, MessageTypeChoice, PinnedMessage
 from Message.params import MessageParams
 from Message.validators import MessageErrors
 from utils.qiniu import issue_message_upload, build_message_image_thumbnail_uri, build_message_video_thumbnail_uri, sign_private_download_url, avatar_uri_for_key, validate_message_media_key
@@ -47,7 +47,7 @@ class MessageView(View):
         MessageParams.reply_to_message_id,
         MessageParams.client_message_id,
         MessageParams.mention_user_ids,
-        MessageParams.asset_id,
+        MessageParams.resource_id,
     )
     def post(self, request: Request):
         request.user.space.require_chat_enabled()
@@ -56,8 +56,8 @@ class MessageView(View):
         if request.query.chat.group:
             request.user.space.require_group_send_allowed(request.user)
         with transaction.atomic():
-            media_asset = MediaAsset.objects.filter(id=request.json.asset_id).first() if request.json.asset_id else None
-            if request.json.asset_id and media_asset is None:
+            media_resource = MediaResource.objects.select_related('asset').filter(id=request.json.resource_id).first() if request.json.resource_id else None
+            if request.json.resource_id and media_resource is None:
                 raise MessageErrors.MEDIA_ASSET_INVALID
             message = Message.create(
                 chat=request.query.chat,
@@ -67,7 +67,7 @@ class MessageView(View):
                 reply_to=request.json.reply_to,
                 client_message_id=request.json.client_message_id,
                 mention_user_ids=request.json.mention_user_ids,
-                media_asset=media_asset)
+                media_resource=media_resource)
             if getattr(message, '_was_created', True):
                 NotificationEvent.emit_message_notifications(message, actor=request.user)
         return message.jsonl(request=request)
@@ -146,7 +146,7 @@ class MessageForwardView(View):
         message_ids = list(request.json.message_ids)
         target_chat_ids = list(request.json.target_chat_ids)
         source_messages = list(
-            Message.objects.select_related('chat', 'user', 'media_asset', 'forward_bundle')
+            Message.objects.select_related('chat', 'user', 'media_resource__asset', 'forward_bundle')
             .filter(id__in=message_ids, is_deleted=False)
             .order_by('created_at', 'id')
         )
@@ -288,17 +288,19 @@ class MessageUploadView(View):
             request.user.require_capability('chat.message.send.file')
         media_kind = MediaAsset.kind_for_name(request.json.kind)
         if request.json.kind in {'video', 'file'}:
-            duplicate = MediaAsset.find_duplicate(
-                request.user, media_kind, request.json.content_hash, request.json.file_size,
-            )
+            duplicate = MediaAsset.find_duplicate(request.json.content_hash, request.json.file_size)
             if duplicate is not None:
+                MediaResource.require_capacity(request.user, request.json.file_size, asset=duplicate)
+                resource = MediaResource.acquire(
+                    request.user, duplicate, media_kind, request.json.file_name,
+                )
                 return dict(
                     kind=request.json.kind,
                     instant=True,
-                    asset=duplicate.resource_jsonl(request=request),
-                    quota=MediaAsset.quota_for(request.user),
+                    resource=resource.resource_jsonl(request=request),
+                    quota=MediaResource.quota_for(request.user),
                 )
-            MediaAsset.require_capacity(request.user, request.json.file_size)
+            MediaResource.require_capacity(request.user, request.json.file_size)
         return issue_message_upload(
             kind=request.json.kind,
             file_name=request.json.file_name,
@@ -314,27 +316,19 @@ class MessageResourceView(View):
         if kind_name not in (None, 'image', 'video', 'file'):
             raise MessageErrors.MEDIA_KIND_INVALID
         kinds = [kind_name] if kind_name else ['image', 'video', 'file']
-        assets = []
+        resources = []
         for name in kinds:
             kind = MediaAsset.kind_for_name(name)
-            if name == 'image':
-                queryset = MediaAsset.objects.filter(
-                    kind=kind,
-                    library_active=True,
-                    messages__user=request.user,
-                    messages__is_deleted=False,
-                ).distinct()
-            else:
-                queryset = MediaAsset.objects.filter(
-                    owner=request.user,
-                    kind=kind,
-                    library_active=True,
-                ).exclude(status=MediaAsset.STATUS_FAILED)
-            assets.extend(queryset.order_by('-created_at', '-id')[:200])
-        assets.sort(key=lambda asset: (asset.created_at, asset.id), reverse=True)
+            queryset = MediaResource.objects.select_related('asset').filter(
+                owner=request.user,
+                kind=kind,
+                library_active=True,
+            ).exclude(asset__status=MediaAsset.STATUS_FAILED)
+            resources.extend(queryset.order_by('-created_at', '-id')[:200])
+        resources.sort(key=lambda resource: (resource.created_at, resource.id), reverse=True)
         return dict(
-            items=[asset.resource_jsonl(request=request) for asset in assets],
-            quota=MediaAsset.quota_for(request.user),
+            items=[resource.resource_jsonl(request=request) for resource in resources],
+            quota=MediaResource.quota_for(request.user),
         )
 
     @auth.require_user
@@ -351,28 +345,28 @@ class MessageResourceView(View):
             raise MessageErrors.MEDIA_KIND_INVALID
         request.user.require_capability(f'chat.message.send.{kind_name}')
         kind = MediaAsset.kind_for_name(kind_name)
-        duplicate = MediaAsset.find_duplicate(
-            request.user, kind, request.json.content_hash, request.json.file_size,
-        )
+        duplicate = MediaAsset.find_duplicate(request.json.content_hash, request.json.file_size)
         if duplicate is not None:
-            return dict(asset=duplicate.resource_jsonl(request=request), instant=True, quota=MediaAsset.quota_for(request.user))
-        MediaAsset.require_capacity(request.user, request.json.file_size)
+            MediaResource.require_capacity(request.user, request.json.file_size, asset=duplicate)
+            resource = MediaResource.acquire(request.user, duplicate, kind, request.json.file_name)
+            return dict(resource=resource.resource_jsonl(request=request), instant=True, quota=MediaResource.quota_for(request.user))
+        MediaResource.require_capacity(request.user, request.json.file_size)
         upload = issue_message_upload(kind_name, request.json.file_name, request.json.content_type)
         upload['instant'] = False
-        upload['quota'] = MediaAsset.quota_for(request.user)
+        upload['quota'] = MediaResource.quota_for(request.user)
         return upload
 
     @auth.require_user
-    @analyse.query(MessageParams.asset_id)
+    @analyse.query(MessageParams.resource_id)
     def delete(self, request: Request):
-        asset = MediaAsset.objects.filter(id=request.query.asset_id, owner=request.user, library_active=True).first()
-        if asset is None or asset.kind not in {MediaAsset.KIND_VIDEO, MediaAsset.KIND_FILE}:
+        resource = MediaResource.objects.filter(id=request.query.resource_id, owner=request.user, library_active=True).first()
+        if resource is None or resource.kind not in {MediaAsset.KIND_VIDEO, MediaAsset.KIND_FILE}:
             raise MessageErrors.MEDIA_ASSET_INVALID
-        if asset.recalculate_reference_count() > 0:
+        if resource.recalculate_reference_count() > 0:
             raise MessageErrors.MEDIA_ASSET_IN_USE
-        asset.library_active = False
-        asset.save(update_fields=['library_active', 'updated_at'])
-        return dict(quota=MediaAsset.quota_for(request.user))
+        resource.library_active = False
+        resource.save(update_fields=['library_active'])
+        return dict(quota=MediaResource.quota_for(request.user))
 
 
 class MessageResourceFinalizeView(View):
@@ -402,26 +396,26 @@ class MessageResourceFinalizeView(View):
         with transaction.atomic():
             User.objects.select_for_update().get(id=request.user.id)
             if kind_name in {'video', 'file'}:
-                duplicate = MediaAsset.find_duplicate(request.user, kind, request.json.content_hash, request.json.file_size)
+                duplicate = MediaAsset.find_duplicate(request.json.content_hash, request.json.file_size)
                 if duplicate is not None:
-                    return dict(asset=duplicate.resource_jsonl(request=request), instant=True, quota=MediaAsset.quota_for(request.user))
-                MediaAsset.require_capacity(request.user, request.json.file_size)
+                    MediaResource.require_capacity(request.user, request.json.file_size, asset=duplicate)
+                    resource = MediaResource.acquire(request.user, duplicate, kind, request.json.file_name)
+                    return dict(resource=resource.resource_jsonl(request=request), instant=True, quota=MediaResource.quota_for(request.user))
+                MediaResource.require_capacity(request.user, request.json.file_size)
             asset = MediaAsset.queue(
                 key,
                 avatar_uri_for_key(key),
                 kind,
-                owner=request.user,
                 content_hash=request.json.content_hash,
                 mime_type=request.json.content_type,
-                file_name=request.json.file_name,
                 file_size=request.json.file_size,
                 duration_seconds=request.json.duration_seconds,
             )
-            asset.library_active = True
             if kind not in {MediaAsset.KIND_IMAGE, MediaAsset.KIND_VIDEO}:
                 asset.status = MediaAsset.STATUS_READY
-            asset.save(update_fields=['library_active', 'status', 'updated_at'])
-        return dict(asset=asset.resource_jsonl(request=request), instant=False, quota=MediaAsset.quota_for(request.user))
+            asset.save(update_fields=['status', 'updated_at'])
+            resource = MediaResource.acquire(request.user, asset, kind, request.json.file_name)
+        return dict(resource=resource.resource_jsonl(request=request), instant=False, quota=MediaResource.quota_for(request.user))
 
 
 class MessageEventSyncView(View):
@@ -464,7 +458,7 @@ class MessageMediaMetadataView(View):
         }.get(message.type)
         if kind is None:
             raise MessageErrors.TYPE_INVALID
-        metadata = message.media_asset
+        metadata = message.media_resource.asset if message.media_resource_id else None
         if metadata is None:
             metadata = MediaAsset.queue(
                 message.source_media_key(), message.source_media_uri(), kind,
@@ -484,8 +478,8 @@ class MessageBlobView(View):
     def get(self, request: Request, blob_slug: str):
         asset = MediaAssetAlias.resolve(blob_slug)
         if asset is None or not (
-            asset.messages.filter(is_deleted=False).exists()
-            or asset.forward_items.filter(bundle__messages__is_deleted=False).exists()
+            asset.resources.filter(messages__is_deleted=False).exists()
+            or asset.resources.filter(forward_items__bundle__messages__is_deleted=False).exists()
         ):
             raise MessageErrors.NOT_EXISTS
         return self._redirect(sign_private_download_url(asset.source_uri))
@@ -495,8 +489,8 @@ class MessageBlobThumbnailView(View):
     def get(self, request: Request, blob_slug: str):
         asset = MediaAssetAlias.resolve(blob_slug)
         if asset is None or asset.kind not in (MediaAsset.KIND_IMAGE, MediaAsset.KIND_VIDEO) or not (
-            asset.messages.filter(is_deleted=False).exists()
-            or asset.forward_items.filter(bundle__messages__is_deleted=False).exists()
+            asset.resources.filter(messages__is_deleted=False).exists()
+            or asset.resources.filter(forward_items__bundle__messages__is_deleted=False).exists()
         ):
             raise MessageErrors.NOT_EXISTS
         if asset.kind == MediaAsset.KIND_VIDEO:

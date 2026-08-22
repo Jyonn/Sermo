@@ -261,6 +261,13 @@ def delete_file(key: str):
     return _delete_file(validate_avatar_key(key))
 
 
+def delete_message_media_file(key: str):
+    normalized = str(key or '').strip().lstrip('/')
+    if not normalized.startswith(f'{MESSAGE_MEDIA_PREFIX}/'):
+        raise UserErrors.AVATAR_DELETE_FAILED(details='invalid message media key')
+    return _delete_file(normalized)
+
+
 def key_from_avatar_uri(avatar_uri: str):
     normalized = (avatar_uri or '').strip()
     if not normalized:
