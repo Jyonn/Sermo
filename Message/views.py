@@ -323,7 +323,9 @@ class MessageResourceView(View):
                 owner=request.user,
                 kind=kind,
                 library_active=True,
-            ).exclude(asset__status=MediaAsset.STATUS_FAILED)
+            ).exclude(asset__status=MediaAsset.STATUS_FAILED).filter(
+                MediaResource.available_reference_q(),
+            ).distinct()
             resources.extend(queryset.order_by('-created_at', '-id')[:200])
         resources.sort(key=lambda resource: (resource.created_at, resource.id), reverse=True)
         return dict(
@@ -477,10 +479,7 @@ class MessageBlobView(View):
 
     def get(self, request: Request, blob_slug: str):
         asset = MediaAssetAlias.resolve(blob_slug)
-        if asset is None or not (
-            asset.resources.filter(messages__is_deleted=False).exists()
-            or asset.resources.filter(forward_items__bundle__messages__is_deleted=False).exists()
-        ):
+        if asset is None or not asset.resources.filter(MediaResource.available_reference_q()).exists():
             raise MessageErrors.NOT_EXISTS
         return self._redirect(sign_private_download_url(asset.source_uri))
 
@@ -488,10 +487,9 @@ class MessageBlobView(View):
 class MessageBlobThumbnailView(View):
     def get(self, request: Request, blob_slug: str):
         asset = MediaAssetAlias.resolve(blob_slug)
-        if asset is None or asset.kind not in (MediaAsset.KIND_IMAGE, MediaAsset.KIND_VIDEO) or not (
-            asset.resources.filter(messages__is_deleted=False).exists()
-            or asset.resources.filter(forward_items__bundle__messages__is_deleted=False).exists()
-        ):
+        if asset is None or asset.kind not in (MediaAsset.KIND_IMAGE, MediaAsset.KIND_VIDEO) or not asset.resources.filter(
+            MediaResource.available_reference_q(),
+        ).exists():
             raise MessageErrors.NOT_EXISTS
         if asset.kind == MediaAsset.KIND_VIDEO:
             return MessageBlobView._redirect(build_message_video_thumbnail_uri(asset.source_uri))

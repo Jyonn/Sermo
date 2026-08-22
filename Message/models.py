@@ -1900,6 +1900,10 @@ class MediaResource(models.Model):
     def can_be_used_by(self, user):
         return self.owner_id == user.id
 
+    @staticmethod
+    def available_reference_q():
+        return Q(messages__is_deleted=False) | Q(forward_items__bundle__messages__is_deleted=False)
+
     @classmethod
     def quota_for(cls, user):
         from django.db.models import Sum

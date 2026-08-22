@@ -11,6 +11,7 @@ from Message.models import MediaAssetAlias
 from Message.validators import MessageErrors
 from Space.models import Space
 from User.models import User
+from utils import auth
 
 
 class CloudResourceTests(TestCase):
@@ -38,6 +39,28 @@ class CloudResourceTests(TestCase):
     def create_resource(self, asset=None, owner=None, kind=None, file_name='report.pdf'):
         asset = asset or self.create_asset()
         return MediaResource.acquire(owner or self.user, asset, kind if kind is not None else asset.kind, file_name)
+
+    def authorization(self):
+        return dict(HTTP_AUTHORIZATION=f"Bearer {auth.get_login_token(self.user)['auth']}")
+
+    def test_resource_list_excludes_assets_without_visible_message_references(self):
+        available = self.create_resource()
+        unavailable_asset = self.create_asset(
+            source_key='sermo/messages/file/unavailable.pdf',
+            source_uri='https://example.com/sermo/messages/file/unavailable.pdf',
+            content_hash='b' * 64,
+        )
+        self.create_resource(asset=unavailable_asset, file_name='unavailable.pdf')
+        message = Message.create(self.chat, self.user, MessageTypeChoice.FILE, '', media_resource=available)
+
+        response = self.client.get('/messages/resources?resource_kind=file', **self.authorization())
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual([item['resource_id'] for item in response.json()['body']['items']], [available.id])
+
+        message.remove()
+        response = self.client.get('/messages/resources?resource_kind=file', **self.authorization())
+        self.assertEqual(response.json()['body']['items'], [])
 
     def test_hash_reuses_physical_asset_globally(self):
         asset = self.create_asset()
