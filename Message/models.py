@@ -1956,7 +1956,7 @@ class MediaResource(models.Model):
             pixel_height=self.asset.pixel_height,
             reference_count=self.recalculate_reference_count(),
             status=self.asset.status,
-            created_at=self.created_at.timestamp(),
+            created_at=self.asset.created_at.timestamp(),
         )
 
 

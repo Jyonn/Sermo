@@ -326,8 +326,8 @@ class MessageResourceView(View):
             ).exclude(asset__status=MediaAsset.STATUS_FAILED).filter(
                 MediaResource.available_reference_q(),
             ).distinct()
-            resources.extend(queryset.order_by('-created_at', '-id')[:200])
-        resources.sort(key=lambda resource: (resource.created_at, resource.id), reverse=True)
+            resources.extend(queryset.order_by('-asset__created_at', '-id')[:200])
+        resources.sort(key=lambda resource: (resource.asset.created_at, resource.id), reverse=True)
         return dict(
             items=[resource.resource_jsonl(request=request) for resource in resources],
             quota=MediaResource.quota_for(request.user),

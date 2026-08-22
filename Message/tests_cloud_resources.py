@@ -1,5 +1,8 @@
+from datetime import timedelta
+from io import StringIO
 from unittest.mock import patch
 
+from django.core.management import call_command
 from django.test import TestCase
 from django.utils import timezone
 
@@ -61,6 +64,45 @@ class CloudResourceTests(TestCase):
         message.remove()
         response = self.client.get('/messages/resources?resource_kind=file', **self.authorization())
         self.assertEqual(response.json()['body']['items'], [])
+
+    def test_resource_list_uses_asset_first_upload_time(self):
+        older_asset = self.create_asset(content_hash='c' * 64)
+        newer_asset = self.create_asset(
+            source_key='sermo/messages/file/newer.pdf',
+            source_uri='https://example.com/sermo/messages/file/newer.pdf',
+            content_hash='d' * 64,
+        )
+        older = self.create_resource(asset=older_asset, file_name='older.pdf')
+        newer = self.create_resource(asset=newer_asset, file_name='newer.pdf')
+        older_message = Message.create(self.chat, self.user, MessageTypeChoice.FILE, '', media_resource=older)
+        newer_message = Message.create(self.chat, self.user, MessageTypeChoice.FILE, '', media_resource=newer)
+        older_time = timezone.now() - timedelta(days=4)
+        newer_time = timezone.now() - timedelta(days=1)
+        Message.objects.filter(id=older_message.id).update(created_at=older_time)
+        Message.objects.filter(id=newer_message.id).update(created_at=newer_time)
+        MediaAsset.objects.filter(id=older_asset.id).update(created_at=older_time)
+        MediaAsset.objects.filter(id=newer_asset.id).update(created_at=newer_time)
+
+        response = self.client.get('/messages/resources?resource_kind=file', **self.authorization())
+
+        items = response.json()['body']['items']
+        self.assertEqual([item['resource_id'] for item in items], [newer.id, older.id])
+        self.assertEqual(items[1]['created_at'], older_time.timestamp())
+
+    def test_backfill_media_asset_created_at_uses_earliest_message(self):
+        asset = self.create_asset(content_hash='e' * 64)
+        resource = self.create_resource(asset=asset)
+        first = Message.create(self.chat, self.user, MessageTypeChoice.FILE, '', media_resource=resource)
+        second = Message.create(self.chat, self.user, MessageTypeChoice.FILE, '', media_resource=resource)
+        first_time = timezone.now() - timedelta(days=10)
+        second_time = timezone.now() - timedelta(days=3)
+        Message.objects.filter(id=first.id).update(created_at=first_time)
+        Message.objects.filter(id=second.id).update(created_at=second_time)
+
+        call_command('backfill_media_asset_created_at', stdout=StringIO())
+
+        asset.refresh_from_db()
+        self.assertEqual(asset.created_at, first_time)
 
     def test_hash_reuses_physical_asset_globally(self):
         asset = self.create_asset()
