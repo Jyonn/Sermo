@@ -185,6 +185,8 @@ class Statement(models.Model):
         transaction.on_commit(lambda: [StatementMedia.fetch_metadata_async(media_id) for media_id in media_ids])
         from Chat.models import ChatUserPreference
         transaction.on_commit(lambda: ChatUserPreference.emit_peer_statement_events(statement))
+        from Activity.models import ActivityService
+        ActivityService.record_event(user, 'square.statement.publish', statement.id)
         return cls.objects.select_related('user').prefetch_related(statement_media_prefetch()).get(id=statement.id)
 
     def jsonl(self, request=None):

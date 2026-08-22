@@ -54,6 +54,7 @@ INSTALLED_APPS = [
     'Square',
     'PlatformAdmin',
     'AccessPolicy',
+    'Activity',
 ]
 
 MIDDLEWARE = [

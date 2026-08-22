@@ -27,4 +27,5 @@ urlpatterns = [
     path('square/', include('Square.urls')),
     path('platform-admin/', include('PlatformAdmin.urls')),
     path('capabilities/', include('AccessPolicy.urls')),
+    path('activities/', include('Activity.urls')),
 ]
