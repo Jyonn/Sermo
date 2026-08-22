@@ -1954,6 +1954,7 @@ class MediaResource(models.Model):
             duration_seconds=self.asset.duration_seconds,
             pixel_width=self.asset.pixel_width,
             pixel_height=self.asset.pixel_height,
+            metadata=self.asset.jsonl() if self.kind in {MediaAsset.KIND_IMAGE, MediaAsset.KIND_VIDEO} else None,
             reference_count=self.recalculate_reference_count(),
             status=self.asset.status,
             created_at=self.asset.created_at.timestamp(),

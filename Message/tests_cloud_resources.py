@@ -89,6 +89,31 @@ class CloudResourceTests(TestCase):
         self.assertEqual([item['resource_id'] for item in items], [newer.id, older.id])
         self.assertEqual(items[1]['created_at'], older_time.timestamp())
 
+    def test_image_resource_includes_shared_media_metadata(self):
+        asset = self.create_asset(
+            source_key='sermo/messages/image/camera.jpg',
+            source_uri='https://example.com/sermo/messages/image/camera.jpg',
+            kind=MediaAsset.KIND_IMAGE,
+            content_hash='f' * 64,
+            make='FUJIFILM',
+            model='X100VI',
+            lens_model='23mm F2',
+            taken_at=timezone.now() - timedelta(days=2),
+            address='Shanghai',
+            geocoding_status=MediaAsset.GEOCODING_READY,
+        )
+        resource = self.create_resource(asset=asset, kind=MediaAsset.KIND_IMAGE, file_name='camera.jpg')
+        with patch.object(User, 'require_capability', return_value=None):
+            Message.create(self.chat, self.user, MessageTypeChoice.IMAGE, '', media_resource=resource)
+
+        response = self.client.get('/messages/resources?resource_kind=image', **self.authorization())
+
+        metadata = response.json()['body']['items'][0]['metadata']
+        self.assertEqual(metadata['make'], 'FUJIFILM')
+        self.assertEqual(metadata['model'], 'X100VI')
+        self.assertEqual(metadata['lens_model'], '23mm F2')
+        self.assertEqual(metadata['address'], 'Shanghai')
+
     def test_backfill_media_asset_created_at_uses_earliest_message(self):
         asset = self.create_asset(content_hash='e' * 64)
         resource = self.create_resource(asset=asset)
