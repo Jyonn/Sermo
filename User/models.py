@@ -3462,6 +3462,7 @@ class WebPushDelivery(models.Model):
                 MessageTypeChoice.MAP_ACCESS: _('Shared a footprint map.'),
                 MessageTypeChoice.STATEMENT: _('Shared a statement.'),
                 MessageTypeChoice.STICKER: _('Sent a sticker.'),
+                MessageTypeChoice.ACTIVITY: _('Shared an activity.'),
             }
             body = natural_bodies.get(message_type) or payload.get('content') or _('Sent a message.')
             if event.event_type == NotificationEventTypeChoice.DIRECT_MESSAGE:

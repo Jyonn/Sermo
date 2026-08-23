@@ -158,7 +158,7 @@ class MessageForwardView(View):
         allowed_types = {
             MessageTypeChoice.TEXT, MessageTypeChoice.IMAGE, MessageTypeChoice.FILE,
             MessageTypeChoice.VIDEO, MessageTypeChoice.AUDIO, MessageTypeChoice.LOCATION,
-            MessageTypeChoice.STATEMENT, MessageTypeChoice.STICKER,
+            MessageTypeChoice.STATEMENT, MessageTypeChoice.STICKER, MessageTypeChoice.ACTIVITY,
         }
         for message in source_messages:
             if message.type not in allowed_types:

@@ -70,6 +70,7 @@ class MessageTypeChoice(Choice):
     STATEMENT = 8
     STICKER = 9
     FORWARD_BUNDLE = 10
+    ACTIVITY = 11
 
 
 class MessageEventTypeChoice(Choice):
@@ -475,6 +476,7 @@ class Message(models.Model):
         MessageTypeChoice.STATEMENT: '[发言]',
         MessageTypeChoice.STICKER: '[表情包]',
         MessageTypeChoice.FORWARD_BUNDLE: '[聊天记录]',
+        MessageTypeChoice.ACTIVITY: '[活动]',
     }
 
     chat = models.ForeignKey(Chat, on_delete=models.CASCADE, db_index=True)
@@ -1017,6 +1019,28 @@ class Message(models.Model):
                 raise MessageErrors.CONTENT_TOO_LONG
             return normalized
 
+        if message_type == MessageTypeChoice.ACTIVITY:
+            from Activity.models import ActivityCampaign
+
+            payload = cls._parse_payload(content)
+            activity_key = str(payload.get('activity_key') or '').strip()[:80]
+            campaign = ActivityCampaign.objects.filter(key=activity_key, enabled=True).first()
+            if campaign is None:
+                raise MessageErrors.PAYLOAD_INVALID
+            normalized = json.dumps(
+                dict(
+                    kind='activity',
+                    activity_key=campaign.key,
+                    url=(str(payload.get('url') or '').strip())[:280],
+                    title=(str(payload.get('title') or campaign.title).strip())[:80],
+                ),
+                separators=(',', ':'),
+                ensure_ascii=False,
+            )
+            if len(normalized) > cls.vldt.MAX_CONTENT_LENGTH:
+                raise MessageErrors.CONTENT_TOO_LONG
+            return normalized
+
         if message_type == MessageTypeChoice.STICKER:
             payload = cls._parse_payload(content)
             try:
@@ -1111,6 +1135,22 @@ class Message(models.Model):
             if viewer is not None and Statement.visible_for(viewer).filter(id=reference.get('statement_id')).exists():
                 response['statement'] = Statement.detail(viewer, reference.get('statement_id'), request=request)
             return response
+        if self.type == MessageTypeChoice.ACTIVITY:
+            from Activity.models import ActivityCampaign, ActivityService
+
+            reference = self._parse_payload(self.content)
+            viewer = self._viewer_from_request(request)
+            campaign = ActivityCampaign.objects.filter(
+                key=reference.get('activity_key'),
+                enabled=True,
+            ).first()
+            return dict(
+                kind='activity',
+                activity_key=reference.get('activity_key') or '',
+                url=reference.get('url') or '',
+                title=reference.get('title') or '',
+                activity=ActivityService.payload(campaign, viewer) if campaign is not None and viewer is not None else None,
+            )
         if self.type == MessageTypeChoice.STICKER:
             from Sticker.models import StickerAsset
             reference = self._parse_payload(self.content)

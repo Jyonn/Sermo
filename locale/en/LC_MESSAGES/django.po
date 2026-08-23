@@ -810,6 +810,9 @@ msgstr "%(actor)s pinned a message"
 msgid "%(actor)s unpinned a message"
 msgstr "%(actor)s unpinned a message"
 
+msgid "Shared an activity."
+msgstr "Shared an activity."
+
 #~ msgid "Email verification code expired"
 #~ msgstr "Email verification code expired"
 
