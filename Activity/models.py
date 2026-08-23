@@ -112,6 +112,14 @@ class ActivityAwakening(models.Model):
         ]
 
 
+class UserActivityReward(models.Model):
+    progress = models.OneToOneField(UserActivityProgress, on_delete=models.CASCADE, related_name='personal_reward')
+    resource_type = models.CharField(max_length=24)
+    reward_id = models.CharField(max_length=80)
+    resource_key = models.CharField(max_length=80)
+    unlocked_at = models.DateTimeField(auto_now_add=True)
+
+
 class ActivityService:
     AWAKENING_COUNT = 8
 
@@ -140,22 +148,52 @@ class ActivityService:
                     event_key=event_key,
                     event_date=timezone.localdate(),
                 )
-                if today_events.count() >= campaign.daily_user_limit:
-                    continue
+                earns_force = today_events.filter(points__gt=0).count() < campaign.daily_user_limit
                 event, created = ActivityEvent.objects.get_or_create(
                     campaign=campaign,
                     progress=progress,
                     event_key=event_key,
                     event_date=timezone.localdate(),
                     event_reference=str(event_reference),
-                    defaults={'points': 1},
+                    defaults={'points': 1 if earns_force else 0},
                 )
                 if created:
                     progress.earned_points += event.points
                     progress.available_points += event.points
                     progress.save(update_fields=['earned_points', 'available_points', 'updated_at'])
+                    cls._ensure_personal_reward(progress)
                     awarded.append(campaign.key)
         return awarded
+
+    @classmethod
+    def _ensure_personal_reward(cls, progress):
+        from User.models import UserResourceInventory
+
+        target = int(progress.campaign.config.get('personal_event_target', 0))
+        pool = progress.campaign.config.get('personal_reward_pool') or []
+        if not target or not pool or progress.events.count() < target:
+            return None
+        existing = UserActivityReward.objects.filter(progress=progress).first()
+        if existing:
+            UserResourceInventory.grant_activity_resource(
+                progress.user, existing.resource_type, existing.reward_id, existing.resource_key,
+                progress.campaign.key, metadata={'kind': 'personal_task', 'target': target},
+            )
+            return existing
+        owned = set(progress.user.resource_inventory.values_list('reward_id', flat=True))
+        available = [item for item in pool if item.get('reward_id') not in owned] or pool
+        choice = random.SystemRandom().choice(available)
+        reward = UserActivityReward.objects.create(
+            progress=progress,
+            resource_type=choice.get('resource_type', 'bubble'),
+            reward_id=choice['reward_id'],
+            resource_key=choice['resource_key'],
+        )
+        UserResourceInventory.grant_activity_resource(
+            progress.user, reward.resource_type, reward.reward_id, reward.resource_key,
+            progress.campaign.key, metadata={'kind': 'personal_task', 'target': target},
+        )
+        return reward
 
     @staticmethod
     def _grant_reward_to_members(reward):
@@ -257,6 +295,7 @@ class ActivityService:
     @classmethod
     def payload(cls, campaign, user):
         space_activity, progress = cls._progress(campaign, user)
+        personal_reward = cls._ensure_personal_reward(progress)
         cls._ensure_legacy_awakenings(space_activity)
         rewards = {item.milestone_id: item for item in space_activity.rewards.select_related('milestone')}
         for reward in rewards.values():
@@ -285,6 +324,12 @@ class ActivityService:
             today_earned=progress.events.filter(event_date=timezone.localdate()).exists(),
             available_points=progress.available_points,
             contributed_points=progress.contributed_points,
+            personal_event_count=progress.events.count(),
+            personal_event_target=int(campaign.config.get('personal_event_target', 0)),
+            personal_reward=dict(
+                resource_key=personal_reward.resource_key,
+                reward_id=personal_reward.reward_id,
+            ) if personal_reward else None,
             space_total=space_activity.total_points,
             target=max([item['threshold'] for item in milestones], default=0),
             milestones=milestones,
