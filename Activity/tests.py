@@ -38,6 +38,7 @@ class ActivityServiceTests(TestCase):
         self.assertEqual(UserActivityReward.objects.filter(progress__user=self.user, progress__campaign=self.campaign).count(), 1)
 
         payload = ActivityService.payload(self.campaign, self.user)
+        self.assertEqual(payload['official_user']['user_id'], self.space.official_user_id)
         self.assertEqual(payload['claimable_points'], 1)
         self.assertEqual(payload['available_points'], 0)
         self.assertEqual(ActivityService.contribute(self.campaign, self.user), 0)
@@ -48,3 +49,10 @@ class ActivityServiceTests(TestCase):
         self.assertEqual(amount, 1)
         self.assertTrue(UserResourceInventory.objects.filter(user=self.user, source='activity').exists())
         self.assertTrue(ActivityAwakening.objects.filter(space_activity__space=self.space, user=self.user).exists())
+
+    def test_payload_exposes_space_official_user(self):
+        official = self.space.ensure_official_user()
+
+        payload = ActivityService.payload(self.campaign, self.user)
+
+        self.assertEqual(payload['official_user']['user_id'], official.id)

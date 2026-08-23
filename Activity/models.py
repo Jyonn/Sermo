@@ -350,6 +350,7 @@ class ActivityService:
                 resource_key=personal_reward.resource_key,
                 reward_id=personal_reward.reward_id,
             ) if personal_reward else None,
+            official_user=user.space.official_user.tiny_json() if user.space.official_user_id else None,
             space_total=space_activity.total_points,
             target=max([item['threshold'] for item in milestones], default=0),
             milestones=milestones,
