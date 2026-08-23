@@ -98,7 +98,23 @@ class SpaceActivityReward(models.Model):
         ]
 
 
+class ActivityAwakening(models.Model):
+    space_activity = models.ForeignKey(SpaceActivity, on_delete=models.CASCADE, related_name='awakenings')
+    step = models.PositiveSmallIntegerField()
+    threshold = models.PositiveIntegerField()
+    user = models.ForeignKey('User.User', on_delete=models.SET_NULL, null=True, related_name='activity_awakenings')
+    unlocked_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['step']
+        constraints = [
+            models.UniqueConstraint(fields=['space_activity', 'step'], name='activity_space_awakening_unique'),
+        ]
+
+
 class ActivityService:
+    AWAKENING_COUNT = 8
+
     @staticmethod
     def _progress(campaign, user):
         space_activity, _ = SpaceActivity.objects.get_or_create(campaign=campaign, space=user.space)
@@ -187,17 +203,61 @@ class ActivityService:
             progress = UserActivityProgress.objects.select_for_update().get(id=progress.id)
             amount = progress.available_points
             if amount:
+                previous_total = space_activity.total_points
                 progress.available_points = 0
                 progress.contributed_points += amount
                 progress.save(update_fields=['available_points', 'contributed_points', 'updated_at'])
                 space_activity.total_points += amount
                 space_activity.save(update_fields=['total_points', 'updated_at'])
+                cls._record_crossed_awakenings(space_activity, user, previous_total)
                 cls._unlock_crossed_milestones(space_activity)
         return amount
 
     @classmethod
+    def _record_crossed_awakenings(cls, space_activity, user, previous_total=0):
+        target = max(space_activity.campaign.milestones.values_list('threshold', flat=True), default=24)
+        count = int(space_activity.campaign.config.get('awakening_count', cls.AWAKENING_COUNT))
+        for step in range(1, count + 1):
+            threshold = max(1, round(target * step / count))
+            if previous_total < threshold <= space_activity.total_points:
+                ActivityAwakening.objects.get_or_create(
+                    space_activity=space_activity,
+                    step=step,
+                    defaults={'threshold': threshold, 'user': user},
+                )
+
+    @classmethod
+    def _ensure_legacy_awakenings(cls, space_activity):
+        if space_activity.total_points <= 0:
+            return
+        contributors = list(
+            space_activity.user_progress.filter(contributed_points__gt=0)
+            .select_related('user').order_by('updated_at', 'id')
+        )
+        if not contributors:
+            return
+        target = max(space_activity.campaign.milestones.values_list('threshold', flat=True), default=24)
+        count = int(space_activity.campaign.config.get('awakening_count', cls.AWAKENING_COUNT))
+        contribution_owners = [
+            contributor.user
+            for contributor in contributors
+            for _ in range(contributor.contributed_points)
+        ]
+        for step in range(1, count + 1):
+            threshold = max(1, round(target * step / count))
+            if threshold > space_activity.total_points:
+                break
+            contributor = contribution_owners[min(threshold - 1, len(contribution_owners) - 1)]
+            ActivityAwakening.objects.get_or_create(
+                space_activity=space_activity,
+                step=step,
+                defaults={'threshold': threshold, 'user': contributor},
+            )
+
+    @classmethod
     def payload(cls, campaign, user):
         space_activity, progress = cls._progress(campaign, user)
+        cls._ensure_legacy_awakenings(space_activity)
         rewards = {item.milestone_id: item for item in space_activity.rewards.select_related('milestone')}
         for reward in rewards.values():
             cls._grant_reward_to_members(reward)
@@ -228,4 +288,9 @@ class ActivityService:
             space_total=space_activity.total_points,
             target=max([item['threshold'] for item in milestones], default=0),
             milestones=milestones,
+            awakenings=[dict(
+                step=item.step,
+                threshold=item.threshold,
+                user=item.user.tiny_json() if item.user else None,
+            ) for item in space_activity.awakenings.select_related('user')],
         )

@@ -3,7 +3,7 @@ from datetime import timedelta
 from django.test import TestCase
 from django.utils import timezone
 
-from Activity.models import ActivityCampaign, ActivityEvent, ActivityMilestone, ActivityService
+from Activity.models import ActivityAwakening, ActivityCampaign, ActivityEvent, ActivityMilestone, ActivityService
 from Space.models import Space
 from User.models import User, UserResourceInventory
 
@@ -32,3 +32,4 @@ class ActivityServiceTests(TestCase):
         amount = ActivityService.contribute(self.campaign, self.user)
         self.assertEqual(amount, 1)
         self.assertTrue(UserResourceInventory.objects.filter(user=self.user, source='activity').exists())
+        self.assertTrue(ActivityAwakening.objects.filter(space_activity__space=self.space, user=self.user).exists())
