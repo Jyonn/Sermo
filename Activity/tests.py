@@ -38,6 +38,13 @@ class ActivityServiceTests(TestCase):
         self.assertEqual(UserActivityReward.objects.filter(progress__user=self.user, progress__campaign=self.campaign).count(), 1)
 
         payload = ActivityService.payload(self.campaign, self.user)
+        self.assertTrue(payload['personal_reward_claimable'])
+        self.assertIsNone(payload['personal_reward'])
+        reward = ActivityService.claim_personal_reward(self.campaign, self.user)
+        self.assertIsNotNone(reward.claimed_at)
+        payload = ActivityService.payload(self.campaign, self.user)
+        self.assertFalse(payload['personal_reward_claimable'])
+        self.assertEqual(payload['personal_reward']['reward_id'], reward.reward_id)
         self.assertEqual(payload['official_user']['user_id'], self.space.official_user_id)
         self.assertEqual(payload['claimable_points'], 1)
         self.assertEqual(payload['available_points'], 0)

@@ -32,3 +32,11 @@ class ActivityClaimView(View):
         campaign = ActivityCampaign.active().get(key=key)
         ActivityService.claim(campaign, request.user)
         return ActivityService.payload(campaign, request.user)
+
+
+class ActivityPersonalRewardClaimView(View):
+    @auth.require_user
+    def post(self, request: Request, key: str):
+        campaign = ActivityCampaign.active().get(key=key)
+        ActivityService.claim_personal_reward(campaign, request.user)
+        return ActivityService.payload(campaign, request.user)

@@ -119,6 +119,7 @@ class UserActivityReward(models.Model):
     reward_id = models.CharField(max_length=80)
     resource_key = models.CharField(max_length=80)
     unlocked_at = models.DateTimeField(auto_now_add=True)
+    claimed_at = models.DateTimeField(null=True, blank=True, db_index=True)
 
 
 class ActivityService:
@@ -185,18 +186,12 @@ class ActivityService:
 
     @classmethod
     def _ensure_personal_reward(cls, progress):
-        from User.models import UserResourceInventory
-
         target = int(progress.campaign.config.get('personal_event_target', 0))
         pool = progress.campaign.config.get('personal_reward_pool') or []
         if not target or not pool or progress.events.count() < target:
             return None
         existing = UserActivityReward.objects.filter(progress=progress).first()
         if existing:
-            UserResourceInventory.grant_activity_resource(
-                progress.user, existing.resource_type, existing.reward_id, existing.resource_key,
-                progress.campaign.key, metadata={'kind': 'personal_task', 'target': target},
-            )
             return existing
         owned = set(progress.user.resource_inventory.values_list('reward_id', flat=True))
         available = [item for item in pool if item.get('reward_id') not in owned] or pool
@@ -207,10 +202,27 @@ class ActivityService:
             reward_id=choice['reward_id'],
             resource_key=choice['resource_key'],
         )
-        UserResourceInventory.grant_activity_resource(
-            progress.user, reward.resource_type, reward.reward_id, reward.resource_key,
-            progress.campaign.key, metadata={'kind': 'personal_task', 'target': target},
-        )
+        return reward
+
+    @classmethod
+    def claim_personal_reward(cls, campaign, user):
+        from User.models import UserResourceInventory
+
+        with transaction.atomic():
+            _, progress = cls._progress(campaign, user)
+            progress = UserActivityProgress.objects.select_for_update().get(id=progress.id)
+            reward = cls._ensure_personal_reward(progress)
+            if reward is None:
+                raise ValueError('personal reward is not ready')
+            reward = UserActivityReward.objects.select_for_update().get(id=reward.id)
+            if reward.claimed_at is None:
+                target = int(campaign.config.get('personal_event_target', 0))
+                UserResourceInventory.grant_activity_resource(
+                    user, reward.resource_type, reward.reward_id, reward.resource_key,
+                    campaign.key, metadata={'kind': 'personal_task', 'target': target},
+                )
+                reward.claimed_at = timezone.now()
+                reward.save(update_fields=['claimed_at'])
         return reward
 
     @staticmethod
@@ -346,10 +358,11 @@ class ActivityService:
             contributed_points=progress.contributed_points,
             personal_event_count=progress.events.count(),
             personal_event_target=int(campaign.config.get('personal_event_target', 0)),
+            personal_reward_claimable=bool(personal_reward and personal_reward.claimed_at is None),
             personal_reward=dict(
                 resource_key=personal_reward.resource_key,
                 reward_id=personal_reward.reward_id,
-            ) if personal_reward else None,
+            ) if personal_reward and personal_reward.claimed_at else None,
             official_user=user.space.official_user.tiny_json() if user.space.official_user_id else None,
             space_total=space_activity.total_points,
             target=max([item['threshold'] for item in milestones], default=0),
