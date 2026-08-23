@@ -25,3 +25,10 @@ class ActivityContributionView(View):
         ActivityService.contribute(campaign, request.user)
         return ActivityService.payload(campaign, request.user)
 
+
+class ActivityClaimView(View):
+    @auth.require_user
+    def post(self, request: Request, key: str):
+        campaign = ActivityCampaign.active().get(key=key)
+        ActivityService.claim(campaign, request.user)
+        return ActivityService.payload(campaign, request.user)

@@ -73,6 +73,7 @@ class ActivityEvent(models.Model):
     event_reference = models.CharField(max_length=80, blank=True, default='')
     event_date = models.DateField(db_index=True)
     points = models.PositiveSmallIntegerField(default=1)
+    claimed_at = models.DateTimeField(null=True, blank=True, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -158,12 +159,29 @@ class ActivityService:
                     defaults={'points': 1 if earns_force else 0},
                 )
                 if created:
-                    progress.earned_points += event.points
-                    progress.available_points += event.points
-                    progress.save(update_fields=['earned_points', 'available_points', 'updated_at'])
                     cls._ensure_personal_reward(progress)
                     awarded.append(campaign.key)
         return awarded
+
+    @classmethod
+    def claim(cls, campaign, user):
+        with transaction.atomic():
+            _, progress = cls._progress(campaign, user)
+            progress = UserActivityProgress.objects.select_for_update().get(id=progress.id)
+            events = ActivityEvent.objects.select_for_update().filter(
+                campaign=campaign,
+                progress=progress,
+                points__gt=0,
+                claimed_at__isnull=True,
+            )
+            amount = sum(events.values_list('points', flat=True))
+            if amount:
+                claimed_at = timezone.now()
+                events.update(claimed_at=claimed_at)
+                progress.earned_points += amount
+                progress.available_points += amount
+                progress.save(update_fields=['earned_points', 'available_points', 'updated_at'])
+        return amount
 
     @classmethod
     def _ensure_personal_reward(cls, progress):
@@ -311,6 +329,7 @@ class ActivityService:
                 reward_label=item.reward_label,
             ))
         now = timezone.now()
+        claimable_points = sum(progress.events.filter(points__gt=0, claimed_at__isnull=True).values_list('points', flat=True))
         return dict(
             key=campaign.key,
             title=campaign.title,
@@ -322,6 +341,7 @@ class ActivityService:
             active=campaign.starts_at <= now < campaign.ends_at and campaign.enabled,
             verified=bool(user.verified),
             today_earned=progress.events.filter(event_date=timezone.localdate()).exists(),
+            claimable_points=claimable_points,
             available_points=progress.available_points,
             contributed_points=progress.contributed_points,
             personal_event_count=progress.events.count(),

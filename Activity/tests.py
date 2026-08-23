@@ -35,7 +35,14 @@ class ActivityServiceTests(TestCase):
         ActivityService.record_event(self.user, 'square.statement.publish', '3')
         self.assertEqual(ActivityEvent.objects.filter(campaign=self.campaign, progress__user=self.user).count(), 3)
         self.assertEqual(ActivityEvent.objects.filter(campaign=self.campaign, progress__user=self.user, points=1).count(), 1)
-        self.assertEqual(UserActivityReward.objects.filter(progress__user=self.user).count(), 1)
+        self.assertEqual(UserActivityReward.objects.filter(progress__user=self.user, progress__campaign=self.campaign).count(), 1)
+
+        payload = ActivityService.payload(self.campaign, self.user)
+        self.assertEqual(payload['claimable_points'], 1)
+        self.assertEqual(payload['available_points'], 0)
+        self.assertEqual(ActivityService.contribute(self.campaign, self.user), 0)
+        self.assertEqual(ActivityService.claim(self.campaign, self.user), 1)
+        self.assertEqual(ActivityService.claim(self.campaign, self.user), 0)
 
         amount = ActivityService.contribute(self.campaign, self.user)
         self.assertEqual(amount, 1)
