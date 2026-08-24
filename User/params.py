@@ -74,6 +74,18 @@ class AuthParams(metaclass=Params):
     switch_ticket = Validator('ticket').to(str).bool(lambda x: len(x.strip()) > 0, message=_('Empty account switch ticket'))
 
 
+class WeChatMiniProgramAuthParams(metaclass=Params):
+    code = Validator('code').to(str).to(lambda value: value.strip()).bool(
+        lambda value: bool(value), message=_('Empty WeChat login code'),
+    )
+    nickname = Validator('nickname').to(str).null().default(None).to(
+        lambda value: value.strip() if value else None,
+    )
+    language = Validator('language').to(str).null().default('zh-CN').to(User.normalizers.language).exception(
+        User.validators.language,
+    )
+
+
 class UserPrivateAccountParams(metaclass=Params):
     enabled = Validator('enabled').to(int).bool(lambda x: x in (0, 1), message=_('enabled should be 0 or 1'))
 

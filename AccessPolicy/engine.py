@@ -9,7 +9,7 @@ ALLOWED_FIELDS = {
     'growth_level', 'has_password', 'verified', 'email_verified', 'phone_verified',
     'dual_verified', 'permanent_vip', 'official', 'chat_enabled', 'square_enabled',
     'square_explore_enabled', 'space_phone_verified', 'space_identity_verified',
-    'unverified_group_policy', 'qr_invite',
+    'unverified_group_policy', 'qr_invite', 'wechat_miniprogram',
 }
 ALLOWED_OPERATORS = {'eq', 'neq', 'gte', 'gt', 'lte', 'lt', 'in', 'not_in', 'exists'}
 MAX_DEPTH = 8
@@ -98,6 +98,11 @@ def subject_context(user=None, space=None, overrides=None):
     space = space or getattr(user, 'space', None)
     email_verified = bool(getattr(user, 'email_verified_at', None))
     phone_verified = bool(getattr(user, 'phone_verified_at', None))
+    wechat_identities = (
+        getattr(user, 'wechat_miniprogram_identities', None)
+        if user is not None and getattr(user, 'pk', None)
+        else None
+    )
     values = {
         'growth_level': user.effective_growth_level() if user is not None else 1,
         'has_password': bool(getattr(user, 'has_password', False)),
@@ -117,6 +122,7 @@ def subject_context(user=None, space=None, overrides=None):
         'space_identity_verified': bool(getattr(space, 'identity_verified_at', False)),
         'unverified_group_policy': int(getattr(space, 'unverified_group_policy', 2)),
         'qr_invite': False,
+        'wechat_miniprogram': bool(wechat_identities and wechat_identities.exists()),
     }
     values.update(overrides or {})
     return values

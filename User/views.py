@@ -39,6 +39,7 @@ from User.models import (
     PermanentVipCampaign,
     UserResourceInventory,
     UserFeatureDiscovery,
+    WeChatMiniProgramIdentity,
 )
 from User.params import (
     AuthParams,
@@ -59,6 +60,7 @@ from User.params import (
     UserPrivateAccountParams,
     UserContactUnbindParams,
     UserPasswordRecoveryParams,
+    WeChatMiniProgramAuthParams,
 )
 from User.validators import UserErrors
 from Space.models import Space
@@ -67,6 +69,35 @@ from Space.models import Space
 def _require_password_enabled(user):
     if not user.has_password:
         raise UserErrors.PASSWORD_NOT_SET
+
+
+def _require_profile_edit_enabled(user):
+    if user.has_password or WeChatMiniProgramIdentity.objects.filter(user=user).exists():
+        return
+    raise UserErrors.PASSWORD_NOT_SET
+
+
+class WeChatMiniProgramLoginView(View):
+    @analyse.json(
+        WeChatMiniProgramAuthParams.code,
+        WeChatMiniProgramAuthParams.nickname,
+        WeChatMiniProgramAuthParams.language,
+    )
+    def post(self, request: Request):
+        from User.wechat_miniprogram import login_with_wechat_code
+
+        user, created = login_with_wechat_code(
+            code=request.json.code,
+            nickname=request.json.nickname,
+            language=request.json.language,
+        )
+        user.log_login()
+        return dict(
+            created=created,
+            user=user.json_me(),
+            space=user.space.json(),
+            auth=auth.get_login_token(user),
+        )
 
 
 class HeartbeatView(View):
@@ -725,7 +756,7 @@ class UserNameView(View):
     @auth.require_user
     @analyse.json(UserParams.name)
     def post(self, request: Request):
-        _require_password_enabled(request.user)
+        _require_profile_edit_enabled(request.user)
         request.user.set_name(request.json.name)
         return request.user.json_me()
 
@@ -745,7 +776,7 @@ class AvatarCustomUploadView(View):
         UserParams.avatar_content_type,
     )
     def post(self, request: Request):
-        _require_password_enabled(request.user)
+        _require_profile_edit_enabled(request.user)
         request.user.require_capability('menu.profile.avatar.custom')
         return issue_avatar_upload(
             file_name=request.json.file_name,
@@ -757,7 +788,7 @@ class AvatarCustomView(View):
     @auth.require_user
     @analyse.json(UserParams.avatar_key)
     def post(self, request: Request):
-        _require_password_enabled(request.user)
+        _require_profile_edit_enabled(request.user)
         key = validate_avatar_key(request.json.key)
         request.user.set_custom_avatar(avatar_uri_for_key(key))
         return request.user.dictify('avatar_type', 'avatar_uri')

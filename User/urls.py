@@ -40,9 +40,11 @@ from User.views import (
     ChatBackgroundView,
     UserPersonalizationView,
     UserLanguagePreferenceView,
+    WeChatMiniProgramLoginView,
 )
 
 urlpatterns = [
+    path('wechat-miniprogram/login', WeChatMiniProgramLoginView.as_view(), name='wechat miniprogram login'),
     path('heartbeat', HeartbeatView.as_view(), name='heartbeat'),
     path('me', UserMeView.as_view(), name='user me'),
     path('me/emoji-usage', UserEmojiUsageView.as_view(), name='user emoji usage'),

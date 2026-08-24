@@ -32,6 +32,11 @@ class UserErrors:
     SPACE_FORBIDDEN = Error(message=_('Users are not in the same space'), code=Code.Forbidden)
     SPACE_MEMBER_LIMIT_REACHED = Error(message=_('This space has reached its member limit'), code=Code.BadRequest)
     LANGUAGE_INVALID = Error(message=_('Unsupported language'), code=Code.BadRequest)
+    WECHAT_LOGIN_CODE_INVALID = Error(message=_('Invalid WeChat login code'), code=Code.BadRequest)
+    WECHAT_LOGIN_FAILED = Error(message=_('WeChat login failed'), code=Code.InternalServerError)
+    WECHAT_MINIPROGRAM_NOT_CONFIGURED = Error(
+        message=_('WeChat Mini Program login is not configured'), code=Code.InternalServerError,
+    )
     WELCOME_MESSAGE_EMPTY = Error(message=_('Welcome message cannot be empty'), code=Code.BadRequest)
     WELCOME_MESSAGE_TOO_LONG = Error(message=_('Welcome message is too long'), code=Code.BadRequest)
     CONTACT_CODE_INVALID = Error(message=_('Invalid contact verification code'), code=Code.BadRequest)
