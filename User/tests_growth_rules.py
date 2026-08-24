@@ -181,11 +181,14 @@ class GrowthReconciliationTests(TestCase):
 
     def test_permanent_vip_bundle_uses_the_same_inventory(self):
         UserResourceInventory.grant_permanent_vip_resources(self.user, 7)
+        self.user.is_permanent_vip = True
+        self.user.save(update_fields=['is_permanent_vip'])
 
         self.assertTrue(UserResourceInventory.owns(self.user, 'vip', 'founding-100'))
         self.assertTrue(UserResourceInventory.owns(self.user, 'bubble', 'vip'))
         self.assertTrue(UserResourceInventory.owns(self.user, 'frame', 'vip'))
         self.assertEqual(PermanentVipCampaign.status_for(self.user)['slot'], 7)
+        self.assertEqual(self.user.json_friend()['permanent_vip_slot'], 7)
 
     def test_daily_events_share_the_global_daily_cap(self):
         day = '2026-08-04'

@@ -346,7 +346,9 @@ class Friendship(models.Model):
             status=FriendshipStatusChoice.ACCEPTED,
         ).filter(Q(user_low=user) | Q(user_high=user))
         friends = []
-        for relation in relations.select_related('user_low', 'user_high'):
+        for relation in relations.select_related('user_low', 'user_high').prefetch_related(
+            'user_low__resource_inventory', 'user_high__resource_inventory',
+        ):
             friend = relation.user_high if relation.user_low_id == user.id else relation.user_low
             if not friend.is_deleted:
                 friends.append(friend)

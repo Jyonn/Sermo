@@ -385,7 +385,7 @@ class SpaceUserListView(View):
 
         offset = request.query.offset
         limit = request.query.limit
-        rows = users.order_by('name_pinyin', 'lower_name', 'id')[offset:offset + limit]
+        rows = users.prefetch_related('resource_inventory').order_by('name_pinyin', 'lower_name', 'id')[offset:offset + limit]
         level_names = request.user.space.level_names or []
         payload = []
         for user in rows:

@@ -1126,10 +1126,22 @@ class User(models.Model):
         return self.calculate_growth(save=False)
 
     def tiny_json(self):
-        return self.dictify(
+        payload = self.dictify(
             'name', 'user_id', 'official', 'avatar_type', 'avatar_uri', 'avatar_cache_key', 'is_permanent_vip',
             'chat_bubble_style', 'avatar_frame_style', 'statement_card_style', 'growth_level',
         )
+        payload['permanent_vip_slot'] = self.permanent_vip_slot()
+        return payload
+
+    def permanent_vip_slot(self):
+        if not self.is_permanent_vip:
+            return None
+        if hasattr(self, '_permanent_vip_slot_cache'):
+            return self._permanent_vip_slot_cache
+        prefetched = getattr(self, '_prefetched_objects_cache', {}).get('resource_inventory')
+        claim = next((item for item in prefetched if item.reward_id == 'vip.permanent'), None) if prefetched is not None else self.resource_inventory.filter(reward_id='vip.permanent').only('metadata').first()
+        self._permanent_vip_slot_cache = (claim.metadata or {}).get('slot') if claim else None
+        return self._permanent_vip_slot_cache
 
     def jsonl(self):
         payload = self.dictify(
@@ -1150,10 +1162,11 @@ class User(models.Model):
             'avatar_cache_key',
         )
         payload['plaza_greeting'] = self.display_plaza_greeting()
+        payload['permanent_vip_slot'] = self.permanent_vip_slot()
         return payload
 
     def json_friend(self):
-        return self.dictify(
+        payload = self.dictify(
             'name',
             'name_pinyin',
             'user_id',
@@ -1167,6 +1180,8 @@ class User(models.Model):
             'avatar_cache_key',
             'last_heartbeat',
         )
+        payload['permanent_vip_slot'] = self.permanent_vip_slot()
+        return payload
 
     def jwt_json(self):
         return self.dictify('name', 'user_id', 'space_id', 'language', 'verified')
