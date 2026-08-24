@@ -492,6 +492,7 @@ class Message(models.Model):
 
     type = models.IntegerField(choices=MessageTypeChoice.to_choices())
     content = models.CharField(max_length=vldt.MAX_CONTENT_LENGTH, blank=True, default='')
+    appearance = models.JSONField(default=dict, blank=True)
     media_resource = models.ForeignKey(
         'MediaResource', on_delete=models.SET_NULL, null=True, blank=True, related_name='messages',
     )
@@ -510,6 +511,14 @@ class Message(models.Model):
                 name='message_unique_client_id',
             ),
         ]
+
+    def save(self, *args, **kwargs):
+        if not self.appearance and self.user_id:
+            self.appearance = {
+                key: value for key, value in self.user.tiny_json().items()
+                if key in {'chat_bubble_style', 'avatar_frame_style', 'is_permanent_vip'}
+            }
+        return super().save(*args, **kwargs)
 
     @classmethod
     def visible_queryset(cls):
@@ -1207,7 +1216,9 @@ class Message(models.Model):
         return self.PREVIEW_TEXT_BY_TYPE.get(self.type, self.content)
 
     def _dictify_user(self):
-        return self.user.tiny_json()
+        payload = self.user.tiny_json()
+        payload.update(self.appearance or {})
+        return payload
 
     def _dictify_created_at(self):
         return self.created_at.timestamp()
@@ -1258,7 +1269,7 @@ class Message(models.Model):
         payload = dict(
             message_id=self.id,
             client_message_id=self.client_message_id,
-            user=self.user.tiny_json(),
+            user=self._dictify_user(),
             type=self.type,
             content=content,
             payload=self._payload_for_type(request=request),
@@ -2038,7 +2049,7 @@ class ForwardBundle(models.Model):
                 original_message=message,
                 media_resource=message.media_resource,
                 message_type=message.type,
-                author=message.user.tiny_json(),
+                author=message._dictify_user(),
                 content=message.preview_text(),
                 payload=message._payload_for_type(request=request) or {},
                 sent_at=message.created_at,
@@ -2062,6 +2073,7 @@ class ForwardBundle(models.Model):
         return dict(
             kind='forward_bundle',
             bundle_id=self.id,
+            first_person_user_id=self.created_by_id,
             title=_('Chat history'),
             summary=', '.join(authors[:3]),
             item_count=len(items),

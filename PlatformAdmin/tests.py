@@ -105,7 +105,7 @@ class PlatformAdminSecurityTests(TestCase):
         deleted = Message.objects.create(chat=chat, user=user, type=MessageTypeChoice.TEXT, content='deleted evidence', is_deleted=True)
         Message.objects.create(chat=chat, user=user, type=MessageTypeChoice.TEXT, content='visible message')
         request = RequestFactory().get(
-            f'/platform-admin/chats/{chat.id}/messages?reason=incident&limit=1',
+            f'/platform-admin/chats/{chat.id}/messages?reason=incident&limit=1&perspective_user_id={user.id}',
             HTTP_AUTHORIZATION=f'Bearer {auth.get_platform_admin_token("admin@example.com")["auth"]}',
         )
 
@@ -117,6 +117,7 @@ class PlatformAdminSecurityTests(TestCase):
         second_page = ChatMessageView.as_view()(next_request, chat_id=chat.id)
 
         self.assertTrue(first_page['has_more'])
+        self.assertEqual(first_page['first_person_user_id'], user.id)
         self.assertEqual(second_page['messages'][0]['message_id'], deleted.id)
         self.assertTrue(second_page['messages'][0]['is_deleted'])
 

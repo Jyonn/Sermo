@@ -65,8 +65,15 @@ class MessageForwardingTests(TestCase):
         self.assertEqual(forwarded.media_resource.asset_id, asset.id)
 
     def test_bundle_keeps_snapshot_after_original_is_recalled(self):
+        self.peer.chat_bubble_style = 'comic'
+        self.peer.avatar_frame_style = 'polaroid'
+        self.peer.save(update_fields=['chat_bubble_style', 'avatar_frame_style'])
         first = Message.create(self.source_chat, self.peer, MessageTypeChoice.TEXT, 'First line')
         second = Message.create(self.source_chat, self.user, MessageTypeChoice.TEXT, 'Second line')
+
+        self.peer.chat_bubble_style = 'default'
+        self.peer.avatar_frame_style = 'none'
+        self.peer.save(update_fields=['chat_bubble_style', 'avatar_frame_style'])
 
         response = self.post_forward([first.id, second.id], 'bundle')
 
@@ -76,3 +83,6 @@ class MessageForwardingTests(TestCase):
         first.remove()
         payload = forwarded._payload_for_type()
         self.assertEqual([item['content'] for item in payload['items']], ['First line', 'Second line'])
+        self.assertEqual(payload['first_person_user_id'], self.user.id)
+        self.assertEqual(payload['items'][0]['author']['chat_bubble_style'], 'comic')
+        self.assertEqual(payload['items'][0]['author']['avatar_frame_style'], 'polaroid')
