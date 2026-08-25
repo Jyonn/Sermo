@@ -1,4 +1,5 @@
 import json
+from unittest.mock import patch
 
 from django.test import TestCase
 from django.utils import timezone
@@ -163,6 +164,32 @@ class StatementApiTests(TestCase):
         body = response.json()['body']
         self.assertEqual(len(body['media']), 9)
         self.assertIsNone(body['media'][0]['location'])
+
+    @patch('Message.image_metadata.reverse_geocode', return_value=('福建省厦门市思明区', 'opencage'))
+    def test_statement_stores_location_independently_from_media(self, reverse_geocode):
+        response = self.post_statement(self.author, {
+            'text': '带位置的发言',
+            'visibility': 'public',
+            'media': [],
+            'location': {'latitude': 24.4798, 'longitude': 118.0894},
+        })
+
+        self.assertEqual(response.status_code, 200, response.content)
+        location = response.json()['body']['location']
+        self.assertEqual(location['address'], '福建省厦门市思明区')
+        self.assertEqual(location['geocoding_provider'], 'opencage')
+        self.assertAlmostEqual(location['latitude'], 24.4798)
+        reverse_geocode.assert_called_once_with(24.4798, 118.0894)
+
+    def test_statement_rejects_invalid_location(self):
+        response = self.post_statement(self.author, {
+            'text': '错误位置',
+            'visibility': 'public',
+            'media': [],
+            'location': {'latitude': 91, 'longitude': 118},
+        })
+
+        self.assertEqual(response.status_code, 400, response.content)
 
     def test_statements_can_share_media_asset(self):
         asset = MediaAsset.objects.create(

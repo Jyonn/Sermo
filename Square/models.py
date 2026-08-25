@@ -80,6 +80,10 @@ class Statement(models.Model):
         default=StatementVisibilityChoice.PUBLIC,
         db_index=True,
     )
+    latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    address = models.CharField(max_length=255, blank=True, default='')
+    geocoding_provider = models.CharField(max_length=32, blank=True, default='')
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
     is_deleted = models.BooleanField(default=False, db_index=True)
 
@@ -146,7 +150,7 @@ class Statement(models.Model):
         return statement.jsonl(request=request)
 
     @classmethod
-    def create_statement(cls, user, text, visibility, media):
+    def create_statement(cls, user, text, visibility, media, location=None):
         user.require_capability('square.statement.publish')
         _enforce_frequency(cls.objects.filter(space=user.space, is_deleted=False), user)
         normalized_text = (text or '').strip()
@@ -172,11 +176,29 @@ class Statement(models.Model):
         if not normalized_text and not normalized_media:
             raise SquareErrors.CONTENT_REQUIRED
         StatementMedia.attach_assets(normalized_media)
+        normalized_location = location or None
+        if normalized_location and not normalized_location.get('address'):
+            try:
+                from Message.image_metadata import reverse_geocode
+                address, provider = reverse_geocode(
+                    normalized_location['latitude'], normalized_location['longitude'],
+                )
+                normalized_location = {
+                    **normalized_location,
+                    'address': str(address or '')[:255],
+                    'geocoding_provider': str(provider or '')[:32],
+                }
+            except Exception:
+                normalized_location = {**normalized_location, 'address': '', 'geocoding_provider': ''}
         statement = cls.objects.create(
             space=user.space,
             user=user,
             text=normalized_text,
             visibility=visibility_value,
+            latitude=normalized_location['latitude'] if normalized_location else None,
+            longitude=normalized_location['longitude'] if normalized_location else None,
+            address=normalized_location.get('address', '') if normalized_location else '',
+            geocoding_provider=normalized_location.get('geocoding_provider', '') if normalized_location else '',
         )
         StatementMedia.objects.bulk_create([
             StatementMedia(statement=statement, position=index, media_asset=item['media_asset'])
@@ -210,6 +232,12 @@ class Statement(models.Model):
             user=self.user.tiny_json(),
             text=self.text,
             visibility='friends' if self.visibility == StatementVisibilityChoice.FRIENDS else 'public',
+            location=(dict(
+                latitude=float(self.latitude),
+                longitude=float(self.longitude),
+                address=self.address,
+                geocoding_provider=self.geocoding_provider,
+            ) if self.latitude is not None and self.longitude is not None else None),
             media=[item.jsonl(request=request) for item in self.media.all()],
             comment_count=getattr(self, 'visible_comment_count', self.comments.filter(is_deleted=False).count()),
             like_count=getattr(self, 'visible_like_count', self.likes.count()),

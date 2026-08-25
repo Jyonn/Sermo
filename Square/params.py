@@ -26,6 +26,26 @@ def validate_media(value):
     return value
 
 
+def validate_location(value):
+    if value in (None, ''):
+        return None
+    if not hasattr(value, 'get'):
+        raise SquareErrors.LOCATION_INVALID
+    try:
+        latitude = round(float(value.get('latitude')), 6)
+        longitude = round(float(value.get('longitude')), 6)
+    except (TypeError, ValueError):
+        raise SquareErrors.LOCATION_INVALID
+    if not -90 <= latitude <= 90 or not -180 <= longitude <= 180:
+        raise SquareErrors.LOCATION_INVALID
+    return {
+        'latitude': latitude,
+        'longitude': longitude,
+        'address': str(value.get('address') or '').strip()[:255],
+        'geocoding_provider': str(value.get('geocoding_provider') or '').strip()[:32],
+    }
+
+
 def validate_comment_text(value):
     normalized = str(value or '').strip()
     if not normalized:
@@ -39,6 +59,7 @@ class SquareParams(metaclass=Params):
     text = Validator('text').to(validate_text).null().default('')
     visibility = Validator('visibility').to(validate_visibility).default('public')
     media = Validator('media').to(validate_media).default([])
+    location = Validator('location').to(validate_location).null().default(None)
     pin = Validator('pin').to(int).bool(lambda value: value in (0, 1)).default(0)
     before = Validator('before').to(int).null().default(None)
     offset = Validator('offset').to(int).bool(lambda value: 0 <= value <= 5000).default(0)

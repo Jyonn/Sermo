@@ -13,6 +13,7 @@ class SquareErrors:
     AUDIO_LIMIT_EXCEEDED = Error(message=_('A statement can contain only one voice recording'), code=Code.BadRequest)
     AUDIO_DURATION_INVALID = Error(message=_('Voice recording cannot exceed 60 seconds'), code=Code.BadRequest)
     VISIBILITY_INVALID = Error(message=_('Invalid statement visibility'), code=Code.BadRequest)
+    LOCATION_INVALID = Error(message=_('Invalid statement location'), code=Code.BadRequest)
     COMMENT_REQUIRED = Error(message=_('Comment cannot be empty'), code=Code.BadRequest)
     COMMENT_TOO_LONG = Error(message=_('A comment can contain at most 140 characters'), code=Code.BadRequest)
     DAILY_LIMIT_REACHED = Error(message=_('Daily square limit reached'), code=Code.Forbidden)

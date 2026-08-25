@@ -23,6 +23,25 @@ from utils.qiniu import (
 )
 
 
+class StatementLocationView(View):
+    @auth.require_user
+    @analyse.json(SquareParams.location)
+    def post(self, request: Request):
+        location = raw(request.json.location)
+        if location is None:
+            raise SquareErrors.LOCATION_INVALID
+        try:
+            from Message.image_metadata import reverse_geocode
+            address, provider = reverse_geocode(location['latitude'], location['longitude'])
+        except Exception:
+            address, provider = '', ''
+        return {
+            **location,
+            'address': str(address or '')[:255],
+            'geocoding_provider': str(provider or '')[:32],
+        }
+
+
 class StatementView(View):
     @auth.require_user
     @analyse.query(SquareParams.before, SquareParams.limit, SquareParams.scope, SquareParams.user_id)
@@ -38,7 +57,7 @@ class StatementView(View):
         )
 
     @auth.require_user
-    @analyse.json(SquareParams.text, SquareParams.visibility, SquareParams.media, SquareParams.pin)
+    @analyse.json(SquareParams.text, SquareParams.visibility, SquareParams.media, SquareParams.location, SquareParams.pin)
     def post(self, request: Request):
         request.user.space.require_square_enabled()
         with transaction.atomic():
@@ -47,6 +66,7 @@ class StatementView(View):
                 text=request.json.text,
                 visibility=request.json.visibility,
                 media=raw(request.json.media),
+                location=raw(request.json.location),
             )
             if request.json.pin:
                 if not request.user.is_official:
