@@ -161,6 +161,13 @@ class VideoMetadataTests(SimpleTestCase):
 
 
 class UnifiedMediaAssetTests(TestCase):
+    def test_image_exif_time_is_interpreted_as_beijing_wall_time(self):
+        from Message.image_metadata import parse_exif
+
+        metadata = parse_exif({'DateTimeOriginal': {'val': '2026:08:26 10:00:00'}})
+
+        self.assertEqual(metadata['taken_at'].isoformat(), '2026-08-26T10:00:00+08:00')
+
     @patch('Message.image_metadata.reverse_geocode', return_value=('上海市', 'opencage'))
     @patch('Message.image_metadata.fetch_qiniu_exif')
     @patch('Message.image_metadata.fetch_qiniu_image_info')

@@ -1,4 +1,5 @@
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone as datetime_timezone
+from unittest.mock import patch
 
 from django.test import TestCase
 from django.utils import timezone
@@ -71,3 +72,18 @@ class ActivityServiceTests(TestCase):
         payload = ActivityService.payload(self.campaign, self.user)
 
         self.assertEqual(payload['official_user']['user_id'], official.id)
+
+    def test_daily_event_resets_at_beijing_midnight(self):
+        before_midnight = datetime(2026, 8, 26, 15, 30, tzinfo=datetime_timezone.utc)
+        after_midnight = datetime(2026, 8, 26, 16, 30, tzinfo=datetime_timezone.utc)
+
+        with patch('Activity.models.timezone.now', return_value=before_midnight):
+            ActivityService.record_event(self.user, 'square.statement.publish', 'before-midnight')
+        with patch('Activity.models.timezone.now', return_value=after_midnight):
+            ActivityService.record_event(self.user, 'square.statement.publish', 'after-midnight')
+
+        events = ActivityEvent.objects.filter(campaign=self.campaign, progress__user=self.user).order_by('event_date')
+        self.assertEqual(list(events.values_list('event_date', 'points')), [
+            (before_midnight.astimezone(timezone.get_current_timezone()).date(), 1),
+            (after_midnight.astimezone(timezone.get_current_timezone()).date(), 1),
+        ])
