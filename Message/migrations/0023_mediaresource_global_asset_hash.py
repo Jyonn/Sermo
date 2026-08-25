@@ -7,6 +7,16 @@ from django.db import migrations, models
 MEDIA_KIND_BY_MESSAGE_TYPE = {1: 0, 2: 3, 4: 1, 5: 2}
 
 
+def _column_names(schema_editor, table_name):
+    with schema_editor.connection.cursor() as cursor:
+        return {
+            column.name
+            for column in schema_editor.connection.introspection.get_table_description(
+                cursor, table_name,
+            )
+        }
+
+
 class IdempotentCreateModel(migrations.CreateModel):
     def database_forwards(self, app_label, schema_editor, from_state, to_state):
         model = to_state.apps.get_model(app_label, self.name)
@@ -30,14 +40,33 @@ class IdempotentAddField(migrations.AddField):
     def database_forwards(self, app_label, schema_editor, from_state, to_state):
         model = to_state.apps.get_model(app_label, self.model_name)
         field = model._meta.get_field(self.name)
-        with schema_editor.connection.cursor() as cursor:
-            columns = {
-                column.name
-                for column in schema_editor.connection.introspection.get_table_description(
-                    cursor, model._meta.db_table,
-                )
-            }
+        columns = _column_names(schema_editor, model._meta.db_table)
         if field.column not in columns:
+            super().database_forwards(app_label, schema_editor, from_state, to_state)
+
+
+class IdempotentRemoveField(migrations.RemoveField):
+    def database_forwards(self, app_label, schema_editor, from_state, to_state):
+        model = from_state.apps.get_model(app_label, self.model_name)
+        field = model._meta.get_field(self.name)
+        columns = _column_names(schema_editor, model._meta.db_table)
+        if field.column in columns:
+            super().database_forwards(app_label, schema_editor, from_state, to_state)
+
+
+class IdempotentAlterUniqueField(migrations.AlterField):
+    def database_forwards(self, app_label, schema_editor, from_state, to_state):
+        model = to_state.apps.get_model(app_label, self.model_name)
+        field = model._meta.get_field(self.name)
+        with schema_editor.connection.cursor() as cursor:
+            constraints = schema_editor.connection.introspection.get_constraints(
+                cursor, model._meta.db_table,
+            )
+        has_unique = any(
+            constraint.get('unique') and list(constraint.get('columns') or ()) == [field.column]
+            for constraint in constraints.values()
+        )
+        if not has_unique:
             super().database_forwards(app_label, schema_editor, from_state, to_state)
 
 
@@ -60,6 +89,11 @@ def create_resources_and_merge_assets(apps, schema_editor):
     MediaResource = apps.get_model('Message', 'MediaResource')
     ForwardBundleItem = apps.get_model('Message', 'ForwardBundleItem')
     StatementMedia = apps.get_model('Square', 'StatementMedia')
+
+    # MySQL can commit DDL even when the migration later fails. If this legacy
+    # source column is already gone, the data pass completed on an earlier run.
+    if 'media_asset_id' not in _column_names(schema_editor, Message._meta.db_table):
+        return
 
     for message in Message.objects.exclude(media_asset_id=None).iterator(chunk_size=500):
         kind = MEDIA_KIND_BY_MESSAGE_TYPE.get(message.type)
@@ -182,13 +216,13 @@ class Migration(migrations.Migration):
             field=models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.PROTECT, related_name='forward_items', to='Message.mediaresource'),
         ),
         migrations.RunPython(create_resources_and_merge_assets, migrations.RunPython.noop),
-        migrations.RemoveField(model_name='message', name='media_asset'),
-        migrations.RemoveField(model_name='forwardbundleitem', name='media_asset'),
-        migrations.RemoveField(model_name='mediaasset', name='owner'),
-        migrations.RemoveField(model_name='mediaasset', name='file_name'),
-        migrations.RemoveField(model_name='mediaasset', name='library_active'),
-        migrations.RemoveField(model_name='mediaasset', name='reference_count'),
-        migrations.AlterField(
+        IdempotentRemoveField(model_name='message', name='media_asset'),
+        IdempotentRemoveField(model_name='forwardbundleitem', name='media_asset'),
+        IdempotentRemoveField(model_name='mediaasset', name='owner'),
+        IdempotentRemoveField(model_name='mediaasset', name='file_name'),
+        IdempotentRemoveField(model_name='mediaasset', name='library_active'),
+        IdempotentRemoveField(model_name='mediaasset', name='reference_count'),
+        IdempotentAlterUniqueField(
             model_name='mediaasset',
             name='content_hash',
             field=models.CharField(blank=True, max_length=64, null=True, unique=True),
