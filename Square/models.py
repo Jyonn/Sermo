@@ -23,6 +23,18 @@ class StatementMediaKindChoice(Choice):
     VIDEO = 2
 
 
+class SquareReadState(models.Model):
+    user = models.OneToOneField('User.User', on_delete=models.CASCADE, related_name='square_read_state')
+    explore_statement_id = models.PositiveBigIntegerField(default=0)
+    friends_statement_id = models.PositiveBigIntegerField(default=0)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    @classmethod
+    def ensure(cls, user):
+        state, _ = cls.objects.get_or_create(user=user)
+        return state
+
+
 def statement_media_prefetch():
     return Prefetch('media', queryset=StatementMedia.objects.select_related('media_asset'))
 

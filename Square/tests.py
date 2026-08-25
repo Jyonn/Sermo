@@ -7,7 +7,7 @@ from Friendship.models import Friendship
 from Space.models import Space
 from Message.models import MediaAsset
 from Square.models import Statement, StatementComment, StatementCommentLike, StatementLike, StatementMedia
-from User.models import User
+from User.models import NotificationEvent, NotificationEventTypeChoice, User
 from utils import auth
 
 
@@ -94,6 +94,58 @@ class StatementApiTests(TestCase):
 
         self.assertEqual(response.status_code, 200, response.content)
         self.assertEqual(response.json()['body'][0]['text'], '朋友可见')
+
+    def test_square_status_tracks_new_feed_items_without_counting_own_posts(self):
+        baseline = self.client.get('/square/status', **self.authorization(self.friend))
+        self.assertFalse(baseline.json()['body']['explore_unread'])
+        self.assertFalse(baseline.json()['body']['friends_unread'])
+
+        Statement.create_statement(self.author, '新朋友发言', 'public', [])
+        updated = self.client.get('/square/status', **self.authorization(self.friend)).json()['body']
+        self.assertTrue(updated['explore_unread'])
+        self.assertTrue(updated['friends_unread'])
+
+        marked = self.client.post(
+            '/square/status',
+            data=json.dumps({'scope': 'friends'}),
+            content_type='application/json',
+            **self.authorization(self.friend),
+        ).json()['body']
+        self.assertTrue(marked['explore_unread'])
+        self.assertFalse(marked['friends_unread'])
+
+        Statement.create_statement(self.friend, '自己的发言', 'public', [])
+        own = self.client.get('/square/status', **self.authorization(self.friend)).json()['body']
+        self.assertFalse(own['friends_unread'])
+
+    def test_square_notification_feed_can_start_with_unread_and_page_history(self):
+        old = NotificationEvent.objects.create(
+            space=self.space,
+            user=self.friend,
+            actor=self.author,
+            event_type=NotificationEventTypeChoice.SQUARE_STATEMENT_LIKE,
+            payload={'statement_id': 1},
+            is_read=True,
+        )
+        unread = NotificationEvent.objects.create(
+            space=self.space,
+            user=self.friend,
+            actor=self.author,
+            event_type=NotificationEventTypeChoice.SQUARE_STATEMENT_COMMENT,
+            payload={'statement_id': 2},
+        )
+
+        first = self.client.get(
+            '/users/me/notification-events?category=square&unread_only=1&limit=30',
+            **self.authorization(self.friend),
+        ).json()['body']
+        self.assertEqual([row['notification_event_id'] for row in first['events']], [unread.id])
+
+        history = self.client.get(
+            f'/users/me/notification-events?category=square&before={unread.id}&limit=30',
+            **self.authorization(self.friend),
+        ).json()['body']
+        self.assertEqual([row['notification_event_id'] for row in history['events']], [old.id])
 
     def test_statement_supports_nine_ordered_photos_without_user_location(self):
         media = [

@@ -4,12 +4,15 @@ from django.views import View
 from oba import raw
 from smartdjango import OK, analyse
 
-from Square.models import Statement, StatementComment, StatementCommentLike, StatementLike, StatementMedia, statement_media_prefetch
+from Square.models import SquareReadState, Statement, StatementComment, StatementCommentLike, StatementLike, StatementMedia, statement_media_prefetch
+from Activity.models import ActivityCampaign, ActivityService
+from Friendship.models import Friendship, FriendshipStatusChoice
+from django.db.models import Q
 from Message.models import MediaAsset, MediaAssetAlias
 from Square.params import SquareParams
 from Square.quota import quota_for_user
 from Square.validators import SquareErrors
-from User.models import NotificationEvent, NotificationEventTypeChoice
+from User.models import NotificationEvent, NotificationEventTypeChoice, PermanentVipCampaign
 from utils import auth
 from utils.auth import Request
 from utils.qiniu import (
@@ -107,6 +110,64 @@ class SquareQuotaView(View):
     def get(self, request: Request):
         request.user.space.require_square_enabled()
         return quota_for_user(request.user)
+
+
+class SquareStatusView(View):
+    @staticmethod
+    def _latest_visible_id(user, scope):
+        queryset = Statement.visible_for(user).exclude(user=user)
+        if scope == 'friends':
+            friendships = Friendship.objects.filter(
+                space=user.space,
+                status=FriendshipStatusChoice.ACCEPTED,
+            ).filter(Q(user_low=user) | Q(user_high=user)).values_list('user_low_id', 'user_high_id')
+            friend_ids = [high_id if low_id == user.id else low_id for low_id, high_id in friendships]
+            queryset = queryset.filter(user_id__in=friend_ids)
+        return queryset.order_by('-id').values_list('id', flat=True).first() or 0
+
+    @classmethod
+    def _payload(cls, user):
+        explore_latest = cls._latest_visible_id(user, 'all')
+        friends_latest = cls._latest_visible_id(user, 'friends')
+        state, _ = SquareReadState.objects.get_or_create(user=user, defaults={
+            'explore_statement_id': explore_latest,
+            'friends_statement_id': friends_latest,
+        })
+        activities = [ActivityService.payload(campaign, user) for campaign in ActivityCampaign.active()]
+        activity_claimable = any(
+            item['claimable_points'] or item['personal_reward_claimable']
+            for item in activities
+        )
+        vip_campaign = PermanentVipCampaign.status_for(user)
+        vip_claimable = vip_campaign['active'] and vip_campaign['eligible']
+        _updated, notification_unread = NotificationEvent.mark_square_events_read(user, statement_id=-1)
+        return dict(
+            notification_unread=notification_unread,
+            explore_unread=explore_latest > state.explore_statement_id,
+            friends_unread=friends_latest > state.friends_statement_id,
+            activity_claimable=activity_claimable or vip_claimable,
+            claimable_activity_keys=[
+                item['key'] for item in activities
+                if item['claimable_points'] or item['personal_reward_claimable']
+            ] + (['vip:founding-100'] if vip_claimable else []),
+        )
+
+    @auth.require_user
+    def get(self, request: Request):
+        request.user.space.require_square_enabled()
+        return self._payload(request.user)
+
+    @auth.require_user
+    @analyse.json(SquareParams.read_scope)
+    def post(self, request: Request):
+        request.user.space.require_square_enabled()
+        state = SquareReadState.ensure(request.user)
+        latest_id = self._latest_visible_id(request.user, request.json.scope)
+        field = 'explore_statement_id' if request.json.scope == 'all' else 'friends_statement_id'
+        if latest_id > getattr(state, field):
+            setattr(state, field, latest_id)
+            state.save(update_fields=[field, 'updated_at'])
+        return self._payload(request.user)
 
 
 class StatementUploadView(View):

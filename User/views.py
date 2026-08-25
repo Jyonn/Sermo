@@ -441,12 +441,24 @@ class NotificationEventView(View):
         queryset = NotificationEvent.objects.filter(user=request.user).select_related('actor').order_by('-id')
         if request.GET.get('category') == 'square':
             queryset = queryset.filter(event_type__in=self.SQUARE_TYPES)
+        if request.GET.get('unread_only') == '1':
+            queryset = queryset.filter(is_read=False)
         try:
             limit = min(50, max(1, int(request.GET.get('limit', 30))))
         except (TypeError, ValueError):
             limit = 30
-        rows = list(queryset[:limit])
-        return dict(events=[event.json() for event in rows], unread_count=queryset.filter(is_read=False).count())
+        try:
+            before = int(request.GET.get('before')) if request.GET.get('before') else None
+        except (TypeError, ValueError):
+            before = None
+        if before:
+            queryset = queryset.filter(id__lt=before)
+        rows = list(queryset[:limit + 1])
+        return dict(
+            events=[event.json() for event in rows[:limit]],
+            unread_count=NotificationEvent.objects.filter(user=request.user, is_read=False, event_type__in=self.SQUARE_TYPES).count(),
+            has_more=len(rows) > limit,
+        )
 
     @auth.require_user
     @analyse.json(NotificationEventParams.statement_id)
