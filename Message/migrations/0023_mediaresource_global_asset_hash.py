@@ -7,6 +7,40 @@ from django.db import migrations, models
 MEDIA_KIND_BY_MESSAGE_TYPE = {1: 0, 2: 3, 4: 1, 5: 2}
 
 
+class IdempotentCreateModel(migrations.CreateModel):
+    def database_forwards(self, app_label, schema_editor, from_state, to_state):
+        model = to_state.apps.get_model(app_label, self.name)
+        tables = set(schema_editor.connection.introspection.table_names())
+        if model._meta.db_table not in tables:
+            super().database_forwards(app_label, schema_editor, from_state, to_state)
+
+
+class IdempotentAddConstraint(migrations.AddConstraint):
+    def database_forwards(self, app_label, schema_editor, from_state, to_state):
+        model = to_state.apps.get_model(app_label, self.model_name)
+        with schema_editor.connection.cursor() as cursor:
+            constraints = schema_editor.connection.introspection.get_constraints(
+                cursor, model._meta.db_table,
+            )
+        if self.constraint.name not in constraints:
+            super().database_forwards(app_label, schema_editor, from_state, to_state)
+
+
+class IdempotentAddField(migrations.AddField):
+    def database_forwards(self, app_label, schema_editor, from_state, to_state):
+        model = to_state.apps.get_model(app_label, self.model_name)
+        field = model._meta.get_field(self.name)
+        with schema_editor.connection.cursor() as cursor:
+            columns = {
+                column.name
+                for column in schema_editor.connection.introspection.get_table_description(
+                    cursor, model._meta.db_table,
+                )
+            }
+        if field.column not in columns:
+            super().database_forwards(app_label, schema_editor, from_state, to_state)
+
+
 def _resource_for(MediaResource, owner_id, asset_id, kind, file_name):
     normalized_name = os.path.basename(str(file_name or '').strip())[:180]
     resource, _created = MediaResource.objects.get_or_create(
@@ -120,7 +154,7 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        migrations.CreateModel(
+        IdempotentCreateModel(
             name='MediaResource',
             fields=[
                 ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
@@ -133,16 +167,16 @@ class Migration(migrations.Migration):
                 ('owner', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='media_resources', to='User.user')),
             ],
         ),
-        migrations.AddConstraint(
+        IdempotentAddConstraint(
             model_name='mediaresource',
             constraint=models.UniqueConstraint(fields=('owner', 'asset', 'kind', 'file_name'), name='media_resource_owner_asset_kind_name_unique'),
         ),
-        migrations.AddField(
+        IdempotentAddField(
             model_name='message',
             name='media_resource',
             field=models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='messages', to='Message.mediaresource'),
         ),
-        migrations.AddField(
+        IdempotentAddField(
             model_name='forwardbundleitem',
             name='media_resource',
             field=models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.PROTECT, related_name='forward_items', to='Message.mediaresource'),
