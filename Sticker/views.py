@@ -15,8 +15,19 @@ from utils.qiniu import build_sticker_display_uri, delete_sticker_file, issue_st
 
 class StickerView(View):
     @auth.require_user
+    @analyse.query(StickerParams.offset, StickerParams.limit)
     def get(self, request: Request):
-        return [row.jsonl(request=request) for row in UserSticker.objects.filter(user=request.user).select_related('asset')]
+        offset = request.query.offset
+        limit = request.query.limit
+        page = list(
+            UserSticker.objects.filter(user=request.user).select_related('asset')[offset:offset + limit + 1]
+        )
+        rows = page[:limit]
+        return dict(
+            items=[row.jsonl(request=request) for row in rows],
+            has_more=len(page) > limit,
+            next_offset=offset + len(rows),
+        )
 
     @auth.require_user
     @analyse.json(StickerParams.message_id)
@@ -60,22 +71,30 @@ class StickerView(View):
 
 class StickerExploreView(View):
     @auth.require_user
+    @analyse.query(StickerParams.offset, StickerParams.limit)
     def get(self, request: Request):
+        offset = request.query.offset
+        limit = request.query.limit
         owned_asset_ids = UserSticker.objects.filter(user=request.user).values('asset_id')
         source_user_id = UserSticker.objects.filter(asset_id=OuterRef('pk')).order_by(
             'created_at', 'id',
         ).values('user_id')[:1]
-        assets = list(StickerAsset.objects.exclude(id__in=owned_asset_ids).annotate(
+        page = list(StickerAsset.objects.exclude(id__in=owned_asset_ids).annotate(
             source_user_id=Subquery(source_user_id),
-        ).order_by('-created_at', '-id')[:60])
+        ).order_by('-created_at', '-id')[offset:offset + limit + 1])
+        assets = page[:limit]
         source_users = User.objects.in_bulk({asset.source_user_id for asset in assets if asset.source_user_id})
-        return [
-            asset.jsonl(
-                request=request,
-                source_user=source_users.get(asset.source_user_id),
-            )
-            for asset in assets
-        ]
+        return dict(
+            items=[
+                asset.jsonl(
+                    request=request,
+                    source_user=source_users.get(asset.source_user_id),
+                )
+                for asset in assets
+            ],
+            has_more=len(page) > limit,
+            next_offset=offset + len(assets),
+        )
 
 
 class StickerCollectView(View):

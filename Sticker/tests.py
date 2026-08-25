@@ -2,8 +2,12 @@ from unittest.mock import patch
 from types import SimpleNamespace
 
 from django.test import TestCase
+from django.utils import timezone
 
-from Sticker.models import StickerAsset
+from Space.models import Space
+from Sticker.models import StickerAsset, UserSticker
+from User.models import User
+from utils import auth
 
 
 class StickerAssetDimensionTests(TestCase):
@@ -79,3 +83,59 @@ class StickerExplorePrivacyTests(TestCase):
 
         self.assertEqual(payload['source_scope'], 'external')
         self.assertNotIn('source_user', payload)
+
+
+class StickerPaginationTests(TestCase):
+    def setUp(self):
+        self.space = Space.objects.create(
+            name='Sticker space',
+            slug='sticker-space',
+            email='admin@example.com',
+            admin_phone_verified_at=timezone.now(),
+        )
+        self.user = User.create(self.space, 'Collector', email='collector@example.com', verified=True)
+        self.other = User.create(self.space, 'Source', email='source@example.com', verified=True)
+
+    def authorization(self):
+        return dict(HTTP_AUTHORIZATION=f"Bearer {auth.get_login_token(self.user)['auth']}")
+
+    def create_asset(self, index):
+        return StickerAsset.objects.create(
+            content_hash=f'{index:064x}',
+            storage_key=f'sermo/messages/sticker/{index}.png',
+        )
+
+    def test_my_stickers_return_stable_pages(self):
+        for index in range(5):
+            UserSticker.objects.create(user=self.user, asset=self.create_asset(index + 1))
+
+        first = self.client.get('/stickers/?offset=0&limit=2', **self.authorization()).json()['body']
+        second = self.client.get(
+            f"/stickers/?offset={first['next_offset']}&limit=2",
+            **self.authorization(),
+        ).json()['body']
+
+        self.assertEqual(len(first['items']), 2)
+        self.assertTrue(first['has_more'])
+        self.assertEqual(first['next_offset'], 2)
+        self.assertEqual(len(second['items']), 2)
+        self.assertTrue(set(item['sticker_id'] for item in first['items']).isdisjoint(
+            item['sticker_id'] for item in second['items']
+        ))
+
+    def test_explore_stickers_return_stable_pages(self):
+        for index in range(5):
+            UserSticker.objects.create(user=self.other, asset=self.create_asset(index + 10))
+
+        first = self.client.get('/stickers/explore?offset=0&limit=2', **self.authorization()).json()['body']
+        second = self.client.get(
+            f"/stickers/explore?offset={first['next_offset']}&limit=2",
+            **self.authorization(),
+        ).json()['body']
+
+        self.assertEqual(len(first['items']), 2)
+        self.assertTrue(first['has_more'])
+        self.assertEqual(len(second['items']), 2)
+        self.assertTrue(set(item['sticker_asset_id'] for item in first['items']).isdisjoint(
+            item['sticker_asset_id'] for item in second['items']
+        ))

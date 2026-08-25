@@ -15,6 +15,10 @@ def validate_hash(value):
 
 
 class StickerParams(metaclass=Params):
+    offset = Validator('offset').to(int) \
+        .bool(lambda value: value >= 0).default(0)
+    limit = Validator('limit').to(int) \
+        .bool(lambda value: 1 <= value <= 60).default(30)
     content_hash = Validator('content_hash').to(validate_hash)
     file_name = Validator('file_name').to(str)
     content_type = Validator('content_type').to(str).null().default(None)
