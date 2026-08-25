@@ -831,6 +831,7 @@ class UserPersonalizationView(View):
         UserParams.avatar_frame_style,
         UserParams.statement_card_style,
         UserParams.show_self_avatar,
+        UserParams.profile_card_theme,
     )
     def post(self, request: Request):
         request.user.set_personalization(
@@ -838,6 +839,7 @@ class UserPersonalizationView(View):
             avatar_frame_style=request.json.avatar_frame_style,
             statement_card_style=request.json.statement_card_style,
             show_self_avatar=request.json.show_self_avatar,
+            profile_card_theme=request.json.profile_card_theme,
         )
         return request.user.json_me()
 

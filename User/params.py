@@ -47,6 +47,9 @@ class UserParams(metaclass=Params):
     statement_card_style = Validator('statement_card_style').to(str).null().default(None).to(
         lambda value: User.validators.personalization('statement_card_style', value)
     )
+    profile_card_theme = Validator('profile_card_theme').to(str).null().default(None).to(
+        lambda value: User.validators.personalization('profile_card_theme', value)
+    )
     show_self_avatar = Validator('show_self_avatar') \
         .null().default(None) \
         .to(lambda value: None if value is None else int(value)) \

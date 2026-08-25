@@ -262,6 +262,7 @@ class User(models.Model):
     chat_background_uri = models.CharField(max_length=255, default='')
     chat_bubble_style = models.CharField(max_length=16, default='default')
     avatar_frame_style = models.CharField(max_length=16, default='none')
+    profile_card_theme = models.CharField(max_length=16, default='default')
     statement_card_style = models.CharField(max_length=16, default='default')
     show_self_avatar = models.BooleanField(default=False)
     pinned_square_statement_id = models.PositiveIntegerField(null=True, blank=True)
@@ -551,6 +552,8 @@ class User(models.Model):
         from TravelMap.unlocks import CITY_BUBBLE_RULES, city_bubble_requirement, unlocked_city_bubble_styles
 
         fields = ['chat_bubble_style', 'avatar_frame_style']
+        if values.get('profile_card_theme') is not None:
+            fields.append('profile_card_theme')
         if values.get('statement_card_style') is not None:
             fields.append('statement_card_style')
         if values.get('show_self_avatar') is not None:
@@ -577,6 +580,11 @@ class User(models.Model):
                     'avatar_frame_style': 'frame',
                     'statement_card_style': 'statement',
                 }.get(field)
+                if field == 'profile_card_theme':
+                    if normalized == 'level-12' and self.effective_growth_level() < 12:
+                        raise UserErrors.PERSONALIZATION_NOT_OWNED
+                    if normalized == 'vip' and not self.is_permanent_vip:
+                        raise UserErrors.PERSONALIZATION_NOT_OWNED
                 if capability_group:
                     self.require_capability(f'menu.personalization.{capability_group}.use.{normalized}')
                 if normalized in ACTIVITY_PERSONALIZATION.get(field, set()) and not UserResourceInventory.owns(
@@ -1129,6 +1137,7 @@ class User(models.Model):
         payload = self.dictify(
             'name', 'user_id', 'official', 'avatar_type', 'avatar_uri', 'avatar_cache_key', 'is_permanent_vip',
             'chat_bubble_style', 'avatar_frame_style', 'statement_card_style', 'growth_level',
+            'profile_card_theme',
         )
         payload['permanent_vip_slot'] = self.permanent_vip_slot()
         return payload
@@ -1157,6 +1166,7 @@ class User(models.Model):
             'chat_bubble_style',
             'avatar_frame_style',
             'statement_card_style',
+            'profile_card_theme',
             'avatar_type',
             'avatar_uri',
             'avatar_cache_key',
@@ -1223,6 +1233,7 @@ class User(models.Model):
             'chat_bubble_style',
             'avatar_frame_style',
             'statement_card_style',
+            'profile_card_theme',
             'show_self_avatar',
         )
         payload['chat_background_uri'] = (

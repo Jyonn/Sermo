@@ -129,6 +129,7 @@ class UserValidator:
         'statement_card_style': {
             'default', 'editorial', 'mosaic', 'hero', 'comic', 'receipt', 'vip', 'niko', 'fufu',
         },
+        'profile_card_theme': {'default', 'level-12', 'vip'},
     }
     GESTURE_LOCK_MIN_MINUTES = 1
     GESTURE_LOCK_MAX_MINUTES = 30

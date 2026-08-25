@@ -93,6 +93,28 @@ class CityBubbleUnlockTests(TestCase):
         self.assertTrue(self.user.json_me()['show_self_avatar'])
         self.assertNotIn('show_self_avatar', self.user.tiny_json())
 
+    def test_profile_card_theme_requires_level_or_vip(self):
+        with self.assertRaises(UserErrors.PERSONALIZATION_NOT_OWNED.__class__):
+            self.user.set_personalization(
+                chat_bubble_style='default', avatar_frame_style='none', profile_card_theme='level-12',
+            )
+        with patch.object(User, 'effective_growth_level', return_value=12):
+            self.user.set_personalization(
+                chat_bubble_style='default', avatar_frame_style='none', profile_card_theme='level-12',
+            )
+        self.assertEqual(self.user.profile_card_theme, 'level-12')
+
+        with self.assertRaises(UserErrors.PERSONALIZATION_NOT_OWNED.__class__):
+            self.user.set_personalization(
+                chat_bubble_style='default', avatar_frame_style='none', profile_card_theme='vip',
+            )
+        self.user.is_permanent_vip = True
+        self.user.save(update_fields=['is_permanent_vip'])
+        self.user.set_personalization(
+            chat_bubble_style='default', avatar_frame_style='none', profile_card_theme='vip',
+        )
+        self.assertEqual(self.user.profile_card_theme, 'vip')
+
     def test_custom_plaza_greeting_takes_precedence(self):
         self.assertEqual(
             User(language='zh-CN', plaza_greeting='  今天也要尽兴  ').display_plaza_greeting(),
