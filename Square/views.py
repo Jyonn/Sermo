@@ -135,7 +135,7 @@ class SquareStatusView(View):
         })
         activities = [ActivityService.payload(campaign, user) for campaign in ActivityCampaign.active()]
         activity_claimable = any(
-            item['claimable_points'] or item['personal_reward_claimable']
+            item['claimable_points'] or item['personal_reward_claimable'] or item['space_reward_claimable']
             for item in activities
         )
         vip_campaign = PermanentVipCampaign.status_for(user)
@@ -148,7 +148,7 @@ class SquareStatusView(View):
             activity_claimable=activity_claimable or vip_claimable,
             claimable_activity_keys=[
                 item['key'] for item in activities
-                if item['claimable_points'] or item['personal_reward_claimable']
+                if item['claimable_points'] or item['personal_reward_claimable'] or item['space_reward_claimable']
             ] + (['vip:founding-100'] if vip_claimable else []),
         )
 

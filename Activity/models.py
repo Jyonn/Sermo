@@ -241,15 +241,25 @@ class ActivityService:
             )
 
     @classmethod
-    def _unlock_crossed_milestones(cls, space_activity):
-        used_keys = set(space_activity.rewards.values_list('resource_key', flat=True))
-        unlocked = []
-        for milestone in space_activity.campaign.milestones.filter(threshold__lte=space_activity.total_points):
-            if space_activity.rewards.filter(milestone=milestone).exists():
-                continue
+    def claim_space_reward(cls, campaign, user):
+        """Claim the next reached space milestone without auto-granting on contribution."""
+        with transaction.atomic():
+            space_activity, _ = cls._progress(campaign, user)
+            space_activity = SpaceActivity.objects.select_for_update().get(id=space_activity.id)
+            claimed_milestone_ids = space_activity.rewards.values_list('milestone_id', flat=True)
+            milestone = (
+                campaign.milestones.filter(threshold__lte=space_activity.total_points)
+                .exclude(id__in=claimed_milestone_ids)
+                .order_by('threshold', 'id')
+                .first()
+            )
+            if milestone is None:
+                raise ValueError('space reward is not ready')
+
+            used_keys = set(space_activity.rewards.values_list('resource_key', flat=True))
             available = [item for item in milestone.reward_pool if item.get('resource_key') not in used_keys]
             if not available:
-                continue
+                raise ValueError('space reward pool is exhausted')
             choice = random.SystemRandom().choice(available)
             reward = SpaceActivityReward.objects.create(
                 space_activity=space_activity,
@@ -258,10 +268,18 @@ class ActivityService:
                 reward_id=choice['reward_id'],
                 resource_key=choice['resource_key'],
             )
-            used_keys.add(reward.resource_key)
             cls._grant_reward_to_members(reward)
-            unlocked.append(reward)
-        return unlocked
+        return reward
+
+    @classmethod
+    def _claimable_space_milestone(cls, space_activity):
+        claimed_milestone_ids = space_activity.rewards.values_list('milestone_id', flat=True)
+        return (
+            space_activity.campaign.milestones.filter(threshold__lte=space_activity.total_points)
+            .exclude(id__in=claimed_milestone_ids)
+            .order_by('threshold', 'id')
+            .first()
+        )
 
     @classmethod
     def contribute(cls, campaign, user):
@@ -278,7 +296,6 @@ class ActivityService:
                 space_activity.total_points += amount
                 space_activity.save(update_fields=['total_points', 'updated_at'])
                 cls._record_crossed_awakenings(space_activity, user, previous_total)
-                cls._unlock_crossed_milestones(space_activity)
         return amount
 
     @classmethod
@@ -330,12 +347,14 @@ class ActivityService:
         rewards = {item.milestone_id: item for item in space_activity.rewards.select_related('milestone')}
         for reward in rewards.values():
             cls._grant_reward_to_members(reward)
+        claimable_space_milestone = cls._claimable_space_milestone(space_activity)
         milestones = []
         for item in campaign.milestones.all():
             reward = rewards.get(item.id)
             milestones.append(dict(
                 threshold=item.threshold,
                 unlocked=reward is not None,
+                claimable=claimable_space_milestone is not None and item.id == claimable_space_milestone.id,
                 resource_key=reward.resource_key if reward else '',
                 reward_id=reward.reward_id if reward else '',
                 reward_label=item.reward_label,
@@ -363,6 +382,10 @@ class ActivityService:
                 resource_key=personal_reward.resource_key,
                 reward_id=personal_reward.reward_id,
             ) if personal_reward and personal_reward.claimed_at else None,
+            space_reward_claimable=dict(
+                threshold=claimable_space_milestone.threshold,
+                reward_label=claimable_space_milestone.reward_label,
+            ) if claimable_space_milestone else None,
             official_user=user.space.official_user.tiny_json() if user.space.official_user_id else None,
             space_total=space_activity.total_points,
             target=max([item['threshold'] for item in milestones], default=0),

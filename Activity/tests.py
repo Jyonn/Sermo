@@ -3,7 +3,7 @@ from datetime import timedelta
 from django.test import TestCase
 from django.utils import timezone
 
-from Activity.models import ActivityAwakening, ActivityCampaign, ActivityEvent, ActivityMilestone, ActivityService, UserActivityReward
+from Activity.models import ActivityAwakening, ActivityCampaign, ActivityEvent, ActivityMilestone, ActivityService, SpaceActivityReward, UserActivityReward
 from Space.models import Space
 from User.models import User, UserResourceInventory
 
@@ -54,7 +54,15 @@ class ActivityServiceTests(TestCase):
 
         amount = ActivityService.contribute(self.campaign, self.user)
         self.assertEqual(amount, 1)
-        self.assertTrue(UserResourceInventory.objects.filter(user=self.user, source='activity').exists())
+        payload = ActivityService.payload(self.campaign, self.user)
+        self.assertEqual(payload['space_reward_claimable']['threshold'], 1)
+        self.assertFalse(SpaceActivityReward.objects.filter(space_activity__space=self.space).exists())
+        reward = ActivityService.claim_space_reward(self.campaign, self.user)
+        self.assertEqual(reward.milestone.threshold, 1)
+        self.assertIsNone(ActivityService.payload(self.campaign, self.user)['space_reward_claimable'])
+        self.assertTrue(UserResourceInventory.objects.filter(
+            user=self.user, source='activity', resource_key=reward.resource_key,
+        ).exists())
         self.assertTrue(ActivityAwakening.objects.filter(space_activity__space=self.space, user=self.user).exists())
 
     def test_payload_exposes_space_official_user(self):
