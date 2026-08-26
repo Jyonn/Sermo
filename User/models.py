@@ -2516,12 +2516,13 @@ class NotificationEvent(models.Model):
         return NotificationAudienceChoice.FRIEND if is_friend else NotificationAudienceChoice.OTHER
 
     def json(self):
+        anonymous_actor = bool((self.payload or {}).get('anonymous_actor'))
         return dict(
             notification_event_id=self.id,
             event_type=self.event_type,
             topic=self.topic(),
             audience=self.audience(),
-            actor=self.actor.tiny_json() if self.actor_id else None,
+            actor=(dict(user_id=0, name='', anonymous=True) if anonymous_actor else self.actor.tiny_json()) if self.actor_id else None,
             payload=self.payload or {},
             is_read=self.is_read,
             created_at=self.created_at.timestamp(),
@@ -2556,7 +2557,7 @@ class NotificationEvent(models.Model):
         hide_message_content=False,
     ):
         payload = self.payload or {}
-        actor_name = self.actor.name if self.actor_id else None
+        actor_name = str(_('Anonymous user')) if payload.get('anonymous_actor') else self.actor.name if self.actor_id else None
 
         if self.event_type == NotificationEventTypeChoice.DIRECT_MESSAGE:
             if hide_message_content:
@@ -2735,7 +2736,7 @@ class NotificationEvent(models.Model):
         return event
 
     @classmethod
-    def emit_square_event(cls, user, actor, event_type, statement_id, comment_id=None):
+    def emit_square_event(cls, user, actor, event_type, statement_id, comment_id=None, anonymous_actor=False):
         if user.id == actor.id:
             return None
         event = cls.objects.create(
@@ -2743,7 +2744,7 @@ class NotificationEvent(models.Model):
             user=user,
             actor=actor,
             event_type=event_type,
-            payload=dict(statement_id=statement_id, comment_id=comment_id),
+            payload=dict(statement_id=statement_id, comment_id=comment_id, anonymous_actor=bool(anonymous_actor)),
         )
         cls._enqueue_deliveries_after_commit([event.id])
         return event

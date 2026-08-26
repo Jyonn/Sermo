@@ -67,6 +67,26 @@ def frequency_limits_for_user(user):
     return min(daily, policy_limits.get('daily', daily)), min(weekly, policy_limits.get('weekly', weekly))
 
 
+def anonymous_weekly_limit_for_user(user):
+    if user.is_official:
+        return None
+    _daily, weekly = frequency_limits_for_user(user)
+    return int(weekly * 0.4)
+
+
+def anonymous_user_json():
+    return dict(
+        user_id=0,
+        name='',
+        official=False,
+        anonymous=True,
+        avatar_type='preset',
+        avatar_uri='',
+        is_permanent_vip=False,
+        growth_level=0,
+    )
+
+
 def _enforce_frequency(queryset, user, multiplier=1):
     if user.is_official:
         return
@@ -97,6 +117,7 @@ class Statement(models.Model):
     )
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
     is_deleted = models.BooleanField(default=False, db_index=True)
+    is_anonymous = models.BooleanField(default=False, db_index=True)
 
     class Meta:
         ordering = ['-id']
@@ -130,11 +151,11 @@ class Statement(models.Model):
                 status=FriendshipStatusChoice.ACCEPTED,
             ).filter(Q(user_low=user) | Q(user_high=user)).values_list('user_low_id', 'user_high_id')
             friend_ids = [high_id if low_id == user.id else low_id for low_id, high_id in friendships]
-            queryset = queryset.filter(user_id__in=[user.id, *friend_ids])
+            queryset = queryset.filter(user_id__in=[user.id, *friend_ids], is_anonymous=False)
         elif scope == 'mine':
             queryset = queryset.filter(user=user)
         if user_id is not None:
-            queryset = queryset.filter(user_id=user_id)
+            queryset = queryset.filter(user_id=user_id, is_anonymous=False)
         if before:
             queryset = queryset.filter(id__lt=before)
         return [item.jsonl(request=request) for item in queryset.order_by('-created_at', '-id')[:limit]]
@@ -167,9 +188,24 @@ class Statement(models.Model):
         return statement.jsonl(request=request)
 
     @classmethod
-    def create_statement(cls, user, text, visibility, media, location=None, forward_bundle=None):
+    def create_statement(cls, user, text, visibility, media, location=None, forward_bundle=None, is_anonymous=False):
         user.require_capability('square.statement.publish')
         _enforce_frequency(cls.objects.filter(space=user.space, is_deleted=False), user)
+        is_anonymous = bool(is_anonymous)
+        if is_anonymous:
+            if not user.space.square_explore_enabled:
+                raise SquareErrors.ANONYMOUS_REQUIRES_EXPLORE
+            if visibility != 'public':
+                raise SquareErrors.ANONYMOUS_VISIBILITY_INVALID
+            anonymous_limit = anonymous_weekly_limit_for_user(user)
+            if anonymous_limit is not None and cls.objects.filter(
+                space=user.space,
+                user=user,
+                is_deleted=False,
+                is_anonymous=True,
+                created_at__gte=timezone.now() - timedelta(days=7),
+            ).count() >= anonymous_limit:
+                raise SquareErrors.ANONYMOUS_WEEKLY_LIMIT_REACHED
         normalized_text = (text or '').strip()
         if len(normalized_text) > 140:
             raise SquareErrors.TEXT_TOO_LONG
@@ -222,6 +258,7 @@ class Statement(models.Model):
             address=normalized_location.get('address', '') if normalized_location else '',
             geocoding_provider=normalized_location.get('geocoding_provider', '') if normalized_location else '',
             forward_bundle=forward_bundle,
+            is_anonymous=is_anonymous,
         )
         StatementMedia.objects.bulk_create([
             StatementMedia(statement=statement, position=index, media_asset=item['media_asset'])
@@ -240,8 +277,9 @@ class Statement(models.Model):
                 user.award_growth(media_events[kind])
         media_ids = list(statement.media.values_list('id', flat=True))
         transaction.on_commit(lambda: [StatementMedia.fetch_metadata_async(media_id) for media_id in media_ids])
-        from Chat.models import ChatUserPreference
-        transaction.on_commit(lambda: ChatUserPreference.emit_peer_statement_events(statement))
+        if not is_anonymous:
+            from Chat.models import ChatUserPreference
+            transaction.on_commit(lambda: ChatUserPreference.emit_peer_statement_events(statement))
         from Activity.models import ActivityService
         ActivityService.record_event(user, 'square.statement.publish', statement.id)
         return cls.objects.select_related('user', 'forward_bundle').prefetch_related(
@@ -254,7 +292,9 @@ class Statement(models.Model):
             viewer = None
         return dict(
             statement_id=self.id,
-            user=self.user.tiny_json(),
+            user=anonymous_user_json() if self.is_anonymous else self.user.tiny_json(),
+            is_anonymous=self.is_anonymous,
+            is_mine=bool(viewer and viewer.id == self.user_id),
             text=self.text,
             visibility='friends' if self.visibility == StatementVisibilityChoice.FRIENDS else 'public',
             location=(dict(
@@ -288,6 +328,7 @@ class StatementComment(models.Model):
     text = models.CharField(max_length=140)
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
     is_deleted = models.BooleanField(default=False, db_index=True)
+    is_anonymous = models.BooleanField(default=False, db_index=True)
 
     class Meta:
         ordering = ['-id']
@@ -337,7 +378,7 @@ class StatementComment(models.Model):
         return [comment.jsonl(viewer=user, include_replies=True) for comment in roots[offset:offset + limit]]
 
     @classmethod
-    def create_comment(cls, user, statement_id, text, parent_id=None):
+    def create_comment(cls, user, statement_id, text, parent_id=None, is_anonymous=False):
         user.require_capability('square.interaction.reply' if parent_id is not None else 'square.interaction.comment')
         _enforce_frequency(cls.objects.filter(statement__space=user.space, is_deleted=False), user, multiplier=5)
         normalized_text = (text or '').strip()
@@ -346,6 +387,9 @@ class StatementComment(models.Model):
         if len(normalized_text) > 140:
             raise SquareErrors.COMMENT_TOO_LONG
         statement = cls.statement_for_user(user, statement_id)
+        is_anonymous = bool(is_anonymous)
+        if is_anonymous and (not statement.is_anonymous or statement.user_id != user.id):
+            raise SquareErrors.ANONYMOUS_COMMENT_FORBIDDEN
         parent = None
         if parent_id is not None:
             try:
@@ -356,7 +400,13 @@ class StatementComment(models.Model):
                 )
             except cls.DoesNotExist:
                 raise SquareErrors.NOT_EXISTS
-        comment = cls.objects.create(statement=statement, user=user, text=normalized_text, parent=parent)
+        comment = cls.objects.create(
+            statement=statement,
+            user=user,
+            text=normalized_text,
+            parent=parent,
+            is_anonymous=is_anonymous,
+        )
         if parent is not None:
             root = parent
             while root.parent_id is not None:
@@ -377,8 +427,10 @@ class StatementComment(models.Model):
             statement_id=self.statement_id,
             parent_id=self.parent_id,
             root_id=getattr(self, 'thread_root_id', self.parent_id),
-            reply_to_user=self.parent.user.tiny_json() if self.parent_id else None,
-            user=self.user.tiny_json(),
+            reply_to_user=(anonymous_user_json() if self.parent.is_anonymous else self.parent.user.tiny_json()) if self.parent_id else None,
+            user=anonymous_user_json() if self.is_anonymous else self.user.tiny_json(),
+            is_anonymous=self.is_anonymous,
+            is_author=self.user_id == self.statement.user_id,
             text=self.text,
             like_count=like_count,
             reply_count=reply_count,

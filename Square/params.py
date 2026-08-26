@@ -75,4 +75,5 @@ class SquareParams(metaclass=Params):
     file_name = Validator('file_name').to(str)
     content_type = Validator('content_type').to(str).null().default(None)
     comment_text = Validator('text').to(validate_comment_text)
+    anonymous = Validator('anonymous').to(int).bool(lambda value: value in (0, 1)).default(0)
     read_scope = Validator('scope').to(str).bool(lambda value: value in ('all', 'friends'))

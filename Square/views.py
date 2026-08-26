@@ -58,7 +58,7 @@ class StatementView(View):
         )
 
     @auth.require_user
-    @analyse.json(SquareParams.text, SquareParams.visibility, SquareParams.media, SquareParams.location, SquareParams.pin)
+    @analyse.json(SquareParams.text, SquareParams.visibility, SquareParams.media, SquareParams.location, SquareParams.pin, SquareParams.anonymous)
     def post(self, request: Request):
         request.user.space.require_square_enabled()
         with transaction.atomic():
@@ -68,6 +68,7 @@ class StatementView(View):
                 visibility=request.json.visibility,
                 media=raw(request.json.media),
                 location=raw(request.json.location),
+                is_anonymous=request.json.anonymous,
             )
             if request.json.pin:
                 if not request.user.is_official:
@@ -182,7 +183,7 @@ class SquareStatusView(View):
                 status=FriendshipStatusChoice.ACCEPTED,
             ).filter(Q(user_low=user) | Q(user_high=user)).values_list('user_low_id', 'user_high_id')
             friend_ids = [high_id if low_id == user.id else low_id for low_id, high_id in friendships]
-            queryset = queryset.filter(user_id__in=friend_ids)
+            queryset = queryset.filter(user_id__in=friend_ids, is_anonymous=False)
         return queryset.order_by('-id').values_list('id', flat=True).first() or 0
 
     @classmethod
@@ -367,7 +368,7 @@ class StatementCommentView(View):
         )
 
     @auth.require_user
-    @analyse.json(SquareParams.comment_text, SquareParams.parent_id)
+    @analyse.json(SquareParams.comment_text, SquareParams.parent_id, SquareParams.anonymous)
     def post(self, request: Request, statement_id: int):
         request.user.space.require_square_enabled()
         comment = StatementComment.create_comment(
@@ -375,16 +376,19 @@ class StatementCommentView(View):
             statement_id,
             request.json.text,
             parent_id=request.json.parent_id,
+            is_anonymous=request.json.anonymous,
         )
         if comment.parent_id:
             NotificationEvent.emit_square_event(
                 comment.parent.user, request.user, NotificationEventTypeChoice.SQUARE_COMMENT_REPLY,
                 comment.statement_id, comment.id,
+                anonymous_actor=comment.is_anonymous,
             )
         else:
             NotificationEvent.emit_square_event(
                 comment.statement.user, request.user, NotificationEventTypeChoice.SQUARE_STATEMENT_COMMENT,
                 comment.statement_id, comment.id,
+                anonymous_actor=comment.is_anonymous,
             )
         return comment.jsonl(viewer=request.user)
 

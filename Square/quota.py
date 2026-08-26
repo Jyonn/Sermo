@@ -8,6 +8,7 @@ from Square.models import (
     StatementCommentLike,
     StatementLike,
     frequency_limits_for_user,
+    anonymous_weekly_limit_for_user,
 )
 
 
@@ -35,6 +36,9 @@ def quota_for_user(user):
             daily_limit=None if unlimited else daily_limit,
             weekly_used=statements.filter(created_at__gte=week_start).count(),
             weekly_limit=None if unlimited else weekly_limit,
+            anonymous_weekly_used=statements.filter(is_anonymous=True, created_at__gte=week_start).count(),
+            anonymous_weekly_limit=None if unlimited else anonymous_weekly_limit_for_user(user),
+            anonymous_available=bool(user.space.square_explore_enabled),
         ),
         comments=dict(
             daily_used=comments.filter(created_at__gte=day_start).count(),

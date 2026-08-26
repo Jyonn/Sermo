@@ -1,4 +1,5 @@
 import json
+from datetime import timedelta
 from unittest.mock import patch
 
 from django.test import TestCase
@@ -120,6 +121,94 @@ class StatementApiTests(TestCase):
 
         self.assertEqual(len(friend_feed.json()['body']), 1)
         self.assertEqual(stranger_feed.json()['body'], [])
+
+    def test_anonymous_statement_is_sanitized_and_only_appears_in_explore_and_mine(self):
+        response = self.post_statement(self.author, {
+            'text': '不透露身份',
+            'visibility': 'public',
+            'media': [],
+            'anonymous': 1,
+        })
+
+        self.assertEqual(response.status_code, 200, response.content)
+        body = response.json()['body']
+        self.assertTrue(body['is_anonymous'])
+        self.assertTrue(body['is_mine'])
+        self.assertEqual(body['user']['user_id'], 0)
+        self.assertEqual(body['user']['name'], '')
+
+        explore = self.client.get('/square/statements?scope=all&limit=20', **self.authorization(self.friend))
+        friends = self.client.get('/square/statements?scope=friends&limit=20', **self.authorization(self.friend))
+        mine = self.client.get('/square/statements?scope=mine&limit=20', **self.authorization(self.author))
+        profile = self.client.get(
+            f'/square/statements?scope=all&user_id={self.author.id}&limit=20',
+            **self.authorization(self.friend),
+        )
+
+        self.assertEqual(explore.json()['body'][0]['user']['user_id'], 0)
+        self.assertEqual(friends.json()['body'], [])
+        self.assertEqual(mine.json()['body'][0]['statement_id'], body['statement_id'])
+        self.assertEqual(profile.json()['body'], [])
+
+    def test_anonymous_statement_requires_explore_and_public_visibility(self):
+        self.space.square_explore_enabled = False
+        self.space.save(update_fields=['square_explore_enabled'])
+        disabled = self.post_statement(self.author, {
+            'text': '不能匿名', 'visibility': 'public', 'media': [], 'anonymous': 1,
+        })
+        self.assertEqual(disabled.status_code, 403, disabled.content)
+        self.assertEqual(disabled.json()['identifier'], 'SQUARE@ANONYMOUS_REQUIRES_EXPLORE')
+
+        self.space.square_explore_enabled = True
+        self.space.save(update_fields=['square_explore_enabled'])
+        friends_only = self.post_statement(self.author, {
+            'text': '不能匿名', 'visibility': 'friends', 'media': [], 'anonymous': 1,
+        })
+        self.assertEqual(friends_only.status_code, 400, friends_only.content)
+        self.assertEqual(friends_only.json()['identifier'], 'SQUARE@ANONYMOUS_VISIBILITY_INVALID')
+
+    def test_anonymous_statement_has_independent_forty_percent_weekly_limit(self):
+        first = Statement.create_statement(self.author, '第一条匿名', 'public', [], is_anonymous=True)
+        Statement.objects.filter(id=first.id).update(created_at=timezone.now() - timedelta(days=2))
+        second = Statement.create_statement(self.author, '第二条匿名', 'public', [], is_anonymous=True)
+        Statement.objects.filter(id=second.id).update(created_at=timezone.now() - timedelta(days=4))
+
+        denied = self.post_statement(self.author, {
+            'text': '第三条匿名', 'visibility': 'public', 'media': [], 'anonymous': 1,
+        })
+        self.assertEqual(denied.status_code, 403, denied.content)
+        self.assertEqual(denied.json()['identifier'], 'SQUARE@ANONYMOUS_WEEKLY_LIMIT_REACHED')
+
+        quota = self.client.get('/square/quota', **self.authorization(self.author)).json()['body']
+        self.assertEqual(quota['statements']['weekly_limit'], 5)
+        self.assertEqual(quota['statements']['anonymous_weekly_limit'], 2)
+        self.assertEqual(quota['statements']['anonymous_weekly_used'], 2)
+
+    def test_only_anonymous_statement_author_can_comment_anonymously(self):
+        statement = Statement.create_statement(self.author, '匿名主题', 'public', [], is_anonymous=True)
+        author_comment = self.client.post(
+            f'/square/statements/{statement.id}/comments',
+            data=json.dumps({'text': '作者匿名回复', 'anonymous': 1}),
+            content_type='application/json',
+            **self.authorization(self.author),
+        )
+        self.assertEqual(author_comment.status_code, 200, author_comment.content)
+        comment = author_comment.json()['body']
+        self.assertTrue(comment['is_anonymous'])
+        self.assertTrue(comment['is_author'])
+        self.assertEqual(comment['user']['user_id'], 0)
+
+        public_author_comment = StatementComment.create_comment(self.author, statement.id, '作者公开回复')
+        self.assertTrue(public_author_comment.jsonl(viewer=self.author)['is_author'])
+
+        denied = self.client.post(
+            f'/square/statements/{statement.id}/comments',
+            data=json.dumps({'text': '访客匿名回复', 'anonymous': 1}),
+            content_type='application/json',
+            **self.authorization(self.friend),
+        )
+        self.assertEqual(denied.status_code, 403, denied.content)
+        self.assertEqual(denied.json()['identifier'], 'SQUARE@ANONYMOUS_COMMENT_FORBIDDEN')
 
     def test_admin_feed_includes_friends_only_statement(self):
         Statement.create_statement(self.author, '朋友可见', 'friends', [])

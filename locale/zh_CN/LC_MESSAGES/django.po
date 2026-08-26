@@ -905,3 +905,18 @@ msgstr "云端空间已满"
 
 msgid "This resource is still used by messages"
 msgstr "该资源仍被消息引用"
+
+msgid "Weekly anonymous statement limit reached"
+msgstr "本周匿名发言额度已用完"
+
+msgid "Anonymous statements require Explore to be enabled"
+msgstr "空间开启探索后才可匿名发言"
+
+msgid "Anonymous statements must be visible in Explore"
+msgstr "匿名发言只能发布到探索"
+
+msgid "Only the anonymous statement author can comment anonymously"
+msgstr "只有匿名发言的作者可以匿名评论"
+
+msgid "Anonymous user"
+msgstr "匿名用户"
