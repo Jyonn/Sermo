@@ -115,6 +115,7 @@ class Statement(models.Model):
         'Message.ForwardBundle', on_delete=models.PROTECT, null=True, blank=True,
         related_name='square_statements',
     )
+    chat_record_redacted = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
     is_deleted = models.BooleanField(default=False, db_index=True)
     is_anonymous = models.BooleanField(default=False, db_index=True)
@@ -188,7 +189,10 @@ class Statement(models.Model):
         return statement.jsonl(request=request)
 
     @classmethod
-    def create_statement(cls, user, text, visibility, media, location=None, forward_bundle=None, is_anonymous=False):
+    def create_statement(
+        cls, user, text, visibility, media, location=None, forward_bundle=None,
+        is_anonymous=False, chat_record_redacted=False,
+    ):
         user.require_capability('square.statement.publish')
         _enforce_frequency(cls.objects.filter(space=user.space, is_deleted=False), user)
         is_anonymous = bool(is_anonymous)
@@ -258,6 +262,7 @@ class Statement(models.Model):
             address=normalized_location.get('address', '') if normalized_location else '',
             geocoding_provider=normalized_location.get('geocoding_provider', '') if normalized_location else '',
             forward_bundle=forward_bundle,
+            chat_record_redacted=bool(chat_record_redacted and forward_bundle is not None),
             is_anonymous=is_anonymous,
         )
         StatementMedia.objects.bulk_create([
@@ -304,7 +309,10 @@ class Statement(models.Model):
                 geocoding_provider=self.geocoding_provider,
             ) if self.latitude is not None and self.longitude is not None else None),
             media=[item.jsonl(request=request) for item in self.media.all()],
-            chat_record=self.forward_bundle.jsonl(request=request) if self.forward_bundle_id else None,
+            chat_record=(
+                self.forward_bundle.jsonl(request=request, redact_identity=self.chat_record_redacted)
+                if self.forward_bundle_id else None
+            ),
             comment_count=getattr(self, 'visible_comment_count', self.comments.filter(is_deleted=False).count()),
             like_count=getattr(self, 'visible_like_count', self.likes.count()),
             liked=bool(getattr(self, 'viewer_liked', viewer and self.likes.filter(user=viewer).exists())),

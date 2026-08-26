@@ -85,6 +85,36 @@ class StatementApiTests(TestCase):
 
         self.assertEqual(response.status_code, 403, response.content)
 
+    def test_official_account_can_redact_chat_record_statement(self):
+        official = self.space.ensure_official_user()
+        Friendship.ensure_locked_friendship(official, self.author)
+        chat = Chat.get_or_create_direct(official, self.author)
+        first = Message.create(chat, official, 0, '官方消息')
+        second = Message.create(chat, self.author, 0, '成员消息')
+
+        response = self.client.post(
+            '/square/statements/chat-record',
+            data=json.dumps({
+                'message_ids': [first.id, second.id],
+                'visibility': 'public',
+                'redact_chat_record': 1,
+            }),
+            content_type='application/json',
+            **self.authorization(official),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        statement = Statement.objects.get(id=response.json()['body']['statement_id'])
+        self.assertTrue(statement.chat_record_redacted)
+        record = response.json()['body']['chat_record']
+        self.assertTrue(record['redacted_identity'])
+        self.assertLess(record['first_person_user_id'], 0)
+        self.assertEqual([item['author']['name'] for item in record['items']], ['01', '02'])
+        for item in record['items']:
+            self.assertEqual(item['author']['avatar_uri'], '')
+            self.assertEqual(item['author']['chat_bubble_style'], 'default')
+            self.assertNotIn('Author', item['author'].values())
+
     def test_pinned_statement_returns_empty_success_when_none_exists(self):
         response = self.client.get('/square/statements/pinned', **self.authorization(self.stranger))
 

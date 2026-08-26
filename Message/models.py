@@ -2061,10 +2061,32 @@ class ForwardBundle(models.Model):
             MediaResource.objects.get(id=resource_id).recalculate_reference_count()
         return bundle
 
-    def jsonl(self, request=None):
+    def jsonl(self, request=None, redact_identity=False):
         prefetched = getattr(self, '_prefetched_objects_cache', {}).get('items')
         bundle_items = prefetched if prefetched is not None else self.items.select_related('media_resource__asset').order_by('position')
         items = [item.jsonl(request=request) for item in bundle_items]
+        first_person_user_id = self.created_by_id
+        if redact_identity:
+            author_ids = []
+            for item in items:
+                author_id = (item.get('author') or {}).get('user_id')
+                if author_id not in author_ids:
+                    author_ids.append(author_id)
+            pseudonyms = {author_id: -(index + 1) for index, author_id in enumerate(author_ids)}
+            for item in items:
+                author_id = (item.get('author') or {}).get('user_id')
+                pseudonym = pseudonyms[author_id]
+                item['author'] = {
+                    'user_id': pseudonym,
+                    'name': f'{abs(pseudonym):02d}',
+                    'official': False,
+                    'avatar_type': 'preset',
+                    'avatar_uri': '',
+                    'is_permanent_vip': False,
+                    'chat_bubble_style': 'default',
+                    'avatar_frame_style': 'none',
+                }
+            first_person_user_id = pseudonyms.get(self.created_by_id)
         authors = []
         for item in items:
             name = str((item.get('author') or {}).get('name') or '').strip()
@@ -2073,7 +2095,8 @@ class ForwardBundle(models.Model):
         return dict(
             kind='forward_bundle',
             bundle_id=self.id,
-            first_person_user_id=self.created_by_id,
+            first_person_user_id=first_person_user_id,
+            redacted_identity=bool(redact_identity),
             title=_('Chat history'),
             summary=', '.join(authors[:3]),
             item_count=len(items),

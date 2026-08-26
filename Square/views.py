@@ -80,7 +80,7 @@ class StatementView(View):
 
 class SquareChatRecordStatementView(View):
     @auth.require_user
-    @analyse.json(MessageParams.message_ids, SquareParams.visibility)
+    @analyse.json(MessageParams.message_ids, SquareParams.visibility, SquareParams.redact_chat_record)
     def post(self, request: Request):
         request.user.space.require_square_enabled()
         request.user.space.require_chat_enabled()
@@ -113,6 +113,7 @@ class SquareChatRecordStatementView(View):
             bundle = ForwardBundle.create_from_messages(messages, request.user, request=request)
             statement = Statement.create_statement(
                 request.user, '', request.json.visibility, [], forward_bundle=bundle,
+                chat_record_redacted=request.json.redact_chat_record,
             )
         return statement.jsonl(request=request)
 
