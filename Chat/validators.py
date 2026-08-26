@@ -25,6 +25,7 @@ class ChatMemberErrors:
     INVITE_NOT_FOUND = Error(_('Invite not found for this chat'))
     INVITE_CLOSED = Error(_('Invite is not pending'))
     OWNER_LEAVE_FORBIDDEN = Error(_('Owner cannot leave group chat directly'))
+    OWNER_TRANSFER_TO_SELF = Error(_('Owner cannot transfer the group to themselves'))
 
 
 class ChatValidator:

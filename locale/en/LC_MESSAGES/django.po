@@ -818,3 +818,8 @@ msgstr "Shared an activity."
 
 #~ msgid "Failed to send verification email"
 #~ msgstr "Failed to send verification email"
+msgid "Owner cannot transfer the group to themselves"
+msgstr "Owner cannot transfer the group to themselves"
+
+msgid "%(actor)s transferred group ownership to %(owner)s"
+msgstr "%(actor)s transferred group ownership to %(owner)s"

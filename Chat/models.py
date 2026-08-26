@@ -73,8 +73,13 @@ class Chat(models.Model):
             chat=self,
             status=ChatMemberStatusChoice.ACTIVE,
             user__is_deleted=False,
-        ).select_related('user').order_by('user__name_pinyin', 'user__lower_name', 'user_id')
-        return [item.user.jsonl() for item in members]
+        ).select_related('user').order_by('joined_at', 'created_at', 'id')
+        payload = []
+        for item in members:
+            user = item.user.jsonl()
+            user['joined_at'] = item.joined_at.timestamp() if item.joined_at else item.created_at.timestamp()
+            payload.append(user)
+        return payload
 
     def _dictify_owner(self):
         owner = ChatMember.objects.filter(
@@ -356,6 +361,44 @@ class Chat(models.Model):
                     member_count=len(members),
                 )
             return members
+
+    def transfer_ownership(self, operator: User, target: User):
+        if not self.group:
+            raise ChatErrors.NOT_GROUP_CHAT(chat=self.id)
+        if operator.id == target.id:
+            raise ChatMemberErrors.OWNER_TRANSFER_TO_SELF
+
+        with transaction.atomic():
+            owner_member = ChatMember.objects.select_for_update().filter(
+                chat=self,
+                user=operator,
+                role=ChatMemberRoleChoice.OWNER,
+                status=ChatMemberStatusChoice.ACTIVE,
+            ).first()
+            if owner_member is None:
+                raise ChatErrors.FORBIDDEN
+            target_member = ChatMember.objects.select_for_update().filter(
+                chat=self,
+                user=target,
+                status=ChatMemberStatusChoice.ACTIVE,
+                user__is_deleted=False,
+            ).first()
+            if target_member is None:
+                raise ChatMemberErrors.NOT_MEMBER(user=target.name, chat=self.id)
+
+            owner_member.role = ChatMemberRoleChoice.MEMBER
+            owner_member.save(update_fields=['role', 'updated_at'])
+            target_member.role = ChatMemberRoleChoice.OWNER
+            target_member.save(update_fields=['role', 'updated_at'])
+
+            from Message.models import Message
+            Message.create_system(
+                self,
+                operator,
+                'ownership_transferred',
+                new_owner_name=target.name,
+            )
+        return target_member
 
     def leave(self, user: User):
         member = ChatMember.objects.filter(

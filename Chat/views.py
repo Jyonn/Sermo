@@ -99,6 +99,17 @@ class GroupChatMemberView(View):
         return chat.json()
 
 
+class GroupChatOwnerView(View):
+    @auth.require_user
+    @analyse.query(ChatMemberParams.chat_id)
+    @analyse.json(ChatMemberParams.user_id)
+    @auth.require_chat_owner()
+    def post(self, request):
+        chat: Chat = request.query.chat
+        chat.transfer_ownership(request.user, request.json.user)
+        return chat.json()
+
+
 class GroupChatInviteRespondView(View):
     @auth.require_user
     @analyse.query(ChatMemberParams.chat_id)

@@ -794,6 +794,11 @@ class Message(models.Model):
                     actor=actor,
                     title=str(payload.get('new_title') or '').strip(),
                 )
+            if event == 'ownership_transferred':
+                return _('%(actor)s transferred group ownership to %(owner)s') % dict(
+                    actor=actor,
+                    owner=str(payload.get('new_owner_name') or '').strip(),
+                )
             if event == 'message_pinned':
                 return _('%(actor)s pinned a message') % dict(actor=actor)
             if event == 'message_unpinned':

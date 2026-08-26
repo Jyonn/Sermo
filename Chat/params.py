@@ -37,6 +37,10 @@ class ChatMemberParams(metaclass=Params):
         .to(int) \
         .bool(lambda x: x in (0, 1), message=_('accept should be 0 or 1'))
 
+    user_id = Validator('user_id', final_name='user') \
+        .to(int) \
+        .to(User.index)
+
 
 class ChatPreferenceParams(metaclass=Params):
     pinned = Validator('pinned') \

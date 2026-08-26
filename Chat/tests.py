@@ -159,6 +159,21 @@ class ChatNotificationPreferenceTests(TestCase):
         self.assertEqual(payload['event'], 'members_removed')
         self.assertEqual(payload['member_names'], ['Recipient', 'Another'])
 
+    def test_owner_can_transfer_group_to_active_member(self):
+        self.chat.transfer_ownership(self.sender, self.recipient)
+
+        self.assertFalse(self.chat.is_owner(self.sender))
+        self.assertTrue(self.chat.is_owner(self.recipient))
+        payload = Message.objects.filter(chat=self.chat, type=MessageTypeChoice.SYSTEM).get()._payload_for_type()
+        self.assertEqual(payload['event'], 'ownership_transferred')
+        self.assertEqual(payload['new_owner_name'], 'Recipient')
+
+    def test_non_owner_cannot_transfer_group(self):
+        with self.assertRaises(Exception):
+            self.chat.transfer_ownership(self.recipient, self.sender)
+
+        self.assertTrue(self.chat.is_owner(self.sender))
+
 
 class GroupMessageVisibilityBoundaryTests(TestCase):
     def setUp(self):

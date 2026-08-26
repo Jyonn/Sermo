@@ -920,3 +920,8 @@ msgstr "只有匿名发言的作者可以匿名评论"
 
 msgid "Anonymous user"
 msgstr "匿名用户"
+msgid "Owner cannot transfer the group to themselves"
+msgstr "不能将群主转让给自己"
+
+msgid "%(actor)s transferred group ownership to %(owner)s"
+msgstr "%(actor)s 将群主转让给了 %(owner)s"
