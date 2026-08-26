@@ -1313,7 +1313,7 @@ class Message(models.Model):
 
     @classmethod
     def search(cls, chat: Chat, user: User, keyword=None, message_type=None, before=None, limit=30, request=None):
-        queryset = cls.visible_for_user(chat, user).select_related('user', 'reply_to', 'reply_to__user', 'media_resource__asset', 'forward_bundle').prefetch_related('chat_mentions__user', 'forward_bundle__items__media_resource__asset')
+        queryset = cls.visible_for_user(chat, user).exclude(type=MessageTypeChoice.STICKER).select_related('user', 'reply_to', 'reply_to__user', 'media_resource__asset', 'forward_bundle').prefetch_related('chat_mentions__user', 'forward_bundle__items__media_resource__asset')
         normalized_keyword = (keyword or '').strip()
         if normalized_keyword:
             queryset = queryset.filter(content__icontains=normalized_keyword)

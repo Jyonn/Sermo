@@ -236,3 +236,15 @@ class GroupMessageVisibilityBoundaryTests(TestCase):
         new_event = next(event for event in events if event['message_id'] == self.new_message.id)
         self.assertNotIn('message', old_event)
         self.assertEqual(new_event['message']['message_id'], self.new_message.id)
+
+    def test_search_excludes_sticker_messages(self):
+        sticker = Message.create(self.chat, self.owner, MessageTypeChoice.STICKER, 'sticker payload')
+
+        search = self.client.get(
+            f'/messages/search?chat_id={self.chat.id}&limit=30',
+            **self.authorization(self.new_member),
+        )
+
+        message_ids = [item['message_id'] for item in search.json()['body']['items']]
+        self.assertIn(self.new_message.id, message_ids)
+        self.assertNotIn(sticker.id, message_ids)
