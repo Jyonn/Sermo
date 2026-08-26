@@ -10,6 +10,7 @@ from Chat.models import Chat
 from Space.models import Space
 from Message.models import ForwardBundleItem, MediaAsset, Message
 from Square.models import Statement, StatementComment, StatementCommentLike, StatementLike, StatementMedia
+from Square.views import SquareStatusView
 from User.models import NotificationEvent, NotificationEventTypeChoice, User
 from utils import auth
 
@@ -322,6 +323,27 @@ class StatementApiTests(TestCase):
         Statement.create_statement(self.friend, '自己的发言', 'public', [])
         own = self.client.get('/square/status', **self.authorization(self.friend)).json()['body']
         self.assertFalse(own['friends_unread'])
+
+    def test_activity_attention_stops_after_all_rewards_are_claimed(self):
+        completed = {
+            'claimable_points': 1,
+            'personal_reward_claimable': False,
+            'space_reward_claimable': None,
+            'milestones': [{'unlocked': True}, {'unlocked': True}],
+        }
+        pending_space_progress = {
+            **completed,
+            'milestones': [{'unlocked': True}, {'unlocked': False}],
+        }
+        pending_personal_reward = {
+            **completed,
+            'claimable_points': 0,
+            'personal_reward_claimable': True,
+        }
+
+        self.assertFalse(SquareStatusView._activity_needs_attention(completed))
+        self.assertTrue(SquareStatusView._activity_needs_attention(pending_space_progress))
+        self.assertTrue(SquareStatusView._activity_needs_attention(pending_personal_reward))
 
     def test_square_notification_feed_can_start_with_unread_and_page_history(self):
         old = NotificationEvent.objects.create(

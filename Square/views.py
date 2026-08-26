@@ -183,6 +183,13 @@ class SquareQuotaView(View):
 
 class SquareStatusView(View):
     @staticmethod
+    def _activity_needs_attention(activity):
+        if activity['personal_reward_claimable'] or activity['space_reward_claimable']:
+            return True
+        has_locked_space_reward = any(not milestone['unlocked'] for milestone in activity['milestones'])
+        return bool(activity['claimable_points'] and has_locked_space_reward)
+
+    @staticmethod
     def _latest_visible_id(user, scope):
         queryset = Statement.visible_for(user).exclude(user=user)
         if scope == 'friends':
@@ -203,10 +210,8 @@ class SquareStatusView(View):
             'friends_statement_id': friends_latest,
         })
         activities = [ActivityService.payload(campaign, user) for campaign in ActivityCampaign.active()]
-        activity_claimable = any(
-            item['claimable_points'] or item['personal_reward_claimable'] or item['space_reward_claimable']
-            for item in activities
-        )
+        claimable_activities = [item for item in activities if cls._activity_needs_attention(item)]
+        activity_claimable = bool(claimable_activities)
         vip_campaign = PermanentVipCampaign.status_for(user)
         vip_claimable = vip_campaign['active'] and vip_campaign['eligible']
         _updated, notification_unread = NotificationEvent.mark_square_events_read(user, statement_id=-1)
@@ -216,8 +221,7 @@ class SquareStatusView(View):
             friends_unread=friends_latest > state.friends_statement_id,
             activity_claimable=activity_claimable or vip_claimable,
             claimable_activity_keys=[
-                item['key'] for item in activities
-                if item['claimable_points'] or item['personal_reward_claimable'] or item['space_reward_claimable']
+                item['key'] for item in claimable_activities
             ] + (['vip:founding-100'] if vip_claimable else []),
         )
 
