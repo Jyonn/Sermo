@@ -71,6 +71,38 @@ class StatementApiTests(TestCase):
         self.assertEqual(ForwardBundleItem.objects.filter(bundle=statement.forward_bundle).count(), 2)
         self.assertEqual(response.json()['body']['chat_record']['first_person_user_id'], official.id)
 
+    def test_official_account_can_add_text_location_and_pin_to_chat_record_statement(self):
+        official = self.space.ensure_official_user()
+        Friendship.ensure_locked_friendship(official, self.author)
+        chat = Chat.get_or_create_direct(official, self.author)
+        message = Message.create(chat, official, 0, '可转发消息')
+
+        response = self.client.post(
+            '/square/statements/chat-record',
+            data=json.dumps({
+                'message_ids': [message.id],
+                'text': '补充说明',
+                'visibility': 'friends',
+                'location': {
+                    'latitude': 31.2304,
+                    'longitude': 121.4737,
+                    'address': '上海市',
+                    'geocoding_provider': 'test',
+                },
+                'pin': 1,
+            }),
+            content_type='application/json',
+            **self.authorization(official),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        statement = Statement.objects.get(id=response.json()['body']['statement_id'])
+        official.refresh_from_db()
+        self.assertEqual(statement.text, '补充说明')
+        self.assertEqual(statement.address, '上海市')
+        self.assertEqual(statement.visibility, 1)
+        self.assertEqual(official.pinned_square_statement_id, statement.id)
+
     def test_regular_member_cannot_publish_chat_record_statement(self):
         Friendship.ensure_locked_friendship(self.author, self.friend)
         chat = Chat.get_or_create_direct(self.author, self.friend)

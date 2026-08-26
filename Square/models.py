@@ -224,7 +224,7 @@ class Statement(models.Model):
         if forward_bundle is not None:
             if not user.is_official or forward_bundle.created_by_id != user.id:
                 raise SquareErrors.CHAT_RECORD_FORBIDDEN
-            if normalized_media or location:
+            if normalized_media:
                 raise SquareErrors.CHAT_RECORD_EXCLUSIVE
         media_capabilities = {
             StatementMediaKindChoice.IMAGE: 'square.statement.publish.image',

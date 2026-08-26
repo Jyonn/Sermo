@@ -80,7 +80,10 @@ class StatementView(View):
 
 class SquareChatRecordStatementView(View):
     @auth.require_user
-    @analyse.json(MessageParams.message_ids, SquareParams.visibility, SquareParams.redact_chat_record)
+    @analyse.json(
+        MessageParams.message_ids, SquareParams.text, SquareParams.visibility,
+        SquareParams.location, SquareParams.pin, SquareParams.redact_chat_record,
+    )
     def post(self, request: Request):
         request.user.space.require_square_enabled()
         request.user.space.require_chat_enabled()
@@ -112,9 +115,13 @@ class SquareChatRecordStatementView(View):
         with transaction.atomic():
             bundle = ForwardBundle.create_from_messages(messages, request.user, request=request)
             statement = Statement.create_statement(
-                request.user, '', request.json.visibility, [], forward_bundle=bundle,
+                request.user, request.json.text, request.json.visibility, [],
+                location=raw(request.json.location), forward_bundle=bundle,
                 chat_record_redacted=request.json.redact_chat_record,
             )
+            if request.json.pin:
+                request.user.pinned_square_statement_id = statement.id
+                request.user.save(update_fields=['pinned_square_statement_id'])
         return statement.jsonl(request=request)
 
 
