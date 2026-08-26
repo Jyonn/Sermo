@@ -24,3 +24,5 @@ class SquareErrors:
     DELETE_FORBIDDEN = Error(message=_('You cannot delete this statement'), code=Code.Forbidden)
     COMMENT_DELETE_FORBIDDEN = Error(message=_('You cannot delete this comment'), code=Code.Forbidden)
     PIN_FORBIDDEN = Error(message=_('Only the official account can pin its own statement'), code=Code.Forbidden)
+    CHAT_RECORD_FORBIDDEN = Error(message=_('Only the official account can publish chat records'), code=Code.Forbidden)
+    CHAT_RECORD_EXCLUSIVE = Error(message=_('Chat records cannot be combined with other attachments'), code=Code.BadRequest)

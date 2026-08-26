@@ -8,7 +8,8 @@ from Square.models import SquareReadState, Statement, StatementComment, Statemen
 from Activity.models import ActivityCampaign, ActivityService
 from Friendship.models import Friendship, FriendshipStatusChoice
 from django.db.models import Q
-from Message.models import MediaAsset, MediaAssetAlias
+from Message.models import ForwardBundle, MediaAsset, MediaAssetAlias, Message, MessageTypeChoice
+from Message.params import MessageParams
 from Square.params import SquareParams
 from Square.quota import quota_for_user
 from Square.validators import SquareErrors
@@ -73,6 +74,45 @@ class StatementView(View):
                     raise SquareErrors.PIN_FORBIDDEN
                 request.user.pinned_square_statement_id = statement.id
                 request.user.save(update_fields=['pinned_square_statement_id'])
+        return statement.jsonl(request=request)
+
+
+class SquareChatRecordStatementView(View):
+    @auth.require_user
+    @analyse.json(MessageParams.message_ids, SquareParams.visibility)
+    def post(self, request: Request):
+        request.user.space.require_square_enabled()
+        request.user.space.require_chat_enabled()
+        if not request.user.is_official:
+            raise SquareErrors.CHAT_RECORD_FORBIDDEN
+        message_ids = list(request.json.message_ids)
+        messages = list(
+            Message.objects.select_related('chat', 'user', 'media_resource__asset', 'forward_bundle')
+            .filter(id__in=message_ids, is_deleted=False)
+            .order_by('created_at', 'id')
+        )
+        if len(messages) != len(message_ids):
+            from Message.validators import MessageErrors
+            raise MessageErrors.NOT_EXISTS
+        if len({message.chat_id for message in messages}) != 1:
+            from Message.validators import MessageErrors
+            raise MessageErrors.FORWARD_TARGET_INVALID
+        allowed_types = {
+            MessageTypeChoice.TEXT, MessageTypeChoice.IMAGE, MessageTypeChoice.FILE,
+            MessageTypeChoice.VIDEO, MessageTypeChoice.AUDIO, MessageTypeChoice.LOCATION,
+            MessageTypeChoice.STATEMENT, MessageTypeChoice.STICKER, MessageTypeChoice.ACTIVITY,
+        }
+        from Message.validators import MessageErrors
+        for message in messages:
+            if message.type not in allowed_types:
+                raise MessageErrors.FORWARD_UNSUPPORTED
+            if not message.is_visible_to(request.user):
+                raise MessageErrors.NOT_A_MEMBER
+        with transaction.atomic():
+            bundle = ForwardBundle.create_from_messages(messages, request.user, request=request)
+            statement = Statement.create_statement(
+                request.user, '', request.json.visibility, [], forward_bundle=bundle,
+            )
         return statement.jsonl(request=request)
 
 

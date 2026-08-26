@@ -5,8 +5,9 @@ from django.test import TestCase
 from django.utils import timezone
 
 from Friendship.models import Friendship
+from Chat.models import Chat
 from Space.models import Space
-from Message.models import MediaAsset
+from Message.models import ForwardBundleItem, MediaAsset, Message
 from Square.models import Statement, StatementComment, StatementCommentLike, StatementLike, StatementMedia
 from User.models import NotificationEvent, NotificationEventTypeChoice, User
 from utils import auth
@@ -48,6 +49,40 @@ class StatementApiTests(TestCase):
             content_type='application/json',
             **self.authorization(user),
         )
+
+    def test_official_account_can_publish_selected_chat_as_statement(self):
+        official = self.space.ensure_official_user()
+        Friendship.ensure_locked_friendship(official, self.author)
+        chat = Chat.get_or_create_direct(official, self.author)
+        first = Message.create(chat, official, 0, '第一条')
+        second = Message.create(chat, self.author, 0, '第二条')
+
+        response = self.client.post(
+            '/square/statements/chat-record',
+            data=json.dumps({'message_ids': [first.id, second.id], 'visibility': 'public'}),
+            content_type='application/json',
+            **self.authorization(official),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        statement = Statement.objects.get(id=response.json()['body']['statement_id'])
+        self.assertIsNotNone(statement.forward_bundle_id)
+        self.assertEqual(ForwardBundleItem.objects.filter(bundle=statement.forward_bundle).count(), 2)
+        self.assertEqual(response.json()['body']['chat_record']['first_person_user_id'], official.id)
+
+    def test_regular_member_cannot_publish_chat_record_statement(self):
+        Friendship.ensure_locked_friendship(self.author, self.friend)
+        chat = Chat.get_or_create_direct(self.author, self.friend)
+        message = Message.create(chat, self.author, 0, '不可发布')
+
+        response = self.client.post(
+            '/square/statements/chat-record',
+            data=json.dumps({'message_ids': [message.id], 'visibility': 'public'}),
+            content_type='application/json',
+            **self.authorization(self.author),
+        )
+
+        self.assertEqual(response.status_code, 403, response.content)
 
     def test_pinned_statement_returns_empty_success_when_none_exists(self):
         response = self.client.get('/square/statements/pinned', **self.authorization(self.stranger))

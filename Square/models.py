@@ -7,7 +7,7 @@ from django.urls import reverse
 from smartdjango import Choice, models
 
 from Friendship.models import Friendship, FriendshipStatusChoice
-from Message.models import MessageValidator
+from Message.models import ForwardBundle, ForwardBundleItem, MessageValidator
 from Square.validators import SquareErrors
 from utils.qiniu import avatar_uri_for_key, validate_message_media_key
 
@@ -37,6 +37,13 @@ class SquareReadState(models.Model):
 
 def statement_media_prefetch():
     return Prefetch('media', queryset=StatementMedia.objects.select_related('media_asset'))
+
+
+def statement_forward_bundle_prefetch():
+    return Prefetch(
+        'forward_bundle__items',
+        queryset=ForwardBundleItem.objects.select_related('media_resource__asset').order_by('position'),
+    )
 
 
 def _frequency_limits(level):
@@ -84,6 +91,10 @@ class Statement(models.Model):
     longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
     address = models.CharField(max_length=255, blank=True, default='')
     geocoding_provider = models.CharField(max_length=32, blank=True, default='')
+    forward_bundle = models.ForeignKey(
+        'Message.ForwardBundle', on_delete=models.PROTECT, null=True, blank=True,
+        related_name='square_statements',
+    )
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
     is_deleted = models.BooleanField(default=False, db_index=True)
 
@@ -106,7 +117,9 @@ class Statement(models.Model):
 
     @classmethod
     def feed(cls, user, before=None, limit=20, request=None, scope='all', user_id=None):
-        queryset = cls.visible_for(user).select_related('user').prefetch_related(statement_media_prefetch()).annotate(
+        queryset = cls.visible_for(user).select_related('user', 'forward_bundle').prefetch_related(
+            statement_media_prefetch(), statement_forward_bundle_prefetch(),
+        ).annotate(
             visible_comment_count=Count('comments', filter=Q(comments__is_deleted=False), distinct=True),
             visible_like_count=Count('likes', distinct=True),
             viewer_liked=Exists(StatementLike.objects.filter(statement_id=OuterRef('pk'), user=user)),
@@ -128,7 +141,9 @@ class Statement(models.Model):
 
     @classmethod
     def admin_feed(cls, space, viewer, before=None, limit=20, request=None):
-        queryset = cls.objects.filter(space=space, is_deleted=False).select_related('user').prefetch_related(statement_media_prefetch()).annotate(
+        queryset = cls.objects.filter(space=space, is_deleted=False).select_related('user', 'forward_bundle').prefetch_related(
+            statement_media_prefetch(), statement_forward_bundle_prefetch(),
+        ).annotate(
             visible_comment_count=Count('comments', filter=Q(comments__is_deleted=False), distinct=True),
             visible_like_count=Count('likes', distinct=True),
             viewer_liked=Exists(StatementLike.objects.filter(statement_id=OuterRef('pk'), user=viewer)),
@@ -140,7 +155,9 @@ class Statement(models.Model):
     @classmethod
     def detail(cls, user, statement_id, request=None):
         try:
-            statement = cls.visible_for(user).select_related('user').prefetch_related(statement_media_prefetch()).annotate(
+            statement = cls.visible_for(user).select_related('user', 'forward_bundle').prefetch_related(
+                statement_media_prefetch(), statement_forward_bundle_prefetch(),
+            ).annotate(
                 visible_comment_count=Count('comments', filter=Q(comments__is_deleted=False), distinct=True),
                 visible_like_count=Count('likes', distinct=True),
                 viewer_liked=Exists(StatementLike.objects.filter(statement_id=OuterRef('pk'), user=user)),
@@ -150,7 +167,7 @@ class Statement(models.Model):
         return statement.jsonl(request=request)
 
     @classmethod
-    def create_statement(cls, user, text, visibility, media, location=None):
+    def create_statement(cls, user, text, visibility, media, location=None, forward_bundle=None):
         user.require_capability('square.statement.publish')
         _enforce_frequency(cls.objects.filter(space=user.space, is_deleted=False), user)
         normalized_text = (text or '').strip()
@@ -164,16 +181,21 @@ class Statement(models.Model):
             raise SquareErrors.VISIBILITY_INVALID
 
         normalized_media = StatementMedia.normalize_payload(media)
+        if forward_bundle is not None:
+            if not user.is_official or forward_bundle.created_by_id != user.id:
+                raise SquareErrors.CHAT_RECORD_FORBIDDEN
+            if normalized_media or location:
+                raise SquareErrors.CHAT_RECORD_EXCLUSIVE
         media_capabilities = {
             StatementMediaKindChoice.IMAGE: 'square.statement.publish.image',
             StatementMediaKindChoice.AUDIO: 'square.statement.publish.audio',
             StatementMediaKindChoice.VIDEO: 'square.statement.publish.video',
         }
-        if not normalized_media:
+        if not normalized_media and forward_bundle is None:
             user.require_capability('square.statement.publish.text')
         for media_kind in {item['kind'] for item in normalized_media}:
             user.require_capability(media_capabilities[media_kind])
-        if not normalized_text and not normalized_media:
+        if not normalized_text and not normalized_media and forward_bundle is None:
             raise SquareErrors.CONTENT_REQUIRED
         StatementMedia.attach_assets(normalized_media)
         normalized_location = location or None
@@ -199,6 +221,7 @@ class Statement(models.Model):
             longitude=normalized_location['longitude'] if normalized_location else None,
             address=normalized_location.get('address', '') if normalized_location else '',
             geocoding_provider=normalized_location.get('geocoding_provider', '') if normalized_location else '',
+            forward_bundle=forward_bundle,
         )
         StatementMedia.objects.bulk_create([
             StatementMedia(statement=statement, position=index, media_asset=item['media_asset'])
@@ -221,7 +244,9 @@ class Statement(models.Model):
         transaction.on_commit(lambda: ChatUserPreference.emit_peer_statement_events(statement))
         from Activity.models import ActivityService
         ActivityService.record_event(user, 'square.statement.publish', statement.id)
-        return cls.objects.select_related('user').prefetch_related(statement_media_prefetch()).get(id=statement.id)
+        return cls.objects.select_related('user', 'forward_bundle').prefetch_related(
+            statement_media_prefetch(), statement_forward_bundle_prefetch(),
+        ).get(id=statement.id)
 
     def jsonl(self, request=None):
         viewer = getattr(request, 'user', None) if request else None
@@ -239,6 +264,7 @@ class Statement(models.Model):
                 geocoding_provider=self.geocoding_provider,
             ) if self.latitude is not None and self.longitude is not None else None),
             media=[item.jsonl(request=request) for item in self.media.all()],
+            chat_record=self.forward_bundle.jsonl(request=request) if self.forward_bundle_id else None,
             comment_count=getattr(self, 'visible_comment_count', self.comments.filter(is_deleted=False).count()),
             like_count=getattr(self, 'visible_like_count', self.likes.count()),
             liked=bool(getattr(self, 'viewer_liked', viewer and self.likes.filter(user=viewer).exists())),
