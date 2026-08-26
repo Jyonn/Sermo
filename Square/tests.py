@@ -523,6 +523,20 @@ class StatementApiTests(TestCase):
         self.assertEqual(quota['likes']['daily_used'], 1)
         self.assertFalse(quota['media']['audio'])
 
+    def test_video_statement_unlocks_at_level_10(self):
+        with patch.object(User, 'effective_growth_level', return_value=9):
+            level_nine = self.client.get('/square/quota', **self.authorization(self.author))
+
+        self.assertEqual(level_nine.status_code, 200, level_nine.content)
+        self.assertFalse(level_nine.json()['body']['media']['video'])
+        self.assertEqual(level_nine.json()['body']['media']['video_level'], 10)
+
+        with patch.object(User, 'effective_growth_level', return_value=10):
+            level_ten = self.client.get('/square/quota', **self.authorization(self.author))
+
+        self.assertEqual(level_ten.status_code, 200, level_ten.content)
+        self.assertTrue(level_ten.json()['body']['media']['video'])
+
     def test_permanent_vip_uses_level_18_frequency_limits(self):
         self.author.is_permanent_vip = True
         self.author.save(update_fields=['is_permanent_vip'])

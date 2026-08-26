@@ -59,6 +59,6 @@ def quota_for_user(user):
             audio=unlimited or audio_allowed,
             audio_level=user.capability_required_level('square.statement.publish.audio', fallback=6),
             video=unlimited or video_allowed,
-            video_level=user.capability_required_level('square.statement.publish.video', fallback=8),
+            video_level=user.capability_required_level('square.statement.publish.video', fallback=10),
         ),
     )

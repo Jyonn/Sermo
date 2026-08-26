@@ -60,7 +60,7 @@ def baseline_requirements():
         'chat.reminder.online': level(7),
         'square.statement.publish': atom('verified'),
         'square.statement.publish.audio': level(6),
-        'square.statement.publish.video': level(8),
+        'square.statement.publish.video': level(10),
         'square.interaction': atom('verified'),
         'contacts.search': atom('verified'),
         'contacts.friend_request': any_of(atom('verified'), atom('qr_invite')),

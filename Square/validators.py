@@ -23,7 +23,7 @@ class SquareErrors:
     ANONYMOUS_VISIBILITY_INVALID = Error(message=_('Anonymous statements must be visible in Explore'), code=Code.BadRequest)
     ANONYMOUS_COMMENT_FORBIDDEN = Error(message=_('Only the anonymous statement author can comment anonymously'), code=Code.Forbidden)
     AUDIO_LEVEL_REQUIRED = Error(message=_('Voice statements unlock at LV6'), code=Code.Forbidden)
-    VIDEO_LEVEL_REQUIRED = Error(message=_('Video statements unlock at LV8'), code=Code.Forbidden)
+    VIDEO_LEVEL_REQUIRED = Error(message=_('Video statements unlock at LV10'), code=Code.Forbidden)
     VIDEO_LIMIT_EXCEEDED = Error(message=_('A statement can contain only one video'), code=Code.BadRequest)
     DELETE_FORBIDDEN = Error(message=_('You cannot delete this statement'), code=Code.Forbidden)
     COMMENT_DELETE_FORBIDDEN = Error(message=_('You cannot delete this comment'), code=Code.Forbidden)
