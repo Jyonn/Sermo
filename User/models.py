@@ -2959,6 +2959,8 @@ class NotificationDelivery(models.Model):
         return f'{FRONTEND_BASE_URL}/{space_slug}/app/chats/{chat_id}'
 
     def _instant_icon_url(self, pref: NotificationPreference):
+        if (self.event.payload or {}).get('anonymous_actor'):
+            return None
         if pref.bark_icon_mode == NotificationPreference.BARK_ICON_SPACE:
             official_user = self.event.space.official_user
             return official_user.tiny_json().get('avatar_uri') if official_user else None

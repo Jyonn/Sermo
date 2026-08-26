@@ -438,7 +438,8 @@ class StatementComment(models.Model):
             reply_to_user=(anonymous_user_json() if self.parent.is_anonymous else self.parent.user.tiny_json()) if self.parent_id else None,
             user=anonymous_user_json() if self.is_anonymous else self.user.tiny_json(),
             is_anonymous=self.is_anonymous,
-            is_author=self.user_id == self.statement.user_id,
+            # A public reply must not reveal that it came from an anonymous statement's author.
+            is_author=self.user_id == self.statement.user_id and (not self.statement.is_anonymous or self.is_anonymous),
             text=self.text,
             like_count=like_count,
             reply_count=reply_count,

@@ -261,7 +261,25 @@ class StatementApiTests(TestCase):
         self.assertEqual(comment['user']['user_id'], 0)
 
         public_author_comment = StatementComment.create_comment(self.author, statement.id, '作者公开回复')
-        self.assertTrue(public_author_comment.jsonl(viewer=self.author)['is_author'])
+        self.assertFalse(public_author_comment.jsonl(viewer=self.author)['is_author'])
+
+        visitor_comment = StatementComment.create_comment(self.friend, statement.id, '访客评论')
+        anonymous_reply = self.client.post(
+            f'/square/statements/{statement.id}/comments',
+            data=json.dumps({'text': '匿名回复访客', 'parent_id': visitor_comment.id, 'anonymous': 1}),
+            content_type='application/json',
+            **self.authorization(self.author),
+        )
+        self.assertEqual(anonymous_reply.status_code, 200, anonymous_reply.content)
+        event = NotificationEvent.objects.get(
+            user=self.friend,
+            event_type=NotificationEventTypeChoice.SQUARE_COMMENT_REPLY,
+        )
+        self.assertTrue(event.payload['anonymous_actor'])
+        self.assertEqual(event.json()['actor'], {'user_id': 0, 'name': '', 'anonymous': True})
+        title, body = event.render_delivery_message()
+        self.assertNotIn(self.author.name, title)
+        self.assertNotIn(self.author.name, body)
 
         denied = self.client.post(
             f'/square/statements/{statement.id}/comments',
