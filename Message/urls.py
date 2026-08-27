@@ -1,6 +1,6 @@
 from django.urls import path
 
-from Message.views import MessageView, MessageBatchView, MessageClearView, MessageEventSyncView, MessageForwardView, MessageHistoryRecoveryView, MessageReconcileView, MessageSearchView, MessageUploadView, MessageBlobView, MessageBlobThumbnailView, MessageMediaMetadataView, MessageLinkPreviewView, MessageResourceFinalizeView, MessageResourceView, PinnedMessageView
+from Message.views import MessageView, MessageBatchView, MessageClearView, MessageEventSyncBaselineView, MessageEventSyncView, MessageForwardView, MessageHistoryRecoveryView, MessageReconcileView, MessageSearchView, MessageUploadView, MessageBlobView, MessageBlobThumbnailView, MessageMediaMetadataView, MessageLinkPreviewView, MessageResourceFinalizeView, MessageResourceView, PinnedMessageView
 
 urlpatterns = [
     path('blob/<slug:blob_slug>/thumbnail', MessageBlobThumbnailView.as_view(), name='message blob thumbnail'),
@@ -10,6 +10,7 @@ urlpatterns = [
     path('resources', MessageResourceView.as_view(), name='message resources'),
     path('resources/finalize', MessageResourceFinalizeView.as_view(), name='message resource finalize'),
     path('media-metadata', MessageMediaMetadataView.as_view(), name='message media metadata'),
+    path('sync-v2/baseline', MessageEventSyncBaselineView.as_view(), name='message event sync baseline'),
     path('sync-v2', MessageEventSyncView.as_view(), name='message event sync'),
     path('pins', PinnedMessageView.as_view(), name='pinned messages'),
     path('batch', MessageBatchView.as_view(), name='message batch'),

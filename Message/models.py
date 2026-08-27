@@ -1487,15 +1487,24 @@ class MessageEvent(models.Model):
         return cls.objects.create(message=message, chat=message.chat, actor=message.user, type=MessageEventTypeChoice.RECALLED)
 
     @classmethod
+    def visible_for_user(cls, user: User):
+        chat_ids = [chat.id for chat in Chat.get_user_chats(user)]
+        return cls.objects.filter(Q(target_user=user) | Q(target_user__isnull=True, chat_id__in=chat_ids))
+
+    @classmethod
+    def sync_baseline_for_user(cls, user: User):
+        latest_event_id = cls.visible_for_user(user).order_by('-id').values_list('id', flat=True).first()
+        return dict(next_after=latest_event_id or 0)
+
+    @classmethod
     def sync_for_user(cls, user: User, after: int, limit: int, request: HttpRequest = None):
         from Chat.models import ChatReadState, ChatUserPreference
 
-        chat_ids = [chat.id for chat in Chat.get_user_chats(user)]
         rows = list(
-            cls.objects.select_related('chat', 'message', 'message__user', 'message__reply_to', 'message__reply_to__user')
+            cls.visible_for_user(user)
+            .select_related('chat', 'message', 'message__user', 'message__reply_to', 'message__reply_to__user')
             .prefetch_related('message__chat_mentions__user')
             .filter(id__gt=after)
-            .filter(Q(target_user=user) | Q(target_user__isnull=True, chat_id__in=chat_ids))
             .order_by('id')[:limit + 1]
         )
         has_more = len(rows) > limit

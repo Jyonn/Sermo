@@ -442,6 +442,12 @@ class MessageEventSyncView(View):
         )
 
 
+class MessageEventSyncBaselineView(View):
+    @auth.require_user
+    def get(self, request: Request):
+        return MessageEvent.sync_baseline_for_user(request.user)
+
+
 class MessageLinkPreviewView(View):
     @auth.require_user
     @analyse.query(MessageParams.message_id)

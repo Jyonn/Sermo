@@ -46,6 +46,42 @@ class ChatUnreadSyncTests(TestCase):
         self.assertEqual(second_state['unread_count'], 0)
         self.assertIsNotNone(second_state['last_read_at'])
 
+    def test_new_device_baseline_skips_history_and_receives_future_events(self):
+        historical = Message.create(self.chat, self.peer, MessageTypeChoice.TEXT, 'historical message')
+
+        baseline = MessageEvent.sync_baseline_for_user(self.me)
+        initial_sync = MessageEvent.sync_for_user(self.me, after=baseline['next_after'], limit=50)
+
+        self.assertEqual(initial_sync['events'], [])
+
+        future = Message.create(self.chat, self.peer, MessageTypeChoice.TEXT, 'future message')
+        future_sync = MessageEvent.sync_for_user(self.me, after=baseline['next_after'], limit=50)
+
+        self.assertNotIn(historical.id, [event['message_id'] for event in future_sync['events']])
+        self.assertEqual([event['message_id'] for event in future_sync['events']], [future.id])
+
+    def test_sync_baseline_ignores_events_outside_user_chats(self):
+        outsider = User.create(self.space, 'Outsider', verified=True)
+        outsider_chat = Chat.objects.create(
+            space=self.space,
+            chat_type=ChatTypeChoice.GROUP,
+            title='Outsider group',
+            created_by=outsider,
+        )
+        ChatMember.objects.create(
+            chat=outsider_chat,
+            user=outsider,
+            status=ChatMemberStatusChoice.ACTIVE,
+            joined_at=timezone.now(),
+        )
+        visible = Message.create(self.chat, self.peer, MessageTypeChoice.TEXT, 'visible')
+        Message.create(outsider_chat, outsider, MessageTypeChoice.TEXT, 'hidden')
+
+        baseline = MessageEvent.sync_baseline_for_user(self.me)
+        visible_event_id = MessageEvent.objects.get(message=visible).id
+
+        self.assertEqual(baseline['next_after'], visible_event_id)
+
     def test_mentions_and_weak_badges_are_synchronized_separately(self):
         message = Message.create(
             self.chat,
