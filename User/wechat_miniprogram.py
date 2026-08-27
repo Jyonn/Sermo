@@ -50,14 +50,14 @@ def exchange_code(code):
 
 def _available_name(space, requested, open_id):
     base = (requested or '').strip() or f'微信用户{open_id[-6:]}'
-    base = base[:User.vldt.NAME_MAX_LENGTH]
-    User.vldt.name(base)
+    base = base[:User.vldt.NICKNAME_MAX_LENGTH]
+    User.vldt.nickname(base)
     if not User.objects.filter(space=space, lower_name=base.lower(), is_deleted=False).exists():
         return base
     suffix = 2
     while True:
         marker = str(suffix)
-        candidate = f'{base[:User.vldt.NAME_MAX_LENGTH - len(marker)]}{marker}'
+        candidate = f'{base[:User.vldt.NICKNAME_MAX_LENGTH - len(marker)]}{marker}'
         if not User.objects.filter(space=space, lower_name=candidate.lower(), is_deleted=False).exists():
             return candidate
         suffix += 1

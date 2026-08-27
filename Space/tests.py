@@ -970,6 +970,18 @@ class SpaceAdminApiTests(TestCase):
             **self.user_authorization(self.member),
         )
         self.assertEqual(nickname_response.status_code, 200, nickname_response.content)
+        self.member.name_changed_at = None
+        self.member.save(update_fields=['name_changed_at'])
+        nickname_too_long = self.client.post(
+            '/users/me/name',
+            data=json.dumps({'name': '123456789'}),
+            content_type='application/json',
+            **self.user_authorization(self.member),
+        )
+        self.assertEqual(nickname_too_long.status_code, 400)
+        self.assertEqual(nickname_too_long.json()['identifier'], 'USER@NAME_TOO_LONG')
+        self.member.name_changed_at = None
+        self.member.save(update_fields=['name_changed_at'])
         nickname_cooldown = self.client.post(
             '/users/me/name',
             data=json.dumps({'name': 'ThirdMember'}),

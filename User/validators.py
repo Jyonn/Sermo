@@ -11,6 +11,9 @@ class UserErrors:
     NOT_EXISTS = Error(message=_('User ({attr}={value}) does not exist'), code=Code.NotFound)
     EXISTS = Error(message=_('User already exists'), code=Code.BadRequest)
     EMPTY_NAME = Error(message=_('Name cannot be empty'), code=Code.BadRequest)
+    NAME_TOO_LONG = Error(
+        message=_('Nickname cannot exceed {max_length} characters'), code=Code.BadRequest,
+    )
     INTERVAL_TOO_SMALL = Error(message=_('Interval should be greater than {offline_interval} minutes'), code=Code.BadRequest)
     PASSWORD_TOO_SHORT = Error(message=_('Password should be at least {password_length} characters long'), code=Code.BadRequest)
     PASSWORD_ERROR = Error(message=_('Password error'), code=Code.BadRequest)
@@ -93,6 +96,7 @@ class UserValidator:
     DESCRIPTION_MAX_LENGTH = 100
     SALT_MAX_LENGTH = 32
     NAME_MAX_LENGTH = 20
+    NICKNAME_MAX_LENGTH = 8
     SPACE_SLUG_MAX_LENGTH = 15
     SPACE_SLUG_MIN_LENGTH = 3
     SPACE_SLUG_RANDOM_LENGTH = 5
@@ -140,6 +144,13 @@ class UserValidator:
             raise UserErrors.SPACE_IN_NAME
         if not value:
             raise UserErrors.EMPTY_NAME
+
+    @classmethod
+    def nickname(cls, value):
+        cls.name(value)
+        if len(value) > cls.NICKNAME_MAX_LENGTH:
+            raise UserErrors.NAME_TOO_LONG(max_length=cls.NICKNAME_MAX_LENGTH)
+        return value
 
     @classmethod
     def offline_notification_interval(cls, value):

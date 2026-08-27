@@ -39,6 +39,12 @@ class WeChatMiniProgramLoginTests(TestCase):
         user, _ = login_with_wechat_code('code', nickname='小姜')
         self.assertEqual(user.name, '小姜2')
 
+    @patch('User.wechat_miniprogram.exchange_code')
+    def test_long_nickname_is_trimmed_to_eight_characters(self, exchange):
+        exchange.return_value = dict(app_id='wx-test', open_id='openid-4', union_id='')
+        user, _ = login_with_wechat_code('code', nickname='一二三四五六七八九十')
+        self.assertEqual(user.name, '一二三四五六七八')
+
     def test_bound_user_can_change_nickname_without_password(self):
         user = User.create(space=self.space, name='旧名', language='zh-CN')
         WeChatMiniProgramIdentity.objects.create(user=user, app_id='wx-test', open_id='openid-3')

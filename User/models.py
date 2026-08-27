@@ -410,6 +410,7 @@ class User(models.Model):
         normalized_language = cls.vldt.language(language)
         user = cls.objects.filter(space=space, lower_name=lower_name, is_deleted=False).first()
         if user is None:
+            cls.vldt.nickname(name)
             deleted_user = cls.objects.filter(space=space, lower_name=lower_name, is_deleted=True).first()
             if deleted_user is not None:
                 deleted_user.release_deleted_identity()
@@ -495,7 +496,7 @@ class User(models.Model):
         if available_at and timezone.now() < available_at:
             raise UserErrors.NICKNAME_CHANGE_COOLDOWN(available_at=available_at.isoformat())
         normalized = (name or '').strip()
-        self.vldt.name(normalized)
+        self.vldt.nickname(normalized)
         lower_name = normalized.lower()
         if lower_name != self.lower_name:
             if User.objects.filter(space=self.space, lower_name=lower_name, is_deleted=False).exclude(id=self.id).exists():
