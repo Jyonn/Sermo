@@ -15,6 +15,8 @@ from User.models import (
     UserResourceInventory,
     UserContactVerificationCode,
     UserNotificationChoice,
+    UserStateEvent,
+    UserStateEventKindChoice,
     account_switch_phone_variants,
     extract_emojis,
     normalize_bark_endpoint,
@@ -22,6 +24,7 @@ from User.models import (
 from TravelMap.models import MapCheckIn
 from User.validators import UserErrors
 from utils.notificator_integration import send_verification_mail
+from utils import auth
 
 
 class UserPresentationTests(SimpleTestCase):
@@ -42,6 +45,44 @@ class UserPresentationTests(SimpleTestCase):
 
         user.avatar_uri = 'https://cdn.example.com/avatar/b.png'
         self.assertNotEqual(first, user._dictify_avatar_cache_key())
+
+
+class UserStateEventSyncTests(TestCase):
+    def setUp(self):
+        self.space = Space.objects.create(name='State Events', slug='state-events', email='state@example.com')
+        self.user = User.create(space=self.space, name='State User', verified=True)
+        self.other = User.create(space=self.space, name='Other User', verified=True)
+
+    def authorization(self, user):
+        return {'HTTP_AUTHORIZATION': f"Bearer {auth.get_login_token(user)['auth']}"}
+
+    def test_sync_is_user_scoped_and_cursor_based(self):
+        first = UserStateEvent.emit(self.user, UserStateEventKindChoice.CHATS_CHANGED, 12)
+        second = UserStateEvent.emit(self.user, UserStateEventKindChoice.FRIENDS_CHANGED, 34)
+        UserStateEvent.emit(self.other, UserStateEventKindChoice.FRIEND_REQUESTS_CHANGED, 56)
+
+        response = self.client.get(
+            f'/users/me/state-events?after={first.id}&limit=10',
+            **self.authorization(self.user),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        payload = response.json()['body']
+        self.assertEqual([event['event_id'] for event in payload['events']], [second.id])
+        self.assertEqual(payload['next_after'], second.id)
+        self.assertFalse(payload['has_more'])
+
+    def test_baseline_starts_fresh_device_after_existing_events(self):
+        event = UserStateEvent.emit(self.user, UserStateEventKindChoice.CHATS_CHANGED, 12)
+        UserStateEvent.emit(self.other, UserStateEventKindChoice.CHATS_CHANGED, 13)
+
+        response = self.client.get(
+            '/users/me/state-events/baseline',
+            **self.authorization(self.user),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json()['body']['next_after'], event.id)
 
 
 class CityBubbleUnlockTests(TestCase):

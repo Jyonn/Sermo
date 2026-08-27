@@ -23,6 +23,7 @@ from User.models import (
     NotificationPreference,
     NotificationEvent,
     NotificationEventTypeChoice,
+    UserStateEvent,
     NotificationTopicPreference,
     WebPushSubscription,
     RefreshToken,
@@ -468,6 +469,36 @@ class NotificationEventView(View):
             request.json.statement_id,
         )
         return dict(updated=updated, unread_count=unread_count)
+
+
+class UserStateEventBaselineView(View):
+    @auth.require_user
+    def get(self, request: Request):
+        return dict(next_after=UserStateEvent.baseline(request.user))
+
+
+class UserStateEventSyncView(View):
+    @auth.require_user
+    def get(self, request: Request):
+        try:
+            after = max(0, int(request.GET.get('after', 0)))
+        except (TypeError, ValueError):
+            after = 0
+        try:
+            limit = min(100, max(1, int(request.GET.get('limit', 50))))
+        except (TypeError, ValueError):
+            limit = 50
+
+        rows = list(
+            UserStateEvent.objects.filter(user=request.user, id__gt=after)
+            .order_by('id')[:limit + 1]
+        )
+        events = rows[:limit]
+        return dict(
+            events=[event.json() for event in events],
+            next_after=events[-1].id if events else after,
+            has_more=len(rows) > limit,
+        )
 
 
 class UserWebReminderPreferenceView(View):

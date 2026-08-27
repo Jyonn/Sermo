@@ -2462,6 +2462,57 @@ class UserGestureLockPreference(models.Model):
         )
 
 
+class UserStateEventKindChoice(Choice):
+    CHATS_CHANGED = 'chats.changed'
+    FRIENDS_CHANGED = 'friends.changed'
+    FRIEND_REQUESTS_CHANGED = 'friend_requests.changed'
+
+
+class UserStateEvent(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='state_events', db_index=True)
+    kind = models.CharField(max_length=32, choices=UserStateEventKindChoice.to_choices(), db_index=True)
+    resource_id = models.PositiveBigIntegerField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['user', 'id'], name='user_state_user_id_idx'),
+        ]
+
+    @classmethod
+    def emit(cls, user, kind, resource_id=None):
+        if user is None or user.is_deleted:
+            return None
+        return cls.objects.create(user=user, kind=kind, resource_id=resource_id)
+
+    @classmethod
+    def emit_many(cls, users, kind, resource_id=None):
+        user_ids = {
+            int(user.id if isinstance(user, User) else user)
+            for user in users
+            if user is not None
+        }
+        if not user_ids:
+            return []
+        valid_user_ids = User.objects.filter(id__in=user_ids, is_deleted=False).values_list('id', flat=True)
+        return cls.objects.bulk_create([
+            cls(user_id=user_id, kind=kind, resource_id=resource_id)
+            for user_id in valid_user_ids
+        ])
+
+    @classmethod
+    def baseline(cls, user):
+        return cls.objects.filter(user=user).aggregate(latest=Max('id'))['latest'] or 0
+
+    def json(self):
+        return dict(
+            event_id=self.id,
+            kind=self.kind,
+            resource_id=self.resource_id,
+            created_at=self.created_at.timestamp(),
+        )
+
+
 class NotificationEvent(models.Model):
     space = models.ForeignKey('Space.Space', on_delete=models.CASCADE, related_name='notification_events', db_index=True)
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notification_events', db_index=True)

@@ -106,9 +106,27 @@ class Chat(models.Model):
     def jsonl(self):
         return self.json()
 
+    def _active_user_ids(self):
+        return list(
+            ChatMember.objects.filter(
+                chat=self,
+                status=ChatMemberStatusChoice.ACTIVE,
+                user__is_deleted=False,
+            ).values_list('user_id', flat=True)
+        )
+
+    def _emit_state_changed(self, extra_user_ids=None):
+        from User.models import UserStateEvent, UserStateEventKindChoice
+
+        user_ids = set(self._active_user_ids())
+        user_ids.update(extra_user_ids or [])
+        UserStateEvent.emit_many(user_ids, UserStateEventKindChoice.CHATS_CHANGED, self.id)
+
     def remove(self):
+        user_ids = self._active_user_ids()
         self.is_deleted = True
         self.save(update_fields=['is_deleted'])
+        self._emit_state_changed(user_ids)
 
     def has_active_member(self, user: User):
         member_exists = ChatMember.objects.filter(
@@ -237,6 +255,7 @@ class Chat(models.Model):
                 invited_by=self_user,
                 joined_at=timezone.now(),
             )
+            chat._emit_state_changed()
             return chat
 
     @classmethod
@@ -287,6 +306,7 @@ class Chat(models.Model):
                 member_count=len(invited_names),
             )
             creator.award_growth('explore:create_group')
+            chat._emit_state_changed()
             return chat
 
     def rename(self, operator: User, title: str):
@@ -308,6 +328,7 @@ class Chat(models.Model):
                 old_title=previous_title,
                 new_title=next_title,
             )
+            self._emit_state_changed()
 
     def invite_member(self, inviter: User, user: User):
         if not self.group:
@@ -320,7 +341,9 @@ class Chat(models.Model):
         if user.id != inviter.id:
             self._require_friend_of(inviter, user)
             self.space.require_group_join_allowed(user)
-        return ChatMember.invite(chat=self, user=user, invited_by=inviter)
+        member = ChatMember.invite(chat=self, user=user, invited_by=inviter)
+        self._emit_state_changed([user.id])
+        return member
 
     def invite_members(self, inviter: User, users: List[User]):
         with transaction.atomic():
@@ -339,14 +362,18 @@ class Chat(models.Model):
     def respond_invite(self, user: User, accept: bool):
         if not self.group:
             raise ChatErrors.NOT_GROUP_CHAT(chat=self.id)
-        return ChatMember.respond(chat=self, user=user, accept=accept)
+        member = ChatMember.respond(chat=self, user=user, accept=accept)
+        self._emit_state_changed([user.id])
+        return member
 
     def remove_member(self, operator: User, user: User):
         if not self.group:
             raise ChatErrors.NOT_GROUP_CHAT(chat=self.id)
         if not self.is_owner(operator):
             raise ChatErrors.FORBIDDEN
-        return ChatMember.kick(chat=self, user=user)
+        member = ChatMember.kick(chat=self, user=user)
+        self._emit_state_changed([user.id])
+        return member
 
     def remove_members(self, operator: User, users: List[User]):
         with transaction.atomic():
@@ -398,6 +425,7 @@ class Chat(models.Model):
                 'ownership_transferred',
                 new_owner_name=target.name,
             )
+            self._emit_state_changed()
         return target_member
 
     def leave(self, user: User):
@@ -417,6 +445,7 @@ class Chat(models.Model):
             member.status = ChatMemberStatusChoice.LEFT
             member.left_at = timezone.now()
             member.save(update_fields=['status', 'left_at', 'updated_at'])
+            self._emit_state_changed([user.id])
         return member
 
 

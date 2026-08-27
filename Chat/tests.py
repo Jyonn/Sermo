@@ -8,7 +8,7 @@ from django.utils import timezone
 from Chat.models import Chat, ChatMember, ChatMemberRoleChoice, ChatMemberStatusChoice, ChatReadState, ChatTypeChoice, ChatUserPreference
 from Message.models import Message, MessageTypeChoice, PinnedMessage
 from Space.models import Space
-from User.models import NotificationEvent, User
+from User.models import NotificationEvent, User, UserStateEvent, UserStateEventKindChoice
 from utils import auth
 
 
@@ -78,6 +78,22 @@ class ChatNotificationPreferenceTests(TestCase):
         events = NotificationEvent.emit_message_notifications(message, actor=self.sender, enqueue=False)
         self.assertTrue(any(event.user_id == self.recipient.id for event in events))
         self.assertFalse(ChatUserPreference.ensure(self.chat, self.recipient).notifications_muted)
+
+    def test_removed_member_and_remaining_members_receive_chat_state_event(self):
+        UserStateEvent.objects.all().delete()
+
+        self.chat.remove_member(self.sender, self.recipient)
+
+        self.assertTrue(UserStateEvent.objects.filter(
+            user=self.sender,
+            kind=UserStateEventKindChoice.CHATS_CHANGED,
+            resource_id=self.chat.id,
+        ).exists())
+        self.assertTrue(UserStateEvent.objects.filter(
+            user=self.recipient,
+            kind=UserStateEventKindChoice.CHATS_CHANGED,
+            resource_id=self.chat.id,
+        ).exists())
 
     def test_group_rename_creates_attributed_system_message_once(self):
         with patch.object(self.sender, 'require_capability'):

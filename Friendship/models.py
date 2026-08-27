@@ -173,6 +173,17 @@ class Friendship(models.Model):
             return self.user_high
         return self.user_low
 
+    def _emit_state_changes(self, *, chats=False, friends=False, requests=False):
+        from User.models import UserStateEvent, UserStateEventKindChoice
+
+        users = [self.user_low_id, self.user_high_id]
+        if chats:
+            UserStateEvent.emit_many(users, UserStateEventKindChoice.CHATS_CHANGED, self.id)
+        if friends:
+            UserStateEvent.emit_many(users, UserStateEventKindChoice.FRIENDS_CHANGED, self.id)
+        if requests:
+            UserStateEvent.emit_many(users, UserStateEventKindChoice.FRIEND_REQUESTS_CHANGED, self.id)
+
     @classmethod
     def ensure_locked_friendship(cls, user_a: User, user_b: User):
         space, user_low, user_high = cls._pair(user_a, user_b)
@@ -237,6 +248,7 @@ class Friendship(models.Model):
                 from_user=from_user.tiny_json(),
             ),
         )
+        item._emit_state_changes(requests=True)
         return item
 
     def accept(self, user: User):
@@ -274,6 +286,7 @@ class Friendship(models.Model):
                     ).count()
                     if awarded_count < 2:
                         inviter.award_growth(f'social:qr_friend:{month}:{awarded_count + 1}')
+            self._emit_state_changes(chats=True, friends=True, requests=True)
         return self
 
     def _send_accept_welcome_message(self, responder: User):
@@ -317,6 +330,7 @@ class Friendship(models.Model):
         self.status = FriendshipStatusChoice.REJECTED
         self.responded_at = timezone.now()
         self.save(update_fields=['status', 'responded_at', 'updated_at'])
+        self._emit_state_changes(requests=True)
         return self
 
     def remove(self, user: User):
@@ -330,6 +344,7 @@ class Friendship(models.Model):
             self.status = FriendshipStatusChoice.DELETED
             self.responded_at = timezone.now()
             self.save(update_fields=['status', 'responded_at', 'updated_at'])
+            self._emit_state_changes(requests=True)
             return self
         if self.status != FriendshipStatusChoice.ACCEPTED:
             raise FriendshipErrors.NOT_FRIENDS
@@ -337,6 +352,7 @@ class Friendship(models.Model):
         self.status = FriendshipStatusChoice.DELETED
         self.responded_at = timezone.now()
         self.save(update_fields=['status', 'responded_at', 'updated_at'])
+        self._emit_state_changes(chats=True, friends=True)
         return self
 
     @classmethod
