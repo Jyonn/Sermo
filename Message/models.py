@@ -2076,26 +2076,35 @@ class ForwardBundle(models.Model):
         items = [item.jsonl(request=request) for item in bundle_items]
         first_person_user_id = self.created_by_id
         if redact_identity:
+            official_author_id = self.created_by_id if self.created_by.is_official else None
+            official_participates = official_author_id is not None and any(
+                (item.get('author') or {}).get('user_id') == official_author_id for item in items
+            )
             author_ids = []
             for item in items:
                 author_id = (item.get('author') or {}).get('user_id')
+                if official_participates and author_id == official_author_id:
+                    continue
                 if author_id not in author_ids:
                     author_ids.append(author_id)
             pseudonyms = {author_id: -(index + 1) for index, author_id in enumerate(author_ids)}
             for item in items:
                 author_id = (item.get('author') or {}).get('user_id')
+                if official_participates and author_id == official_author_id:
+                    continue
                 pseudonym = pseudonyms[author_id]
                 item['author'] = {
                     'user_id': pseudonym,
                     'name': f'{abs(pseudonym):02d}',
                     'official': False,
+                    'anonymous': True,
                     'avatar_type': 'preset',
                     'avatar_uri': '',
                     'is_permanent_vip': False,
                     'chat_bubble_style': 'default',
                     'avatar_frame_style': 'none',
                 }
-            first_person_user_id = pseudonyms.get(self.created_by_id)
+            first_person_user_id = official_author_id if official_participates else None
         authors = []
         for item in items:
             name = str((item.get('author') or {}).get('name') or '').strip()

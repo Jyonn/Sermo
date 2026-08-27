@@ -141,12 +141,39 @@ class StatementApiTests(TestCase):
         self.assertTrue(statement.chat_record_redacted)
         record = response.json()['body']['chat_record']
         self.assertTrue(record['redacted_identity'])
-        self.assertLess(record['first_person_user_id'], 0)
-        self.assertEqual([item['author']['name'] for item in record['items']], ['01', '02'])
-        for item in record['items']:
-            self.assertEqual(item['author']['avatar_uri'], '')
-            self.assertEqual(item['author']['chat_bubble_style'], 'default')
-            self.assertNotIn('Author', item['author'].values())
+        self.assertEqual(record['first_person_user_id'], official.id)
+        self.assertEqual(record['items'][0]['author']['user_id'], official.id)
+        self.assertEqual(record['items'][0]['author']['name'], official.name)
+        self.assertTrue(record['items'][0]['author']['official'])
+        self.assertEqual(record['items'][1]['author']['name'], '01')
+        self.assertLess(record['items'][1]['author']['user_id'], 0)
+        self.assertTrue(record['items'][1]['author']['anonymous'])
+        self.assertEqual(record['items'][1]['author']['avatar_uri'], '')
+        self.assertEqual(record['items'][1]['author']['chat_bubble_style'], 'default')
+        self.assertNotIn('Author', record['items'][1]['author'].values())
+
+    def test_redacted_chat_record_without_official_message_has_no_first_person(self):
+        official = self.space.ensure_official_user()
+        Friendship.ensure_locked_friendship(official, self.author)
+        chat = Chat.get_or_create_direct(official, self.author)
+        message = Message.create(chat, self.author, 0, '成员消息')
+
+        response = self.client.post(
+            '/square/statements/chat-record',
+            data=json.dumps({
+                'message_ids': [message.id],
+                'visibility': 'public',
+                'redact_chat_record': 1,
+            }),
+            content_type='application/json',
+            **self.authorization(official),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        record = response.json()['body']['chat_record']
+        self.assertIsNone(record['first_person_user_id'])
+        self.assertEqual(record['items'][0]['author']['name'], '01')
+        self.assertTrue(record['items'][0]['author']['anonymous'])
 
     def test_pinned_statement_returns_empty_success_when_none_exists(self):
         response = self.client.get('/square/statements/pinned', **self.authorization(self.stranger))
