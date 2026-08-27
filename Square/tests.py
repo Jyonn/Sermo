@@ -9,7 +9,7 @@ from Friendship.models import Friendship
 from Chat.models import Chat
 from Space.models import Space
 from Message.models import ForwardBundleItem, MediaAsset, Message
-from Square.models import Statement, StatementComment, StatementCommentLike, StatementLike, StatementMedia
+from Square.models import SquareMute, Statement, StatementComment, StatementCommentLike, StatementLike, StatementMedia
 from Square.views import SquareStatusView
 from User.models import NotificationEvent, NotificationEventTypeChoice, User
 from utils import auth
@@ -51,6 +51,73 @@ class StatementApiTests(TestCase):
             content_type='application/json',
             **self.authorization(user),
         )
+
+    def test_official_account_can_mute_statement_author_and_mute_blocks_square_writes(self):
+        official = self.space.ensure_official_user()
+        statement = Statement.create_statement(self.author, '需要处理', 'public', [])
+
+        muted = self.client.post(
+            f'/square/statements/{statement.id}/mute-author',
+            data=json.dumps({'duration': '3d', 'reason': '多次发布违规内容'}),
+            content_type='application/json',
+            **self.authorization(official),
+        )
+
+        self.assertEqual(muted.status_code, 200, muted.content)
+        mute = SquareMute.active_queryset().get(space=self.space, user=self.author)
+        self.assertEqual(mute.reason, '多次发布违规内容')
+        self.assertIsNotNone(mute.muted_until)
+
+        publish = self.post_statement(self.author, {'text': '无法发布', 'visibility': 'public', 'media': []})
+        self.assertEqual(publish.status_code, 403, publish.content)
+        self.assertEqual(publish.json()['identifier'], 'SQUARE@MUTED')
+
+        comment = self.client.post(
+            f'/square/statements/{statement.id}/comments',
+            data=json.dumps({'text': '无法评论'}),
+            content_type='application/json',
+            **self.authorization(self.author),
+        )
+        self.assertEqual(comment.status_code, 403, comment.content)
+        self.assertEqual(comment.json()['identifier'], 'SQUARE@MUTED')
+
+    def test_regular_member_cannot_mute_and_admin_can_update_and_revoke_mute(self):
+        statement = Statement.create_statement(self.author, '普通发言', 'public', [])
+        denied = self.client.post(
+            f'/square/statements/{statement.id}/mute-author',
+            data=json.dumps({'duration': '1d', 'reason': '无权操作'}),
+            content_type='application/json',
+            **self.authorization(self.friend),
+        )
+        self.assertEqual(denied.status_code, 403, denied.content)
+        self.assertEqual(denied.json()['identifier'], 'SQUARE@MUTE_FORBIDDEN')
+
+        space_auth = dict(
+            HTTP_AUTHORIZATION=f"Bearer {auth.get_space_login_token(self.space)['auth']}",
+        )
+        created = self.client.post(
+            '/square/admin/mutes',
+            data=json.dumps({
+                'user_id': self.author.id,
+                'duration': 'permanent',
+                'reason': '管理员复核',
+            }),
+            content_type='application/json',
+            **space_auth,
+        )
+        self.assertEqual(created.status_code, 200, created.content)
+        self.assertTrue(created.json()['body']['permanent'])
+
+        listing = self.client.get('/square/admin/mutes', **space_auth)
+        self.assertEqual(listing.status_code, 200, listing.content)
+        self.assertEqual(listing.json()['body'][0]['user']['user_id'], self.author.id)
+
+        revoked = self.client.delete(
+            f'/square/admin/mutes?user_id={self.author.id}',
+            **space_auth,
+        )
+        self.assertEqual(revoked.status_code, 200, revoked.content)
+        self.assertIsNone(SquareMute.active_for(self.author))
 
     def test_official_account_can_publish_selected_chat_as_statement(self):
         official = self.space.ensure_official_user()

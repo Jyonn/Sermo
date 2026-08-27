@@ -1,6 +1,6 @@
 from django.urls import path
 
-from Square.views import AdminStatementView, PinnedStatementView, SquareChatRecordStatementView, SquareQuotaView, SquareStatusView, StatementCommentDetailView, StatementCommentLikeView, StatementCommentView, StatementDetailView, StatementLikeView, StatementLocationView, StatementMediaThumbnailView, StatementMediaView, StatementPinView, StatementUploadView, StatementView
+from Square.views import AdminSquareMuteView, AdminStatementView, PinnedStatementView, SquareChatRecordStatementView, SquareQuotaView, SquareStatusView, StatementAuthorMuteView, StatementCommentDetailView, StatementCommentLikeView, StatementCommentView, StatementDetailView, StatementLikeView, StatementLocationView, StatementMediaThumbnailView, StatementMediaView, StatementPinView, StatementUploadView, StatementView
 
 
 urlpatterns = [
@@ -13,8 +13,10 @@ urlpatterns = [
     path('statements', StatementView.as_view(), name='square statements'),
     path('statements/chat-record', SquareChatRecordStatementView.as_view(), name='square chat record statement'),
     path('admin/statements', AdminStatementView.as_view(), name='square admin statements'),
+    path('admin/mutes', AdminSquareMuteView.as_view(), name='square admin mutes'),
     path('statements/pinned', PinnedStatementView.as_view(), name='square pinned statement'),
     path('statements/<int:statement_id>/pin', StatementPinView.as_view(), name='square statement pin'),
+    path('statements/<int:statement_id>/mute-author', StatementAuthorMuteView.as_view(), name='square statement mute author'),
     path('statements/<int:statement_id>/comments', StatementCommentView.as_view(), name='square statement comments'),
     path('statements/<int:statement_id>', StatementDetailView.as_view(), name='square statement detail'),
     path('statements/<int:statement_id>/like', StatementLikeView.as_view(), name='square statement like'),

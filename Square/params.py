@@ -55,6 +55,20 @@ def validate_comment_text(value):
     return normalized
 
 
+def validate_mute_duration(value):
+    normalized = str(value or '').strip().lower()
+    if normalized not in {'1d', '3d', '7d', '30d', 'permanent'}:
+        raise SquareErrors.MUTE_DURATION_INVALID
+    return normalized
+
+
+def validate_mute_reason(value):
+    normalized = str(value or '').strip()
+    if not normalized:
+        raise SquareErrors.MUTE_REASON_REQUIRED
+    return normalized[:240]
+
+
 class SquareParams(metaclass=Params):
     text = Validator('text').to(validate_text).null().default('')
     visibility = Validator('visibility').to(validate_visibility).default('public')
@@ -78,3 +92,5 @@ class SquareParams(metaclass=Params):
     anonymous = Validator('anonymous').to(int).bool(lambda value: value in (0, 1)).default(0)
     redact_chat_record = Validator('redact_chat_record').to(int).bool(lambda value: value in (0, 1)).default(0)
     read_scope = Validator('scope').to(str).bool(lambda value: value in ('all', 'friends'))
+    mute_duration = Validator('duration').to(validate_mute_duration)
+    mute_reason = Validator('reason').to(validate_mute_reason)

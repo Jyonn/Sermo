@@ -35,6 +35,85 @@ class SquareReadState(models.Model):
         return state
 
 
+class SquareMute(models.Model):
+    space = models.ForeignKey('Space.Space', on_delete=models.CASCADE, related_name='square_mutes')
+    user = models.ForeignKey('User.User', on_delete=models.CASCADE, related_name='square_mutes')
+    created_by = models.ForeignKey(
+        'User.User', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='created_square_mutes',
+    )
+    reason = models.CharField(max_length=240)
+    muted_until = models.DateTimeField(null=True, blank=True, db_index=True)
+    active = models.BooleanField(default=True, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    revoked_at = models.DateTimeField(null=True, blank=True)
+    revoked_by = models.ForeignKey(
+        'User.User', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='revoked_square_mutes',
+    )
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['space', 'user'], name='unique_square_mute_per_member'),
+        ]
+        ordering = ['-updated_at', '-id']
+
+    @classmethod
+    def active_queryset(cls):
+        now = timezone.now()
+        return cls.objects.filter(active=True).filter(Q(muted_until__isnull=True) | Q(muted_until__gt=now))
+
+    @classmethod
+    def active_for(cls, user):
+        if user.is_official:
+            return None
+        return cls.active_queryset().filter(space=user.space, user=user).first()
+
+    @classmethod
+    def require_can_participate(cls, user):
+        if cls.active_for(user) is not None:
+            raise SquareErrors.MUTED
+
+    @classmethod
+    def set_for(cls, space, user, actor, duration, reason):
+        if user.space_id != space.id or user.is_official or user.id == actor.id:
+            raise SquareErrors.MUTE_TARGET_INVALID
+        days = {'1d': 1, '3d': 3, '7d': 7, '30d': 30}
+        muted_until = None if duration == 'permanent' else timezone.now() + timedelta(days=days[duration])
+        mute, _created = cls.objects.update_or_create(
+            space=space,
+            user=user,
+            defaults=dict(
+                created_by=actor,
+                reason=reason,
+                muted_until=muted_until,
+                active=True,
+                revoked_at=None,
+                revoked_by=None,
+            ),
+        )
+        return mute
+
+    def revoke(self, actor):
+        self.active = False
+        self.revoked_at = timezone.now()
+        self.revoked_by = actor
+        self.save(update_fields=['active', 'revoked_at', 'revoked_by', 'updated_at'])
+
+    def jsonl(self):
+        return dict(
+            mute_id=self.id,
+            user=self.user.tiny_json(),
+            reason=self.reason,
+            muted_until=self.muted_until.timestamp() if self.muted_until else None,
+            permanent=self.muted_until is None,
+            created_by=self.created_by.tiny_json() if self.created_by else None,
+            created_at=self.created_at.timestamp(),
+            updated_at=self.updated_at.timestamp(),
+        )
+
+
 def statement_media_prefetch():
     return Prefetch('media', queryset=StatementMedia.objects.select_related('media_asset'))
 
@@ -194,6 +273,7 @@ class Statement(models.Model):
         is_anonymous=False, chat_record_redacted=False,
     ):
         user.require_capability('square.statement.publish')
+        SquareMute.require_can_participate(user)
         _enforce_frequency(cls.objects.filter(space=user.space, is_deleted=False), user)
         is_anonymous = bool(is_anonymous)
         if is_anonymous:
@@ -318,6 +398,7 @@ class Statement(models.Model):
             liked=bool(getattr(self, 'viewer_liked', viewer and self.likes.filter(user=viewer).exists())),
             can_delete=bool(viewer and (viewer.id == self.user_id or viewer.is_official and viewer.space_id == self.space_id)),
             can_pin=bool(viewer and viewer.id == self.user_id and viewer.is_official),
+            can_mute=bool(viewer and viewer.is_official and viewer.space_id == self.space_id and not self.user.is_official),
             is_pinned=bool(self.user.is_official and self.user.pinned_square_statement_id == self.id),
             created_at=self.created_at.timestamp(),
         )
@@ -388,6 +469,7 @@ class StatementComment(models.Model):
     @classmethod
     def create_comment(cls, user, statement_id, text, parent_id=None, is_anonymous=False):
         user.require_capability('square.interaction.reply' if parent_id is not None else 'square.interaction.comment')
+        SquareMute.require_can_participate(user)
         _enforce_frequency(cls.objects.filter(statement__space=user.space, is_deleted=False), user, multiplier=5)
         normalized_text = (text or '').strip()
         if not normalized_text:

@@ -4,7 +4,7 @@ from django.views import View
 from oba import raw
 from smartdjango import OK, analyse
 
-from Square.models import SquareReadState, Statement, StatementComment, StatementCommentLike, StatementLike, StatementMedia, statement_media_prefetch
+from Square.models import SquareMute, SquareReadState, Statement, StatementComment, StatementCommentLike, StatementLike, StatementMedia, statement_media_prefetch
 from Activity.models import ActivityCampaign, ActivityService
 from Friendship.models import Friendship, FriendshipStatusChoice
 from django.db.models import Q
@@ -13,7 +13,7 @@ from Message.params import MessageParams
 from Square.params import SquareParams
 from Square.quota import quota_for_user
 from Square.validators import SquareErrors
-from User.models import NotificationEvent, NotificationEventTypeChoice, PermanentVipCampaign
+from User.models import NotificationEvent, NotificationEventTypeChoice, PermanentVipCampaign, User
 from utils import auth
 from utils.auth import Request
 from utils.qiniu import (
@@ -172,6 +172,66 @@ class StatementPinView(View):
         request.user.pinned_square_statement_id = statement.id if request.json.pin else None
         request.user.save(update_fields=['pinned_square_statement_id'])
         return statement.jsonl(request=request)
+
+
+class StatementAuthorMuteView(View):
+    @auth.require_user
+    @analyse.json(SquareParams.mute_duration, SquareParams.mute_reason)
+    def post(self, request: Request, statement_id: int):
+        request.user.space.require_square_enabled()
+        if not request.user.is_official:
+            raise SquareErrors.MUTE_FORBIDDEN
+        try:
+            statement = Statement.objects.select_related('user').get(
+                id=statement_id,
+                space=request.user.space,
+                is_deleted=False,
+            )
+        except Statement.DoesNotExist:
+            raise SquareErrors.NOT_EXISTS
+        mute = SquareMute.set_for(
+            request.user.space,
+            statement.user,
+            request.user,
+            request.json.duration,
+            request.json.reason,
+        )
+        return mute.jsonl()
+
+
+class AdminSquareMuteView(View):
+    @auth.require_space
+    def get(self, request: Request):
+        return [
+            mute.jsonl()
+            for mute in SquareMute.active_queryset().filter(space=request.space).select_related(
+                'user', 'created_by',
+            )
+        ]
+
+    @auth.require_space
+    @analyse.json(SquareParams.user_id, SquareParams.mute_duration, SquareParams.mute_reason)
+    def post(self, request: Request):
+        actor = request.space.ensure_official_user()
+        try:
+            user = User.objects.get(id=request.json.user_id, space=request.space)
+        except User.DoesNotExist:
+            raise SquareErrors.MUTE_TARGET_INVALID
+        return SquareMute.set_for(
+            request.space, user, actor, request.json.duration, request.json.reason,
+        ).jsonl()
+
+    @auth.require_space
+    @analyse.query(SquareParams.user_id)
+    def delete(self, request: Request):
+        actor = request.space.ensure_official_user()
+        mute = SquareMute.active_queryset().filter(
+            space=request.space,
+            user_id=request.query.user_id,
+        ).first()
+        if mute is not None:
+            mute.revoke(actor)
+        return OK
 
 
 class SquareQuotaView(View):
