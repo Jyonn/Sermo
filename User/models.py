@@ -2117,11 +2117,6 @@ class WebPushSubscription(models.Model):
         )]
 
     @classmethod
-    def is_legacy_space_origin(cls, origin: str):
-        normalized = (origin or '').strip().lower().rstrip('/')
-        return normalized.endswith('.sermo.jyonn.space') and normalized != cls.CANONICAL_WEB_ORIGIN
-
-    @classmethod
     def register(
         cls,
         user: User,
@@ -2136,6 +2131,11 @@ class WebPushSubscription(models.Model):
             raise UserErrors.WEB_PUSH_SUBSCRIPTION_INVALID
         endpoint_digest = hashlib.sha256(normalized_endpoint.encode('utf-8')).hexdigest()
         normalized_origin = origin.strip().rstrip('/')
+        origin_host = (urlparse(normalized_origin).hostname or '').lower()
+        is_supported_origin = (
+            normalized_origin.lower() == cls.CANONICAL_WEB_ORIGIN
+            or origin_host in {'localhost', '127.0.0.1'}
+        )
         subscription, _created = cls.objects.update_or_create(
             user=user,
             endpoint_digest=endpoint_digest,
@@ -2146,7 +2146,7 @@ class WebPushSubscription(models.Model):
                 auth=auth.strip(),
                 origin=normalized_origin,
                 user_agent=(user_agent or '')[:255],
-                enabled=not cls.is_legacy_space_origin(normalized_origin),
+                enabled=is_supported_origin,
             ),
         )
         return subscription
@@ -2154,12 +2154,6 @@ class WebPushSubscription(models.Model):
     @classmethod
     def active_for_user(cls, user: User):
         stale_before = timezone.now() - datetime.timedelta(days=cls.ACTIVE_LEASE_DAYS)
-        cls.objects.filter(
-            user=user,
-            space_id=user.space_id,
-            enabled=True,
-            origin__iendswith='.sermo.jyonn.space',
-        ).exclude(origin__iexact=cls.CANONICAL_WEB_ORIGIN).update(enabled=False)
         cls.objects.filter(
             user=user,
             space_id=user.space_id,
@@ -2715,8 +2709,8 @@ class NotificationEvent(models.Model):
                         NotificationEventTypeChoice.DIRECT_MESSAGE,
                         NotificationEventTypeChoice.GROUP_MESSAGE,
                     ):
-                        WebPushDelivery.enqueue_for_event(event)
-                        NotificationDelivery.enqueue_bark_for_event(event)
+                        NotificationDelivery.enqueue_web_for_event(event)
+                        NotificationDelivery.enqueue_instant_for_event(event)
                     else:
                         NotificationDelivery.enqueue_for_event(event)
         except Exception:
@@ -2884,6 +2878,13 @@ class NotificationDelivery(models.Model):
         null=True,
         blank=True,
     )
+    web_subscription = models.ForeignKey(
+        WebPushSubscription,
+        on_delete=models.SET_NULL,
+        related_name='deliveries',
+        null=True,
+        blank=True,
+    )
     status = models.IntegerField(
         choices=NotificationDeliveryStatusChoice.to_choices(),
         default=NotificationDeliveryStatusChoice.PENDING,
@@ -2904,6 +2905,107 @@ class NotificationDelivery(models.Model):
         return False
 
     @classmethod
+    def enqueue_web_for_event(cls, event: NotificationEvent):
+        if not NotificationTopicPreference.is_enabled_for_event(event, NotificationRouteChannelChoice.WEB):
+            return []
+        subscriptions = list(WebPushSubscription.active_for_user(event.user))
+        deliveries = [
+            cls.objects.create(
+                event=event,
+                channel=UserNotificationChoice.UNSET,
+                web_subscription=subscription,
+            )
+            for subscription in subscriptions
+        ]
+        if deliveries:
+            with ThreadPoolExecutor(
+                max_workers=min(4, len(deliveries)),
+                thread_name_prefix='web-push',
+            ) as executor:
+                list(executor.map(cls._attempt_send_web_isolated, deliveries))
+        return deliveries
+
+    @staticmethod
+    def _attempt_send_web_isolated(delivery):
+        close_old_connections()
+        try:
+            return delivery._attempt_send_web()
+        finally:
+            close_old_connections()
+
+    def _web_payload(self):
+        payload = dict(self.event.payload or {})
+        official_user = self.event.space.official_user
+        payload.update(
+            notification_event_id=self.event_id,
+            event_type=self.event.event_type,
+            space_slug=self.event.space.slug,
+            icon=official_user.tiny_json().get('avatar_uri') if official_user else '',
+        )
+        return payload
+
+    def _web_notification_text(self):
+        from Message.models import MessageTypeChoice
+
+        event = self.event
+        payload = event.payload or {}
+        language = event.user.language if event.user_id else translation.get_language()
+        with translation.override(language):
+            actor_name = event.actor.name if event.actor_id else ''
+            message_type = payload.get('message_type')
+            natural_bodies = {
+                MessageTypeChoice.IMAGE: _('Sent a photo.'),
+                MessageTypeChoice.VIDEO: _('Sent a video.'),
+                MessageTypeChoice.AUDIO: _('Sent a voice message.'),
+                MessageTypeChoice.FILE: _('Sent a file.'),
+                MessageTypeChoice.LOCATION: _('Shared a location.'),
+                MessageTypeChoice.MAP_ACCESS: _('Shared a footprint map.'),
+                MessageTypeChoice.STATEMENT: _('Shared a statement.'),
+                MessageTypeChoice.STICKER: _('Sent a sticker.'),
+                MessageTypeChoice.ACTIVITY: _('Shared an activity.'),
+            }
+            body = natural_bodies.get(message_type) or payload.get('content') or _('Sent a message.')
+            if event.event_type == NotificationEventTypeChoice.DIRECT_MESSAGE:
+                return str(actor_name or _('New direct message')), str(body)
+            if event.event_type == NotificationEventTypeChoice.GROUP_MESSAGE:
+                title = payload.get('chat_name') or _('Group chat')
+                if actor_name:
+                    body = _('{name}: {message}').format(name=actor_name, message=body)
+                return str(title), str(body)
+            return event.render_delivery_message()
+
+    def _attempt_send_web(self):
+        from utils.webpush import WebPushNotConfigured, is_expired_subscription_error, send_web_push
+
+        subscription = self.web_subscription
+        if subscription is None:
+            self.status = NotificationDeliveryStatusChoice.SKIPPED
+            self.detail = 'subscription_missing'
+        else:
+            title, body = self._web_notification_text()
+            try:
+                send_web_push(
+                    subscription=subscription,
+                    title=title,
+                    body=body,
+                    payload=self._web_payload(),
+                )
+                self.status = NotificationDeliveryStatusChoice.SENT
+                self.detail = None
+            except WebPushNotConfigured as err:
+                self.status = NotificationDeliveryStatusChoice.SKIPPED
+                self.detail = str(err)[:255]
+            except Exception as err:
+                self.status = NotificationDeliveryStatusChoice.FAILED
+                self.detail = str(err)[:255]
+                if is_expired_subscription_error(err):
+                    subscription.enabled = False
+                    subscription.save(update_fields=['enabled'])
+        self.attempted_at = timezone.now()
+        self.save(update_fields=['status', 'detail', 'attempted_at'])
+        return self
+
+    @classmethod
     def _channel_target(cls, user: User, channel: int):
         if channel == UserNotificationChoice.EMAIL:
             return user.email
@@ -2918,9 +3020,10 @@ class NotificationDelivery(models.Model):
         return offline_seconds >= threshold_seconds
 
     @classmethod
-    def enqueue_instant_for_event(cls, event: NotificationEvent):
+    def enqueue_instant_for_event(cls, event: NotificationEvent, preferences=None):
+        preferences = preferences if preferences is not None else NotificationPreference.ensure_defaults(event.user)
         pref = next((
-            item for item in NotificationPreference.ensure_defaults(event.user)
+            item for item in preferences
             if item.channel == UserNotificationChoice.BARK
         ), None)
         if (
@@ -3352,9 +3455,9 @@ class NotificationDelivery(models.Model):
         deliveries = []
         # Web Push and instant receivers are time-sensitive routes. Instant
         # notifications are sent per event while offline, never via digest.
-        deliveries.extend(WebPushDelivery.enqueue_for_event(event))
-        deliveries.extend(cls.enqueue_instant_for_event(event))
         prefs = NotificationPreference.ensure_defaults(event.user)
+        deliveries.extend(cls.enqueue_web_for_event(event))
+        deliveries.extend(cls.enqueue_instant_for_event(event, preferences=prefs))
         for pref in prefs:
             if pref.channel == UserNotificationChoice.BARK:
                 continue
@@ -3439,112 +3542,3 @@ class NotificationDelivery(models.Model):
             delivery.save(update_fields=['detail'])
             delivery._attempt_send(pref)
         return deliveries
-
-
-class WebPushDelivery(models.Model):
-    event = models.ForeignKey(NotificationEvent, on_delete=models.CASCADE, related_name='web_push_deliveries', db_index=True)
-    subscription = models.ForeignKey(WebPushSubscription, on_delete=models.CASCADE, related_name='deliveries', db_index=True)
-    status = models.IntegerField(
-        choices=NotificationDeliveryStatusChoice.to_choices(),
-        default=NotificationDeliveryStatusChoice.PENDING,
-        db_index=True,
-    )
-    detail = models.CharField(max_length=255, null=True, blank=True)
-    attempted_at = models.DateTimeField(null=True, blank=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    @classmethod
-    def enqueue_for_event(cls, event: NotificationEvent):
-        deliveries = []
-        if not NotificationTopicPreference.is_enabled_for_event(event, NotificationRouteChannelChoice.WEB):
-            return deliveries
-        subscriptions = list(WebPushSubscription.active_for_user(event.user))
-        deliveries = [
-            cls.objects.create(event=event, subscription=subscription)
-            for subscription in subscriptions
-        ]
-        if deliveries:
-            # A stale FCM/APNs endpoint must not block another device. Keep the
-            # pool bounded because one event rarely has more than a few devices.
-            with ThreadPoolExecutor(
-                max_workers=min(4, len(deliveries)),
-                thread_name_prefix='web-push',
-            ) as executor:
-                list(executor.map(cls._attempt_send_isolated, deliveries))
-        return deliveries
-
-    @staticmethod
-    def _attempt_send_isolated(delivery):
-        close_old_connections()
-        try:
-            return delivery._attempt_send()
-        finally:
-            close_old_connections()
-
-    def _payload(self):
-        payload = dict(self.event.payload or {})
-        official_user = self.event.space.official_user
-        payload.update(
-            notification_event_id=self.event_id,
-            event_type=self.event.event_type,
-            space_slug=self.event.space.slug,
-            icon=official_user.tiny_json().get('avatar_uri') if official_user else '',
-        )
-        return payload
-
-    def _notification_text(self):
-        from Message.models import MessageTypeChoice
-
-        event = self.event
-        payload = event.payload or {}
-        language = event.user.language if event.user_id else translation.get_language()
-        with translation.override(language):
-            actor_name = event.actor.name if event.actor_id else ''
-            message_type = payload.get('message_type')
-            natural_bodies = {
-                MessageTypeChoice.IMAGE: _('Sent a photo.'),
-                MessageTypeChoice.VIDEO: _('Sent a video.'),
-                MessageTypeChoice.AUDIO: _('Sent a voice message.'),
-                MessageTypeChoice.FILE: _('Sent a file.'),
-                MessageTypeChoice.LOCATION: _('Shared a location.'),
-                MessageTypeChoice.MAP_ACCESS: _('Shared a footprint map.'),
-                MessageTypeChoice.STATEMENT: _('Shared a statement.'),
-                MessageTypeChoice.STICKER: _('Sent a sticker.'),
-                MessageTypeChoice.ACTIVITY: _('Shared an activity.'),
-            }
-            body = natural_bodies.get(message_type) or payload.get('content') or _('Sent a message.')
-            if event.event_type == NotificationEventTypeChoice.DIRECT_MESSAGE:
-                return str(actor_name or _('New direct message')), str(body)
-            if event.event_type == NotificationEventTypeChoice.GROUP_MESSAGE:
-                title = payload.get('chat_name') or _('Group chat')
-                if actor_name:
-                    body = _('{name}: {message}').format(name=actor_name, message=body)
-                return str(title), str(body)
-            return event.render_delivery_message()
-
-    def _attempt_send(self):
-        from utils.webpush import WebPushNotConfigured, is_expired_subscription_error, send_web_push
-
-        title, body = self._notification_text()
-        try:
-            send_web_push(
-                subscription=self.subscription,
-                title=title,
-                body=body,
-                payload=self._payload(),
-            )
-            self.status = NotificationDeliveryStatusChoice.SENT
-            self.detail = None
-        except WebPushNotConfigured as err:
-            self.status = NotificationDeliveryStatusChoice.SKIPPED
-            self.detail = str(err)[:255]
-        except Exception as err:
-            self.status = NotificationDeliveryStatusChoice.FAILED
-            self.detail = str(err)[:255]
-            if is_expired_subscription_error(err):
-                self.subscription.enabled = False
-                self.subscription.save(update_fields=['enabled'])
-
-        self.attempted_at = timezone.now()
-        self.save(update_fields=['status', 'detail', 'attempted_at'])
-        return self

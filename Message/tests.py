@@ -6,7 +6,7 @@ from django.test import SimpleTestCase, TestCase
 
 from Message.image_metadata import _reverse_geocode_opencage, parse_image_info, reverse_geocode
 from Message.video_metadata import parse_avinfo
-from Message.models import MediaAsset, MediaAssetAlias, Message, MessageTypeChoice, random_point_within_radius
+from Message.models import MediaAsset, Message, MessageTypeChoice, random_point_within_radius
 from utils.qiniu import build_message_media_key, validate_message_media_key
 from utils.global_settings import Globals
 
@@ -233,18 +233,6 @@ class UnifiedMediaAssetTests(TestCase):
         self.assertEqual(audio.duration_seconds, 12)
         self.assertEqual(file.file_size, 2048)
         fetch.assert_not_called()
-
-    def test_legacy_blob_slug_resolves_to_asset(self):
-        asset = MediaAsset.objects.create(
-            source_key='sermo/messages/image/legacy.jpg',
-            source_uri='https://resource.example.com/sermo/messages/image/legacy.jpg',
-            kind=MediaAsset.KIND_IMAGE,
-        )
-        MediaAssetAlias.objects.create(slug='legacy-message-slug', asset=asset)
-
-        self.assertEqual(MediaAssetAlias.resolve(asset.blob_slug), asset)
-        self.assertEqual(MediaAssetAlias.resolve('legacy-message-slug'), asset)
-
 
 class LocationMessageTests(SimpleTestCase):
     @patch('Message.image_metadata.reverse_geocode', return_value=('新加坡滨海湾', 'opencage'))

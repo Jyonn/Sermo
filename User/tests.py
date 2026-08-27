@@ -11,7 +11,6 @@ from User.models import (
     NotificationEventTypeChoice,
     NotificationDelivery,
     WebPushSubscription,
-    WebPushDelivery,
     User,
     UserResourceInventory,
     UserContactVerificationCode,
@@ -181,17 +180,6 @@ class SquareNotificationReadTests(TestCase):
 
         self.assertEqual(updated, 4)
         self.assertEqual(unread_count, 1)
-
-
-class WebPushOriginTests(SimpleTestCase):
-    def test_space_subdomain_is_legacy(self):
-        self.assertTrue(WebPushSubscription.is_legacy_space_origin('https://yuanmeng.sermo.jyonn.space'))
-
-    def test_canonical_origin_is_not_legacy(self):
-        self.assertFalse(WebPushSubscription.is_legacy_space_origin('https://sermo.jyonn.space'))
-
-    def test_unrelated_subdomain_is_not_legacy(self):
-        self.assertFalse(WebPushSubscription.is_legacy_space_origin('https://api.example.com'))
 
 
 class WebPushRegistrationTests(TestCase):
@@ -400,7 +388,7 @@ class NotificationEventDeliveryTests(SimpleTestCase):
             payload={'message_type': 1, 'content': '[图片]'},
         )
 
-        title, body = WebPushDelivery(event=event)._notification_text()
+        title, body = NotificationDelivery(event=event)._web_notification_text()
 
         self.assertEqual(title, 'Fly')
         self.assertEqual(body, '发送了一张图片。')
@@ -419,7 +407,7 @@ class NotificationEventDeliveryTests(SimpleTestCase):
             },
         )
 
-        title, body = WebPushDelivery(event=event)._notification_text()
+        title, body = NotificationDelivery(event=event)._web_notification_text()
 
         self.assertEqual(title, '一百二十五星俱乐部')
         self.assertEqual(body, 'Fly：晚上集合')
@@ -442,7 +430,7 @@ class NotificationEventDeliveryTests(SimpleTestCase):
         thread.return_value.start.assert_called_once_with()
 
     @patch('User.models.NotificationPreference.ensure_defaults', return_value=[])
-    @patch('User.models.WebPushDelivery.enqueue_for_event', return_value=['web'])
+    @patch('User.models.NotificationDelivery.enqueue_web_for_event', return_value=['web'])
     def test_web_push_is_enqueued_before_slower_channels(self, web_push, ensure_defaults):
         event = NotificationEvent(user=User(id=1))
 

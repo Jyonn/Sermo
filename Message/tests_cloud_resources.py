@@ -10,7 +10,6 @@ from Chat.models import Chat
 from Friendship.models import Friendship
 from Message.models import MediaAsset, MediaResource, Message, MessageTypeChoice
 from Message.management.commands.backfill_media_asset_hashes import Command as BackfillCommand
-from Message.models import MediaAssetAlias
 from Message.validators import MessageErrors
 from Space.models import Space
 from User.models import User
@@ -245,7 +244,7 @@ class CloudResourceTests(TestCase):
         self.assertEqual(peer_resource.reference_count, 0)
 
     @patch('Message.management.commands.backfill_media_asset_hashes.delete_message_media_file')
-    def test_backfill_merges_global_assets_and_preserves_names_and_old_slug(self, delete_file):
+    def test_backfill_merges_global_assets_and_preserves_names(self, delete_file):
         canonical = self.create_asset()
         duplicate = self.create_asset(
             source_key='sermo/messages/file/duplicate.pdf',
@@ -254,8 +253,6 @@ class CloudResourceTests(TestCase):
         )
         first = self.create_resource(asset=canonical, file_name='first.pdf')
         second = self.create_resource(asset=duplicate, owner=self.peer, file_name='second.pdf')
-        old_slug = duplicate.blob_slug
-
         BackfillCommand._merge_asset(duplicate, canonical)
 
         first.refresh_from_db()
@@ -263,7 +260,6 @@ class CloudResourceTests(TestCase):
         self.assertEqual(first.asset_id, canonical.id)
         self.assertEqual(second.asset_id, canonical.id)
         self.assertEqual({first.file_name, second.file_name}, {'first.pdf', 'second.pdf'})
-        self.assertEqual(MediaAssetAlias.resolve(old_slug), canonical)
         self.assertFalse(MediaAsset.objects.filter(source_key='sermo/messages/file/duplicate.pdf').exists())
         delete_file.assert_called_once()
 

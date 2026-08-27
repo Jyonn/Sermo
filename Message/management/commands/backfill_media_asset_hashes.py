@@ -9,7 +9,6 @@ from django.db.models import Q
 from Message.models import (
     ForwardBundleItem,
     MediaAsset,
-    MediaAssetAlias,
     MediaResource,
     Message,
 )
@@ -62,14 +61,9 @@ class Command(BaseCommand):
     def _merge_asset(cls, duplicate, canonical):
         old_key = duplicate.source_key
         with transaction.atomic():
-            MediaAssetAlias.objects.get_or_create(
-                slug=duplicate.blob_slug,
-                defaults={'asset': canonical},
-            )
             for resource in duplicate.resources.select_for_update().iterator(chunk_size=200):
                 cls._merge_resource(resource, canonical)
             StatementMedia.objects.filter(media_asset=duplicate).update(media_asset=canonical)
-            MediaAssetAlias.objects.filter(asset=duplicate).update(asset=canonical)
             duplicate.delete()
         try:
             delete_message_media_file(old_key)

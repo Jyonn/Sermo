@@ -8,7 +8,7 @@ from Square.models import SquareReadState, Statement, StatementComment, Statemen
 from Activity.models import ActivityCampaign, ActivityService
 from Friendship.models import Friendship, FriendshipStatusChoice
 from django.db.models import Q
-from Message.models import ForwardBundle, MediaAsset, MediaAssetAlias, Message, MessageTypeChoice
+from Message.models import ForwardBundle, MediaAsset, Message, MessageTypeChoice
 from Message.params import MessageParams
 from Square.params import SquareParams
 from Square.quota import quota_for_user
@@ -407,7 +407,7 @@ class StatementCommentView(View):
 
 class StatementMediaView(View):
     def get(self, request: Request, blob_slug: str):
-        asset = MediaAssetAlias.resolve(blob_slug)
+        asset = MediaAsset.objects.filter(blob_slug=str(blob_slug or '').strip().lower()).first()
         if asset is None or not asset.statement_media_items.filter(statement__is_deleted=False).exists():
             raise SquareErrors.NOT_EXISTS
         response = HttpResponseRedirect(sign_private_download_url(asset.source_uri))
@@ -417,7 +417,7 @@ class StatementMediaView(View):
 
 class StatementMediaThumbnailView(View):
     def get(self, request: Request, blob_slug: str):
-        asset = MediaAssetAlias.resolve(blob_slug)
+        asset = MediaAsset.objects.filter(blob_slug=str(blob_slug or '').strip().lower()).first()
         if asset is None or asset.kind not in {MediaAsset.KIND_IMAGE, MediaAsset.KIND_VIDEO} or not asset.statement_media_items.filter(statement__is_deleted=False).exists():
             raise SquareErrors.NOT_EXISTS
         thumbnail_uri = build_message_image_thumbnail_uri(asset.source_uri, width=480) if asset.kind == MediaAsset.KIND_IMAGE else build_message_video_thumbnail_uri(asset.source_uri, width=480)

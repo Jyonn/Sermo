@@ -24,7 +24,6 @@ from User.models import (
     User,
     UserNotificationChoice,
     UserRoleChoice,
-    WebPushDelivery,
 )
 from utils import auth
 from utils.notificator_integration import send_verification_mail
@@ -245,6 +244,8 @@ def _delivery_status(value):
 
 
 def _delivery_channel(value, delivery=None):
+    if delivery is not None and delivery.web_subscription_id:
+        return 'web'
     if value == UserNotificationChoice.BARK and delivery is not None and delivery.instant_endpoint_id:
         return delivery.instant_endpoint.provider
     return {
@@ -294,27 +295,26 @@ class MessageDeliveryView(View):
                 payload__message_id=message.id,
             ).select_related('user').prefetch_related(
                 'deliveries__instant_endpoint',
-                'web_push_deliveries__subscription',
+                'deliveries__web_subscription',
             ).order_by('created_at', 'id')
         )
         recipients = []
         totals = dict(sent=0, pending=0, failed=0, skipped=0)
         for event in events:
-            deliveries = [
-                _delivery_payload(delivery, _delivery_channel(delivery.channel, delivery))
-                for delivery in event.deliveries.all().order_by('created_at', 'id')
-                if delivery.detail not in _NON_DELIVERY_DETAILS
-            ]
-            for delivery in event.web_push_deliveries.all().order_by('created_at', 'id'):
-                item = _delivery_payload(delivery, 'web')
-                subscription = delivery.subscription
-                item['subscription'] = dict(
-                    digest=subscription.endpoint_digest[:12],
-                    origin=subscription.origin,
-                    user_agent=subscription.user_agent,
-                    enabled=subscription.enabled,
-                    last_seen_at=subscription.last_seen_at.timestamp(),
-                )
+            deliveries = []
+            for delivery in event.deliveries.all().order_by('created_at', 'id'):
+                if delivery.detail in _NON_DELIVERY_DETAILS:
+                    continue
+                item = _delivery_payload(delivery, _delivery_channel(delivery.channel, delivery))
+                if delivery.web_subscription_id:
+                    subscription = delivery.web_subscription
+                    item['subscription'] = dict(
+                        digest=subscription.endpoint_digest[:12],
+                        origin=subscription.origin,
+                        user_agent=subscription.user_agent,
+                        enabled=subscription.enabled,
+                        last_seen_at=subscription.last_seen_at.timestamp(),
+                    )
                 deliveries.append(item)
             for delivery in deliveries:
                 if delivery['status'] in totals:

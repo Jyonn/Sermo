@@ -77,7 +77,7 @@ class Chat(models.Model):
         payload = []
         for item in members:
             user = item.user.jsonl()
-            user['joined_at'] = item.joined_at.timestamp() if item.joined_at else item.created_at.timestamp()
+            user['joined_at'] = item.joined_at.timestamp()
             payload.append(user)
         return payload
 

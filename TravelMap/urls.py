@@ -6,7 +6,6 @@ from TravelMap.views import (
     MapAccessReciprocateView,
     MapAccessOverviewView,
     MapAccessView,
-    MapGeometryView,
     MyTravelMapView,
     TravelMapCheckInView,
     UserTravelMapView,
@@ -20,7 +19,6 @@ urlpatterns = [
     path('access', MapAccessView.as_view(), name='travel map access'),
     path('access/reciprocate', MapAccessReciprocateView.as_view(), name='travel map access reciprocate'),
     path('access/overview', MapAccessOverviewView.as_view(), name='travel map access overview'),
-    path('geometry', MapGeometryView.as_view(), name='travel map geometry'),
     path('chats/access', ChatMapAccessView.as_view(), name='chat travel map access'),
     path('chats/maps', ChatTravelMapsView.as_view(), name='chat travel maps'),
 ]

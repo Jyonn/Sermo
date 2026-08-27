@@ -7,7 +7,7 @@ from django.views import View
 from smartdjango import analyse, OK
 
 from Chat.models import Chat
-from Message.models import ForwardBundle, LinkPreview, MediaAsset, MediaAssetAlias, MediaResource, Message, MessageEvent, MessageHistoryRecovery, MessageTypeChoice, PinnedMessage
+from Message.models import ForwardBundle, LinkPreview, MediaAsset, MediaResource, Message, MessageEvent, MessageHistoryRecovery, MessageTypeChoice, PinnedMessage
 from Message.params import MessageParams
 from Message.validators import MessageErrors
 from utils.qiniu import issue_message_upload, build_message_image_thumbnail_uri, build_message_video_thumbnail_uri, sign_private_download_url, avatar_uri_for_key, validate_message_media_key
@@ -344,31 +344,6 @@ class MessageResourceView(View):
         )
 
     @auth.require_user
-    @analyse.json(
-        MessageParams.kind,
-        MessageParams.file_name,
-        MessageParams.content_type,
-        MessageParams.file_size,
-        MessageParams.content_hash,
-    )
-    def post(self, request: Request):
-        kind_name = request.json.kind
-        if kind_name not in {'video', 'file'}:
-            raise MessageErrors.MEDIA_KIND_INVALID
-        request.user.require_capability(f'chat.message.send.{kind_name}')
-        kind = MediaAsset.kind_for_name(kind_name)
-        duplicate = MediaAsset.find_duplicate(request.json.content_hash, request.json.file_size)
-        if duplicate is not None:
-            MediaResource.require_capacity(request.user, request.json.file_size, asset=duplicate)
-            resource = MediaResource.acquire(request.user, duplicate, kind, request.json.file_name)
-            return dict(resource=resource.resource_jsonl(request=request), instant=True, quota=MediaResource.quota_for(request.user))
-        MediaResource.require_capacity(request.user, request.json.file_size)
-        upload = issue_message_upload(kind_name, request.json.file_name, request.json.content_type)
-        upload['instant'] = False
-        upload['quota'] = MediaResource.quota_for(request.user)
-        return upload
-
-    @auth.require_user
     @analyse.query(MessageParams.resource_id)
     def delete(self, request: Request):
         resource = MediaResource.objects.filter(id=request.query.resource_id, owner=request.user, library_active=True).first()
@@ -494,7 +469,7 @@ class MessageBlobView(View):
         return response
 
     def get(self, request: Request, blob_slug: str):
-        asset = MediaAssetAlias.resolve(blob_slug)
+        asset = MediaAsset.objects.filter(blob_slug=str(blob_slug or '').strip().lower()).first()
         if asset is None or not asset.resources.filter(MediaResource.available_reference_q()).exists():
             raise MessageErrors.NOT_EXISTS
         return self._redirect(sign_private_download_url(asset.source_uri))
@@ -502,7 +477,7 @@ class MessageBlobView(View):
 
 class MessageBlobThumbnailView(View):
     def get(self, request: Request, blob_slug: str):
-        asset = MediaAssetAlias.resolve(blob_slug)
+        asset = MediaAsset.objects.filter(blob_slug=str(blob_slug or '').strip().lower()).first()
         if asset is None or asset.kind not in (MediaAsset.KIND_IMAGE, MediaAsset.KIND_VIDEO) or not asset.resources.filter(
             MediaResource.available_reference_q(),
         ).exists():

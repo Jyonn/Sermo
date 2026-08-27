@@ -908,19 +908,14 @@ class Message(models.Model):
             raw_url = match.group(0).rstrip(LinkPreview.TRAILING_PUNCTUATION)
             parsed = urlparse(raw_url)
             hostname = (parsed.hostname or '').lower()
-            trusted_host = (
-                hostname in {'sermo.jyonn.space', 'localhost', '127.0.0.1'}
-                or hostname.endswith('.sermo.jyonn.space')
-                or hostname.endswith('.localhost')
-            )
+            trusted_host = hostname in {'sermo.jyonn.space', 'localhost', '127.0.0.1'}
             if not trusted_host:
                 continue
             path_match = re.fullmatch(r'/(?:([^/]+)/)?app/square/statements/(\d+)/?', parsed.path)
             if path_match is None:
                 continue
             path_slug, statement_id = path_match.groups()
-            host_slug = hostname.removesuffix('.sermo.jyonn.space') if hostname.endswith('.sermo.jyonn.space') else ''
-            referenced_slug = (path_slug or host_slug or user.space.slug).lower()
+            referenced_slug = (path_slug or user.space.slug).lower()
             if referenced_slug != user.space.slug:
                 continue
             statement = Statement.visible_for(user).filter(id=int(statement_id)).first()
@@ -2162,17 +2157,3 @@ class ForwardBundleItem(models.Model):
             payload=payload,
             sent_at=self.sent_at.timestamp(),
         )
-
-
-class MediaAssetAlias(models.Model):
-    slug = models.CharField(max_length=32, unique=True, db_index=True)
-    asset = models.ForeignKey(MediaAsset, on_delete=models.CASCADE, related_name='aliases')
-
-    @classmethod
-    def resolve(cls, slug):
-        normalized = str(slug or '').strip().lower()
-        asset = MediaAsset.objects.filter(blob_slug=normalized).first()
-        if asset is not None:
-            return asset
-        alias = cls.objects.select_related('asset').filter(slug=normalized).first()
-        return alias.asset if alias else None
