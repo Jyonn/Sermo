@@ -106,6 +106,7 @@ class CloudResourceTests(TestCase):
         second = self.client.get('/messages/resources?kind=file&offset=2&limit=2', **self.authorization()).json()['body']
 
         self.assertEqual([item['resource_id'] for item in first['items']], [resource.id for resource in resources[:2]])
+        self.assertEqual(first['total_count'], 3)
         self.assertTrue(first['has_more'])
         self.assertEqual(first['next_offset'], 2)
         self.assertEqual([item['resource_id'] for item in second['items']], [resources[2].id])

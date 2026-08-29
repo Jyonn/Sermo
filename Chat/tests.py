@@ -1,4 +1,5 @@
 import json
+from datetime import datetime, timezone as datetime_timezone
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -254,13 +255,44 @@ class GroupMessageVisibilityBoundaryTests(TestCase):
         self.assertEqual(new_event['message']['message_id'], self.new_message.id)
 
     def test_search_excludes_sticker_messages(self):
-        sticker = Message.create(self.chat, self.owner, MessageTypeChoice.STICKER, 'sticker payload')
+        sticker = Message.objects.create(
+            chat=self.chat,
+            user=self.owner,
+            type=MessageTypeChoice.STICKER,
+            content='{"kind":"sticker","asset_id":999999}',
+        )
 
         search = self.client.get(
             f'/messages/search?chat_id={self.chat.id}&limit=30',
             **self.authorization(self.new_member),
         )
 
-        message_ids = [item['message_id'] for item in search.json()['body']['items']]
+        body = search.json()['body']
+        message_ids = [item['message_id'] for item in body['items']]
         self.assertIn(self.new_message.id, message_ids)
         self.assertNotIn(sticker.id, message_ids)
+        self.assertEqual(body['total_count'], 1)
+
+    def test_search_calendar_returns_first_visible_message_for_shanghai_day(self):
+        later = Message.create(self.chat, self.owner, MessageTypeChoice.TEXT, 'later that day')
+        first_time = datetime(2026, 8, 12, 16, 30, tzinfo=datetime_timezone.utc)
+        later_time = datetime(2026, 8, 13, 3, 0, tzinfo=datetime_timezone.utc)
+        ChatMember.objects.filter(id=self.membership.id).update(
+            joined_at=datetime(2026, 1, 1, tzinfo=datetime_timezone.utc),
+        )
+        Message.objects.filter(id=self.old_message.id).update(
+            created_at=datetime(2025, 12, 31, tzinfo=datetime_timezone.utc),
+        )
+        Message.objects.filter(id=self.new_message.id).update(created_at=first_time)
+        Message.objects.filter(id=later.id).update(created_at=later_time)
+
+        response = self.client.get(
+            f'/messages/search/calendar?chat_id={self.chat.id}&year=2026&month=8',
+            **self.authorization(self.new_member),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json()['body']['days'], [{
+            'date': '2026-08-13',
+            'first_message_id': self.new_message.id,
+        }])

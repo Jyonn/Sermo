@@ -9,6 +9,7 @@ import secrets
 import socket
 import threading
 import uuid
+from zoneinfo import ZoneInfo
 from html.parser import HTMLParser
 from urllib.parse import urljoin, urlparse, urlunparse
 
@@ -1314,6 +1315,7 @@ class Message(models.Model):
             queryset = queryset.filter(content__icontains=normalized_keyword)
         if message_type is not None:
             queryset = queryset.filter(type=message_type)
+        total_count = queryset.count()
         if before is not None:
             queryset = queryset.filter(id__lt=before)
         messages = list(queryset.order_by('-id')[:limit + 1])
@@ -1321,8 +1323,31 @@ class Message(models.Model):
         messages = messages[:limit]
         return dict(
             items=[message.jsonl(request=request) for message in messages],
+            total_count=total_count,
             has_more=has_more,
             next_before=messages[-1].id if has_more and messages else None,
+        )
+
+    @classmethod
+    def calendar_days(cls, chat: Chat, user: User, year: int, month: int):
+        base_tz = ZoneInfo('Asia/Shanghai')
+        month_start = datetime.datetime(year, month, 1, tzinfo=base_tz)
+        if month == 12:
+            month_end = datetime.datetime(year + 1, 1, 1, tzinfo=base_tz)
+        else:
+            month_end = datetime.datetime(year, month + 1, 1, tzinfo=base_tz)
+        rows = cls.visible_for_user(chat, user).filter(
+            created_at__gte=month_start,
+            created_at__lt=month_end,
+        ).order_by('created_at', 'id').values_list('id', 'created_at')
+        days = {}
+        for message_id, created_at in rows.iterator():
+            day = timezone.localtime(created_at, base_tz).date().isoformat()
+            days.setdefault(day, message_id)
+        return dict(
+            year=year,
+            month=month,
+            days=[dict(date=day, first_message_id=message_id) for day, message_id in days.items()],
         )
 
     def remove(self):

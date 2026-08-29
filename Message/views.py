@@ -114,6 +114,23 @@ class MessageSearchView(View):
         )
 
 
+class MessageSearchCalendarView(View):
+    @auth.require_user
+    @analyse.query(
+        MessageParams.chat_id,
+        MessageParams.calendar_year,
+        MessageParams.calendar_month,
+    )
+    @auth.require_chat_member()
+    def get(self, request: Request):
+        return Message.calendar_days(
+            chat=request.query.chat,
+            user=request.user,
+            year=request.query.calendar_year,
+            month=request.query.calendar_month,
+        )
+
+
 class MessageBatchView(View):
     @auth.require_user
     @analyse.json(MessageParams.message_ids)
@@ -333,11 +350,13 @@ class MessageResourceView(View):
         if request.query.resource_keyword:
             queryset = queryset.filter(file_name__icontains=request.query.resource_keyword.strip())
         queryset = queryset.distinct().order_by('-asset__created_at', '-id')
+        total_count = queryset.count()
         page = list(queryset[offset:offset + limit + 1])
         has_more = len(page) > limit
         resources = page[:limit]
         return dict(
             items=[resource.resource_jsonl(request=request) for resource in resources],
+            total_count=total_count,
             quota=MediaResource.quota_for(request.user),
             has_more=has_more,
             next_offset=offset + len(resources),

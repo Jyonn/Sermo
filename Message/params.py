@@ -74,4 +74,12 @@ class MessageParams(metaclass=Params):
         lambda value: value in (0, 1, 2, 4, 5, 6, 7, 8, 9, 11),
         message=_('Unsupported message type'),
     ).null().default(None)
+    calendar_year = Validator('year', final_name='calendar_year').to(int).bool(
+        lambda value: 2000 <= value <= 2100,
+        message=_('Unsupported calendar year'),
+    )
+    calendar_month = Validator('month', final_name='calendar_month').to(int).bool(
+        lambda value: 1 <= value <= 12,
+        message=_('Unsupported calendar month'),
+    )
     delete_scope = Validator('scope', final_name='delete_scope').to(str).bool(lambda value: value in ('me', 'everyone')).default('everyone')
