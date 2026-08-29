@@ -100,6 +100,25 @@ def _is_notificator_timeout(error: Exception):
     return 'timed out' in message or 'timeout' in message or 'read timed out' in message
 
 
+def _notify_operator_change(space, user, assigned):
+    official = space.ensure_official_user()
+    content = (
+        ('You have been assigned as a space operator. You can now manage Square mutes and publish merged chat records as posts.'
+         if assigned else
+         'Your space operator role has been removed. Operator permissions are no longer available.')
+        if user.language == 'en' else
+        ('你已被设为空间运营者，现在可以管理广场禁言，并将合并聊天记录发布为发言。'
+         if assigned else
+         '你的空间运营者身份已被取消，相关运营权限已同步收回。')
+    )
+    with transaction.atomic():
+        Friendship.ensure_locked_friendship(official, user)
+        chat = Chat.get_or_create_direct(official, user)
+        message = Message.create(chat=chat, user=official, message_type=0, content=content)
+        events = NotificationEvent.emit_message_notifications(message, actor=official, enqueue=False)
+        NotificationEvent._enqueue_deliveries_after_commit([event.id for event in events])
+
+
 class SpaceEmailCodeRequestView(View):
     @analyse.json(
         SpaceEmailVerificationCodeParams.slug,
@@ -321,12 +340,17 @@ class SpaceAdminOperatorView(View):
             if SpaceOperator.objects.filter(space=space).count() >= SpaceOperator.MAX_PER_SPACE:
                 raise SpaceErrors.OPERATOR_LIMIT_REACHED
             operator = SpaceOperator.objects.create(space=space, user=user)
+        _notify_operator_change(request.space, user, True)
         return operator.json()
 
     @auth.require_space
     @analyse.query(SpaceOperatorParams.user_id)
     def delete(self, request: Request):
-        SpaceOperator.objects.filter(space=request.space, user_id=request.query.user_id).delete()
+        operator = SpaceOperator.objects.filter(space=request.space, user_id=request.query.user_id).select_related('user').first()
+        if operator is not None:
+            user = operator.user
+            operator.delete()
+            _notify_operator_change(request.space, user, False)
         return {}
 
 
