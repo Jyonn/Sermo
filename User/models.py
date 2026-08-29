@@ -1484,7 +1484,21 @@ class PermanentVipCampaign(models.Model):
 
     @classmethod
     def status_for(cls, user):
+        from Activity.models import ActivityCampaign, ActivityService
+
         campaign, _ = cls.objects.get_or_create(key='founding-100')
+        activity_campaign = ActivityCampaign.objects.filter(
+            key='permanent-vip-founding-100',
+            enabled=True,
+        ).first()
+        space_activity_active = False
+        if activity_campaign is not None:
+            ActivityService.ensure_automatic_for_space(user.space)
+            space_activity_active = ActivityService.space_activity_for(
+                activity_campaign,
+                user.space,
+                active_only=True,
+            ).is_active()
         claim = UserResourceInventory.objects.filter(user=user, reward_id='vip.permanent').first()
         level = user.effective_growth_level()
         required_level = cls.required_level_for_slot(min(campaign.claimed_count + 1, cls.LIMIT))
@@ -1506,7 +1520,8 @@ class PermanentVipCampaign(models.Model):
             ],
             claimed_by_user=claim is not None,
             slot=(claim.metadata or {}).get('slot') if claim else None,
-            active=claim is None and campaign.claimed_count < cls.LIMIT,
+            active=space_activity_active and claim is None and campaign.claimed_count < cls.LIMIT,
+            space_activity_active=space_activity_active,
         )
 
     @classmethod

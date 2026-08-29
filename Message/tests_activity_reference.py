@@ -1,10 +1,8 @@
 import json
-from datetime import timedelta
 
 from django.test import RequestFactory, TestCase
-from django.utils import timezone
 
-from Activity.models import ActivityCampaign
+from Activity.models import ActivityCampaign, ActivityService
 from Chat.models import Chat, ChatTypeChoice
 from Message.models import Message, MessageTypeChoice
 from Message.validators import MessageErrors
@@ -26,9 +24,9 @@ class ActivityMessageReferenceTests(TestCase):
             key='baxian-test',
             title='八仙聚力',
             title_en='Baxian Gathering',
-            starts_at=timezone.now() - timedelta(days=1),
-            ends_at=timezone.now() + timedelta(days=14),
+            duration_seconds=15 * 24 * 60 * 60,
         )
+        ActivityService.claim_for_space(self.campaign, self.space)
 
     def test_activity_reference_is_normalized_and_resolved(self):
         content = Message.normalize_content(MessageTypeChoice.ACTIVITY, json.dumps({

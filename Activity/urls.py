@@ -1,10 +1,12 @@
 from django.urls import path
 
-from Activity.views import ActiveActivityView, ActivityClaimView, ActivityContributionView, ActivityDetailView, ActivityPersonalRewardClaimView, ActivitySpaceRewardClaimView
+from Activity.views import AdminActivityClaimView, AdminActivityListView, ActiveActivityView, ActivityClaimView, ActivityContributionView, ActivityDetailView, ActivityPersonalRewardClaimView, ActivitySpaceRewardClaimView
 
 
 urlpatterns = [
     path('active', ActiveActivityView.as_view(), name='active activities'),
+    path('admin', AdminActivityListView.as_view(), name='admin activities'),
+    path('admin/<slug:key>/claim', AdminActivityClaimView.as_view(), name='admin activity claim'),
     path('<slug:key>', ActivityDetailView.as_view(), name='activity detail'),
     path('<slug:key>/claim', ActivityClaimView.as_view(), name='activity claim'),
     path('<slug:key>/personal-reward/claim', ActivityPersonalRewardClaimView.as_view(), name='activity personal reward claim'),

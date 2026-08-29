@@ -5,7 +5,7 @@ from oba import raw
 from smartdjango import OK, analyse
 
 from Square.models import SquareMute, SquareReadState, Statement, StatementComment, StatementCommentLike, StatementLike, StatementMedia, statement_media_prefetch
-from Activity.models import ActivityCampaign, ActivityService
+from Activity.models import ActivityService
 from Friendship.models import Friendship, FriendshipStatusChoice
 from django.db.models import Q
 from Message.models import ForwardBundle, MediaAsset, Message, MessageTypeChoice
@@ -269,11 +269,14 @@ class SquareStatusView(View):
             'explore_statement_id': explore_latest,
             'friends_statement_id': friends_latest,
         })
-        activities = [ActivityService.payload(campaign, user) for campaign in ActivityCampaign.active()]
+        activities = [
+            ActivityService.payload(space_activity.campaign, user, space_activity)
+            for space_activity in ActivityService.active_campaigns_for_space(user.space)
+        ]
         claimable_activities = [item for item in activities if cls._activity_needs_attention(item)]
         activity_claimable = bool(claimable_activities)
         vip_campaign = PermanentVipCampaign.status_for(user)
-        vip_claimable = vip_campaign['active'] and vip_campaign['eligible']
+        vip_claimable = vip_campaign['space_activity_active'] and vip_campaign['active'] and vip_campaign['eligible']
         _updated, notification_unread = NotificationEvent.mark_square_events_read(user, statement_id=-1)
         return dict(
             notification_unread=notification_unread,

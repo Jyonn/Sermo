@@ -1,28 +1,32 @@
 import random
+from datetime import timedelta
 
 from django.db import models, transaction
 from django.utils import timezone
 
 
 class ActivityCampaign(models.Model):
+    class AssignmentMode(models.TextChoices):
+        AUTOMATIC = 'automatic', 'Automatic'
+        MANUAL = 'manual', 'Manual'
+
     key = models.SlugField(max_length=80, unique=True)
     title = models.CharField(max_length=80)
     title_en = models.CharField(max_length=120, blank=True, default='')
     summary = models.CharField(max_length=200, blank=True, default='')
     summary_en = models.CharField(max_length=240, blank=True, default='')
-    starts_at = models.DateTimeField(db_index=True)
-    ends_at = models.DateTimeField(db_index=True)
+    assignment_mode = models.CharField(
+        max_length=16,
+        choices=AssignmentMode.choices,
+        default=AssignmentMode.MANUAL,
+        db_index=True,
+    )
+    duration_seconds = models.PositiveIntegerField(null=True, blank=True)
     event_key = models.CharField(max_length=80, default='square.statement.publish')
     daily_user_limit = models.PositiveSmallIntegerField(default=1)
     config = models.JSONField(default=dict, blank=True)
     enabled = models.BooleanField(default=True, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
-
-    @classmethod
-    def active(cls, now=None):
-        now = now or timezone.now()
-        return cls.objects.filter(enabled=True, starts_at__lte=now, ends_at__gt=now)
-
 
 class ActivityMilestone(models.Model):
     campaign = models.ForeignKey(ActivityCampaign, on_delete=models.CASCADE, related_name='milestones')
@@ -42,6 +46,8 @@ class SpaceActivity(models.Model):
     campaign = models.ForeignKey(ActivityCampaign, on_delete=models.CASCADE, related_name='space_runs')
     space = models.ForeignKey('Space.Space', on_delete=models.CASCADE, related_name='activities')
     total_points = models.PositiveIntegerField(default=0)
+    claimed_at = models.DateTimeField(default=timezone.now, db_index=True)
+    ends_at = models.DateTimeField(null=True, blank=True, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -49,6 +55,10 @@ class SpaceActivity(models.Model):
         constraints = [
             models.UniqueConstraint(fields=['campaign', 'space'], name='activity_campaign_space_unique'),
         ]
+
+    def is_active(self, now=None):
+        now = now or timezone.now()
+        return self.claimed_at <= now and (self.ends_at is None or self.ends_at > now)
 
 
 class UserActivityProgress(models.Model):
@@ -126,8 +136,82 @@ class ActivityService:
     AWAKENING_COUNT = 8
 
     @staticmethod
-    def _progress(campaign, user):
-        space_activity, _ = SpaceActivity.objects.get_or_create(campaign=campaign, space=user.space)
+    def claim_for_space(campaign, space, claimed_at=None):
+        claimed_at = claimed_at or timezone.now()
+        ends_at = (
+            claimed_at + timedelta(seconds=campaign.duration_seconds)
+            if campaign.duration_seconds else None
+        )
+        space_activity, _ = SpaceActivity.objects.get_or_create(
+            campaign=campaign,
+            space=space,
+            defaults={'claimed_at': claimed_at, 'ends_at': ends_at},
+        )
+        return space_activity
+
+    @classmethod
+    def ensure_automatic_for_space(cls, space):
+        for campaign in ActivityCampaign.objects.filter(
+            enabled=True,
+            assignment_mode=ActivityCampaign.AssignmentMode.AUTOMATIC,
+        ):
+            cls.claim_for_space(campaign, space)
+
+    @staticmethod
+    def space_activities(space, active_only=False):
+        now = timezone.now()
+        queryset = SpaceActivity.objects.filter(
+            space=space,
+            campaign__enabled=True,
+            claimed_at__lte=now,
+        ).select_related('campaign')
+        if active_only:
+            queryset = queryset.filter(models.Q(ends_at__isnull=True) | models.Q(ends_at__gt=now))
+        return queryset.order_by('claimed_at', 'id')
+
+    @classmethod
+    def active_campaigns_for_space(cls, space, include_managed=False):
+        cls.ensure_automatic_for_space(space)
+        runs = cls.space_activities(space, active_only=True)
+        if include_managed:
+            return list(runs)
+        return [run for run in runs if run.campaign.config.get('theme') != 'permanent-vip']
+
+    @classmethod
+    def space_activity_for(cls, campaign, space, active_only=False):
+        queryset = cls.space_activities(space, active_only=active_only)
+        return queryset.get(campaign=campaign)
+
+    @classmethod
+    def admin_payloads(cls, space):
+        cls.ensure_automatic_for_space(space)
+        runs = {item.campaign_id: item for item in cls.space_activities(space)}
+        payloads = []
+        for campaign in ActivityCampaign.objects.filter(enabled=True).order_by('created_at', 'id'):
+            run = runs.get(campaign.id)
+            status = 'unclaimed'
+            if run is not None:
+                status = 'active' if run.is_active() else 'ended'
+            payloads.append(dict(
+                key=campaign.key,
+                title=campaign.title,
+                title_en=campaign.title_en,
+                summary=campaign.summary,
+                summary_en=campaign.summary_en,
+                theme=campaign.config.get('theme', ''),
+                assignment_mode=campaign.assignment_mode,
+                mandatory=campaign.assignment_mode == ActivityCampaign.AssignmentMode.AUTOMATIC,
+                duration_seconds=campaign.duration_seconds,
+                status=status,
+                claimed=run is not None,
+                claimed_at=run.claimed_at.timestamp() if run else None,
+                ends_at=run.ends_at.timestamp() if run and run.ends_at else None,
+            ))
+        return payloads
+
+    @staticmethod
+    def _progress(campaign, user, space_activity=None):
+        space_activity = space_activity or SpaceActivity.objects.get(campaign=campaign, space=user.space)
         progress, _ = UserActivityProgress.objects.get_or_create(
             campaign=campaign,
             user=user,
@@ -140,9 +224,11 @@ class ActivityService:
         if not user.verified or user.is_deleted:
             return []
         awarded = []
-        for campaign in ActivityCampaign.active().filter(event_key=event_key):
+        cls.ensure_automatic_for_space(user.space)
+        for space_activity in cls.space_activities(user.space, active_only=True).filter(campaign__event_key=event_key):
+            campaign = space_activity.campaign
             with transaction.atomic():
-                space_activity, progress = cls._progress(campaign, user)
+                space_activity, progress = cls._progress(campaign, user, space_activity)
                 progress = UserActivityProgress.objects.select_for_update().get(id=progress.id)
                 today_events = ActivityEvent.objects.filter(
                     campaign=campaign,
@@ -340,8 +426,8 @@ class ActivityService:
             )
 
     @classmethod
-    def payload(cls, campaign, user):
-        space_activity, progress = cls._progress(campaign, user)
+    def payload(cls, campaign, user, space_activity=None):
+        space_activity, progress = cls._progress(campaign, user, space_activity)
         personal_reward = cls._ensure_personal_reward(progress)
         cls._ensure_legacy_awakenings(space_activity)
         rewards = {item.milestone_id: item for item in space_activity.rewards.select_related('milestone')}
@@ -359,7 +445,6 @@ class ActivityService:
                 reward_id=reward.reward_id if reward else '',
                 reward_label=item.reward_label,
             ))
-        now = timezone.now()
         claimable_points = sum(progress.events.filter(points__gt=0, claimed_at__isnull=True).values_list('points', flat=True))
         return dict(
             key=campaign.key,
@@ -367,9 +452,12 @@ class ActivityService:
             title_en=campaign.title_en,
             summary=campaign.summary,
             summary_en=campaign.summary_en,
-            starts_at=campaign.starts_at.timestamp(),
-            ends_at=campaign.ends_at.timestamp(),
-            active=campaign.starts_at <= now < campaign.ends_at and campaign.enabled,
+            starts_at=space_activity.claimed_at.timestamp(),
+            ends_at=space_activity.ends_at.timestamp() if space_activity.ends_at else None,
+            active=campaign.enabled and space_activity.is_active(),
+            assignment_mode=campaign.assignment_mode,
+            duration_seconds=campaign.duration_seconds,
+            theme=campaign.config.get('theme', ''),
             verified=bool(user.verified),
             today_earned=progress.events.filter(event_date=timezone.localdate()).exists(),
             claimable_points=claimable_points,
