@@ -1309,7 +1309,9 @@ class Message(models.Model):
 
     @classmethod
     def search(cls, chat: Chat, user: User, keyword=None, message_type=None, before=None, limit=30, request=None):
-        queryset = cls.visible_for_user(chat, user).exclude(type=MessageTypeChoice.STICKER).select_related('user', 'reply_to', 'reply_to__user', 'media_resource__asset', 'forward_bundle').prefetch_related('chat_mentions__user', 'forward_bundle__items__media_resource__asset')
+        queryset = cls.visible_for_user(chat, user).exclude(
+            type__in=(MessageTypeChoice.STICKER, MessageTypeChoice.SYSTEM),
+        ).select_related('user', 'reply_to', 'reply_to__user', 'media_resource__asset', 'forward_bundle').prefetch_related('chat_mentions__user', 'forward_bundle__items__media_resource__asset')
         normalized_keyword = (keyword or '').strip()
         if normalized_keyword:
             queryset = queryset.filter(content__icontains=normalized_keyword)
@@ -1336,7 +1338,9 @@ class Message(models.Model):
             month_end = datetime.datetime(year + 1, 1, 1, tzinfo=base_tz)
         else:
             month_end = datetime.datetime(year, month + 1, 1, tzinfo=base_tz)
-        rows = cls.visible_for_user(chat, user).filter(
+        rows = cls.visible_for_user(chat, user).exclude(
+            type__in=(MessageTypeChoice.STICKER, MessageTypeChoice.SYSTEM),
+        ).filter(
             created_at__gte=month_start,
             created_at__lt=month_end,
         ).order_by('created_at', 'id').values_list('id', 'created_at')

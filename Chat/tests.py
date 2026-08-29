@@ -261,6 +261,7 @@ class GroupMessageVisibilityBoundaryTests(TestCase):
             type=MessageTypeChoice.STICKER,
             content='{"kind":"sticker","asset_id":999999}',
         )
+        system = Message.objects.create(chat=self.chat, user=self.owner, type=MessageTypeChoice.SYSTEM, content='system activity')
 
         search = self.client.get(
             f'/messages/search?chat_id={self.chat.id}&limit=30',
@@ -271,6 +272,7 @@ class GroupMessageVisibilityBoundaryTests(TestCase):
         message_ids = [item['message_id'] for item in body['items']]
         self.assertIn(self.new_message.id, message_ids)
         self.assertNotIn(sticker.id, message_ids)
+        self.assertNotIn(system.id, message_ids)
         self.assertEqual(body['total_count'], 1)
 
     def test_search_calendar_returns_first_visible_message_for_shanghai_day(self):
