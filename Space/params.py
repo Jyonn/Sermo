@@ -53,6 +53,10 @@ class SpaceUserListParams(metaclass=Params):
         .bool(lambda x: x >= 0, message=_('offset should be greater than or equal to 0'))
 
 
+class SpaceOperatorParams(metaclass=Params):
+    user_id = Validator('user_id').to(int)
+
+
 class SpaceLookupParams(metaclass=Params):
     slug = SpaceParams.slug.copy()
 

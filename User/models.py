@@ -790,6 +790,19 @@ class User(models.Model):
         return self.role == UserRoleChoice.OFFICIAL
 
     @property
+    def is_space_operator(self):
+        if self.is_official:
+            return False
+        if hasattr(self, '_is_space_operator_cache'):
+            return self._is_space_operator_cache
+        self._is_space_operator_cache = hasattr(self, 'space_operator')
+        return self._is_space_operator_cache
+
+    @property
+    def can_operate_square(self):
+        return self.is_official or self.is_space_operator
+
+    @property
     def has_password(self):
         return bool((self.password or '').strip())
 
@@ -936,6 +949,9 @@ class User(models.Model):
 
     def _dictify_official(self):
         return self.is_official
+
+    def _dictify_operator(self):
+        return self.is_space_operator
 
     def _dictify_has_password(self):
         return self.has_password
@@ -1136,7 +1152,7 @@ class User(models.Model):
 
     def tiny_json(self):
         payload = self.dictify(
-            'name', 'user_id', 'official', 'avatar_type', 'avatar_uri', 'avatar_cache_key', 'is_permanent_vip',
+            'name', 'user_id', 'official', 'operator', 'avatar_type', 'avatar_uri', 'avatar_cache_key', 'is_permanent_vip',
             'chat_bubble_style', 'avatar_frame_style', 'statement_card_style', 'growth_level',
             'profile_card_theme',
         )
@@ -1158,6 +1174,7 @@ class User(models.Model):
             'name',
             'user_id',
             'official',
+            'operator',
             'verified',
             'is_alive',
             'welcome_message',
@@ -1182,6 +1199,7 @@ class User(models.Model):
             'name_pinyin',
             'user_id',
             'official',
+            'operator',
             'verified',
             'is_alive',
             'is_permanent_vip',
@@ -1195,7 +1213,7 @@ class User(models.Model):
         return payload
 
     def jwt_json(self):
-        return self.dictify('name', 'user_id', 'space_id', 'language', 'verified')
+        return self.dictify('name', 'user_id', 'space_id', 'language', 'verified', 'official', 'operator')
 
     def json(self):
         return self.jsonl()
@@ -1211,6 +1229,7 @@ class User(models.Model):
             'name',
             'user_id',
             'official',
+            'operator',
             'has_password',
             'language',
             'language_preference',

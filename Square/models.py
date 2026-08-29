@@ -302,7 +302,7 @@ class Statement(models.Model):
 
         normalized_media = StatementMedia.normalize_payload(media)
         if forward_bundle is not None:
-            if not user.is_official or forward_bundle.created_by_id != user.id:
+            if not user.can_operate_square or forward_bundle.created_by_id != user.id:
                 raise SquareErrors.CHAT_RECORD_FORBIDDEN
             if normalized_media:
                 raise SquareErrors.CHAT_RECORD_EXCLUSIVE
@@ -398,7 +398,7 @@ class Statement(models.Model):
             liked=bool(getattr(self, 'viewer_liked', viewer and self.likes.filter(user=viewer).exists())),
             can_delete=bool(viewer and (viewer.id == self.user_id or viewer.is_official and viewer.space_id == self.space_id)),
             can_pin=bool(viewer and viewer.id == self.user_id and viewer.is_official),
-            can_mute=bool(viewer and viewer.is_official and viewer.space_id == self.space_id and not self.user.is_official),
+            can_mute=bool(viewer and viewer.can_operate_square and viewer.space_id == self.space_id and not self.user.is_official),
             is_pinned=bool(self.user.is_official and self.user.pinned_square_statement_id == self.id),
             created_at=self.created_at.timestamp(),
         )

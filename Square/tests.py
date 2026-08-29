@@ -7,7 +7,7 @@ from django.utils import timezone
 
 from Friendship.models import Friendship
 from Chat.models import Chat
-from Space.models import Space
+from Space.models import Space, SpaceOperator
 from Message.models import ForwardBundleItem, MediaAsset, Message
 from Square.models import SquareMute, Statement, StatementComment, StatementCommentLike, StatementLike, StatementMedia
 from Square.views import SquareStatusView
@@ -118,6 +118,33 @@ class StatementApiTests(TestCase):
         )
         self.assertEqual(revoked.status_code, 200, revoked.content)
         self.assertIsNone(SquareMute.active_for(self.author))
+
+    def test_operator_can_mute_statement_author(self):
+        self.friend.phone = '+8613800000002'
+        self.friend.phone_verified_at = timezone.now()
+        self.friend.save(update_fields=['phone', 'phone_verified_at'])
+        SpaceOperator.objects.create(space=self.space, user=self.friend)
+        statement = Statement.create_statement(self.author, '需要运营处理', 'public', [])
+        response = self.client.post(
+            f'/square/statements/{statement.id}/mute-author',
+            data=json.dumps({'duration': '1d', 'reason': '运营处理'}),
+            content_type='application/json',
+            **self.authorization(self.friend),
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+
+    def test_operator_can_publish_selected_chat_as_statement_but_cannot_pin(self):
+        self.friend.phone = '+8613800000003'
+        self.friend.phone_verified_at = timezone.now()
+        self.friend.save(update_fields=['phone', 'phone_verified_at'])
+        SpaceOperator.objects.create(space=self.space, user=self.friend)
+        Friendship.ensure_locked_friendship(self.friend, self.author)
+        chat = Chat.get_or_create_direct(self.friend, self.author)
+        message = Message.create(chat, self.friend, 0, '运营转发')
+        response = self.client.post('/square/statements/chat-record', data=json.dumps({'message_ids': [message.id], 'visibility': 'public'}), content_type='application/json', **self.authorization(self.friend))
+        self.assertEqual(response.status_code, 200, response.content)
+        denied = self.client.post('/square/statements/chat-record', data=json.dumps({'message_ids': [message.id], 'visibility': 'public', 'pin': 1}), content_type='application/json', **self.authorization(self.friend))
+        self.assertEqual(denied.status_code, 403, denied.content)
 
     def test_official_account_can_publish_selected_chat_as_statement(self):
         official = self.space.ensure_official_user()

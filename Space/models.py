@@ -224,6 +224,7 @@ class Space(models.Model):
             raise SpaceErrors.MEMBER_LIMIT_REACHED
         return self
 
+
     def notify_capacity_if_needed(self):
         count = self.active_member_count()
         limit = self.tier_member_limit
@@ -330,6 +331,24 @@ class Space(models.Model):
             'identity_verified_at',
             'level_names',
             'created_at',
+        )
+
+
+class SpaceOperator(models.Model):
+    MAX_PER_SPACE = 5
+
+    space = models.ForeignKey(Space, on_delete=models.CASCADE, related_name='operators')
+    user = models.OneToOneField('User.User', on_delete=models.CASCADE, related_name='space_operator')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ('created_at', 'id')
+
+    def json(self):
+        return dict(
+            operator_id=self.id,
+            user=self.user.jsonl(),
+            created_at=self.created_at.timestamp(),
         )
 
 

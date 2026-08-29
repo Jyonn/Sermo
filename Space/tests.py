@@ -8,7 +8,7 @@ from django.utils import timezone
 from Chat.models import Chat, ChatMember, ChatMemberRoleChoice, ChatMemberStatusChoice, ChatTypeChoice
 from Config.models import Config, ConfigInstance
 from Message.models import Message, MessageEvent, MessageTypeChoice, MessageUserState, PinnedMessage
-from Space.models import Space, SpacePhoneVerificationCode
+from Space.models import Space, SpaceOperator, SpacePhoneVerificationCode
 from Square.models import Statement, StatementComment, StatementCommentLike, StatementLike
 from User.models import GrowthEvent, NotificationPreference, User, UserEmojiUsage, UserNotificationChoice
 from User.growth import GROWTH_THRESHOLDS
@@ -122,6 +122,44 @@ class SpaceAdminApiTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 403, response.content)
+
+    def test_admin_can_assign_dual_verified_operator_without_consent(self):
+        self.member.phone = '+8613800000001'
+        self.member.phone_verified_at = timezone.now()
+        self.member.save(update_fields=['phone', 'phone_verified_at'])
+        response = self.client.post(
+            '/spaces/admin/operators',
+            data=json.dumps({'user_id': self.member.id}),
+            content_type='application/json',
+            **self.authorization(),
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertTrue(SpaceOperator.objects.filter(space=self.space, user=self.member).exists())
+        self.assertTrue(response.json()['body']['user']['operator'])
+
+    def test_operator_requires_verified_email_and_phone(self):
+        response = self.client.post(
+            '/spaces/admin/operators',
+            data=json.dumps({'user_id': self.member.id}),
+            content_type='application/json',
+            **self.authorization(),
+        )
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertEqual(response.json()['identifier'], 'SPACE@OPERATOR_REQUIRES_DUAL_VERIFICATION')
+
+    def test_space_rejects_sixth_operator(self):
+        for index in range(5):
+            user = User.create(space=self.space, name=f'Operator{index}', email=f'operator{index}@example.com', verified=True)
+            user.phone = f'+86138000001{index:02d}'
+            user.phone_verified_at = timezone.now()
+            user.save(update_fields=['phone', 'phone_verified_at'])
+            SpaceOperator.objects.create(space=self.space, user=user)
+        self.member.phone = '+8613800000199'
+        self.member.phone_verified_at = timezone.now()
+        self.member.save(update_fields=['phone', 'phone_verified_at'])
+        response = self.client.post('/spaces/admin/operators', data=json.dumps({'user_id': self.member.id}), content_type='application/json', **self.authorization())
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertEqual(response.json()['identifier'], 'SPACE@OPERATOR_LIMIT_REACHED')
 
     def test_removing_member_hides_square_content_and_clears_reactions(self):
         other = User.create(self.space, 'Other member', verified=True)

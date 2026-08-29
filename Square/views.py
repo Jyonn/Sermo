@@ -87,8 +87,10 @@ class SquareChatRecordStatementView(View):
     def post(self, request: Request):
         request.user.space.require_square_enabled()
         request.user.space.require_chat_enabled()
-        if not request.user.is_official:
+        if not request.user.can_operate_square:
             raise SquareErrors.CHAT_RECORD_FORBIDDEN
+        if request.json.pin and not request.user.is_official:
+            raise SquareErrors.PIN_FORBIDDEN
         message_ids = list(request.json.message_ids)
         messages = list(
             Message.objects.select_related('chat', 'user', 'media_resource__asset', 'forward_bundle')
@@ -179,7 +181,7 @@ class StatementAuthorMuteView(View):
     @analyse.json(SquareParams.mute_duration, SquareParams.mute_reason)
     def post(self, request: Request, statement_id: int):
         request.user.space.require_square_enabled()
-        if not request.user.is_official:
+        if not request.user.can_operate_square:
             raise SquareErrors.MUTE_FORBIDDEN
         try:
             statement = Statement.objects.select_related('user').get(

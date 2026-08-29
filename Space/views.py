@@ -9,7 +9,7 @@ from django.db.models import Count, Q
 from notificator import NotificatorAPIError
 from smartdjango import analyse
 
-from Space.models import Space
+from Space.models import Space, SpaceOperator
 from Space.models import SpaceEmailVerificationCode, SpaceEmailCodePurposeChoice, SpacePhoneVerificationCode
 from Space.params import (
     SpaceParams,
@@ -20,6 +20,7 @@ from Space.params import (
     SpaceUserListParams,
     SpacePhoneVerificationParams,
     SpaceIdentityParams,
+    SpaceOperatorParams,
 )
 from Space.validators import SpaceErrors
 from utils import auth
@@ -282,11 +283,51 @@ class SpaceAdminDashboardView(View):
         threshold = timezone.now() - datetime.timedelta(minutes=User.vldt.OFFLINE_MIN_INTERVAL)
         return dict(
             space=space.json_private(),
+            operators=[item.json() for item in SpaceOperator.objects.filter(space=space).select_related('user')],
             stats=dict(
                 members_count=users.count(),
                 online_count=users.filter(last_heartbeat__gt=threshold).count(),
             ),
         )
+
+
+class SpaceAdminOperatorView(View):
+    @auth.require_space
+    def get(self, request: Request):
+        return [
+            item.json()
+            for item in SpaceOperator.objects.filter(space=request.space).select_related('user')
+        ]
+
+    @auth.require_space
+    @analyse.json(SpaceOperatorParams.user_id)
+    def post(self, request: Request):
+        with transaction.atomic():
+            space = Space.objects.select_for_update().get(id=request.space.id)
+            try:
+                user = User.objects.get(
+                    id=request.json.user_id,
+                    space=space,
+                    role=UserRoleChoice.MEMBER,
+                    is_deleted=False,
+                )
+            except User.DoesNotExist:
+                raise SpaceErrors.OPERATOR_TARGET_INVALID
+            if user.email_verified_at is None or user.phone_verified_at is None:
+                raise SpaceErrors.OPERATOR_REQUIRES_DUAL_VERIFICATION
+            existing = SpaceOperator.objects.filter(user=user).select_related('user').first()
+            if existing:
+                return existing.json()
+            if SpaceOperator.objects.filter(space=space).count() >= SpaceOperator.MAX_PER_SPACE:
+                raise SpaceErrors.OPERATOR_LIMIT_REACHED
+            operator = SpaceOperator.objects.create(space=space, user=user)
+        return operator.json()
+
+    @auth.require_space
+    @analyse.query(SpaceOperatorParams.user_id)
+    def delete(self, request: Request):
+        SpaceOperator.objects.filter(space=request.space, user_id=request.query.user_id).delete()
+        return {}
 
 
 class SpaceAdminPhoneCodeView(View):
