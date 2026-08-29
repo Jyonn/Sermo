@@ -1,6 +1,8 @@
+import json
+
 from django.test import TestCase
 
-from Space.models import Space
+from Space.models import Space, SpaceOperator
 from Friendship.models import Friendship, FriendshipStatusChoice
 from User.models import User, UserStateEvent, UserStateEventKindChoice
 from utils import auth
@@ -40,6 +42,26 @@ class FriendshipExactSearchTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 403, response.content)
+
+    def test_operator_list_exposes_relationship_and_allows_unverified_requester(self):
+        SpaceOperator.objects.create(space=self.space, user=self.verified_user)
+        listing = self.client.get('/friends/operators', **self.authorization(self.unverified_searcher))
+        self.assertEqual(listing.status_code, 200, listing.content)
+        self.assertEqual(listing.json()['body'][0]['relationship'], 'none')
+
+        created = self.client.post(
+            '/friends/operators',
+            data=json.dumps({'to_user_id': self.verified_user.id}),
+            content_type='application/json',
+            **self.authorization(self.unverified_searcher),
+        )
+        self.assertEqual(created.status_code, 200, created.content)
+        self.assertEqual(Friendship.between(self.unverified_searcher, self.verified_user).status, FriendshipStatusChoice.PENDING)
+
+    def test_operator_list_marks_current_operator_as_self(self):
+        SpaceOperator.objects.create(space=self.space, user=self.verified_user)
+        listing = self.client.get('/friends/operators', **self.authorization(self.verified_user))
+        self.assertEqual(listing.json()['body'][0]['relationship'], 'self')
 
 
 class FriendshipStateEventTests(TestCase):

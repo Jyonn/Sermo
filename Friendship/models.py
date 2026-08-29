@@ -209,12 +209,13 @@ class Friendship(models.Model):
         return item
 
     @classmethod
-    def create(cls, from_user: User, to_user: User, source: str = SOURCE_DIRECT):
+    def create(cls, from_user: User, to_user: User, source: str = SOURCE_DIRECT, bypass_capability=False):
         source = source if source in cls.SOURCES else cls.SOURCE_DIRECT
-        from_user.require_capability(
-            'contacts.friend_request',
-            context={'qr_invite': source == cls.SOURCE_QR},
-        )
+        if not bypass_capability:
+            from_user.require_capability(
+                'contacts.friend_request',
+                context={'qr_invite': source == cls.SOURCE_QR},
+            )
         space, user_low, user_high = cls._pair(from_user, to_user)
         item = cls.objects.filter(space=space, user_low=user_low, user_high=user_high).first()
 

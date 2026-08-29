@@ -10,6 +10,7 @@ from Friendship.views import (
     FriendshipInvitePreviewView,
     FriendshipInviteRedeemView,
     FriendshipExactSearchView,
+    FriendshipOperatorView,
 )
 
 urlpatterns = [
@@ -17,6 +18,7 @@ urlpatterns = [
     path('status', FriendshipStatusView.as_view(), name='friend status'),
     path('requests', FriendshipRequestView.as_view(), name='friend requests'),
     path('search', FriendshipExactSearchView.as_view(), name='friend exact search'),
+    path('operators', FriendshipOperatorView.as_view(), name='space operator friends'),
     path('requests/respond', FriendshipRequestRespondView.as_view(), name='friend request respond'),
     path('requests/remove', FriendshipRemoveView.as_view(), name='friend remove'),
     path('invites/token', FriendshipInviteTokenView.as_view(), name='friend invite token'),

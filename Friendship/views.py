@@ -5,6 +5,7 @@ from Friendship.models import Friendship, FriendshipStatusChoice
 from Friendship.params import FriendshipParams
 from Friendship.validators import FriendshipErrors
 from User.models import User
+from Space.models import SpaceOperator
 from utils import auth
 from utils.auth import Request
 
@@ -76,6 +77,40 @@ class FriendshipExactSearchView(View):
                 FriendshipStatusChoice.ACCEPTED: 'friend',
             }.get(relation.status, 'none')
         return dict(user=target.json_friend(), relationship=relationship)
+
+
+class FriendshipOperatorView(View):
+    @staticmethod
+    def _relationship(user, target):
+        if user.id == target.id:
+            return 'self'
+        relation = Friendship.between(user, target)
+        if relation is None:
+            return 'none'
+        return {
+            FriendshipStatusChoice.PENDING: 'pending',
+            FriendshipStatusChoice.ACCEPTED: 'friend',
+        }.get(relation.status, 'none')
+
+    @auth.require_user
+    def get(self, request: Request):
+        return [
+            dict(user=item.user.json_friend(), relationship=self._relationship(request.user, item.user))
+            for item in SpaceOperator.objects.filter(space=request.user.space).select_related('user')
+        ]
+
+    @auth.require_user
+    @analyse.json(FriendshipParams.to_user_id)
+    def post(self, request: Request):
+        target = request.json.to_user
+        if not SpaceOperator.objects.filter(space=request.user.space, user=target).exists():
+            raise FriendshipErrors.INVALID_TARGET
+        return Friendship.create(
+            from_user=request.user,
+            to_user=target,
+            source=Friendship.SOURCE_DIRECT,
+            bypass_capability=True,
+        ).json()
 
 
 class FriendshipRequestRespondView(View):

@@ -132,6 +132,7 @@ class StatementApiTests(TestCase):
             **self.authorization(self.friend),
         )
         self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json()['body']['created_by']['user_id'], self.friend.id)
 
     def test_operator_can_publish_selected_chat_as_statement_but_cannot_pin(self):
         self.friend.phone = '+8613800000003'
