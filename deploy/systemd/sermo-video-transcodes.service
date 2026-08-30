@@ -1,9 +1,14 @@
 [Unit]
 Description=Process Sermo Qiniu video transcodes
-After=network-online.target
+After=network-online.target mysql.service
+Wants=network-online.target
 
 [Service]
 Type=oneshot
 User=ubuntu
-WorkingDirectory=/home/ubuntu/Sermo-Backend
+WorkingDirectory=/home/ubuntu/Sermo
+EnvironmentFile=-/home/ubuntu/Sermo/.env
+Environment="VIRTUAL_ENV=/home/ubuntu/envs/sermo"
+Environment="PATH=/home/ubuntu/envs/sermo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 ExecStart=/home/ubuntu/envs/sermo/bin/python manage.py process_video_transcodes --limit 100
+Nice=5
