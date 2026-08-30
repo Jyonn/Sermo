@@ -87,6 +87,9 @@ class WeChatMiniProgramAuthParams(metaclass=Params):
     language = Validator('language').to(str).null().default('zh-CN').to(User.normalizers.language).exception(
         User.validators.language,
     )
+    space_slug = Validator('space_slug').to(str).null().default(None).to(
+        lambda value: value.strip().lower() if value else None,
+    )
 
 
 class UserPrivateAccountParams(metaclass=Params):

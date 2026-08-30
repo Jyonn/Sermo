@@ -63,22 +63,20 @@ def _available_name(space, requested, open_id):
         suffix += 1
 
 
-def login_with_wechat_code(code, nickname=None, language='zh-CN'):
+def login_with_wechat_code(code, nickname=None, language='zh-CN', space_slug=None):
     session = exchange_code(code)
-    space_slug = Config.get_value_by_key(
+    space_slug = space_slug or Config.get_value_by_key(
         CI.WECHAT_MINIPROGRAM_SPACE_SLUG, default=DEFAULT_SPACE_SLUG,
     )
     space = Space.get_by_slug(space_slug)
     with transaction.atomic():
         identity = WeChatMiniProgramIdentity.objects.select_for_update().select_related('user').filter(
-            app_id=session['app_id'], open_id=session['open_id'],
+            app_id=session['app_id'], open_id=session['open_id'], space=space,
         ).first()
         if identity is not None:
             user = identity.user
             if user.is_deleted:
                 raise UserErrors.USER_DELETED
-            if user.space_id != space.id:
-                raise UserErrors.SPACE_FORBIDDEN
             if session['union_id'] and identity.union_id != session['union_id']:
                 identity.union_id = session['union_id']
                 identity.save(update_fields=['union_id', 'updated_at'])
@@ -91,6 +89,6 @@ def login_with_wechat_code(code, nickname=None, language='zh-CN'):
             name=_available_name(space, nickname, session['open_id']),
             language=language,
         )
-        WeChatMiniProgramIdentity.objects.create(user=user, **session)
+        WeChatMiniProgramIdentity.objects.create(user=user, space=space, **session)
         transaction.on_commit(space.notify_capacity_if_needed)
         return user, True

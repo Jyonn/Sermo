@@ -1280,6 +1280,9 @@ class WeChatMiniProgramIdentity(models.Model):
     user = models.ForeignKey(
         User, on_delete=models.CASCADE, related_name='wechat_miniprogram_identities',
     )
+    space = models.ForeignKey(
+        'Space.Space', on_delete=models.CASCADE, related_name='wechat_miniprogram_identities',
+    )
     app_id = models.CharField(max_length=64, db_index=True)
     open_id = models.CharField(max_length=128)
     union_id = models.CharField(max_length=128, blank=True, default='')
@@ -1289,7 +1292,7 @@ class WeChatMiniProgramIdentity(models.Model):
     class Meta:
         constraints = [
             models.UniqueConstraint(
-                fields=['app_id', 'open_id'], name='unique_wechat_miniprogram_identity',
+                fields=['app_id', 'open_id', 'space'], name='unique_wechat_miniprogram_identity_space',
             ),
         ]
 

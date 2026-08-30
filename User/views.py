@@ -83,6 +83,7 @@ class WeChatMiniProgramLoginView(View):
         WeChatMiniProgramAuthParams.code,
         WeChatMiniProgramAuthParams.nickname,
         WeChatMiniProgramAuthParams.language,
+        WeChatMiniProgramAuthParams.space_slug,
     )
     def post(self, request: Request):
         from User.wechat_miniprogram import login_with_wechat_code
@@ -91,6 +92,7 @@ class WeChatMiniProgramLoginView(View):
             code=request.json.code,
             nickname=request.json.nickname,
             language=request.json.language,
+            space_slug=request.json.space_slug,
         )
         user.log_login()
         return dict(

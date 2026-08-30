@@ -33,6 +33,19 @@ class WeChatMiniProgramLoginTests(TestCase):
         self.assertEqual(WeChatMiniProgramIdentity.objects.filter(user=first).count(), 1)
 
     @patch('User.wechat_miniprogram.exchange_code')
+    def test_same_wechat_identity_can_join_multiple_spaces(self, exchange):
+        other_space = Space.objects.create(name='另一空间', slug='another-space', email='other@example.com')
+        exchange.return_value = dict(app_id='wx-test', open_id='openid-multi', union_id='union-multi')
+
+        first, _ = login_with_wechat_code('first', nickname='小姜', space_slug=self.space.slug)
+        second, created = login_with_wechat_code('second', nickname='小姜', space_slug=other_space.slug)
+
+        self.assertTrue(created)
+        self.assertNotEqual(first.id, second.id)
+        self.assertEqual(second.space_id, other_space.id)
+        self.assertEqual(WeChatMiniProgramIdentity.objects.filter(app_id='wx-test', open_id='openid-multi').count(), 2)
+
+    @patch('User.wechat_miniprogram.exchange_code')
     def test_duplicate_nickname_gets_stable_suffix(self, exchange):
         User.create(space=self.space, name='小姜', language='zh-CN')
         exchange.return_value = dict(app_id='wx-test', open_id='openid-2', union_id='')
@@ -47,7 +60,7 @@ class WeChatMiniProgramLoginTests(TestCase):
 
     def test_bound_user_can_change_nickname_without_password(self):
         user = User.create(space=self.space, name='旧名', language='zh-CN')
-        WeChatMiniProgramIdentity.objects.create(user=user, app_id='wx-test', open_id='openid-3')
+        WeChatMiniProgramIdentity.objects.create(user=user, space=self.space, app_id='wx-test', open_id='openid-3')
         token = auth.get_login_token(user)['auth']
 
         response = self.client.post(
