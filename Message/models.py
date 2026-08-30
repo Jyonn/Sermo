@@ -1090,6 +1090,8 @@ class Message(models.Model):
         path = self._blob_path(thumbnail=thumbnail)
         if not path:
             return ''
+        if self.media_resource.asset.transcode_status == MediaAsset.TRANSCODE_READY:
+            path = f'{path}?variant=playback'
         if request is None:
             return path
         return request.build_absolute_uri(path)
@@ -1707,6 +1709,10 @@ class MediaAsset(models.Model):
     STATUS_PENDING = 0
     STATUS_READY = 1
     STATUS_FAILED = 2
+    TRANSCODE_NONE = 0
+    TRANSCODE_PENDING = 1
+    TRANSCODE_READY = 2
+    TRANSCODE_FAILED = 3
     GEOCODING_PENDING = 0
     GEOCODING_READY = 1
     GEOCODING_FAILED = 2
@@ -1716,6 +1722,15 @@ class MediaAsset(models.Model):
 
     source_key = models.CharField(max_length=255, unique=True)
     source_uri = models.CharField(max_length=500)
+    original_key = models.CharField(max_length=255, blank=True, default='')
+    original_uri = models.CharField(max_length=500, blank=True, default='')
+    playback_key = models.CharField(max_length=255, blank=True, default='')
+    playback_uri = models.CharField(max_length=500, blank=True, default='')
+    transcode_status = models.IntegerField(default=TRANSCODE_NONE, db_index=True)
+    transcode_persistent_id = models.CharField(max_length=128, blank=True, default='')
+    transcode_error = models.CharField(max_length=500, blank=True, default='')
+    transcoded_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    original_deleted_at = models.DateTimeField(null=True, blank=True)
     blob_slug = models.CharField(max_length=32, unique=True, db_index=True, default=generate_media_blob_slug)
     kind = models.IntegerField(db_index=True)
     content_hash = models.CharField(max_length=64, null=True, blank=True, unique=True)
@@ -1802,7 +1817,14 @@ class MediaAsset(models.Model):
             metadata.save(update_fields=[*updates, 'updated_at'])
         if kind in {cls.KIND_IMAGE, cls.KIND_VIDEO}:
             transaction.on_commit(lambda: cls.fetch_async(metadata.id))
+        if kind == cls.KIND_VIDEO and metadata.transcode_status == cls.TRANSCODE_NONE:
+            transaction.on_commit(lambda: cls.queue_video_transcode(metadata.id))
         return metadata
+
+    @classmethod
+    def queue_video_transcode(cls, asset_id):
+        from Message.video_transcode import submit_video_transcode
+        threading.Thread(target=submit_video_transcode, args=(asset_id,), daemon=True).start()
 
     @classmethod
     def _promote_kind(cls, asset, requested_kind):
@@ -2052,6 +2074,9 @@ class MediaResource(models.Model):
     def resource_jsonl(self, request=None):
         path = reverse('message blob', kwargs={'blob_slug': self.asset.blob_slug})
         thumbnail_path = reverse('message blob thumbnail', kwargs={'blob_slug': self.asset.blob_slug})
+        if self.asset.transcode_status == MediaAsset.TRANSCODE_READY:
+            path = f'{path}?variant=playback'
+            thumbnail_path = f'{thumbnail_path}?variant=playback'
         return dict(
             resource_id=self.id,
             kind={MediaAsset.KIND_IMAGE: 'image', MediaAsset.KIND_VIDEO: 'video', MediaAsset.KIND_AUDIO: 'audio', MediaAsset.KIND_FILE: 'file'}.get(self.kind),

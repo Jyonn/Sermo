@@ -1,0 +1,10 @@
+[Unit]
+Description=Poll Sermo video transcodes every minute
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=1min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

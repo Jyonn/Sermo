@@ -671,10 +671,14 @@ class StatementMedia(models.Model):
     def jsonl(self, request=None):
         asset = self.media_asset
         path = reverse('square media', kwargs={'blob_slug': asset.blob_slug})
+        if asset.transcode_status == asset.TRANSCODE_READY:
+            path = f'{path}?variant=playback'
         uri = request.build_absolute_uri(path) if request else path
         thumbnail_uri = None
         if asset.kind in (asset.KIND_IMAGE, asset.KIND_VIDEO):
             thumbnail_path = reverse('square media thumbnail', kwargs={'blob_slug': asset.blob_slug})
+            if asset.transcode_status == asset.TRANSCODE_READY:
+                thumbnail_path = f'{thumbnail_path}?variant=playback'
             thumbnail_uri = request.build_absolute_uri(thumbnail_path) if request else thumbnail_path
         return dict(
             media_id=self.id,

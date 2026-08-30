@@ -1,0 +1,9 @@
+[Unit]
+Description=Process Sermo Qiniu video transcodes
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/home/ubuntu/Sermo-Backend
+ExecStart=/home/ubuntu/envs/sermo/bin/python manage.py process_video_transcodes --limit 100
