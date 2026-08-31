@@ -651,6 +651,24 @@ class StatementApiTests(TestCase):
         self.assertTrue(deleted.json()['body']['root_deleted'])
         self.assertEqual(StatementComment.objects.filter(statement=statement, is_deleted=False).count(), 0)
 
+    def test_deleting_reply_also_removes_nested_descendants(self):
+        statement = Statement.create_statement(self.author, '回复治理', 'public', [])
+        root = StatementComment.create_comment(self.friend, statement.id, '一级评论')
+        reply = StatementComment.create_comment(self.author, statement.id, '二级回复', parent_id=root.id)
+        nested = StatementComment.create_comment(self.friend, statement.id, '三级回复', parent_id=reply.id)
+
+        deleted = self.client.delete(f'/square/comments/{reply.id}', **self.authorization(self.author))
+
+        self.assertEqual(deleted.status_code, 200, deleted.content)
+        self.assertEqual(deleted.json()['body']['deleted_count'], 2)
+        self.assertFalse(deleted.json()['body']['root_deleted'])
+        self.assertEqual(
+            list(StatementComment.objects.filter(statement=statement, is_deleted=False).values_list('id', flat=True)),
+            [root.id],
+        )
+        nested.refresh_from_db()
+        self.assertTrue(nested.is_deleted)
+
     def test_quota_reports_current_rolling_usage(self):
         Statement.create_statement(self.author, '今日发言', 'public', [])
         statement = Statement.objects.get(user=self.author)

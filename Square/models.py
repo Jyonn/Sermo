@@ -547,16 +547,15 @@ class StatementComment(models.Model):
             raise SquareErrors.COMMENT_DELETE_FORBIDDEN
 
         delete_ids = {self.id}
-        if self.parent_id is None:
-            descendants = list(type(self).objects.filter(
-                statement_id=self.statement_id,
-                is_deleted=False,
-            ).values_list('id', 'parent_id'))
-            while True:
-                next_ids = {comment_id for comment_id, parent_id in descendants if parent_id in delete_ids}
-                if next_ids.issubset(delete_ids):
-                    break
-                delete_ids.update(next_ids)
+        descendants = list(type(self).objects.filter(
+            statement_id=self.statement_id,
+            is_deleted=False,
+        ).values_list('id', 'parent_id'))
+        while True:
+            next_ids = {comment_id for comment_id, parent_id in descendants if parent_id in delete_ids}
+            if next_ids.issubset(delete_ids):
+                break
+            delete_ids.update(next_ids)
         deleted_count = type(self).objects.filter(id__in=delete_ids, is_deleted=False).update(is_deleted=True)
         return deleted_count
 
