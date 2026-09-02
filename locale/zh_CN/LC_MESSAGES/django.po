@@ -855,14 +855,14 @@ msgstr "你已被设为空间运营者，现在可以管理广场禁言，并将
 msgid "Your space operator role has been removed. Operator permissions are no longer available."
 msgstr "你的空间运营者身份已被取消，相关运营权限已同步收回。"
 
-msgid "%(actor)s requested changes to submission “%(title)s”"
-msgstr "%(actor)s 要求修改投稿“%(title)s”"
+msgid "Submission “%(title)s” needs changes"
+msgstr "投稿“%(title)s”需要修改"
 
-msgid "%(actor)s closed submission “%(title)s” as noncompliant"
-msgstr "%(actor)s 以不合规为由中止了投稿“%(title)s”"
+msgid "Submission “%(title)s” was closed as noncompliant"
+msgstr "投稿“%(title)s”因不合规已关闭"
 
-msgid "%(actor)s approved submission “%(title)s” for publishing"
-msgstr "%(actor)s 已将投稿“%(title)s”标记为合规待发布"
+msgid "Submission “%(title)s” passed review and is awaiting publication"
+msgstr "投稿“%(title)s”已通过审核，等待发布"
 
 msgid "Group chat"
 msgstr "群聊"

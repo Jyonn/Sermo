@@ -133,6 +133,7 @@ class SubmissionChatTests(TestCase):
         revision_notice = Message.objects.filter(chat=review_chat, type=MessageTypeChoice.OFFICIAL_NOTICE).latest('id')
         self.assertEqual(revision_notice._parse_payload(revision_notice.content)['event'], 'submission_revision')
         self.assertIn('Workflow', revision_notice.system_message_text(self.author))
+        self.assertNotIn(self.operator.name, revision_notice.system_message_text(self.author))
         Message.create(chat, self.author, MessageTypeChoice.TEXT, 'Revision')
         submission.submit(self.author)
         submission.review(self.operator, 'ready')

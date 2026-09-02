@@ -842,18 +842,15 @@ class Message(models.Model):
             if event == 'operator_removed':
                 return _('Your space operator role has been removed. Operator permissions are no longer available.')
             if event == 'submission_revision':
-                return _('%(actor)s requested changes to submission “%(title)s”') % dict(
-                    actor=actor,
+                return _('Submission “%(title)s” needs changes') % dict(
                     title=str(payload.get('submission_title') or '').strip(),
                 )
             if event == 'submission_terminate':
-                return _('%(actor)s closed submission “%(title)s” as noncompliant') % dict(
-                    actor=actor,
+                return _('Submission “%(title)s” was closed as noncompliant') % dict(
                     title=str(payload.get('submission_title') or '').strip(),
                 )
             if event == 'submission_ready':
-                return _('%(actor)s approved submission “%(title)s” for publishing') % dict(
-                    actor=actor,
+                return _('Submission “%(title)s” passed review and is awaiting publication') % dict(
                     title=str(payload.get('submission_title') or '').strip(),
                 )
             return str(payload.get('text') or _('System message')).strip()
