@@ -26,6 +26,10 @@ class ChatParams(metaclass=Params):
         lambda value: 1 <= len(value) <= 64,
         message=_('Invalid submission draft id'),
     )
+    submission_action = Validator('action', final_name='submission_action').to(str).bool(
+        lambda value: value in ('revision', 'terminate', 'ready'),
+        message=_('Invalid submission action'),
+    )
 
 
 class ChatMemberParams(metaclass=Params):

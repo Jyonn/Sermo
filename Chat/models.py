@@ -32,6 +32,15 @@ class ChatMemberStatusChoice(Choice):
     KICKED = 4
 
 
+class SubmissionStatusChoice(Choice):
+    DRAFT = 0
+    REVIEW = 1
+    REVISION = 2
+    TERMINATED = 3
+    READY = 4
+    PUBLISHED = 5
+
+
 class Chat(models.Model):
     validators = ChatValidator
     vldt = ChatValidator
@@ -165,14 +174,23 @@ class Chat(models.Model):
         ).exists()
 
     @classmethod
-    def get_user_chats(cls, user: User, purpose=ChatPurposeChoice.NORMAL):
+    def get_user_chats(cls, user: User, purpose=ChatPurposeChoice.NORMAL, submission_role=None):
+        filters = dict(
+            is_deleted=False,
+            chat_members__user=user,
+            chat_members__status=ChatMemberStatusChoice.ACTIVE,
+            purpose=purpose,
+        )
+        if purpose == ChatPurposeChoice.SUBMISSION:
+            if submission_role == 'reviewer':
+                filters.update(
+                    submission_record__recipient=user,
+                    submission_record__status__gt=SubmissionStatusChoice.DRAFT,
+                )
+            else:
+                filters['submission_record__author'] = user
         chats = list(
-            cls.objects.filter(
-                is_deleted=False,
-                chat_members__user=user,
-                chat_members__status=ChatMemberStatusChoice.ACTIVE,
-                purpose=purpose,
-            ).distinct()
+            cls.objects.filter(**filters).distinct()
         )
         return [
             chat for chat in chats
@@ -376,7 +394,7 @@ class Chat(models.Model):
         ChatMember.objects.create(
             chat=chat,
             user=creator,
-            role=ChatMemberRoleChoice.OWNER,
+            role=ChatMemberRoleChoice.MEMBER,
             status=ChatMemberStatusChoice.ACTIVE,
             invited_by=creator,
             joined_at=chat.created_at,
@@ -384,13 +402,14 @@ class Chat(models.Model):
         ChatMember.objects.create(
             chat=chat,
             user=recipient,
-            role=ChatMemberRoleChoice.MEMBER,
+            role=ChatMemberRoleChoice.OWNER,
             status=ChatMemberStatusChoice.ACTIVE,
             invited_by=creator,
             joined_at=chat.created_at,
         )
         Submission.objects.create(
             chat=chat,
+            author=creator,
             recipient=recipient,
             client_draft_id=client_draft_id,
         )
@@ -725,9 +744,76 @@ class ChatMember(models.Model):
 
 class Submission(models.Model):
     chat = models.OneToOneField(Chat, on_delete=models.CASCADE, related_name='submission_record')
+    author = models.ForeignKey(User, on_delete=models.PROTECT, related_name='authored_submissions')
     recipient = models.ForeignKey(User, on_delete=models.PROTECT, related_name='received_submissions')
     client_draft_id = models.CharField(max_length=64, unique=True)
+    status = models.IntegerField(choices=SubmissionStatusChoice.to_choices(), default=SubmissionStatusChoice.DRAFT, db_index=True)
+    submitted_at = models.DateTimeField(null=True, blank=True)
+    published_statement = models.ForeignKey('Square.Statement', on_delete=models.SET_NULL, null=True, blank=True, related_name='source_submissions')
     created_at = models.DateTimeField(auto_now_add=True)
+
+    STATUS_NAMES = {
+        SubmissionStatusChoice.DRAFT: 'draft',
+        SubmissionStatusChoice.REVIEW: 'review',
+        SubmissionStatusChoice.REVISION: 'revision',
+        SubmissionStatusChoice.TERMINATED: 'terminated',
+        SubmissionStatusChoice.READY: 'ready',
+        SubmissionStatusChoice.PUBLISHED: 'published',
+    }
+
+    def jsonl(self):
+        return dict(
+            author=self.author.tiny_json(),
+            recipient=self.recipient.tiny_json(),
+            status=self.STATUS_NAMES[self.status],
+            submitted_at=self.submitted_at.timestamp() if self.submitted_at else None,
+            published_statement_id=self.published_statement_id,
+        )
+
+    def role_for(self, user: User):
+        if user.id == self.author_id:
+            return 'author'
+        if user.id == self.recipient_id:
+            return 'reviewer'
+        return 'member'
+
+    def can_send(self, user: User):
+        return (
+            user.id == self.author_id and self.status in (SubmissionStatusChoice.DRAFT, SubmissionStatusChoice.REVISION)
+        ) or (
+            user.id == self.recipient_id and self.status == SubmissionStatusChoice.REVIEW
+        )
+
+    def require_send_allowed(self, user: User):
+        if not self.can_send(user):
+            raise ChatErrors.SUBMISSION_SEND_FORBIDDEN
+
+    def submit(self, user: User):
+        if user.id != self.author_id or self.status not in (SubmissionStatusChoice.DRAFT, SubmissionStatusChoice.REVISION):
+            raise ChatErrors.SUBMISSION_TRANSITION_FORBIDDEN
+        from Message.models import Message, MessageTypeChoice
+        if not Message.objects.filter(chat=self.chat, is_deleted=False).exclude(type=MessageTypeChoice.SYSTEM).exists():
+            raise ChatErrors.SUBMISSION_EMPTY
+        self.status = SubmissionStatusChoice.REVIEW
+        self.submitted_at = timezone.now()
+        self.save(update_fields=['status', 'submitted_at'])
+        self.chat._emit_state_changed()
+        return self
+
+    def review(self, user: User, action: str):
+        if user.id != self.recipient_id or self.status != SubmissionStatusChoice.REVIEW:
+            raise ChatErrors.SUBMISSION_TRANSITION_FORBIDDEN
+        next_status = {
+            'revision': SubmissionStatusChoice.REVISION,
+            'terminate': SubmissionStatusChoice.TERMINATED,
+            'ready': SubmissionStatusChoice.READY,
+        }.get(action)
+        if next_status is None:
+            raise ChatErrors.SUBMISSION_TRANSITION_FORBIDDEN
+        self.status = next_status
+        self.save(update_fields=['status'])
+        self.chat._emit_state_changed()
+        return self
 
 
 class ChatReadState(models.Model):

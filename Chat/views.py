@@ -17,6 +17,9 @@ class ChatListView(View):
     @staticmethod
     def build_chat_payload(chat, user, request):
         data = chat.jsonl()
+        if chat.submission:
+            data['submission'] = chat.submission_record.jsonl()
+            data['submission_role'] = chat.submission_record.role_for(user)
         last_message = Message.latest_preview_for_user(chat, user)
         if last_message is not None:
             data['last_message'] = last_message.jsonl(request=request)
@@ -42,7 +45,10 @@ class ChatListView(View):
         purpose = ChatPurposeChoice.SUBMISSION if request.GET.get('purpose') == 'submission' else ChatPurposeChoice.NORMAL
         if purpose == ChatPurposeChoice.SUBMISSION:
             request.user.space.require_submission_enabled()
-        chats = Chat.get_user_chats(request.user, purpose=purpose)
+        submission_role = request.GET.get('role') if purpose == ChatPurposeChoice.SUBMISSION else None
+        if submission_role not in (None, 'author', 'reviewer'):
+            raise ChatErrors.FORBIDDEN
+        chats = Chat.get_user_chats(request.user, purpose=purpose, submission_role=submission_role)
         payloads = [self.build_chat_payload(chat, request.user, request) for chat in chats]
         payloads.sort(key=lambda item: (bool(item['pinned']), item['last_chat_at']), reverse=True)
         return payloads
@@ -146,12 +152,35 @@ class SubmissionStartView(View):
                 client_message_id=request.json.client_message_id,
                 media_resource=media_resource,
             )
-            if getattr(message, '_was_created', True):
-                from User.models import NotificationEvent
-                NotificationEvent.emit_message_notifications(message, actor=request.user)
             if created:
                 chat._emit_state_changed()
-        return dict(chat=chat.json(), message=message.jsonl(request=request))
+        payload = ChatListView.build_chat_payload(chat, request.user, request)
+        return dict(chat=payload, message=message.jsonl(request=request))
+
+
+class SubmissionSubmitView(View):
+    @auth.require_user
+    @analyse.query(ChatParams.chat_id)
+    @auth.require_chat_member()
+    def post(self, request):
+        chat = request.query.chat
+        if not chat.submission:
+            raise ChatErrors.FORBIDDEN
+        chat.submission_record.submit(request.user)
+        return ChatListView.build_chat_payload(chat, request.user, request)
+
+
+class SubmissionStatusView(View):
+    @auth.require_user
+    @analyse.query(ChatParams.chat_id)
+    @analyse.json(ChatParams.submission_action)
+    @auth.require_chat_member()
+    def post(self, request):
+        chat = request.query.chat
+        if not chat.submission:
+            raise ChatErrors.FORBIDDEN
+        chat.submission_record.review(request.user, request.json.submission_action)
+        return ChatListView.build_chat_payload(chat, request.user, request)
 
 
 class SubmissionInviteReviewView(View):

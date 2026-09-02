@@ -6,7 +6,7 @@ from django.utils import timezone
 from django.views import View
 from smartdjango import analyse, OK
 
-from Chat.models import Chat
+from Chat.models import Chat, SubmissionStatusChoice
 from Message.models import ForwardBundle, LinkPreview, MediaAsset, MediaResource, Message, MessageEvent, MessageHistoryRecovery, MessageTypeChoice, PinnedMessage
 from Message.params import MessageParams
 from Message.validators import MessageErrors
@@ -68,7 +68,10 @@ class MessageView(View):
                 client_message_id=request.json.client_message_id,
                 mention_user_ids=request.json.mention_user_ids,
                 media_resource=media_resource)
-            if getattr(message, '_was_created', True):
+            if getattr(message, '_was_created', True) and not (
+                message.chat.submission
+                and message.chat.submission_record.status == SubmissionStatusChoice.DRAFT
+            ):
                 NotificationEvent.emit_message_notifications(message, actor=request.user)
         return message.jsonl(request=request)
 
@@ -80,6 +83,18 @@ class MessageView(View):
             raise MessageErrors.SYSTEM_MESSAGE_FORBIDDEN
         if not message.is_visible_to(request.user):
             raise MessageErrors.NOT_A_MEMBER
+        if message.chat.submission:
+            submission = message.chat.submission_record
+            if (
+                request.query.delete_scope != 'everyone'
+                or request.user.id != submission.author_id
+                or submission.status != SubmissionStatusChoice.DRAFT
+            ):
+                raise MessageErrors.RECALL_WINDOW_EXPIRED
+            if message.user_id != request.user.id:
+                raise MessageErrors.NOT_OWNER
+            message.remove()
+            return OK
         if request.query.delete_scope == 'me':
             message.hide_for(request.user)
         else:
@@ -193,6 +208,8 @@ class MessageForwardView(View):
         for target in targets:
             if not target.has_active_member(request.user):
                 raise MessageErrors.NOT_A_MEMBER
+            if target.submission:
+                target.submission_record.require_send_allowed(request.user)
             if target.group:
                 target.space.require_group_send_allowed(request.user)
 

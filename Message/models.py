@@ -23,7 +23,7 @@ from django.utils.translation import gettext as _, override
 
 from smartdjango import models, Choice
 
-from Chat.models import Chat, ChatMember, ChatMemberStatusChoice
+from Chat.models import Chat, ChatMember, ChatMemberStatusChoice, SubmissionStatusChoice
 from Message.validators import MessageErrors, MessageValidator
 from User.models import User, UserEmojiUsage
 from User.validators import UserErrors
@@ -532,6 +532,10 @@ class Message(models.Model):
     @classmethod
     def visible_for_user(cls, chat: Chat, user: User):
         queryset = cls.visible_in_chat(chat).exclude(hidden_states__user=user)
+        if chat.submission:
+            submission = chat.submission_record
+            if submission.status == SubmissionStatusChoice.DRAFT and user.id != submission.author_id:
+                return queryset.none()
         if not chat.group:
             return queryset
         from Chat.models import ChatMember, ChatMemberStatusChoice
@@ -554,6 +558,8 @@ class Message(models.Model):
         if message_type in (MessageTypeChoice.SYSTEM, MessageTypeChoice.FORWARD_BUNDLE):
             raise MessageErrors.SYSTEM_MESSAGE_FORBIDDEN
         if chat.has_active_member(user):
+            if chat.submission:
+                chat.submission_record.require_send_allowed(user)
             if message_type == MessageTypeChoice.TEXT:
                 statement_reference = cls.statement_reference_from_text(content, user)
                 if statement_reference is not None:

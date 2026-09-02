@@ -18,6 +18,9 @@ class ChatErrors:
     SUBMISSION_TITLE_REQUIRED = Error(_('Submission title is required'))
     SUBMISSION_LEAVE_FORBIDDEN = Error(_('Submission chats cannot be left'))
     SUBMISSION_REVIEW_FORBIDDEN = Error(_('Only the official account or an operator can review submission invites'))
+    SUBMISSION_SEND_FORBIDDEN = Error(_('Messages cannot be sent in the current submission state'))
+    SUBMISSION_TRANSITION_FORBIDDEN = Error(_('This submission action is not available'))
+    SUBMISSION_EMPTY = Error(_('A submission must contain at least one message'))
 
 
 @Error.register

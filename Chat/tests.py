@@ -6,7 +6,7 @@ from unittest.mock import patch
 from django.test import TestCase
 from django.utils import timezone
 
-from Chat.models import Chat, ChatMember, ChatMemberRoleChoice, ChatMemberStatusChoice, ChatPurposeChoice, ChatReadState, ChatTypeChoice, ChatUserPreference
+from Chat.models import Chat, ChatMember, ChatMemberRoleChoice, ChatMemberStatusChoice, ChatPurposeChoice, ChatReadState, ChatTypeChoice, ChatUserPreference, SubmissionStatusChoice
 from Message.models import Message, MessageTypeChoice, PinnedMessage
 from Space.models import Space, SpaceOperator
 from User.models import NotificationEvent, User, UserStateEvent, UserStateEventKindChoice
@@ -51,8 +51,22 @@ class SubmissionChatTests(TestCase):
 
         ordinary = self.client.get('/chats/', **self.authorization(self.author)).json()['body']
         submissions = self.client.get('/chats/?purpose=submission', **self.authorization(self.author)).json()['body']
+        reviewer_drafts = self.client.get('/chats/?purpose=submission&role=reviewer', **self.authorization(self.operator)).json()['body']
         self.assertNotIn(chat.id, [item['chat_id'] for item in ordinary])
         self.assertIn(chat.id, [item['chat_id'] for item in submissions])
+        self.assertEqual(reviewer_drafts, [])
+        self.assertTrue(chat.is_owner(self.operator))
+
+        submitted = self.client.post(
+            f'/chats/submissions/submit?chat_id={chat.id}',
+            **self.authorization(self.author),
+        )
+        self.assertEqual(submitted.status_code, 200, submitted.content)
+        self.assertEqual(submitted.json()['body']['chat_id'], chat.id)
+        self.assertEqual(submitted.json()['body']['submission']['status'], 'review')
+        reviewer_rows = self.client.get('/chats/?purpose=submission&role=reviewer', **self.authorization(self.operator)).json()['body']
+        self.assertIn(chat.id, [item['chat_id'] for item in reviewer_rows])
+        self.assertEqual(reviewer_rows[0]['submission']['status'], 'review')
 
     def test_submission_start_is_idempotent(self):
         payload = {
@@ -75,6 +89,7 @@ class SubmissionChatTests(TestCase):
     def test_submission_invite_requires_operator_review_and_reveals_full_history(self):
         chat, _ = Chat.create_submission(self.author, self.operator, 'Invite review', 'invite-draft')
         old_message = Message.create(chat, self.author, MessageTypeChoice.TEXT, 'Earlier context')
+        chat.submission_record.submit(self.author)
         invited = User.create(self.space, 'Invited', verified=True)
         from Friendship.models import Friendship
         Friendship.ensure_locked_friendship(self.author, invited)
@@ -89,6 +104,36 @@ class SubmissionChatTests(TestCase):
         self.assertIn(old_message.id, Message.visible_for_user(chat, invited).values_list('id', flat=True))
         with self.assertRaises(Exception):
             chat.leave(invited)
+
+    def test_submission_workflow_enforces_sending_and_draft_recall(self):
+        chat, _ = Chat.create_submission(self.author, self.operator, 'Workflow', 'workflow-draft')
+        draft_message = Message.create(chat, self.author, MessageTypeChoice.TEXT, 'Editable draft')
+        delete = self.client.delete(
+            f'/messages/?message_id={draft_message.id}&scope=everyone',
+            **self.authorization(self.author),
+        )
+        self.assertEqual(delete.status_code, 200, delete.content)
+        Message.create(chat, self.author, MessageTypeChoice.TEXT, 'Final draft')
+        submission = chat.submission_record
+        submission.submit(self.author)
+        self.assertEqual(submission.status, SubmissionStatusChoice.REVIEW)
+        with self.assertRaises(Exception):
+            Message.create(chat, self.author, MessageTypeChoice.TEXT, 'Locked author message')
+        Message.create(chat, self.operator, MessageTypeChoice.TEXT, 'Please revise')
+        revision = self.client.post(
+            f'/chats/submissions/status?chat_id={chat.id}',
+            data=json.dumps({'action': 'revision'}),
+            content_type='application/json',
+            **self.authorization(self.operator),
+        )
+        self.assertEqual(revision.status_code, 200, revision.content)
+        self.assertEqual(revision.json()['body']['submission']['status'], 'revision')
+        submission.refresh_from_db()
+        Message.create(chat, self.author, MessageTypeChoice.TEXT, 'Revision')
+        submission.submit(self.author)
+        submission.review(self.operator, 'ready')
+        with self.assertRaises(Exception):
+            Message.create(chat, self.operator, MessageTypeChoice.TEXT, 'Locked reviewer message')
 
 
 class ChatNotificationPreferenceTests(TestCase):

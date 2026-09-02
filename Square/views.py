@@ -103,6 +103,15 @@ class SquareChatRecordStatementView(View):
         if len({message.chat_id for message in messages}) != 1:
             from Message.validators import MessageErrors
             raise MessageErrors.FORWARD_TARGET_INVALID
+        source_chat = messages[0].chat
+        source_submission = source_chat.submission_record if source_chat.submission else None
+        if source_submission is not None:
+            from Chat.models import SubmissionStatusChoice
+            if (
+                source_submission.recipient_id != request.user.id
+                or source_submission.status != SubmissionStatusChoice.READY
+            ):
+                raise SquareErrors.CHAT_RECORD_FORBIDDEN
         allowed_types = {
             MessageTypeChoice.TEXT, MessageTypeChoice.IMAGE, MessageTypeChoice.FILE,
             MessageTypeChoice.VIDEO, MessageTypeChoice.AUDIO, MessageTypeChoice.LOCATION,
@@ -124,6 +133,12 @@ class SquareChatRecordStatementView(View):
             if request.json.pin:
                 request.user.pinned_square_statement_id = statement.id
                 request.user.save(update_fields=['pinned_square_statement_id'])
+            if source_submission is not None:
+                from Chat.models import SubmissionStatusChoice
+                source_submission.status = SubmissionStatusChoice.PUBLISHED
+                source_submission.published_statement = statement
+                source_submission.save(update_fields=['status', 'published_statement'])
+                source_chat._emit_state_changed()
         return statement.jsonl(request=request)
 
 
