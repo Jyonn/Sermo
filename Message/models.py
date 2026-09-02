@@ -934,7 +934,7 @@ class Message(models.Model):
             raw_url = match.group(0).rstrip(LinkPreview.TRAILING_PUNCTUATION)
             parsed = urlparse(raw_url)
             hostname = (parsed.hostname or '').lower()
-            trusted_host = hostname in {'sermo.jyonn.space', 'localhost', '127.0.0.1'}
+            trusted_host = hostname in {'sermo.jyonn.space', 'sermo.6-79.cn', 'localhost', '127.0.0.1'}
             if not trusted_host:
                 continue
             path_match = re.fullmatch(r'/(?:([^/]+)/)?app/square/statements/(\d+)/?', parsed.path)

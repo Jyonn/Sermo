@@ -2133,6 +2133,7 @@ class NotificationDeliveryStatusChoice(Choice):
 class WebPushSubscription(models.Model):
     ACTIVE_LEASE_DAYS = 45
     CANONICAL_WEB_ORIGIN = 'https://sermo.jyonn.space'
+    SUPPORTED_WEB_ORIGINS = frozenset({CANONICAL_WEB_ORIGIN, 'https://sermo.6-79.cn'})
 
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='web_push_subscriptions', db_index=True)
     space = models.ForeignKey('Space.Space', on_delete=models.CASCADE, related_name='web_push_subscriptions', db_index=True)
@@ -2170,7 +2171,7 @@ class WebPushSubscription(models.Model):
         normalized_origin = origin.strip().rstrip('/')
         origin_host = (urlparse(normalized_origin).hostname or '').lower()
         is_supported_origin = (
-            normalized_origin.lower() == cls.CANONICAL_WEB_ORIGIN
+            normalized_origin.lower() in cls.SUPPORTED_WEB_ORIGINS
             or origin_host in {'localhost', '127.0.0.1'}
         )
         subscription, _created = cls.objects.update_or_create(

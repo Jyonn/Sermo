@@ -35,6 +35,15 @@ class StatementMessageReferenceTests(TestCase):
         self.assertEqual(reference['statement_id'], self.statement.id)
         self.assertEqual(reference['url'], url)
 
+    def test_mirror_space_url_is_recognized(self):
+        url = f'https://sermo.6-79.cn/{self.space.slug}/app/square/statements/{self.statement.id}'
+
+        reference = Message.statement_reference_from_text(f'看看这个：{url}', self.viewer)
+
+        self.assertEqual(reference['kind'], 'statement')
+        self.assertEqual(reference['statement_id'], self.statement.id)
+        self.assertEqual(reference['url'], url)
+
     def test_untrusted_or_foreign_space_url_stays_text(self):
         untrusted = f'https://example.com/{self.space.slug}/app/square/statements/{self.statement.id}'
         foreign = f'https://sermo.jyonn.space/another/app/square/statements/{self.statement.id}'

@@ -255,6 +255,17 @@ class WebPushRegistrationTests(TestCase):
         self.assertEqual(first.id, second.id)
         self.assertEqual(WebPushSubscription.objects.count(), 1)
 
+    def test_mirror_origin_is_enabled(self):
+        subscription = WebPushSubscription.register(
+            user=self.first_user,
+            endpoint='https://push.example.test/mirror-endpoint',
+            p256dh='p256dh-key',
+            auth='auth-key',
+            origin='https://sermo.6-79.cn',
+        )
+
+        self.assertTrue(subscription.enabled)
+
 class AccountSwitchPhoneNormalizationTests(SimpleTestCase):
     def test_mainland_phone_variants_include_country_code(self):
         self.assertEqual(
