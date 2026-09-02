@@ -810,6 +810,21 @@ msgstr "%(actor)s pinned a message"
 msgid "%(actor)s unpinned a message"
 msgstr "%(actor)s unpinned a message"
 
+msgid "You are now a space operator. You can manage Square mutes and publish merged chat records as posts."
+msgstr "You are now a space operator. You can manage Square mutes and publish merged chat records as posts."
+
+msgid "Your space operator role has been removed. Operator permissions are no longer available."
+msgstr "Your space operator role has been removed. Operator permissions are no longer available."
+
+msgid "%(actor)s requested changes to submission “%(title)s”"
+msgstr "%(actor)s requested changes to submission “%(title)s”"
+
+msgid "%(actor)s closed submission “%(title)s” as noncompliant"
+msgstr "%(actor)s closed submission “%(title)s” as noncompliant"
+
+msgid "%(actor)s approved submission “%(title)s” for publishing"
+msgstr "%(actor)s approved submission “%(title)s” for publishing"
+
 msgid "Shared an activity."
 msgstr "Shared an activity."
 

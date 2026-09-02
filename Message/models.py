@@ -810,6 +810,25 @@ class Message(models.Model):
                 return _('%(actor)s pinned a message') % dict(actor=actor)
             if event == 'message_unpinned':
                 return _('%(actor)s unpinned a message') % dict(actor=actor)
+            if event == 'operator_assigned':
+                return _('You are now a space operator. You can manage Square mutes and publish merged chat records as posts.')
+            if event == 'operator_removed':
+                return _('Your space operator role has been removed. Operator permissions are no longer available.')
+            if event == 'submission_revision':
+                return _('%(actor)s requested changes to submission “%(title)s”') % dict(
+                    actor=actor,
+                    title=str(payload.get('submission_title') or '').strip(),
+                )
+            if event == 'submission_terminate':
+                return _('%(actor)s closed submission “%(title)s” as noncompliant') % dict(
+                    actor=actor,
+                    title=str(payload.get('submission_title') or '').strip(),
+                )
+            if event == 'submission_ready':
+                return _('%(actor)s approved submission “%(title)s” for publishing') % dict(
+                    actor=actor,
+                    title=str(payload.get('submission_title') or '').strip(),
+                )
             return str(payload.get('text') or _('System message')).strip()
 
     def _award_interaction_growth(self):

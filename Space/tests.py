@@ -139,7 +139,8 @@ class SpaceAdminApiTests(TestCase):
         notice_chat = Chat.get_or_create_direct(self.official, self.member)
         assigned_notice = Message.objects.filter(user=self.official, chat=notice_chat).order_by('-id').first()
         self.assertIsNotNone(assigned_notice)
-        self.assertIn('space operator', assigned_notice.content)
+        self.assertEqual(assigned_notice.type, MessageTypeChoice.SYSTEM)
+        self.assertIn('space operator', assigned_notice.system_message_text(self.member))
 
         removed = self.client.delete(
             f'/spaces/admin/operators?user_id={self.member.id}',
@@ -147,7 +148,8 @@ class SpaceAdminApiTests(TestCase):
         )
         self.assertEqual(removed.status_code, 200, removed.content)
         removed_notice = Message.objects.filter(user=self.official, chat=assigned_notice.chat).order_by('-id').first()
-        self.assertIn('role has been removed', removed_notice.content)
+        self.assertEqual(removed_notice.type, MessageTypeChoice.SYSTEM)
+        self.assertIn('role has been removed', removed_notice.system_message_text(self.member))
 
     def test_operator_requires_verified_email_and_phone(self):
         response = self.client.post(

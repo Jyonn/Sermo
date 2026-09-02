@@ -810,9 +810,19 @@ class Submission(models.Model):
         }.get(action)
         if next_status is None:
             raise ChatErrors.SUBMISSION_TRANSITION_FORBIDDEN
-        self.status = next_status
-        self.save(update_fields=['status'])
-        self.chat._emit_state_changed()
+        from Message.models import Message
+        with transaction.atomic():
+            self.status = next_status
+            self.save(update_fields=['status'])
+            direct_chat = Chat.get_or_create_direct(user, self.author)
+            Message.create_system(
+                direct_chat,
+                user,
+                f'submission_{action}',
+                submission_title=self.chat.title,
+                submission_chat_id=self.chat_id,
+            )
+            self.chat._emit_state_changed()
         return self
 
 

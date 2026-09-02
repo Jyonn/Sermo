@@ -102,21 +102,14 @@ def _is_notificator_timeout(error: Exception):
 
 def _notify_operator_change(space, user, assigned):
     official = space.ensure_official_user()
-    content = (
-        ('You have been assigned as a space operator. You can now manage Square mutes and publish merged chat records as posts.'
-         if assigned else
-         'Your space operator role has been removed. Operator permissions are no longer available.')
-        if user.language == 'en' else
-        ('你已被设为空间运营者，现在可以管理广场禁言，并将合并聊天记录发布为发言。'
-         if assigned else
-         '你的空间运营者身份已被取消，相关运营权限已同步收回。')
-    )
     with transaction.atomic():
         Friendship.ensure_locked_friendship(official, user)
         chat = Chat.get_or_create_direct(official, user)
-        message = Message.create(chat=chat, user=official, message_type=0, content=content)
-        events = NotificationEvent.emit_message_notifications(message, actor=official, enqueue=False)
-        NotificationEvent._enqueue_deliveries_after_commit([event.id for event in events])
+        Message.create_system(
+            chat=chat,
+            user=official,
+            event='operator_assigned' if assigned else 'operator_removed',
+        )
 
 
 class SpaceEmailCodeRequestView(View):

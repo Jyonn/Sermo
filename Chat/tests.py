@@ -129,9 +129,15 @@ class SubmissionChatTests(TestCase):
         self.assertEqual(revision.status_code, 200, revision.content)
         self.assertEqual(revision.json()['body']['submission']['status'], 'revision')
         submission.refresh_from_db()
+        review_chat = Chat.get_or_create_direct(self.operator, self.author)
+        revision_notice = Message.objects.filter(chat=review_chat, type=MessageTypeChoice.SYSTEM).latest('id')
+        self.assertEqual(revision_notice._parse_payload(revision_notice.content)['event'], 'submission_revision')
+        self.assertIn('Workflow', revision_notice.system_message_text(self.author))
         Message.create(chat, self.author, MessageTypeChoice.TEXT, 'Revision')
         submission.submit(self.author)
         submission.review(self.operator, 'ready')
+        ready_notice = Message.objects.filter(chat=review_chat, type=MessageTypeChoice.SYSTEM).latest('id')
+        self.assertEqual(ready_notice._parse_payload(ready_notice.content)['event'], 'submission_ready')
         with self.assertRaises(Exception):
             Message.create(chat, self.operator, MessageTypeChoice.TEXT, 'Locked reviewer message')
 
