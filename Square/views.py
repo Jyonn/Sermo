@@ -6,6 +6,7 @@ from smartdjango import OK, analyse
 
 from Square.models import SquareMute, SquareReadState, Statement, StatementComment, StatementCommentLike, StatementLike, StatementMedia, statement_media_prefetch
 from Activity.models import ActivityService
+from Chat.models import Chat
 from Friendship.models import Friendship, FriendshipStatusChoice
 from django.db.models import Q
 from Message.models import ForwardBundle, MediaAsset, Message, MessageTypeChoice
@@ -22,6 +23,12 @@ from utils.qiniu import (
     issue_message_upload,
     sign_private_download_url,
 )
+
+
+def _notify_square_moderation(actor, user, event, **details):
+    Friendship.ensure_locked_friendship(actor, user)
+    chat = Chat.get_or_create_direct(actor, user)
+    Message.create_official_notice(chat, actor, event, **details)
 
 
 class StatementLocationView(View):
@@ -206,13 +213,21 @@ class StatementAuthorMuteView(View):
             )
         except Statement.DoesNotExist:
             raise SquareErrors.NOT_EXISTS
-        mute = SquareMute.set_for(
-            request.user.space,
-            statement.user,
-            request.user,
-            request.json.duration,
-            request.json.reason,
-        )
+        with transaction.atomic():
+            mute = SquareMute.set_for(
+                request.user.space,
+                statement.user,
+                request.user,
+                request.json.duration,
+                request.json.reason,
+            )
+            _notify_square_moderation(
+                request.user,
+                statement.user,
+                'square_muted',
+                duration=request.json.duration,
+                reason=request.json.reason,
+            )
         return mute.jsonl()
 
 
@@ -234,9 +249,18 @@ class AdminSquareMuteView(View):
             user = User.objects.get(id=request.json.user_id, space=request.space)
         except User.DoesNotExist:
             raise SquareErrors.MUTE_TARGET_INVALID
-        return SquareMute.set_for(
-            request.space, user, actor, request.json.duration, request.json.reason,
-        ).jsonl()
+        with transaction.atomic():
+            mute = SquareMute.set_for(
+                request.space, user, actor, request.json.duration, request.json.reason,
+            )
+            _notify_square_moderation(
+                actor,
+                user,
+                'square_muted',
+                duration=request.json.duration,
+                reason=request.json.reason,
+            )
+        return mute.jsonl()
 
     @auth.require_space
     @analyse.query(SquareParams.user_id)
@@ -247,7 +271,9 @@ class AdminSquareMuteView(View):
             user_id=request.query.user_id,
         ).first()
         if mute is not None:
-            mute.revoke(actor)
+            with transaction.atomic():
+                mute.revoke(actor)
+                _notify_square_moderation(actor, mute.user, 'square_unmuted')
         return OK
 
 

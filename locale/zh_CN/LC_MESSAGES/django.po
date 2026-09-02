@@ -864,6 +864,31 @@ msgstr "投稿“%(title)s”因不合规已关闭"
 msgid "Submission “%(title)s” passed review and is awaiting publication"
 msgstr "投稿“%(title)s”已通过审核，等待发布"
 
+msgid "1 day"
+msgstr "1 天"
+
+msgid "3 days"
+msgstr "3 天"
+
+msgid "7 days"
+msgstr "7 天"
+
+msgid "30 days"
+msgstr "30 天"
+
+msgid "permanently"
+msgstr "永久"
+
+msgid "temporarily"
+msgstr "暂时"
+
+#, python-format
+msgid "Your Square participation has been restricted %(duration)s. Reason: %(reason)s"
+msgstr "你已被限制参与广场，禁言时长：%(duration)s。原因：%(reason)s"
+
+msgid "Your Square mute has been lifted. You can post and comment again."
+msgstr "你的广场禁言已解除，现在可以重新发布发言和评论。"
+
 msgid "Group chat"
 msgstr "群聊"
 

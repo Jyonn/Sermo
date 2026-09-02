@@ -825,6 +825,31 @@ msgstr "Submission “%(title)s” was closed as noncompliant"
 msgid "Submission “%(title)s” passed review and is awaiting publication"
 msgstr "Submission “%(title)s” passed review and is awaiting publication"
 
+msgid "1 day"
+msgstr "1 day"
+
+msgid "3 days"
+msgstr "3 days"
+
+msgid "7 days"
+msgstr "7 days"
+
+msgid "30 days"
+msgstr "30 days"
+
+msgid "permanently"
+msgstr "permanently"
+
+msgid "temporarily"
+msgstr "temporarily"
+
+#, python-format
+msgid "Your Square participation has been restricted %(duration)s. Reason: %(reason)s"
+msgstr "Your Square participation has been restricted %(duration)s. Reason: %(reason)s"
+
+msgid "Your Square mute has been lifted. You can post and comment again."
+msgstr "Your Square mute has been lifted. You can post and comment again."
+
 msgid "Shared an activity."
 msgstr "Shared an activity."
 

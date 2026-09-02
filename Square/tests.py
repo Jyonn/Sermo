@@ -8,7 +8,7 @@ from django.utils import timezone
 from Friendship.models import Friendship
 from Chat.models import Chat
 from Space.models import Space, SpaceOperator
-from Message.models import ForwardBundleItem, MediaAsset, Message
+from Message.models import ForwardBundleItem, MediaAsset, Message, MessageTypeChoice
 from Square.models import SquareMute, Statement, StatementComment, StatementCommentLike, StatementLike, StatementMedia
 from Square.views import SquareStatusView
 from User.models import NotificationEvent, NotificationEventTypeChoice, User
@@ -67,6 +67,11 @@ class StatementApiTests(TestCase):
         mute = SquareMute.active_queryset().get(space=self.space, user=self.author)
         self.assertEqual(mute.reason, '多次发布违规内容')
         self.assertIsNotNone(mute.muted_until)
+        notice_chat = Chat.get_or_create_direct(official, self.author)
+        notice = Message.objects.get(chat=notice_chat, type=MessageTypeChoice.OFFICIAL_NOTICE)
+        self.assertEqual(notice.user_id, official.id)
+        self.assertEqual(notice._parse_payload(notice.content)['event'], 'square_muted')
+        self.assertIn('多次发布违规内容', notice.system_message_text(self.author))
 
         publish = self.post_statement(self.author, {'text': '无法发布', 'visibility': 'public', 'media': []})
         self.assertEqual(publish.status_code, 403, publish.content)
@@ -82,6 +87,7 @@ class StatementApiTests(TestCase):
         self.assertEqual(comment.json()['identifier'], 'SQUARE@MUTED')
 
     def test_regular_member_cannot_mute_and_admin_can_update_and_revoke_mute(self):
+        official = self.space.ensure_official_user()
         statement = Statement.create_statement(self.author, '普通发言', 'public', [])
         denied = self.client.post(
             f'/square/statements/{statement.id}/mute-author',
@@ -118,6 +124,15 @@ class StatementApiTests(TestCase):
         )
         self.assertEqual(revoked.status_code, 200, revoked.content)
         self.assertIsNone(SquareMute.active_for(self.author))
+        notices = Message.objects.filter(
+            chat=Chat.get_or_create_direct(official, self.author),
+            type=MessageTypeChoice.OFFICIAL_NOTICE,
+        ).order_by('id')
+        self.assertEqual([notice._parse_payload(notice.content)['event'] for notice in notices], [
+            'square_muted',
+            'square_unmuted',
+        ])
+        self.assertEqual(notices.last().user_id, official.id)
 
     def test_operator_can_mute_statement_author(self):
         self.friend.phone = '+8613800000002'
@@ -133,6 +148,11 @@ class StatementApiTests(TestCase):
         )
         self.assertEqual(response.status_code, 200, response.content)
         self.assertEqual(response.json()['body']['created_by']['user_id'], self.friend.id)
+        notice = Message.objects.get(
+            chat=Chat.get_or_create_direct(self.friend, self.author),
+            type=MessageTypeChoice.OFFICIAL_NOTICE,
+        )
+        self.assertEqual(notice.user_id, self.friend.id)
 
     def test_operator_can_publish_selected_chat_as_statement_but_cannot_pin(self):
         self.friend.phone = '+8613800000003'

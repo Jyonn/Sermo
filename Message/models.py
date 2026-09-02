@@ -841,6 +841,20 @@ class Message(models.Model):
                 return _('You are now a space operator. You can manage Square mutes and publish merged chat records as posts.')
             if event == 'operator_removed':
                 return _('Your space operator role has been removed. Operator permissions are no longer available.')
+            if event == 'square_muted':
+                duration = {
+                    '1d': _('1 day'),
+                    '3d': _('3 days'),
+                    '7d': _('7 days'),
+                    '30d': _('30 days'),
+                    'permanent': _('permanently'),
+                }.get(payload.get('duration'), _('temporarily'))
+                return _('Your Square participation has been restricted %(duration)s. Reason: %(reason)s') % dict(
+                    duration=duration,
+                    reason=str(payload.get('reason') or '').strip(),
+                )
+            if event == 'square_unmuted':
+                return _('Your Square mute has been lifted. You can post and comment again.')
             if event == 'submission_revision':
                 return _('Submission “%(title)s” needs changes') % dict(
                     title=str(payload.get('submission_title') or '').strip(),
