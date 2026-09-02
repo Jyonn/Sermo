@@ -130,13 +130,13 @@ class SubmissionChatTests(TestCase):
         self.assertEqual(revision.json()['body']['submission']['status'], 'revision')
         submission.refresh_from_db()
         review_chat = Chat.get_or_create_direct(self.operator, self.author)
-        revision_notice = Message.objects.filter(chat=review_chat, type=MessageTypeChoice.SYSTEM).latest('id')
+        revision_notice = Message.objects.filter(chat=review_chat, type=MessageTypeChoice.OFFICIAL_NOTICE).latest('id')
         self.assertEqual(revision_notice._parse_payload(revision_notice.content)['event'], 'submission_revision')
         self.assertIn('Workflow', revision_notice.system_message_text(self.author))
         Message.create(chat, self.author, MessageTypeChoice.TEXT, 'Revision')
         submission.submit(self.author)
         submission.review(self.operator, 'ready')
-        ready_notice = Message.objects.filter(chat=review_chat, type=MessageTypeChoice.SYSTEM).latest('id')
+        ready_notice = Message.objects.filter(chat=review_chat, type=MessageTypeChoice.OFFICIAL_NOTICE).latest('id')
         self.assertEqual(ready_notice._parse_payload(ready_notice.content)['event'], 'submission_ready')
         with self.assertRaises(Exception):
             Message.create(chat, self.operator, MessageTypeChoice.TEXT, 'Locked reviewer message')
@@ -242,6 +242,30 @@ class ChatNotificationPreferenceTests(TestCase):
         with self.assertRaises(Exception) as raised:
             Message.create(self.chat, self.sender, MessageTypeChoice.SYSTEM, 'forged')
         self.assertIn('System messages cannot be managed by users', str(raised.exception))
+
+        with self.assertRaises(Exception):
+            Message.create(self.chat, self.sender, MessageTypeChoice.OFFICIAL_NOTICE, 'forged')
+        with self.assertRaises(Exception):
+            Message.create_official_notice(self.chat, self.sender, 'operator_assigned')
+
+    def test_official_notice_is_notifiable_unread_and_used_as_chat_preview(self):
+        SpaceOperator.objects.create(space=self.space, user=self.sender)
+
+        notice = Message.create_official_notice(
+            self.chat,
+            self.sender,
+            'operator_assigned',
+        )
+
+        self.assertEqual(ChatReadState.unread_count(self.chat, self.recipient), 1)
+        self.assertEqual(notice._payload_for_type()['kind'], 'official_notice')
+        self.assertTrue(NotificationEvent.objects.filter(
+            user=self.recipient,
+            payload__message_id=notice.id,
+        ).exists())
+        payload = self.client.get('/chats/', **self.authorization(self.recipient)).json()['body']
+        chat_payload = next(item for item in payload if item['chat_id'] == self.chat.id)
+        self.assertEqual(chat_payload['last_message']['message_id'], notice.id)
 
     def test_system_message_is_not_notified_unread_or_used_as_chat_preview(self):
         ordinary = Message.create(self.chat, self.sender, MessageTypeChoice.TEXT, 'visible preview')

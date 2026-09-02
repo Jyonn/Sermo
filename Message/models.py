@@ -72,6 +72,7 @@ class MessageTypeChoice(Choice):
     STICKER = 9
     FORWARD_BUNDLE = 10
     ACTIVITY = 11
+    OFFICIAL_NOTICE = 12
 
 
 class MessageEventTypeChoice(Choice):
@@ -555,7 +556,7 @@ class Message(models.Model):
 
     @classmethod
     def create(cls, chat: Chat, user: User, message_type, content, reply_to=None, client_message_id=None, mention_user_ids=None, media_resource=None):
-        if message_type in (MessageTypeChoice.SYSTEM, MessageTypeChoice.FORWARD_BUNDLE):
+        if message_type in (MessageTypeChoice.SYSTEM, MessageTypeChoice.FORWARD_BUNDLE, MessageTypeChoice.OFFICIAL_NOTICE):
             raise MessageErrors.SYSTEM_MESSAGE_FORBIDDEN
         if chat.has_active_member(user):
             if chat.submission:
@@ -733,8 +734,34 @@ class Message(models.Model):
         return message
 
     @classmethod
+    def create_official_notice(cls, chat: Chat, user: User, event: str, **details):
+        if not chat.has_active_member(user):
+            raise MessageErrors.NOT_A_MEMBER
+        if not (user.is_official or user.is_space_operator):
+            raise MessageErrors.SYSTEM_MESSAGE_FORBIDDEN
+        payload = {
+            'kind': 'official_notice',
+            'event': str(event).strip(),
+            'actor_name': user.name,
+            **{key: value for key, value in details.items() if value is not None},
+        }
+        content = json.dumps(payload, separators=(',', ':'), ensure_ascii=False)
+        if len(content) > cls.vldt.MAX_CONTENT_LENGTH:
+            raise MessageErrors.CONTENT_TOO_LONG
+        message = cls.objects.create(
+            chat=chat,
+            user=user,
+            type=MessageTypeChoice.OFFICIAL_NOTICE,
+            content=content,
+        )
+        MessageEvent.record_created(message)
+        from User.models import NotificationEvent
+        NotificationEvent.emit_message_notifications(message, actor=user)
+        return message
+
+    @classmethod
     def forward_individual(cls, source, chat: Chat, user: User):
-        if source.type in (MessageTypeChoice.SYSTEM, MessageTypeChoice.MAP_ACCESS, MessageTypeChoice.FORWARD_BUNDLE):
+        if source.type in (MessageTypeChoice.SYSTEM, MessageTypeChoice.OFFICIAL_NOTICE, MessageTypeChoice.MAP_ACCESS, MessageTypeChoice.FORWARD_BUNDLE):
             raise MessageErrors.FORWARD_UNSUPPORTED
         if not chat.has_active_member(user):
             raise MessageErrors.NOT_A_MEMBER
@@ -777,7 +804,7 @@ class Message(models.Model):
 
     def system_message_text(self, viewer: User = None):
         payload = self._parse_payload(self.content)
-        if payload.get('kind') != 'system':
+        if payload.get('kind') not in {'system', 'official_notice'}:
             return _('System message')
 
         actor = str(payload.get('actor_name') or self.user.name or '').strip()
@@ -1133,9 +1160,9 @@ class Message(models.Model):
             if link_preview is not None:
                 payload['link_preview'] = link_preview.jsonl()
             return payload
-        if self.type == MessageTypeChoice.SYSTEM:
+        if self.type in (MessageTypeChoice.SYSTEM, MessageTypeChoice.OFFICIAL_NOTICE):
             payload = self._parse_payload(self.content)
-            if payload.get('kind') == 'system':
+            if payload.get('kind') in {'system', 'official_notice'}:
                 payload['text'] = self.system_message_text(
                     self._viewer_from_request(request),
                 )
@@ -1241,6 +1268,8 @@ class Message(models.Model):
     def preview_text(self):
         if self.type == MessageTypeChoice.TEXT:
             return self.readable_text()
+        if self.type == MessageTypeChoice.OFFICIAL_NOTICE:
+            return self.system_message_text()
         return self.PREVIEW_TEXT_BY_TYPE.get(self.type, self.content)
 
     def _dictify_user(self):
@@ -1293,7 +1322,7 @@ class Message(models.Model):
 
     def jsonl(self, request: HttpRequest = None, include_deleted: bool = False):
         viewer = self._viewer_from_request(request)
-        content = self.system_message_text(viewer) if self.type == MessageTypeChoice.SYSTEM else self.preview_text()
+        content = self.system_message_text(viewer) if self.type in (MessageTypeChoice.SYSTEM, MessageTypeChoice.OFFICIAL_NOTICE) else self.preview_text()
         payload = dict(
             message_id=self.id,
             client_message_id=self.client_message_id,
@@ -1382,7 +1411,7 @@ class Message(models.Model):
         )
 
     def remove(self):
-        if self.type == MessageTypeChoice.SYSTEM:
+        if self.type in (MessageTypeChoice.SYSTEM, MessageTypeChoice.OFFICIAL_NOTICE):
             raise MessageErrors.SYSTEM_MESSAGE_FORBIDDEN
         if self.is_deleted:
             return
@@ -1396,7 +1425,7 @@ class Message(models.Model):
                 MediaResource.objects.get(id=resource_id).recalculate_reference_count()
 
     def hide_for(self, user: User):
-        if self.type == MessageTypeChoice.SYSTEM:
+        if self.type in (MessageTypeChoice.SYSTEM, MessageTypeChoice.OFFICIAL_NOTICE):
             raise MessageErrors.SYSTEM_MESSAGE_FORBIDDEN
         state, created = MessageUserState.objects.get_or_create(message=self, user=user)
         if created:
@@ -1639,7 +1668,7 @@ class PinnedMessage(models.Model):
 
     @classmethod
     def pin(cls, message, user):
-        if message.type == MessageTypeChoice.SYSTEM:
+        if message.type in (MessageTypeChoice.SYSTEM, MessageTypeChoice.OFFICIAL_NOTICE):
             raise MessageErrors.SYSTEM_MESSAGE_FORBIDDEN
         cls.require_manage_permission(message.chat, user)
         existing = cls.objects.filter(message=message, pinned_by=user).first()
@@ -1668,7 +1697,7 @@ class PinnedMessage(models.Model):
 
     @classmethod
     def unpin(cls, message, user):
-        if message.type == MessageTypeChoice.SYSTEM:
+        if message.type in (MessageTypeChoice.SYSTEM, MessageTypeChoice.OFFICIAL_NOTICE):
             raise MessageErrors.SYSTEM_MESSAGE_FORBIDDEN
         cls.require_manage_permission(message.chat, user)
         deleted, _details = cls.objects.filter(message=message, pinned_by=user).delete()

@@ -105,7 +105,7 @@ def _notify_operator_change(space, user, assigned):
     with transaction.atomic():
         Friendship.ensure_locked_friendship(official, user)
         chat = Chat.get_or_create_direct(official, user)
-        Message.create_system(
+        Message.create_official_notice(
             chat=chat,
             user=official,
             event='operator_assigned' if assigned else 'operator_removed',

@@ -130,7 +130,7 @@ class SubmissionStartView(View):
     )
     def post(self, request):
         request.user.space.require_submission_enabled()
-        if request.json.type in (MessageTypeChoice.SYSTEM, MessageTypeChoice.FORWARD_BUNDLE):
+        if request.json.type in (MessageTypeChoice.SYSTEM, MessageTypeChoice.FORWARD_BUNDLE, MessageTypeChoice.OFFICIAL_NOTICE):
             raise MessageErrors.SYSTEM_MESSAGE_FORBIDDEN
         with transaction.atomic():
             chat, created = Chat.create_submission(

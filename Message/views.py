@@ -51,7 +51,7 @@ class MessageView(View):
     )
     def post(self, request: Request):
         request.user.space.require_chat_enabled()
-        if request.json.type in (MessageTypeChoice.SYSTEM, MessageTypeChoice.FORWARD_BUNDLE):
+        if request.json.type in (MessageTypeChoice.SYSTEM, MessageTypeChoice.FORWARD_BUNDLE, MessageTypeChoice.OFFICIAL_NOTICE):
             raise MessageErrors.SYSTEM_MESSAGE_FORBIDDEN
         if request.query.chat.group:
             request.user.space.require_group_send_allowed(request.user)
@@ -79,7 +79,7 @@ class MessageView(View):
     @analyse.query(MessageParams.message_id, MessageParams.delete_scope)
     def delete(self, request: Request):
         message: Message = request.query.message
-        if message.type == MessageTypeChoice.SYSTEM:
+        if message.type in (MessageTypeChoice.SYSTEM, MessageTypeChoice.OFFICIAL_NOTICE):
             raise MessageErrors.SYSTEM_MESSAGE_FORBIDDEN
         if not message.is_visible_to(request.user):
             raise MessageErrors.NOT_A_MEMBER
@@ -163,7 +163,7 @@ class MessageBatchView(View):
             for message in messages:
                 if not message.chat.has_active_member(request.user):
                     raise MessageErrors.NOT_A_MEMBER
-                if message.type == MessageTypeChoice.SYSTEM:
+                if message.type in (MessageTypeChoice.SYSTEM, MessageTypeChoice.OFFICIAL_NOTICE):
                     raise MessageErrors.SYSTEM_MESSAGE_FORBIDDEN
             for message in messages:
                 message.hide_for(request.user)
@@ -282,7 +282,7 @@ class PinnedMessageView(View):
     def post(self, request: Request):
         if not request.query.message.is_visible_to(request.user):
             raise MessageErrors.NOT_A_MEMBER
-        if request.query.message.type == MessageTypeChoice.SYSTEM:
+        if request.query.message.type in (MessageTypeChoice.SYSTEM, MessageTypeChoice.OFFICIAL_NOTICE):
             raise MessageErrors.SYSTEM_MESSAGE_FORBIDDEN
         PinnedMessage.pin(request.query.message, request.user)
         pin = PinnedMessage.aggregate_for_message(request.query.message)
@@ -293,7 +293,7 @@ class PinnedMessageView(View):
     def delete(self, request: Request):
         if not request.query.message.is_visible_to(request.user):
             raise MessageErrors.NOT_A_MEMBER
-        if request.query.message.type == MessageTypeChoice.SYSTEM:
+        if request.query.message.type in (MessageTypeChoice.SYSTEM, MessageTypeChoice.OFFICIAL_NOTICE):
             raise MessageErrors.SYSTEM_MESSAGE_FORBIDDEN
         PinnedMessage.unpin(request.query.message, request.user)
         return OK
