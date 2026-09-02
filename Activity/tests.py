@@ -155,3 +155,49 @@ class ActivityServiceTests(TestCase):
             (before_midnight.astimezone(timezone.get_current_timezone()).date(), 1),
             (after_midnight.astimezone(timezone.get_current_timezone()).date(), 1),
         ])
+
+    def test_friendly_neighbor_points_and_permanent_manual_rewards(self):
+        campaign = ActivityCampaign.objects.create(
+            key='friendly-neighbor-test',
+            title='Friendly Neighbor',
+            event_key='square.statement.comment',
+            config={
+                'mode': 'friendly_neighbor',
+                'daily_points_limit': 25,
+                'reply_points': [20, 10, 5],
+                'user_rewards': [
+                    {'key': 'frame', 'threshold': 75, 'resource_type': 'frame',
+                     'reward_id': 'activity.spider.frame', 'resource_key': 'spider-web'},
+                    {'key': 'profile', 'threshold': 100, 'resource_type': 'profile',
+                     'reward_id': 'activity.spider.profile', 'resource_key': 'spider-city'},
+                ],
+            },
+        )
+        ActivityService.claim_for_space(campaign, self.space)
+
+        self.assertEqual(ActivityService.record_friendly_neighbor_reply(self.user, 'comment-1'), 20)
+        self.assertEqual(ActivityService.record_friendly_neighbor_reply(self.user, 'comment-2'), 5)
+        self.assertEqual(ActivityService.record_friendly_neighbor_reply(self.user, 'comment-3'), 0)
+        self.assertEqual(ActivityService.record_friendly_neighbor_reply(self.user, 'comment-1'), 0)
+        progress = campaign.user_progress.get(user=self.user)
+        self.assertEqual(progress.earned_points, 25)
+        self.assertEqual(list(progress.events.order_by('id').values_list('points', flat=True)), [20, 5, 0])
+        self.assertEqual(ActivityService.payload(campaign, self.user)['friendly_neighbor']['next_reply_points'], 0)
+
+        progress.earned_points = 100
+        progress.save(update_fields=['earned_points'])
+        ActivityService.claim_milestone_reward(campaign, self.user, 'frame')
+        ActivityService.claim_milestone_reward(campaign, self.user, 'frame')
+        ActivityService.claim_milestone_reward(campaign, self.user, 'profile')
+        payload = ActivityService.payload(campaign, self.user)['friendly_neighbor']
+        self.assertTrue(all(reward['claimed'] for reward in payload['rewards']))
+        self.assertEqual(UserResourceInventory.objects.filter(
+            user=self.user, source='activity', source_reference=campaign.key,
+        ).count(), 2)
+        self.user.set_personalization(
+            chat_bubble_style=self.user.chat_bubble_style,
+            avatar_frame_style='spider-web',
+            profile_card_theme='spider-city',
+        )
+        self.assertEqual(self.user.avatar_frame_style, 'spider-web')
+        self.assertEqual(self.user.profile_card_theme, 'spider-city')

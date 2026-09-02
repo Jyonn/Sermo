@@ -135,6 +135,7 @@ PERSONALIZATION_LEVELS = {
 
 ACTIVITY_PERSONALIZATION = {
     'chat_bubble_style': {'baxian-lv', 'baxian-zhongli', 'baxian-he'},
+    'avatar_frame_style': {'spider-web'},
 }
 
 VIP_OR_LEVEL_PERSONALIZATION = {

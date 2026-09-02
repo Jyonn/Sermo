@@ -147,6 +147,7 @@ class UserResourceTypeChoice(Choice):
     STATEMENT = 'statement'
     IDENTITY = 'identity'
     VIP = 'vip'
+    PROFILE = 'profile'
 
 
 class UserResourceSourceChoice(Choice):
@@ -585,6 +586,8 @@ class User(models.Model):
                     if normalized == 'level-12' and self.effective_growth_level() < 12:
                         raise UserErrors.PERSONALIZATION_NOT_OWNED
                     if normalized == 'vip' and not self.is_permanent_vip:
+                        raise UserErrors.PERSONALIZATION_NOT_OWNED
+                    if normalized == 'spider-city' and not UserResourceInventory.owns(self, 'profile', normalized):
                         raise UserErrors.PERSONALIZATION_NOT_OWNED
                 if capability_group:
                     self.require_capability(f'menu.personalization.{capability_group}.use.{normalized}')

@@ -134,6 +134,7 @@ class UserActivityReward(models.Model):
 
 class ActivityService:
     AWAKENING_COUNT = 8
+    FRIENDLY_NEIGHBOR_MODE = 'friendly_neighbor'
 
     @staticmethod
     def claim_for_space(campaign, space, claimed_at=None):
@@ -249,6 +250,68 @@ class ActivityService:
                     cls._ensure_personal_reward(progress)
                     awarded.append(campaign.key)
         return awarded
+
+    @classmethod
+    def record_friendly_neighbor_reply(cls, user, event_reference):
+        """Award daily web points while retaining zero-point events as anti-abuse history."""
+        if not user.verified or user.is_deleted:
+            return 0
+        awarded = 0
+        for space_activity in cls.space_activities(user.space, active_only=True).filter(
+                campaign__event_key='square.statement.comment'):
+            campaign = space_activity.campaign
+            if campaign.config.get('mode') != cls.FRIENDLY_NEIGHBOR_MODE:
+                continue
+            with transaction.atomic():
+                _, progress = cls._progress(campaign, user, space_activity)
+                progress = UserActivityProgress.objects.select_for_update().get(id=progress.id)
+                today = ActivityEvent.objects.filter(
+                    campaign=campaign,
+                    progress=progress,
+                    event_key=campaign.event_key,
+                    event_date=timezone.localdate(),
+                )
+                reply_index = today.count()
+                daily_limit = int(campaign.config.get('daily_points_limit', 25))
+                daily_points = sum(today.values_list('points', flat=True))
+                schedule = campaign.config.get('reply_points') or [20, 10, 5]
+                nominal = int(schedule[min(reply_index, len(schedule) - 1)])
+                points = max(0, min(nominal, daily_limit - daily_points))
+                event, created = ActivityEvent.objects.get_or_create(
+                    campaign=campaign,
+                    progress=progress,
+                    event_key=campaign.event_key,
+                    event_date=timezone.localdate(),
+                    event_reference=str(event_reference),
+                    defaults={'points': points, 'claimed_at': timezone.now()},
+                )
+                if created and event.points:
+                    progress.earned_points += event.points
+                    progress.save(update_fields=['earned_points', 'updated_at'])
+                    awarded += event.points
+        return awarded
+
+    @classmethod
+    def claim_milestone_reward(cls, campaign, user, reward_key):
+        from User.models import UserResourceInventory
+
+        reward = next((item for item in campaign.config.get('user_rewards', []) if item.get('key') == reward_key), None)
+        if reward is None:
+            raise ValueError('activity reward does not exist')
+        with transaction.atomic():
+            _, progress = cls._progress(campaign, user)
+            progress = UserActivityProgress.objects.select_for_update().get(id=progress.id)
+            if progress.earned_points < int(reward['threshold']):
+                raise ValueError('activity reward is not ready')
+            item, _ = UserResourceInventory.grant_activity_resource(
+                user,
+                reward['resource_type'],
+                reward['reward_id'],
+                reward['resource_key'],
+                campaign.key,
+                metadata={'kind': 'user_milestone', 'threshold': int(reward['threshold'])},
+            )
+        return item
 
     @classmethod
     def claim(cls, campaign, user):
@@ -446,7 +509,7 @@ class ActivityService:
                 reward_label=item.reward_label,
             ))
         claimable_points = sum(progress.events.filter(points__gt=0, claimed_at__isnull=True).values_list('points', flat=True))
-        return dict(
+        payload = dict(
             key=campaign.key,
             title=campaign.title,
             title_en=campaign.title_en,
@@ -484,3 +547,27 @@ class ActivityService:
                 user=item.user.tiny_json() if item.user else None,
             ) for item in space_activity.awakenings.select_related('user')],
         )
+        if campaign.config.get('mode') == cls.FRIENDLY_NEIGHBOR_MODE:
+            today_events = progress.events.filter(event_date=timezone.localdate())
+            today_points = sum(today_events.values_list('points', flat=True))
+            reply_count = today_events.count()
+            daily_limit = int(campaign.config.get('daily_points_limit', 25))
+            schedule = campaign.config.get('reply_points') or [20, 10, 5]
+            next_nominal = int(schedule[min(reply_count, len(schedule) - 1)])
+            owned = set(user.resource_inventory.values_list('reward_id', flat=True))
+            payload['friendly_neighbor'] = dict(
+                web_points=progress.earned_points,
+                today_points=today_points,
+                today_reply_count=reply_count,
+                daily_limit=daily_limit,
+                next_reply_points=max(0, min(next_nominal, daily_limit - today_points)),
+                rewards=[dict(
+                    key=item['key'],
+                    threshold=int(item['threshold']),
+                    resource_type=item['resource_type'],
+                    resource_key=item['resource_key'],
+                    claimed=item['reward_id'] in owned,
+                    claimable=progress.earned_points >= int(item['threshold']) and item['reward_id'] not in owned,
+                ) for item in campaign.config.get('user_rewards', [])],
+            )
+        return payload

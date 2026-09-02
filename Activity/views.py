@@ -50,6 +50,15 @@ class ActivityPersonalRewardClaimView(View):
         return ActivityService.payload(campaign, request.user)
 
 
+class ActivityMilestoneRewardClaimView(View):
+    @auth.require_user
+    def post(self, request: Request, key: str, reward_key: str):
+        campaign = ActivityCampaign.objects.get(key=key, enabled=True)
+        ActivityService.space_activity_for(campaign, request.user.space, active_only=True)
+        ActivityService.claim_milestone_reward(campaign, request.user, reward_key)
+        return ActivityService.payload(campaign, request.user)
+
+
 class ActivitySpaceRewardClaimView(View):
     @auth.require_user
     def post(self, request: Request, key: str):

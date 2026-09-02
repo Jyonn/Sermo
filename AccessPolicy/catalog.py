@@ -130,6 +130,11 @@ for style in PERSONALIZATION_LEVELS['avatar_frame_style']:
         f'menu.personalization.frame.use.{style}', style, style,
         'menu.personalization.frame', 'portrait', asset_key=style,
     )
+for style in ACTIVITY_PERSONALIZATION.get('avatar_frame_style', set()):
+    register(
+        f'menu.personalization.frame.use.{style}', style, style,
+        'menu.personalization.frame', 'celebration', asset_key=style,
+    )
 register('menu.personalization.frame.use.vip', '永久 VIP', 'Permanent VIP', 'menu.personalization.frame', 'workspace_premium', asset_key='vip')
 
 for style in ('default', 'editorial', 'mosaic', 'hero', 'comic', 'receipt'):

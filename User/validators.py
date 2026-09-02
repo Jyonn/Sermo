@@ -128,12 +128,12 @@ class UserValidator:
         },
         'avatar_frame_style': {
             'none', 'orbit', 'aurora', 'polaroid', 'papercut', 'mechanical',
-            'niko-run', 'fufu-wave', 'xiaobai-run', 'vip',
+            'niko-run', 'fufu-wave', 'xiaobai-run', 'vip', 'spider-web',
         },
         'statement_card_style': {
             'default', 'editorial', 'mosaic', 'hero', 'comic', 'receipt', 'vip', 'niko', 'fufu',
         },
-        'profile_card_theme': {'default', 'level-12', 'vip'},
+        'profile_card_theme': {'default', 'level-12', 'vip', 'spider-city'},
     }
     GESTURE_LOCK_MIN_MINUTES = 1
     GESTURE_LOCK_MAX_MINUTES = 30

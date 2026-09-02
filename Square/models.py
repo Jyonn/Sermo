@@ -505,6 +505,8 @@ class StatementComment(models.Model):
         comment.visible_like_count = 0
         comment.viewer_liked = False
         user.award_growth('explore:square_reply' if parent is not None else 'explore:square_comment')
+        from Activity.models import ActivityService
+        ActivityService.record_friendly_neighbor_reply(user, comment.id)
         return comment
 
     def jsonl(self, viewer=None, include_replies=False):
