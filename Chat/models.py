@@ -14,6 +14,11 @@ class ChatTypeChoice(Choice):
     GROUP = 1
 
 
+class ChatPurposeChoice(Choice):
+    NORMAL = 0
+    SUBMISSION = 1
+
+
 class ChatMemberRoleChoice(Choice):
     MEMBER = 0
     OWNER = 1
@@ -33,6 +38,7 @@ class Chat(models.Model):
 
     space = models.ForeignKey('Space.Space', on_delete=models.CASCADE, related_name='chats', db_index=True)
     chat_type = models.IntegerField(choices=ChatTypeChoice.to_choices(), db_index=True)
+    purpose = models.IntegerField(choices=ChatPurposeChoice.to_choices(), default=ChatPurposeChoice.NORMAL, db_index=True)
     title = models.CharField(max_length=vldt.TITLE_MAX_LENGTH, null=True, blank=True)
     created_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='created_chats')
 
@@ -54,6 +60,13 @@ class Chat(models.Model):
     @property
     def direct(self):
         return self.chat_type == ChatTypeChoice.DIRECT
+
+    @property
+    def submission(self):
+        return self.purpose == ChatPurposeChoice.SUBMISSION
+
+    def _dictify_purpose(self):
+        return 'submission' if self.submission else 'normal'
 
     def _dictify_created_at(self):
         return self.created_at.timestamp()
@@ -94,6 +107,7 @@ class Chat(models.Model):
         return self.dictify(
             'id->chat_id',
             'chat_type',
+            'purpose',
             'title',
             'owner',
             'members',
@@ -123,6 +137,8 @@ class Chat(models.Model):
         UserStateEvent.emit_many(user_ids, UserStateEventKindChoice.CHATS_CHANGED, self.id)
 
     def remove(self):
+        if self.submission:
+            raise ChatErrors.FORBIDDEN
         user_ids = self._active_user_ids()
         self.is_deleted = True
         self.save(update_fields=['is_deleted'])
@@ -149,12 +165,13 @@ class Chat(models.Model):
         ).exists()
 
     @classmethod
-    def get_user_chats(cls, user: User):
+    def get_user_chats(cls, user: User, purpose=ChatPurposeChoice.NORMAL):
         chats = list(
             cls.objects.filter(
                 is_deleted=False,
                 chat_members__user=user,
                 chat_members__status=ChatMemberStatusChoice.ACTIVE,
+                purpose=purpose,
             ).distinct()
         )
         return [
@@ -309,6 +326,76 @@ class Chat(models.Model):
             chat._emit_state_changed()
             return chat
 
+    @classmethod
+    def create_submission(cls, creator: User, recipient: User, title: str, client_draft_id: str):
+        creator.space.require_submission_enabled()
+        if recipient.space_id != creator.space_id or recipient.is_deleted:
+            raise ChatErrors.SUBMISSION_RECIPIENT_INVALID
+        if not (recipient.is_official or recipient.is_space_operator):
+            raise ChatErrors.SUBMISSION_RECIPIENT_INVALID
+        normalized_title = (title or '').strip()
+        if not normalized_title:
+            raise ChatErrors.SUBMISSION_TITLE_REQUIRED
+
+        existing = cls.objects.filter(
+            space=creator.space,
+            purpose=ChatPurposeChoice.SUBMISSION,
+            created_by=creator,
+            submission_record__client_draft_id=client_draft_id,
+            is_deleted=False,
+        ).first()
+        if existing is not None:
+            return existing, False
+
+        from Friendship.models import Friendship, FriendshipStatusChoice
+        space, user_low, user_high = Friendship._pair(creator, recipient)
+        friendship, _created = Friendship.objects.get_or_create(
+            space=space,
+            user_low=user_low,
+            user_high=user_high,
+            defaults=dict(
+                requested_by=creator,
+                status=FriendshipStatusChoice.ACCEPTED,
+                responded_at=timezone.now(),
+                source=Friendship.SOURCE_DIRECT,
+            ),
+        )
+        if friendship.status != FriendshipStatusChoice.ACCEPTED:
+            friendship.status = FriendshipStatusChoice.ACCEPTED
+            friendship.responded_at = timezone.now()
+            friendship.save(update_fields=['status', 'responded_at', 'updated_at'])
+        friendship._emit_state_changes(chats=True, friends=True, requests=True)
+
+        chat = cls.objects.create(
+            space=creator.space,
+            chat_type=ChatTypeChoice.GROUP,
+            purpose=ChatPurposeChoice.SUBMISSION,
+            title=normalized_title,
+            created_by=creator,
+        )
+        ChatMember.objects.create(
+            chat=chat,
+            user=creator,
+            role=ChatMemberRoleChoice.OWNER,
+            status=ChatMemberStatusChoice.ACTIVE,
+            invited_by=creator,
+            joined_at=chat.created_at,
+        )
+        ChatMember.objects.create(
+            chat=chat,
+            user=recipient,
+            role=ChatMemberRoleChoice.MEMBER,
+            status=ChatMemberStatusChoice.ACTIVE,
+            invited_by=creator,
+            joined_at=chat.created_at,
+        )
+        Submission.objects.create(
+            chat=chat,
+            recipient=recipient,
+            client_draft_id=client_draft_id,
+        )
+        return chat, True
+
     def rename(self, operator: User, title: str):
         if not self.group:
             raise ChatErrors.NOT_GROUP_CHAT(chat=self.id)
@@ -341,7 +428,8 @@ class Chat(models.Model):
         if user.id != inviter.id:
             self._require_friend_of(inviter, user)
             self.space.require_group_join_allowed(user)
-        member = ChatMember.invite(chat=self, user=user, invited_by=inviter)
+        member = ChatMember.request_submission_invite(chat=self, user=user, invited_by=inviter) \
+            if self.submission else ChatMember.invite(chat=self, user=user, invited_by=inviter)
         self._emit_state_changed([user.id])
         return member
 
@@ -390,6 +478,8 @@ class Chat(models.Model):
             return members
 
     def transfer_ownership(self, operator: User, target: User):
+        if self.submission:
+            raise ChatErrors.FORBIDDEN
         if not self.group:
             raise ChatErrors.NOT_GROUP_CHAT(chat=self.id)
         if operator.id == target.id:
@@ -429,6 +519,8 @@ class Chat(models.Model):
         return target_member
 
     def leave(self, user: User):
+        if self.submission:
+            raise ChatErrors.SUBMISSION_LEAVE_FORBIDDEN
         member = ChatMember.objects.filter(
             chat=self,
             user=user,
@@ -547,6 +639,39 @@ class ChatMember(models.Model):
         return member
 
     @classmethod
+    def request_submission_invite(cls, chat: Chat, user: User, invited_by: User):
+        if not chat.submission:
+            raise ChatErrors.FORBIDDEN
+        member = cls.objects.filter(chat=chat, user=user).first()
+        if member is not None and member.status == ChatMemberStatusChoice.ACTIVE:
+            raise ChatMemberErrors.ALREADY_MEMBER(user=user.name, chat=chat.id)
+        if member is not None and member.status == ChatMemberStatusChoice.PENDING:
+            raise ChatMemberErrors.INVITE_PENDING(user=user.name, chat=chat.id)
+        if member is None:
+            member = cls(chat=chat, user=user)
+        member.role = ChatMemberRoleChoice.MEMBER
+        member.status = ChatMemberStatusChoice.PENDING
+        member.invited_by = invited_by
+        member.joined_at = None
+        member.left_at = None
+        member.save()
+        return member
+
+    def review_submission_invite(self, reviewer: User, accept: bool):
+        if not self.chat.submission or not (reviewer.is_official or reviewer.is_space_operator):
+            raise ChatErrors.SUBMISSION_REVIEW_FORBIDDEN
+        if reviewer.space_id != self.chat.space_id:
+            raise ChatErrors.SUBMISSION_REVIEW_FORBIDDEN
+        if self.status != ChatMemberStatusChoice.PENDING:
+            raise ChatMemberErrors.INVITE_CLOSED
+        self.status = ChatMemberStatusChoice.ACTIVE if accept else ChatMemberStatusChoice.REJECTED
+        self.joined_at = self.chat.created_at if accept else None
+        self.left_at = None if accept else timezone.now()
+        self.save(update_fields=['status', 'joined_at', 'left_at', 'updated_at'])
+        self.chat._emit_state_changed([self.user_id])
+        return self
+
+    @classmethod
     def respond(cls, chat: Chat, user: User, accept: bool):
         member = cls.objects.filter(chat=chat, user=user).first()
         if member is None:
@@ -596,6 +721,13 @@ class ChatMember(models.Model):
             chat__is_deleted=False,
         ).select_related('chat', 'invited_by').order_by('-created_at')[:limit]
         return [row.json() for row in rows]
+
+
+class Submission(models.Model):
+    chat = models.OneToOneField(Chat, on_delete=models.CASCADE, related_name='submission_record')
+    recipient = models.ForeignKey(User, on_delete=models.PROTECT, related_name='received_submissions')
+    client_draft_id = models.CharField(max_length=64, unique=True)
+    created_at = models.DateTimeField(auto_now_add=True)
 
 
 class ChatReadState(models.Model):

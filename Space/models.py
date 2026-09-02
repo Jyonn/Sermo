@@ -63,6 +63,7 @@ class Space(models.Model):
     )
     group_square_enabled = models.BooleanField(default=False)
     chat_enabled = models.BooleanField(default=True)
+    submission_enabled = models.BooleanField(default=False)
     square_explore_enabled = models.BooleanField(default=True)
     unverified_group_policy = models.PositiveSmallIntegerField(default=2)
     member_limit = models.PositiveIntegerField(null=True, blank=True, default=None)
@@ -245,7 +246,7 @@ class Space(models.Model):
 
     def set_admin_settings(
             self, name, group_square_enabled, chat_enabled, square_explore_enabled,
-            unverified_group_policy, member_limit, level_names=None):
+            unverified_group_policy, member_limit, level_names=None, submission_enabled=None):
         normalized_name = self.vldt.name(name)
         normalized_member_limit = self.vldt.member_limit(member_limit)
         normalized_level_names = self.vldt.level_names(level_names or self.level_names)
@@ -264,12 +265,14 @@ class Space(models.Model):
         self.name = normalized_name
         self.group_square_enabled = normalized_square_enabled
         self.chat_enabled = normalized_chat_enabled
+        if submission_enabled is not None:
+            self.submission_enabled = bool(submission_enabled) and normalized_chat_enabled
         self.square_explore_enabled = bool(square_explore_enabled) and normalized_square_enabled
         self.unverified_group_policy = self.vldt.unverified_group_policy(unverified_group_policy)
         self.member_limit = normalized_member_limit
         self.level_names = normalized_level_names
         self.save(update_fields=[
-            'name', 'group_square_enabled', 'chat_enabled', 'square_explore_enabled',
+            'name', 'group_square_enabled', 'chat_enabled', 'submission_enabled', 'square_explore_enabled',
             'unverified_group_policy', 'member_limit', 'level_names',
         ])
         return self
@@ -277,6 +280,11 @@ class Space(models.Model):
     def require_chat_enabled(self):
         if not self.chat_enabled:
             raise SpaceErrors.CHAT_DISABLED
+
+    def require_submission_enabled(self):
+        self.require_chat_enabled()
+        if not self.submission_enabled:
+            raise SpaceErrors.SUBMISSION_DISABLED
 
     def require_square_enabled(self, scope=None):
         if self.verification_tier == 'email' or not self.group_square_enabled:
@@ -301,6 +309,7 @@ class Space(models.Model):
             'official_user',
             'group_square_enabled',
             'chat_enabled',
+            'submission_enabled',
             'square_explore_enabled',
             'unverified_group_policy',
             'member_limit',
@@ -320,6 +329,7 @@ class Space(models.Model):
             'official_user',
             'group_square_enabled',
             'chat_enabled',
+            'submission_enabled',
             'square_explore_enabled',
             'unverified_group_policy',
             'member_limit',

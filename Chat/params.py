@@ -22,6 +22,10 @@ class ChatParams(metaclass=Params):
         .bool(lambda x: len(x) >= 1, message=_('group chat should have at least 1 invited member'))
 
     title: Validator
+    client_draft_id = Validator('client_draft_id').to(str).to(lambda value: value.strip()).bool(
+        lambda value: 1 <= len(value) <= 64,
+        message=_('Invalid submission draft id'),
+    )
 
 
 class ChatMemberParams(metaclass=Params):

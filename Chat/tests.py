@@ -6,11 +6,89 @@ from unittest.mock import patch
 from django.test import TestCase
 from django.utils import timezone
 
-from Chat.models import Chat, ChatMember, ChatMemberRoleChoice, ChatMemberStatusChoice, ChatReadState, ChatTypeChoice, ChatUserPreference
+from Chat.models import Chat, ChatMember, ChatMemberRoleChoice, ChatMemberStatusChoice, ChatPurposeChoice, ChatReadState, ChatTypeChoice, ChatUserPreference
 from Message.models import Message, MessageTypeChoice, PinnedMessage
-from Space.models import Space
+from Space.models import Space, SpaceOperator
 from User.models import NotificationEvent, User, UserStateEvent, UserStateEventKindChoice
 from utils import auth
+
+
+class SubmissionChatTests(TestCase):
+    def setUp(self):
+        self.space = Space.objects.create(
+            name='Submission Space',
+            slug='submissions',
+            email='admin@example.com',
+            submission_enabled=True,
+        )
+        self.official = self.space.ensure_official_user()
+        self.author = User.create(self.space, 'Author', verified=True)
+        self.operator = User.create(self.space, 'Operator', verified=True)
+        SpaceOperator.objects.create(space=self.space, user=self.operator)
+
+    def authorization(self, user):
+        return {'HTTP_AUTHORIZATION': f"Bearer {auth.get_login_token(user)['auth']}"}
+
+    def test_submission_is_created_with_first_message_and_isolated_from_chat_list(self):
+        response = self.client.post(
+            '/chats/submissions/start',
+            data=json.dumps({
+                'peer_user_id': self.operator.id,
+                'title': 'Campus confession',
+                'client_draft_id': 'draft-1',
+                'client_message_id': 'message-1',
+                'type': MessageTypeChoice.TEXT,
+                'content': 'Please publish this anonymously.',
+                'resource_id': None,
+            }),
+            content_type='application/json',
+            **self.authorization(self.author),
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        chat = Chat.objects.get(id=response.json()['body']['chat']['chat_id'])
+        self.assertEqual(chat.purpose, ChatPurposeChoice.SUBMISSION)
+        self.assertEqual(Message.objects.filter(chat=chat).count(), 1)
+
+        ordinary = self.client.get('/chats/', **self.authorization(self.author)).json()['body']
+        submissions = self.client.get('/chats/?purpose=submission', **self.authorization(self.author)).json()['body']
+        self.assertNotIn(chat.id, [item['chat_id'] for item in ordinary])
+        self.assertIn(chat.id, [item['chat_id'] for item in submissions])
+
+    def test_submission_start_is_idempotent(self):
+        payload = {
+            'peer_user_id': self.operator.id,
+            'title': 'One draft',
+            'client_draft_id': 'same-draft',
+            'client_message_id': 'same-message',
+            'type': MessageTypeChoice.TEXT,
+            'content': 'Only once',
+            'resource_id': None,
+        }
+        first = self.client.post('/chats/submissions/start', data=json.dumps(payload), content_type='application/json', **self.authorization(self.author))
+        second = self.client.post('/chats/submissions/start', data=json.dumps(payload), content_type='application/json', **self.authorization(self.author))
+        self.assertEqual(first.status_code, 200, first.content)
+        self.assertEqual(second.status_code, 200, second.content)
+        self.assertEqual(first.json()['body']['chat']['chat_id'], second.json()['body']['chat']['chat_id'])
+        self.assertEqual(Chat.objects.filter(purpose=ChatPurposeChoice.SUBMISSION).count(), 1)
+        self.assertEqual(Message.objects.filter(chat_id=first.json()['body']['chat']['chat_id']).count(), 1)
+
+    def test_submission_invite_requires_operator_review_and_reveals_full_history(self):
+        chat, _ = Chat.create_submission(self.author, self.operator, 'Invite review', 'invite-draft')
+        old_message = Message.create(chat, self.author, MessageTypeChoice.TEXT, 'Earlier context')
+        invited = User.create(self.space, 'Invited', verified=True)
+        from Friendship.models import Friendship
+        Friendship.ensure_locked_friendship(self.author, invited)
+
+        with patch.object(self.author, 'require_capability'):
+            member = chat.invite_member(self.author, invited)
+        self.assertEqual(member.status, ChatMemberStatusChoice.PENDING)
+        self.assertFalse(chat.has_active_member(invited))
+
+        member.review_submission_invite(self.operator, True)
+        self.assertTrue(chat.has_active_member(invited))
+        self.assertIn(old_message.id, Message.visible_for_user(chat, invited).values_list('id', flat=True))
+        with self.assertRaises(Exception):
+            chat.leave(invited)
 
 
 class ChatNotificationPreferenceTests(TestCase):

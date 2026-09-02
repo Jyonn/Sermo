@@ -40,6 +40,7 @@ class SpaceErrors:
     NOTIFICATOR_FAILED = Error(message=_('Failed to send notification'), code=Code.InternalServerError)
     MODULES_REQUIRED = Error(message=_('Chat and square cannot both be disabled'), code=Code.BadRequest)
     CHAT_DISABLED = Error(message=_('Chat is disabled in this space'), code=Code.Forbidden)
+    SUBMISSION_DISABLED = Error(message=_('Submissions are disabled in this space'), code=Code.Forbidden)
     SQUARE_DISABLED = Error(message=_('Square is disabled in this space'), code=Code.Forbidden)
     SQUARE_EXPLORE_DISABLED = Error(message=_('Square exploration is disabled in this space'), code=Code.Forbidden)
     UNVERIFIED_GROUP_JOIN_DISABLED = Error(message=_('Unverified members cannot join group chats in this space'), code=Code.Forbidden)

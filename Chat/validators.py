@@ -14,6 +14,10 @@ class ChatErrors:
     NOT_FRIENDS = Error(_('Users are not friends'))
     CREATOR_NOT_VERIFIED = Error(_('Only verified users can create or invite members to group chats'))
     TARGET_NOT_FRIEND = Error(_('User {user} is not your friend'))
+    SUBMISSION_RECIPIENT_INVALID = Error(_('Submissions can only be sent to the official account or an operator'))
+    SUBMISSION_TITLE_REQUIRED = Error(_('Submission title is required'))
+    SUBMISSION_LEAVE_FORBIDDEN = Error(_('Submission chats cannot be left'))
+    SUBMISSION_REVIEW_FORBIDDEN = Error(_('Only the official account or an operator can review submission invites'))
 
 
 @Error.register

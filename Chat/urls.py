@@ -12,6 +12,9 @@ from Chat.views import (
     GroupChatLeaveView,
     ChatReadView,
     ChatPreferenceView,
+    SubmissionRecipientView,
+    SubmissionStartView,
+    SubmissionInviteReviewView,
 )
 
 urlpatterns = [
@@ -26,4 +29,7 @@ urlpatterns = [
     path('group/leave', GroupChatLeaveView.as_view(), name='group_chat_leave'),
     path('read', ChatReadView.as_view(), name='chat_read'),
     path('preference', ChatPreferenceView.as_view(), name='chat_preference'),
+    path('submissions/recipients', SubmissionRecipientView.as_view(), name='submission_recipients'),
+    path('submissions/start', SubmissionStartView.as_view(), name='submission_start'),
+    path('submissions/invites', SubmissionInviteReviewView.as_view(), name='submission_invite_review'),
 ]
