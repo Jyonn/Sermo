@@ -39,6 +39,7 @@ class SubmissionStatusChoice(Choice):
     TERMINATED = 3
     READY = 4
     PUBLISHED = 5
+    WITHDRAWN = 6
 
 
 class Chat(models.Model):
@@ -759,6 +760,7 @@ class Submission(models.Model):
         SubmissionStatusChoice.TERMINATED: 'terminated',
         SubmissionStatusChoice.READY: 'ready',
         SubmissionStatusChoice.PUBLISHED: 'published',
+        SubmissionStatusChoice.WITHDRAWN: 'withdrawn',
     }
 
     def jsonl(self):
@@ -823,6 +825,19 @@ class Submission(models.Model):
                 submission_chat_id=self.chat_id,
             )
             self.chat._emit_state_changed()
+        return self
+
+    def withdraw(self, user: User):
+        if user.id != self.author_id or self.status not in (
+            SubmissionStatusChoice.DRAFT,
+            SubmissionStatusChoice.REVIEW,
+            SubmissionStatusChoice.REVISION,
+            SubmissionStatusChoice.READY,
+        ):
+            raise ChatErrors.SUBMISSION_TRANSITION_FORBIDDEN
+        self.status = SubmissionStatusChoice.WITHDRAWN
+        self.save(update_fields=['status'])
+        self.chat._emit_state_changed()
         return self
 
 

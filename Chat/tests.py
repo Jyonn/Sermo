@@ -142,6 +142,44 @@ class SubmissionChatTests(TestCase):
         with self.assertRaises(Exception):
             Message.create(chat, self.operator, MessageTypeChoice.TEXT, 'Locked reviewer message')
 
+    def test_author_can_withdraw_until_submission_is_published(self):
+        statuses = (
+            SubmissionStatusChoice.DRAFT,
+            SubmissionStatusChoice.REVIEW,
+            SubmissionStatusChoice.REVISION,
+            SubmissionStatusChoice.READY,
+        )
+        for index, status in enumerate(statuses):
+            chat, _ = Chat.create_submission(self.author, self.operator, f'Withdraw {index}', f'withdraw-{index}')
+            submission = chat.submission_record
+            submission.status = status
+            submission.save(update_fields=['status'])
+            response = self.client.post(
+                f'/chats/submissions/withdraw?chat_id={chat.id}',
+                **self.authorization(self.author),
+            )
+            self.assertEqual(response.status_code, 200, response.content)
+            self.assertEqual(response.json()['body']['submission']['status'], 'withdrawn')
+
+        published_chat, _ = Chat.create_submission(self.author, self.operator, 'Published', 'withdraw-published')
+        type(published_chat.submission_record).objects.filter(pk=published_chat.submission_record.pk).update(
+            status=SubmissionStatusChoice.PUBLISHED,
+        )
+        rejected = self.client.post(
+            f'/chats/submissions/withdraw?chat_id={published_chat.id}',
+            **self.authorization(self.author),
+        )
+        self.assertEqual(rejected.json()['identifier'], 'CHAT@SUBMISSION_TRANSITION_FORBIDDEN')
+        self.assertIsNone(rejected.json()['body'])
+
+        foreign_chat, _ = Chat.create_submission(self.author, self.operator, 'Foreign', 'withdraw-foreign')
+        foreign = self.client.post(
+            f'/chats/submissions/withdraw?chat_id={foreign_chat.id}',
+            **self.authorization(self.operator),
+        )
+        self.assertEqual(foreign.json()['identifier'], 'CHAT@SUBMISSION_TRANSITION_FORBIDDEN')
+        self.assertIsNone(foreign.json()['body'])
+
 
 class ChatNotificationPreferenceTests(TestCase):
     def setUp(self):

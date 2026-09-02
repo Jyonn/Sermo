@@ -131,6 +131,14 @@ class SquareChatRecordStatementView(View):
             if not message.is_visible_to(request.user):
                 raise MessageErrors.NOT_A_MEMBER
         with transaction.atomic():
+            if source_submission is not None:
+                from Chat.models import Submission, SubmissionStatusChoice
+                source_submission = Submission.objects.select_for_update().get(pk=source_submission.pk)
+                if (
+                    source_submission.recipient_id != request.user.id
+                    or source_submission.status != SubmissionStatusChoice.READY
+                ):
+                    raise SquareErrors.CHAT_RECORD_FORBIDDEN
             bundle = ForwardBundle.create_from_messages(messages, request.user, request=request)
             statement = Statement.create_statement(
                 request.user, request.json.text, request.json.visibility, [],

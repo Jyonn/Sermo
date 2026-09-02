@@ -183,6 +183,21 @@ class SubmissionStatusView(View):
         return ChatListView.build_chat_payload(chat, request.user, request)
 
 
+class SubmissionWithdrawView(View):
+    @auth.require_user
+    @analyse.query(ChatParams.chat_id)
+    @auth.require_chat_member()
+    def post(self, request):
+        chat = request.query.chat
+        if not chat.submission:
+            raise ChatErrors.FORBIDDEN
+        with transaction.atomic():
+            submission = type(chat.submission_record).objects.select_for_update().get(chat=chat)
+            submission.withdraw(request.user)
+        chat.refresh_from_db()
+        return ChatListView.build_chat_payload(chat, request.user, request)
+
+
 class SubmissionInviteReviewView(View):
     @auth.require_user
     @analyse.query(ChatMemberParams.chat_id)

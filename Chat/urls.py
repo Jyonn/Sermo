@@ -17,6 +17,7 @@ from Chat.views import (
     SubmissionInviteReviewView,
     SubmissionSubmitView,
     SubmissionStatusView,
+    SubmissionWithdrawView,
 )
 
 urlpatterns = [
@@ -36,4 +37,5 @@ urlpatterns = [
     path('submissions/invites', SubmissionInviteReviewView.as_view(), name='submission_invite_review'),
     path('submissions/submit', SubmissionSubmitView.as_view(), name='submission_submit'),
     path('submissions/status', SubmissionStatusView.as_view(), name='submission_status'),
+    path('submissions/withdraw', SubmissionWithdrawView.as_view(), name='submission_withdraw'),
 ]
