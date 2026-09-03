@@ -149,7 +149,7 @@ def frequency_limits_for_user(user):
 
 
 def anonymous_weekly_limit_for_user(user):
-    if user.is_official:
+    if user.can_operate_square:
         return None
     _daily, weekly = frequency_limits_for_user(user)
     return int(weekly * 0.4)
@@ -169,7 +169,7 @@ def anonymous_user_json():
 
 
 def _enforce_frequency(queryset, user, multiplier=1):
-    if user.is_official:
+    if user.can_operate_square:
         return
     daily, weekly = frequency_limits_for_user(user)
     now = timezone.now()

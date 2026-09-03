@@ -357,6 +357,26 @@ class StatementApiTests(TestCase):
         self.assertEqual(mine.json()['body'][0]['statement_id'], body['statement_id'])
         self.assertEqual(profile.json()['body'], [])
 
+    def test_anonymous_statement_author_receives_square_comment_notification(self):
+        statement = Statement.create_statement(self.author, '匿名主题', 'public', [], is_anonymous=True)
+
+        response = self.client.post(
+            f'/square/statements/{statement.id}/comments',
+            data=json.dumps({'text': '访客评论'}),
+            content_type='application/json',
+            **self.authorization(self.friend),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        event = NotificationEvent.objects.get(
+            user=self.author,
+            event_type=NotificationEventTypeChoice.SQUARE_STATEMENT_COMMENT,
+        )
+        self.assertEqual(event.payload['statement_id'], statement.id)
+        status = self.client.get('/square/status', **self.authorization(self.author))
+        self.assertEqual(status.status_code, 200, status.content)
+        self.assertEqual(status.json()['body']['notification_unread'], 1)
+
     def test_anonymous_statement_requires_explore_and_public_visibility(self):
         self.space.square_explore_enabled = False
         self.space.save(update_fields=['square_explore_enabled'])
@@ -756,6 +776,27 @@ class StatementApiTests(TestCase):
         self.assertEqual(quota['comments']['daily_limit'], 5)
         self.assertEqual(quota['likes']['daily_used'], 1)
         self.assertFalse(quota['media']['audio'])
+
+    def test_operator_has_unlimited_statement_and_comment_frequency(self):
+        self.friend.phone = '+8613800000010'
+        self.friend.phone_verified_at = timezone.now()
+        self.friend.save(update_fields=['phone', 'phone_verified_at'])
+        SpaceOperator.objects.create(space=self.space, user=self.friend)
+
+        first = Statement.create_statement(self.friend, '运营发言一', 'public', [])
+        Statement.create_statement(self.friend, '运营发言二', 'public', [])
+        for index in range(6):
+            StatementComment.create_comment(self.friend, first.id, f'运营评论 {index}')
+
+        response = self.client.get('/square/quota', **self.authorization(self.friend))
+        self.assertEqual(response.status_code, 200, response.content)
+        quota = response.json()['body']
+        self.assertTrue(quota['unlimited'])
+        self.assertIsNone(quota['statements']['daily_limit'])
+        self.assertIsNone(quota['statements']['weekly_limit'])
+        self.assertIsNone(quota['statements']['anonymous_weekly_limit'])
+        self.assertIsNone(quota['comments']['daily_limit'])
+        self.assertIsNone(quota['comments']['weekly_limit'])
 
     def test_video_statement_unlocks_at_level_10(self):
         with patch.object(User, 'effective_growth_level', return_value=9):
