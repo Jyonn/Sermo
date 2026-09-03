@@ -88,6 +88,12 @@ class LinkPreviewStatusChoice(Choice):
     FAILED = 2
 
 
+class AudioTranscriptStatusChoice(Choice):
+    PROCESSING = 0
+    READY = 1
+    FAILED = 2
+
+
 class LinkPreviewHTMLParser(HTMLParser):
     def __init__(self):
         super().__init__()
@@ -1474,6 +1480,102 @@ class Message(models.Model):
             for message in messages
         ])
         return len(messages)
+
+
+class AudioTranscript(models.Model):
+    STALE_AFTER = datetime.timedelta(minutes=2)
+
+    message = models.OneToOneField(
+        Message,
+        on_delete=models.CASCADE,
+        related_name='audio_transcript',
+    )
+    status = models.IntegerField(
+        choices=AudioTranscriptStatusChoice.to_choices(),
+        default=AudioTranscriptStatusChoice.PROCESSING,
+    )
+    text = models.TextField(blank=True, default='')
+    provider_request_id = models.CharField(max_length=128, blank=True, default='')
+    provider_error = models.CharField(max_length=255, blank=True, default='')
+    started_at = models.DateTimeField(default=timezone.now)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        default_manager_name = 'objects'
+
+    @classmethod
+    def claim(cls, message):
+        now = timezone.now()
+        with transaction.atomic():
+            transcript, created = cls.objects.select_for_update().get_or_create(
+                message=message,
+                defaults={
+                    'status': AudioTranscriptStatusChoice.PROCESSING,
+                    'started_at': now,
+                },
+            )
+            if created:
+                return transcript, True
+            if transcript.status == AudioTranscriptStatusChoice.READY:
+                return transcript, False
+            if (
+                transcript.status == AudioTranscriptStatusChoice.PROCESSING
+                and transcript.updated_at >= now - cls.STALE_AFTER
+            ):
+                return transcript, False
+            transcript.status = AudioTranscriptStatusChoice.PROCESSING
+            transcript.provider_error = ''
+            transcript.started_at = now
+            transcript.completed_at = None
+            transcript.save(update_fields=[
+                'status',
+                'provider_error',
+                'started_at',
+                'completed_at',
+                'updated_at',
+            ])
+            return transcript, True
+
+    def mark_ready(self, text, request_id=''):
+        self.status = AudioTranscriptStatusChoice.READY
+        self.text = str(text or '').strip()
+        self.provider_request_id = str(request_id or '')[:128]
+        self.provider_error = ''
+        self.completed_at = timezone.now()
+        self.save(update_fields=[
+            'status',
+            'text',
+            'provider_request_id',
+            'provider_error',
+            'completed_at',
+            'updated_at',
+        ])
+
+    def mark_failed(self, error, request_id=''):
+        self.status = AudioTranscriptStatusChoice.FAILED
+        self.provider_request_id = str(request_id or '')[:128]
+        self.provider_error = str(error or '')[:255]
+        self.completed_at = timezone.now()
+        self.save(update_fields=[
+            'status',
+            'provider_request_id',
+            'provider_error',
+            'completed_at',
+            'updated_at',
+        ])
+
+    def jsonl(self, *, cached=False):
+        status = {
+            AudioTranscriptStatusChoice.PROCESSING: 'processing',
+            AudioTranscriptStatusChoice.READY: 'ready',
+            AudioTranscriptStatusChoice.FAILED: 'failed',
+        }[self.status]
+        return {
+            'status': status,
+            'text': self.text if self.status == AudioTranscriptStatusChoice.READY else '',
+            'cached': bool(cached and self.status == AudioTranscriptStatusChoice.READY),
+        }
 
 
 class MessageUserState(models.Model):

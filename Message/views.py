@@ -7,10 +7,10 @@ from django.views import View
 from smartdjango import analyse, OK
 
 from Chat.models import Chat, SubmissionStatusChoice
-from Message.models import ForwardBundle, LinkPreview, MediaAsset, MediaResource, Message, MessageEvent, MessageHistoryRecovery, MessageTypeChoice, PinnedMessage
+from Message.models import AudioTranscript, AudioTranscriptStatusChoice, ForwardBundle, LinkPreview, MediaAsset, MediaResource, Message, MessageEvent, MessageHistoryRecovery, MessageTypeChoice, PinnedMessage
 from Message.params import MessageParams
 from Message.validators import MessageErrors
-from utils.qiniu import issue_message_upload, build_message_image_thumbnail_uri, build_message_video_thumbnail_uri, sign_private_download_url, avatar_uri_for_key, validate_message_media_key
+from utils.qiniu import ShortAudioTranscriptionError, issue_message_upload, build_message_image_thumbnail_uri, build_message_video_thumbnail_uri, sign_private_download_url, avatar_uri_for_key, transcribe_short_audio, validate_message_media_key
 from utils import auth
 from utils.auth import Request
 from User.models import NotificationEvent, User
@@ -472,6 +472,50 @@ class MessageLinkPreviewView(View):
         if link_preview is None:
             return dict(status='none')
         return link_preview.jsonl()
+
+
+class MessageAudioTranscriptView(View):
+    @staticmethod
+    def _require_audio_message(message, user):
+        if not message.chat.has_active_member(user) or not message.is_visible_to(user):
+            raise MessageErrors.NOT_A_MEMBER
+        if message.type != MessageTypeChoice.AUDIO:
+            raise MessageErrors.TYPE_INVALID
+
+    @auth.require_user
+    @analyse.query(MessageParams.message_id)
+    def get(self, request: Request):
+        message: Message = request.query.message
+        self._require_audio_message(message, request.user)
+        transcript = AudioTranscript.objects.filter(message=message).first()
+        return transcript.jsonl(cached=True) if transcript is not None else {
+            'status': 'none',
+            'text': '',
+            'cached': False,
+        }
+
+    @auth.require_user
+    @analyse.query(MessageParams.message_id)
+    def post(self, request: Request):
+        message: Message = request.query.message
+        self._require_audio_message(message, request.user)
+        transcript, should_process = AudioTranscript.claim(message)
+        if not should_process:
+            return transcript.jsonl(
+                cached=transcript.status == AudioTranscriptStatusChoice.READY,
+            )
+
+        try:
+            source_uri = message.source_media_uri()
+            signed_uri = sign_private_download_url(source_uri, expire_seconds=10 * 60)
+            text, request_id = transcribe_short_audio(signed_uri)
+        except ShortAudioTranscriptionError as err:
+            transcript.mark_failed(err, request_id=err.request_id)
+        except Exception as err:
+            transcript.mark_failed(err)
+        else:
+            transcript.mark_ready(text, request_id=request_id)
+        return transcript.jsonl()
 
 
 class MessageMediaMetadataView(View):

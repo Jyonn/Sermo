@@ -1,11 +1,12 @@
 from django.urls import path
 
-from Message.views import MessageView, MessageBatchView, MessageClearView, MessageEventSyncBaselineView, MessageEventSyncView, MessageForwardView, MessageHistoryRecoveryView, MessageReconcileView, MessageSearchCalendarView, MessageSearchView, MessageUploadView, MessageBlobView, MessageBlobThumbnailView, MessageMediaMetadataView, MessageLinkPreviewView, MessageResourceFinalizeView, MessageResourceView, PinnedMessageView
+from Message.views import MessageView, MessageAudioTranscriptView, MessageBatchView, MessageClearView, MessageEventSyncBaselineView, MessageEventSyncView, MessageForwardView, MessageHistoryRecoveryView, MessageReconcileView, MessageSearchCalendarView, MessageSearchView, MessageUploadView, MessageBlobView, MessageBlobThumbnailView, MessageMediaMetadataView, MessageLinkPreviewView, MessageResourceFinalizeView, MessageResourceView, PinnedMessageView
 
 urlpatterns = [
     path('blob/<slug:blob_slug>/thumbnail', MessageBlobThumbnailView.as_view(), name='message blob thumbnail'),
     path('blob/<slug:blob_slug>', MessageBlobView.as_view(), name='message blob'),
     path('link-preview', MessageLinkPreviewView.as_view(), name='message link preview'),
+    path('audio-transcript', MessageAudioTranscriptView.as_view(), name='message audio transcript'),
     path('upload', MessageUploadView.as_view(), name='message upload'),
     path('resources', MessageResourceView.as_view(), name='message resources'),
     path('resources/finalize', MessageResourceFinalizeView.as_view(), name='message resource finalize'),
