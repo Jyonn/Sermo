@@ -1,5 +1,5 @@
 from django.utils.translation import gettext_lazy as _
-from smartdjango import Params, Validator
+from smartdjango import ListValidator, Params, Validator
 
 from Square.validators import SquareErrors
 
@@ -48,8 +48,6 @@ def validate_location(value):
 
 def validate_comment_text(value):
     normalized = str(value or '').strip()
-    if not normalized:
-        raise SquareErrors.COMMENT_REQUIRED
     if len(normalized) > 140:
         raise SquareErrors.COMMENT_TOO_LONG
     return normalized
@@ -88,7 +86,9 @@ class SquareParams(metaclass=Params):
     kind = Validator('kind').to(str)
     file_name = Validator('file_name').to(str)
     content_type = Validator('content_type').to(str).null().default(None)
-    comment_text = Validator('text').to(validate_comment_text)
+    comment_text = Validator('text').to(validate_comment_text).default('')
+    comment_sticker_asset_id = Validator('sticker_asset_id').to(int).null().default(None)
+    comment_mention_user_ids = ListValidator('mention_user_ids').element(Validator().to(int)).default([])
     anonymous = Validator('anonymous').to(int).bool(lambda value: value in (0, 1)).default(0)
     redact_chat_record = Validator('redact_chat_record').to(int).bool(lambda value: value in (0, 1)).default(0)
     read_scope = Validator('scope').to(str).bool(lambda value: value in ('all', 'friends'))

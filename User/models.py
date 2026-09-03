@@ -2102,6 +2102,7 @@ class NotificationEventTypeChoice(Choice):
     SQUARE_COMMENT_LIKE = 7
     SQUARE_COMMENT_REPLY = 8
     SQUARE_STATEMENT_REMOVED = 9
+    SQUARE_COMMENT_MENTION = 10
 
 
 class NotificationRouteChannelChoice(Choice):
@@ -2580,6 +2581,7 @@ class NotificationEvent(models.Model):
             NotificationEventTypeChoice.SQUARE_STATEMENT_COMMENT: NotificationTopicChoice.SQUARE_STATEMENT_COMMENT,
             NotificationEventTypeChoice.SQUARE_COMMENT_LIKE: NotificationTopicChoice.SQUARE_COMMENT_LIKE,
             NotificationEventTypeChoice.SQUARE_COMMENT_REPLY: NotificationTopicChoice.SQUARE_COMMENT_REPLY,
+            NotificationEventTypeChoice.SQUARE_COMMENT_MENTION: NotificationTopicChoice.SQUARE_COMMENT_REPLY,
         }.get(self.event_type, NotificationTopicChoice.ONLINE if (self.payload or {}).get('kind') == 'peer_online' else None)
 
     def audience(self):
@@ -2623,6 +2625,7 @@ class NotificationEvent(models.Model):
             NotificationEventTypeChoice.SQUARE_COMMENT_LIKE,
             NotificationEventTypeChoice.SQUARE_COMMENT_REPLY,
             NotificationEventTypeChoice.SQUARE_STATEMENT_REMOVED,
+            NotificationEventTypeChoice.SQUARE_COMMENT_MENTION,
         )
         unread = cls.objects.filter(user=user, is_read=False, event_type__in=square_types)
         target = unread.filter(payload__statement_id=statement_id) if statement_id is not None else unread
@@ -2704,6 +2707,7 @@ class NotificationEvent(models.Model):
             NotificationEventTypeChoice.SQUARE_STATEMENT_COMMENT: (_('New comment'), _('{name} commented on your statement.')),
             NotificationEventTypeChoice.SQUARE_COMMENT_LIKE: (_('Comment liked'), _('{name} liked your comment.')),
             NotificationEventTypeChoice.SQUARE_COMMENT_REPLY: (_('New reply'), _('{name} replied to your comment.')),
+            NotificationEventTypeChoice.SQUARE_COMMENT_MENTION: (_('New mention'), _('{name} mentioned you in a comment.')),
         }
         if self.event_type in square_messages:
             title, template = square_messages[self.event_type]

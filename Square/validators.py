@@ -16,6 +16,8 @@ class SquareErrors:
     LOCATION_INVALID = Error(message=_('Invalid statement location'), code=Code.BadRequest)
     COMMENT_REQUIRED = Error(message=_('Comment cannot be empty'), code=Code.BadRequest)
     COMMENT_TOO_LONG = Error(message=_('A comment can contain at most 140 characters'), code=Code.BadRequest)
+    COMMENT_STICKER_INVALID = Error(message=_('This sticker is unavailable'), code=Code.BadRequest)
+    COMMENT_CONTENT_EXCLUSIVE = Error(message=_('Send either text or a sticker as a comment'), code=Code.BadRequest)
     DAILY_LIMIT_REACHED = Error(message=_('Daily square limit reached'), code=Code.Forbidden)
     WEEKLY_LIMIT_REACHED = Error(message=_('Weekly square limit reached'), code=Code.Forbidden)
     ANONYMOUS_WEEKLY_LIMIT_REACHED = Error(message=_('Weekly anonymous statement limit reached'), code=Code.Forbidden)

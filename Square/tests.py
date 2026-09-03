@@ -10,6 +10,7 @@ from Chat.models import Chat
 from Space.models import Space, SpaceOperator
 from Message.models import ForwardBundleItem, MediaAsset, Message, MessageTypeChoice
 from Square.models import SquareMute, Statement, StatementComment, StatementCommentLike, StatementLike, StatementMedia
+from Sticker.models import StickerAsset
 from Square.views import SquareStatusView
 from User.models import NotificationEvent, NotificationEventTypeChoice, User
 from utils import auth
@@ -433,6 +434,56 @@ class StatementApiTests(TestCase):
         )
         self.assertEqual(denied.status_code, 403, denied.content)
         self.assertEqual(denied.json()['identifier'], 'SQUARE@ANONYMOUS_COMMENT_FORBIDDEN')
+
+    def test_comment_mentions_only_record_friends_and_notify_them(self):
+        statement = Statement.create_statement(self.author, '艾特好友', 'public', [])
+        response = self.client.post(
+            f'/square/statements/{statement.id}/comments',
+            data=json.dumps({
+                'text': f'<@{self.friend.id}> 来看看 <@{self.stranger.id}>',
+                'mention_user_ids': [self.friend.id, self.stranger.id],
+            }),
+            content_type='application/json',
+            **self.authorization(self.author),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        comment = StatementComment.objects.get(id=response.json()['body']['comment_id'])
+        self.assertEqual(list(comment.comment_mentions.values_list('user_id', flat=True)), [self.friend.id])
+        self.assertEqual(response.json()['body']['mentions'][0]['user_id'], self.friend.id)
+        mention_event = NotificationEvent.objects.get(
+            user=self.friend,
+            event_type=NotificationEventTypeChoice.SQUARE_COMMENT_MENTION,
+        )
+        self.assertEqual(mention_event.payload['comment_id'], comment.id)
+        self.assertFalse(NotificationEvent.objects.filter(
+            user=self.stranger,
+            event_type=NotificationEventTypeChoice.SQUARE_COMMENT_MENTION,
+        ).exists())
+
+    def test_comment_can_contain_a_sticker_instead_of_text(self):
+        statement = Statement.create_statement(self.author, '表情包回复', 'public', [])
+        sticker = StickerAsset.objects.create(
+            content_hash='square-comment-sticker',
+            storage_key='sermo/messages/sticker/square-comment.webp',
+            mime_type='image/webp',
+            file_size=128,
+            pixel_width=160,
+            pixel_height=120,
+        )
+        response = self.client.post(
+            f'/square/statements/{statement.id}/comments',
+            data=json.dumps({'text': '', 'sticker_asset_id': sticker.id}),
+            content_type='application/json',
+            **self.authorization(self.friend),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        payload = response.json()['body']
+        self.assertEqual(payload['kind'], 'sticker')
+        self.assertEqual(payload['text'], '')
+        self.assertEqual(payload['sticker']['sticker_asset_id'], sticker.id)
+        self.assertEqual(StatementComment.objects.get(id=payload['comment_id']).sticker_asset_id, sticker.id)
 
     def test_admin_feed_includes_friends_only_statement(self):
         Statement.create_statement(self.author, '朋友可见', 'friends', [])

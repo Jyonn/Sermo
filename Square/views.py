@@ -489,10 +489,17 @@ class StatementCommentView(View):
             offset=request.query.offset,
             limit=request.query.limit,
             sort=request.query.comment_sort,
+            request=request,
         )
 
     @auth.require_user
-    @analyse.json(SquareParams.comment_text, SquareParams.parent_id, SquareParams.anonymous)
+    @analyse.json(
+        SquareParams.comment_text,
+        SquareParams.parent_id,
+        SquareParams.anonymous,
+        SquareParams.comment_sticker_asset_id,
+        SquareParams.comment_mention_user_ids,
+    )
     def post(self, request: Request, statement_id: int):
         request.user.space.require_square_enabled()
         comment = StatementComment.create_comment(
@@ -501,6 +508,8 @@ class StatementCommentView(View):
             request.json.text,
             parent_id=request.json.parent_id,
             is_anonymous=request.json.anonymous,
+            sticker_asset_id=request.json.sticker_asset_id,
+            mention_user_ids=request.json.mention_user_ids,
         )
         if comment.parent_id:
             NotificationEvent.emit_square_event(
@@ -514,7 +523,19 @@ class StatementCommentView(View):
                 comment.statement_id, comment.id,
                 anonymous_actor=comment.is_anonymous,
             )
-        return comment.jsonl(viewer=request.user)
+        primary_recipient_id = comment.parent.user_id if comment.parent_id else comment.statement.user_id
+        for mention in comment.comment_mentions.select_related('user'):
+            if mention.user_id == primary_recipient_id:
+                continue
+            NotificationEvent.emit_square_event(
+                mention.user,
+                request.user,
+                NotificationEventTypeChoice.SQUARE_COMMENT_MENTION,
+                comment.statement_id,
+                comment.id,
+                anonymous_actor=comment.is_anonymous,
+            )
+        return comment.jsonl(viewer=request.user, request=request)
 
 
 class StatementMediaView(View):

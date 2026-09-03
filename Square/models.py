@@ -1,4 +1,5 @@
 from datetime import timedelta
+import re
 
 from django.db import transaction
 from django.db.models import Count, Exists, OuterRef, Prefetch, Q
@@ -9,6 +10,7 @@ from smartdjango import Choice, models
 from Friendship.models import Friendship, FriendshipStatusChoice
 from Message.models import ForwardBundle, ForwardBundleItem, MessageValidator
 from Square.validators import SquareErrors
+from Sticker.models import StickerAsset
 from utils.qiniu import avatar_uri_for_key, validate_message_media_key
 
 
@@ -411,10 +413,19 @@ class Statement(models.Model):
 
 
 class StatementComment(models.Model):
+    MENTION_TOKEN_RE = re.compile(r'<@(\d+)>')
+
     statement = models.ForeignKey(Statement, on_delete=models.CASCADE, related_name='comments', db_index=True)
     user = models.ForeignKey('User.User', on_delete=models.CASCADE, related_name='statement_comments')
     parent = models.ForeignKey('self', null=True, blank=True, on_delete=models.CASCADE, related_name='replies')
-    text = models.CharField(max_length=140)
+    text = models.CharField(max_length=140, blank=True, default='')
+    sticker_asset = models.ForeignKey(
+        'Sticker.StickerAsset',
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name='statement_comments',
+    )
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
     is_deleted = models.BooleanField(default=False, db_index=True)
     is_anonymous = models.BooleanField(default=False, db_index=True)
@@ -430,9 +441,11 @@ class StatementComment(models.Model):
             raise SquareErrors.NOT_EXISTS
 
     @classmethod
-    def feed(cls, user, statement_id, offset=0, limit=30, sort='hot'):
+    def feed(cls, user, statement_id, offset=0, limit=30, sort='hot', request=None):
         statement = cls.statement_for_user(user, statement_id)
-        queryset = cls.objects.filter(statement=statement, is_deleted=False).select_related('statement', 'user', 'parent__user').annotate(
+        queryset = cls.objects.filter(statement=statement, is_deleted=False).select_related(
+            'statement', 'user', 'parent__user', 'sticker_asset',
+        ).prefetch_related('comment_mentions__user').annotate(
             visible_like_count=Count('likes', distinct=True),
             viewer_liked=Exists(StatementCommentLike.objects.filter(comment_id=OuterRef('pk'), user=user)),
         )
@@ -464,16 +477,32 @@ class StatementComment(models.Model):
             roots.sort(key=lambda item: (-item.created_at.timestamp(), -item.id))
         else:
             roots.sort(key=lambda item: (-item.visible_like_count, -item.visible_reply_count, -item.created_at.timestamp(), -item.id))
-        return [comment.jsonl(viewer=user, include_replies=True) for comment in roots[offset:offset + limit]]
+        return [comment.jsonl(viewer=user, include_replies=True, request=request) for comment in roots[offset:offset + limit]]
 
     @classmethod
-    def create_comment(cls, user, statement_id, text, parent_id=None, is_anonymous=False):
+    def create_comment(
+        cls,
+        user,
+        statement_id,
+        text='',
+        parent_id=None,
+        is_anonymous=False,
+        sticker_asset_id=None,
+        mention_user_ids=None,
+    ):
         user.require_capability('square.interaction.reply' if parent_id is not None else 'square.interaction.comment')
         SquareMute.require_can_participate(user)
         _enforce_frequency(cls.objects.filter(statement__space=user.space, is_deleted=False), user, multiplier=5)
         normalized_text = (text or '').strip()
-        if not normalized_text:
+        sticker_asset = None
+        if sticker_asset_id is not None:
+            sticker_asset = StickerAsset.objects.filter(id=sticker_asset_id).first()
+            if sticker_asset is None:
+                raise SquareErrors.COMMENT_STICKER_INVALID
+        if not normalized_text and sticker_asset is None:
             raise SquareErrors.COMMENT_REQUIRED
+        if normalized_text and sticker_asset is not None:
+            raise SquareErrors.COMMENT_CONTENT_EXCLUSIVE
         if len(normalized_text) > 140:
             raise SquareErrors.COMMENT_TOO_LONG
         statement = cls.statement_for_user(user, statement_id)
@@ -496,7 +525,11 @@ class StatementComment(models.Model):
             text=normalized_text,
             parent=parent,
             is_anonymous=is_anonymous,
+            sticker_asset=sticker_asset,
         )
+        token_user_ids = set(int(match.group(1)) for match in cls.MENTION_TOKEN_RE.finditer(normalized_text))
+        requested_mention_ids = set(mention_user_ids or token_user_ids)
+        StatementCommentMention.record(comment, user, token_user_ids & requested_mention_ids)
         if parent is not None:
             root = parent
             while root.parent_id is not None:
@@ -509,7 +542,7 @@ class StatementComment(models.Model):
         ActivityService.record_friendly_neighbor_reply(user, comment.id)
         return comment
 
-    def jsonl(self, viewer=None, include_replies=False):
+    def jsonl(self, viewer=None, include_replies=False, request=None):
         like_count = self.visible_like_count if hasattr(self, 'visible_like_count') else self.likes.count()
         reply_count = 0 if self.parent_id else (
             self.visible_reply_count if hasattr(self, 'visible_reply_count') else self.replies.filter(is_deleted=False).count()
@@ -524,7 +557,10 @@ class StatementComment(models.Model):
             is_anonymous=self.is_anonymous,
             # A public reply must not reveal that it came from an anonymous statement's author.
             is_author=self.user_id == self.statement.user_id and (not self.statement.is_anonymous or self.is_anonymous),
+            kind='sticker' if self.sticker_asset_id else 'text',
             text=self.text,
+            sticker=self.sticker_asset.jsonl(request=request) if self.sticker_asset_id else None,
+            mentions=[mention.user.tiny_json() for mention in self.comment_mentions.all()],
             like_count=like_count,
             reply_count=reply_count,
             liked=bool(getattr(self, 'viewer_liked', viewer and self.likes.filter(user=viewer).exists())),
@@ -537,7 +573,7 @@ class StatementComment(models.Model):
         )
         if include_replies:
             payload['replies'] = [
-                reply.jsonl(viewer=viewer)
+                reply.jsonl(viewer=viewer, request=request)
                 for reply in getattr(self, 'visible_replies', [])
             ]
         return payload
@@ -560,6 +596,28 @@ class StatementComment(models.Model):
             delete_ids.update(next_ids)
         deleted_count = type(self).objects.filter(id__in=delete_ids, is_deleted=False).update(is_deleted=True)
         return deleted_count
+
+
+class StatementCommentMention(models.Model):
+    comment = models.ForeignKey(StatementComment, on_delete=models.CASCADE, related_name='comment_mentions')
+    user = models.ForeignKey('User.User', on_delete=models.CASCADE, related_name='statement_comment_mentions')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['comment', 'user'], name='unique_statement_comment_mention_user'),
+        ]
+
+    @classmethod
+    def record(cls, comment, author, user_ids):
+        if not user_ids:
+            return []
+        friend_ids = {friend.id for friend in Friendship.friends_of(author)}
+        valid_ids = set(user_ids) & friend_ids - {author.id}
+        return cls.objects.bulk_create([
+            cls(comment=comment, user_id=user_id)
+            for user_id in valid_ids
+        ], ignore_conflicts=True)
 
 
 class StatementLike(models.Model):
