@@ -5,6 +5,8 @@ from django.test import TestCase
 from Space.models import Space, SpaceOperator
 from Friendship.models import Friendship, FriendshipStatusChoice
 from User.models import User, UserStateEvent, UserStateEventKindChoice
+from Message.models import Message, MessageTypeChoice, WelcomeMessageTemplate
+from Chat.models import Chat
 from utils import auth
 
 
@@ -90,6 +92,27 @@ class FriendshipStateEventTests(TestCase):
         }
         self.assertEqual(self.event_kinds(self.requester), expected)
         self.assertEqual(self.event_kinds(self.recipient), expected)
+
+    def test_accept_sends_all_welcome_template_messages_once(self):
+        WelcomeMessageTemplate.objects.filter(user=self.recipient).delete()
+        WelcomeMessageTemplate.objects.create(
+            user=self.recipient, position=0, type=MessageTypeChoice.TEXT, content='First hello',
+        )
+        WelcomeMessageTemplate.objects.create(
+            user=self.recipient, position=1, type=MessageTypeChoice.TEXT, content='Second hello',
+        )
+
+        self.friendship.accept(self.recipient)
+        chat = Chat.get_or_create_direct(self.recipient, self.requester)
+        sent = list(Message.objects.filter(chat=chat, user=self.recipient).order_by('id'))
+
+        self.assertEqual([message.content for message in sent], ['First hello', 'Second hello'])
+        Friendship.send_welcome_message(
+            sender=self.recipient,
+            receiver=self.requester,
+            event_key=f'friendship:{self.friendship.id}',
+        )
+        self.assertEqual(Message.objects.filter(chat=chat, user=self.recipient).count(), 2)
 
     def test_removing_friend_invalidates_friends_and_chats_for_both_users(self):
         self.friendship.status = FriendshipStatusChoice.ACCEPTED

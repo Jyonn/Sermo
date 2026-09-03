@@ -965,3 +965,12 @@ msgstr "不能将群主转让给自己"
 
 msgid "%(actor)s transferred group ownership to %(owner)s"
 msgstr "%(actor)s 将群主转让给了 %(owner)s"
+
+msgid "Invalid welcome message template"
+msgstr "欢迎消息模板无效"
+
+msgid "Welcome message limit reached"
+msgstr "欢迎消息已达到上限"
+
+msgid "Delete welcome messages down to your current limit before adding new ones"
+msgstr "请先将欢迎消息删除到当前额度以内，再添加新消息"

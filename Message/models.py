@@ -2101,7 +2101,11 @@ class MediaResource(models.Model):
 
     @staticmethod
     def available_reference_q():
-        return Q(messages__is_deleted=False) | Q(forward_items__bundle__messages__is_deleted=False)
+        return (
+            Q(messages__is_deleted=False)
+            | Q(forward_items__bundle__messages__is_deleted=False)
+            | Q(welcome_templates__isnull=False)
+        )
 
     @classmethod
     def quota_for(cls, user):
@@ -2134,6 +2138,7 @@ class MediaResource(models.Model):
     def recalculate_reference_count(self):
         count = self.messages.filter(is_deleted=False).count()
         count += self.forward_items.filter(bundle__messages__is_deleted=False).count()
+        count += self.welcome_templates.count()
         if self.reference_count != count:
             type(self).objects.filter(id=self.id).update(reference_count=count)
             self.reference_count = count
@@ -2161,6 +2166,205 @@ class MediaResource(models.Model):
             status=self.asset.status,
             created_at=self.asset.created_at.timestamp(),
         )
+
+
+class WelcomeMessageTemplate(models.Model):
+    REGULAR_LIMIT = 3
+    PRIVILEGED_LIMIT = 10
+    ALLOWED_TYPES = {
+        MessageTypeChoice.TEXT,
+        MessageTypeChoice.IMAGE,
+        MessageTypeChoice.FILE,
+        MessageTypeChoice.VIDEO,
+        MessageTypeChoice.AUDIO,
+        MessageTypeChoice.STICKER,
+    }
+
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='welcome_message_templates')
+    position = models.PositiveSmallIntegerField(default=0)
+    type = models.IntegerField(choices=MessageTypeChoice.to_choices())
+    content = models.CharField(max_length=MessageValidator.MAX_CONTENT_LENGTH, blank=True, default='')
+    media_resource = models.ForeignKey(
+        MediaResource,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='welcome_templates',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['position', 'id']
+        constraints = [
+            models.UniqueConstraint(fields=['user', 'position'], name='welcome_template_unique_position'),
+        ]
+
+    @classmethod
+    def limit_for(cls, user):
+        return cls.PRIVILEGED_LIMIT if user.is_official or user.is_permanent_vip else cls.REGULAR_LIMIT
+
+    @classmethod
+    def _normalize_item(cls, user, item):
+        from User.validators import UserErrors
+
+        if not isinstance(item, dict):
+            raise UserErrors.WELCOME_MESSAGES_INVALID
+        try:
+            message_type = int(item.get('type'))
+        except (TypeError, ValueError):
+            raise UserErrors.WELCOME_MESSAGES_INVALID
+        if message_type not in cls.ALLOWED_TYPES:
+            raise UserErrors.WELCOME_MESSAGES_INVALID
+
+        resource = None
+        if message_type in Message.MEDIA_KIND_BY_TYPE:
+            try:
+                resource_id = int(item.get('resource_id'))
+            except (TypeError, ValueError):
+                raise UserErrors.WELCOME_MESSAGES_INVALID
+            resource = MediaResource.objects.select_related('asset').filter(
+                id=resource_id,
+                owner=user,
+                library_active=True,
+            ).first()
+            expected_kind = MediaAsset.kind_for_name(Message.MEDIA_KIND_BY_TYPE[message_type])
+            if resource is None or resource.kind != expected_kind or resource.asset.status == MediaAsset.STATUS_FAILED:
+                raise UserErrors.WELCOME_MESSAGES_INVALID
+            content = ''
+        else:
+            try:
+                content = Message.normalize_content(message_type, item.get('content') or '')
+            except Exception as error:
+                if error.__class__.__module__.startswith('smartdjango'):
+                    raise
+                raise UserErrors.WELCOME_MESSAGES_INVALID
+            if message_type == MessageTypeChoice.STICKER:
+                from Sticker.models import StickerAsset
+                asset_id = Message._parse_payload(content).get('asset_id')
+                if not StickerAsset.objects.filter(id=asset_id).exists():
+                    raise UserErrors.WELCOME_MESSAGES_INVALID
+        template_id = item.get('template_message_id')
+        try:
+            template_id = int(template_id) if template_id is not None else None
+        except (TypeError, ValueError):
+            raise UserErrors.WELCOME_MESSAGES_INVALID
+        return dict(id=template_id, type=message_type, content=content, media_resource=resource)
+
+    @classmethod
+    def replace_for(cls, user, items):
+        from User.validators import UserErrors
+
+        user.require_capability('menu.profile.welcome')
+        if not isinstance(items, list) or not items:
+            raise UserErrors.WELCOME_MESSAGE_EMPTY
+        if len(items) > cls.PRIVILEGED_LIMIT:
+            raise UserErrors.WELCOME_MESSAGES_LIMIT
+        normalized = [cls._normalize_item(user, item) for item in items]
+        with transaction.atomic():
+            current = list(cls.objects.select_for_update().filter(user=user).select_related('media_resource__asset'))
+            limit = cls.limit_for(user)
+            if len(current) > limit:
+                current_by_id = {item.id: item for item in current}
+                if len(normalized) >= len(current):
+                    raise UserErrors.WELCOME_MESSAGES_DELETE_FIRST
+                for item in normalized:
+                    existing = current_by_id.get(item['id'])
+                    if (
+                        existing is None
+                        or existing.type != item['type']
+                        or existing.content != item['content']
+                        or existing.media_resource_id != getattr(item['media_resource'], 'id', None)
+                    ):
+                        raise UserErrors.WELCOME_MESSAGES_DELETE_FIRST
+            elif len(normalized) > limit:
+                raise UserErrors.WELCOME_MESSAGES_LIMIT
+
+            old_resources = {item.media_resource_id for item in current if item.media_resource_id}
+            cls.objects.filter(user=user).delete()
+            created = [
+                cls.objects.create(
+                    user=user,
+                    position=position,
+                    type=item['type'],
+                    content=item['content'],
+                    media_resource=item['media_resource'],
+                )
+                for position, item in enumerate(normalized)
+            ]
+            first_text = next((item.content for item in created if item.type == MessageTypeChoice.TEXT), '')
+            if user.welcome_message != first_text:
+                user.welcome_message = first_text
+                user.save(update_fields=['welcome_message'])
+            user.award_growth('explore:welcome')
+            new_resources = {item.media_resource_id for item in created if item.media_resource_id}
+            for resource_id in old_resources | new_resources:
+                MediaResource.objects.get(id=resource_id).recalculate_reference_count()
+        return created
+
+    def jsonl(self, request=None):
+        transient = Message(
+            user=self.user,
+            type=self.type,
+            content=self.content,
+            media_resource=self.media_resource,
+        )
+        payload = transient._payload_for_type(request=request)
+        return dict(
+            template_message_id=self.id,
+            type=self.type,
+            content=transient.preview_text(),
+            payload=payload,
+            resource_id=self.media_resource_id,
+            position=self.position,
+        )
+
+    @classmethod
+    def payload_for(cls, user, request=None):
+        items = list(cls.objects.filter(user=user).select_related('user', 'media_resource__asset'))
+        if not items and (user.welcome_message or '').strip():
+            items = [cls.objects.create(
+                user=user,
+                position=0,
+                type=MessageTypeChoice.TEXT,
+                content=(user.welcome_message or '').strip(),
+            )]
+        limit = cls.limit_for(user)
+        return dict(
+            welcome_message=user.welcome_message,
+            messages=[item.jsonl(request=request) for item in items],
+            max_messages=limit,
+            can_add=len(items) < limit,
+            delete_to_limit=max(0, len(items) - limit),
+        )
+
+    @classmethod
+    def materialize_for(cls, sender, chat, event_key=None):
+        templates = list(cls.objects.filter(user=sender).select_related('media_resource__asset'))
+        if not templates and (sender.welcome_message or '').strip():
+            templates = [cls(
+                user=sender,
+                position=0,
+                type=MessageTypeChoice.TEXT,
+                content=(sender.welcome_message or '').strip(),
+            )]
+        messages = []
+        for template in templates:
+            resource = template.media_resource.clone_for(sender) if template.media_resource_id else None
+            client_id = None
+            if event_key and template.id:
+                client_id = f'welcome:{event_key}:{template.id}'[:MessageValidator.MAX_CLIENT_MESSAGE_ID_LENGTH]
+            message = Message.create(
+                chat=chat,
+                user=sender,
+                message_type=template.type,
+                content=template.content,
+                client_message_id=client_id,
+                media_resource=resource,
+            )
+            if getattr(message, '_was_created', True):
+                messages.append(message)
+        return messages
 
 
 class ForwardBundle(models.Model):

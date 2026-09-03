@@ -787,14 +787,18 @@ class ContactUnbindView(View):
 class WelcomeMessageView(View):
     @auth.require_user
     def get(self, request: Request):
-        return dict(welcome_message=request.user.welcome_message)
+        from Message.models import WelcomeMessageTemplate
+
+        return WelcomeMessageTemplate.payload_for(request.user, request=request)
 
     @auth.require_user
-    @analyse.json(UserParams.welcome_message)
+    @analyse.json(UserParams.welcome_messages)
     def post(self, request: Request):
         _require_password_enabled(request.user)
-        request.user.set_welcome_message(request.json.welcome_message)
-        return dict(welcome_message=request.user.welcome_message)
+        from Message.models import WelcomeMessageTemplate
+
+        WelcomeMessageTemplate.replace_for(request.user, request.json().get('messages'))
+        return WelcomeMessageTemplate.payload_for(request.user, request=request)
 
 
 class UserNameView(View):

@@ -294,31 +294,25 @@ class Friendship(models.Model):
         requester = self.requested_by
         if requester is None or requester.is_deleted:
             return None
-        return self.send_welcome_message(sender=responder, receiver=requester)
+        return self.send_welcome_message(sender=responder, receiver=requester, event_key=f'friendship:{self.id}')
 
     @classmethod
-    def send_welcome_message(cls, sender: User, receiver: User):
+    def send_welcome_message(cls, sender: User, receiver: User, event_key=None):
         if sender is None or receiver is None:
             return None
         if sender.is_deleted or receiver.is_deleted:
             return None
-        welcome_message = (sender.welcome_message or '').strip()
-        if not welcome_message:
-            return None
-
         from Chat.models import Chat
-        from Message.models import Message, MessageTypeChoice
+        from Message.models import WelcomeMessageTemplate
         from User.models import NotificationEvent
 
         chat = Chat.get_or_create_direct(sender, receiver)
-        message = Message.create(
-            chat=chat,
-            user=sender,
-            message_type=MessageTypeChoice.TEXT,
-            content=welcome_message,
+        messages = WelcomeMessageTemplate.materialize_for(
+            sender, chat, event_key=event_key,
         )
-        NotificationEvent.emit_message_notifications(message, actor=sender)
-        return message
+        for message in messages:
+            NotificationEvent.emit_message_notifications(message, actor=sender)
+        return messages[-1] if messages else None
 
     def reject(self, user: User):
         if not self._is_participant(user):

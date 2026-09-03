@@ -11,6 +11,7 @@ from User.models import (
     UserContactVerificationCode,
     WebPushSubscription,
 )
+from User.validators import UserErrors
 
 
 class UserParams(metaclass=Params):
@@ -22,6 +23,9 @@ class UserParams(metaclass=Params):
     lower_name: Validator
     password: Validator
     welcome_message: Validator
+    welcome_messages = Validator('messages').to(
+        lambda value: value if isinstance(value, list) else (_ for _ in ()).throw(UserErrors.WELCOME_MESSAGES_INVALID)
+    )
     avatar_preset_id = Validator('avatar_preset_id') \
         .to(int) \
         .to(User.validators.avatar_preset_id)

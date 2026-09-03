@@ -346,7 +346,9 @@ CSS 建议：
  - 说明：当 `channel=email` 绑定成功后，用户会升级为 `VERIFIED`。
  - 约束：未设置密码的用户不可使用通知绑定相关接口（`notification-prefs/contact-code/bind-contact`）。
 10. `GET /users/me/welcome-message`
-11. `POST /users/me/welcome-message` JSON: `welcome_message`
+11. `POST /users/me/welcome-message` JSON: `messages[]`
+ - 每项包含 `template_message_id?`, `type`, `content`, `resource_id?`；支持文字、图片、视频、语音、文件与表情包。
+ - 普通用户上限 3 条，永久 VIP 与官方账号上限 10 条。权益降低且已有消息超额时，只允许先删除已有消息。
 12. `POST /users/me/avatar/preset` JSON: `avatar_preset_id(1-80)`
  - 返回：`{ avatar_type, avatar_uri }`
 
