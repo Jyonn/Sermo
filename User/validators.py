@@ -107,14 +107,26 @@ class UserValidator:
     PLAZA_GREETING_MAX_LENGTH = 30
     LANGUAGE_MAX_LENGTH = 16
     DEFAULT_LANGUAGE = 'en'
-    SUPPORTED_LANGUAGES = {'en', 'zh-CN'}
-    LANGUAGE_PREFERENCES = {'system', 'en', 'zh-CN'}
+    SUPPORTED_LANGUAGES = {'en', 'zh-CN', 'zh-TW', 'ja', 'ko', 'es'}
+    LANGUAGE_PREFERENCES = {'system', *SUPPORTED_LANGUAGES}
     LANGUAGE_ALIASES = {
         'en': 'en',
         'en-us': 'en',
         'en_us': 'en',
         'zh-cn': 'zh-CN',
         'zh_cn': 'zh-CN',
+        'zh': 'zh-CN',
+        'zh-sg': 'zh-CN',
+        'zh-hans': 'zh-CN',
+        'zh-tw': 'zh-TW',
+        'zh-hk': 'zh-TW',
+        'zh-mo': 'zh-TW',
+        'zh-hant': 'zh-TW',
+        'ja': 'ja',
+        'ja-jp': 'ja',
+        'ko': 'ko',
+        'ko-kr': 'ko',
+        'es': 'es',
     }
     AVATAR_PRESET_MIN_ID = 1
     AVATAR_PRESET_MAX_ID = 36
@@ -181,6 +193,13 @@ class UserValidator:
         lower = raw.lower().replace('_', '-')
         if lower in cls.LANGUAGE_ALIASES:
             return cls.LANGUAGE_ALIASES[lower]
+        if lower.startswith('zh-hant-'):
+            return 'zh-TW'
+        if lower.startswith('zh-hans-'):
+            return 'zh-CN'
+        for prefix in ('en', 'ja', 'ko', 'es'):
+            if lower.startswith(f'{prefix}-'):
+                return prefix
         return raw
 
     @classmethod

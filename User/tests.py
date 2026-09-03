@@ -36,7 +36,20 @@ class UserPresentationTests(SimpleTestCase):
 
     def test_plaza_greeting_has_language_aware_default(self):
         self.assertEqual(User(language='zh-CN').display_plaza_greeting(), '嗨，认识一下？')
+        self.assertEqual(User(language='zh-TW').display_plaza_greeting(), '嗨，认识一下？')
         self.assertEqual(User(language='en').display_plaza_greeting(), 'Hi, nice to meet you.')
+        self.assertEqual(User(language='ja').display_plaza_greeting(), 'Hi, nice to meet you.')
+
+    def test_default_welcome_message_uses_chinese_only_for_chinese_locales(self):
+        space = SimpleNamespace(name='Campus')
+        self.assertEqual(
+            User.default_welcome_message(space, 1, 'zh-TW'),
+            User.MEMBER_WELCOME_MESSAGE_ZH,
+        )
+        self.assertEqual(
+            User.default_welcome_message(space, 1, 'ko'),
+            User.MEMBER_WELCOME_MESSAGE_EN,
+        )
 
     def test_avatar_cache_key_is_stable_and_changes_with_avatar(self):
         user = User(avatar_type='custom', avatar_uri='https://cdn.example.com/avatar/a.png')
@@ -170,6 +183,22 @@ class CityBubbleUnlockTests(TestCase):
         user = User(language='en', language_preference='system')
         user.set_language('zh-CN', save=False)
         self.assertEqual(user.language, 'zh-CN')
+
+    def test_supported_language_preferences_and_common_aliases(self):
+        expected = {
+            'ja-JP': 'ja',
+            'ko-KR': 'ko',
+            'es-MX': 'es',
+            'zh-Hant': 'zh-TW',
+            'zh-Hant-TW': 'zh-TW',
+            'zh-HK': 'zh-TW',
+        }
+        for supplied, normalized in expected.items():
+            with self.subTest(language=supplied):
+                self.assertEqual(User.vldt.language(supplied), normalized)
+                user = User(language='en', language_preference='system')
+                user.set_language_preference('system', system_language=supplied, save=False)
+                self.assertEqual(user.language, normalized)
 
 
 class UserHeartbeatTests(TestCase):

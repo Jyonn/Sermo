@@ -622,12 +622,17 @@ class User(models.Model):
     def default_welcome_message(cls, space, role, language):
         normalized_language = cls.vldt.normalize_language(language)
         if role == UserRoleChoice.OFFICIAL:
-            if normalized_language == 'en':
-                return cls.OFFICIAL_WELCOME_MESSAGE_EN.format(space=space.name)
-            return cls.OFFICIAL_WELCOME_MESSAGE_ZH.format(space=space.name)
-        if normalized_language == 'en':
-            return cls.MEMBER_WELCOME_MESSAGE_EN
-        return cls.MEMBER_WELCOME_MESSAGE_ZH
+            template = (
+                cls.OFFICIAL_WELCOME_MESSAGE_ZH
+                if normalized_language in {'zh-CN', 'zh-TW'}
+                else cls.OFFICIAL_WELCOME_MESSAGE_EN
+            )
+            return template.format(space=space.name)
+        return (
+            cls.MEMBER_WELCOME_MESSAGE_ZH
+            if normalized_language in {'zh-CN', 'zh-TW'}
+            else cls.MEMBER_WELCOME_MESSAGE_EN
+        )
 
     def ensure_welcome_message(self, language=None, save=True):
         if (self.welcome_message or '').strip():
@@ -648,7 +653,7 @@ class User(models.Model):
             return greeting
         return (
             self.DEFAULT_PLAZA_GREETING_ZH
-            if self.vldt.normalize_language(self.language) == 'zh-CN'
+            if self.vldt.normalize_language(self.language) in {'zh-CN', 'zh-TW'}
             else self.DEFAULT_PLAZA_GREETING_EN
         )
 

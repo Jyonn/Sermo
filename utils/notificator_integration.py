@@ -7,7 +7,7 @@ from Config.models import Config, CI
 
 def notificator_locale(language=None):
     normalized = str(language or translation.get_language() or '').strip().lower()
-    return 'en-US' if normalized.startswith('en') else 'zh-CN'
+    return 'zh-CN' if normalized.startswith('zh') else 'en-US'
 
 
 def django_language(locale):
