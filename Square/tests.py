@@ -149,10 +149,11 @@ class StatementApiTests(TestCase):
         self.assertEqual(response.status_code, 200, response.content)
         self.assertEqual(response.json()['body']['created_by']['user_id'], self.friend.id)
         notice = Message.objects.get(
-            chat=Chat.get_or_create_direct(self.friend, self.author),
+            chat=Chat.get_or_create_direct(self.space.ensure_official_user(), self.author),
             type=MessageTypeChoice.OFFICIAL_NOTICE,
         )
-        self.assertEqual(notice.user_id, self.friend.id)
+        self.assertEqual(notice.user_id, self.space.official_user_id)
+        self.assertEqual(notice._parse_payload(notice.content)['actor_user_id'], self.friend.id)
 
     def test_operator_can_publish_selected_chat_as_statement_but_cannot_pin(self):
         self.friend.phone = '+8613800000003'

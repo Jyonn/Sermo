@@ -103,11 +103,9 @@ def _is_notificator_timeout(error: Exception):
 def _notify_operator_change(space, user, assigned):
     official = space.ensure_official_user()
     with transaction.atomic():
-        Friendship.ensure_locked_friendship(official, user)
-        chat = Chat.get_or_create_direct(official, user)
         Message.create_official_notice(
-            chat=chat,
-            user=official,
+            recipient=user,
+            actor=official,
             event='operator_assigned' if assigned else 'operator_removed',
         )
 

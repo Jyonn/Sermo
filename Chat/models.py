@@ -816,9 +816,8 @@ class Submission(models.Model):
         with transaction.atomic():
             self.status = next_status
             self.save(update_fields=['status'])
-            direct_chat = Chat.get_or_create_direct(user, self.author)
             Message.create_official_notice(
-                direct_chat,
+                self.author,
                 user,
                 f'submission_{action}',
                 submission_title=self.chat.title,

@@ -26,9 +26,7 @@ from utils.qiniu import (
 
 
 def _notify_square_moderation(actor, user, event, **details):
-    Friendship.ensure_locked_friendship(actor, user)
-    chat = Chat.get_or_create_direct(actor, user)
-    Message.create_official_notice(chat, actor, event, **details)
+    Message.create_official_notice(user, actor, event, **details)
 
 
 class StatementLocationView(View):

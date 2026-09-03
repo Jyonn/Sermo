@@ -734,29 +734,32 @@ class Message(models.Model):
         return message
 
     @classmethod
-    def create_official_notice(cls, chat: Chat, user: User, event: str, **details):
-        if not chat.has_active_member(user):
-            raise MessageErrors.NOT_A_MEMBER
-        if not (user.is_official or user.is_space_operator):
+    def create_official_notice(cls, recipient: User, actor: User, event: str, **details):
+        if recipient.space_id != actor.space_id:
             raise MessageErrors.SYSTEM_MESSAGE_FORBIDDEN
+        if not (actor.is_official or actor.is_space_operator):
+            raise MessageErrors.SYSTEM_MESSAGE_FORBIDDEN
+        official = recipient.space.ensure_official_user()
+        chat = Chat.get_or_create_direct(official, recipient)
         payload = {
             'kind': 'official_notice',
             'event': str(event).strip(),
-            'actor_name': user.name,
             **{key: value for key, value in details.items() if value is not None},
+            'actor_user_id': actor.id,
+            'actor_name': actor.name,
         }
         content = json.dumps(payload, separators=(',', ':'), ensure_ascii=False)
         if len(content) > cls.vldt.MAX_CONTENT_LENGTH:
             raise MessageErrors.CONTENT_TOO_LONG
         message = cls.objects.create(
             chat=chat,
-            user=user,
+            user=official,
             type=MessageTypeChoice.OFFICIAL_NOTICE,
             content=content,
         )
         MessageEvent.record_created(message)
         from User.models import NotificationEvent
-        NotificationEvent.emit_message_notifications(message, actor=user)
+        NotificationEvent.emit_message_notifications(message, actor=official)
         return message
 
     @classmethod
