@@ -140,6 +140,8 @@ class SpaceAdminApiTests(TestCase):
         assigned_notice = Message.objects.filter(user=self.official, chat=notice_chat).order_by('-id').first()
         self.assertIsNotNone(assigned_notice)
         self.assertEqual(assigned_notice.type, MessageTypeChoice.OFFICIAL_NOTICE)
+        self.assertEqual(assigned_notice._parse_payload(assigned_notice.content)['actor_user_id'], self.official.id)
+        self.assertEqual(assigned_notice._parse_payload(assigned_notice.content)['actor_name'], self.official.name)
         self.assertIn('space operator', assigned_notice.system_message_text(self.member))
 
         removed = self.client.delete(
@@ -149,6 +151,8 @@ class SpaceAdminApiTests(TestCase):
         self.assertEqual(removed.status_code, 200, removed.content)
         removed_notice = Message.objects.filter(user=self.official, chat=assigned_notice.chat).order_by('-id').first()
         self.assertEqual(removed_notice.type, MessageTypeChoice.OFFICIAL_NOTICE)
+        self.assertEqual(removed_notice._parse_payload(removed_notice.content)['actor_user_id'], self.official.id)
+        self.assertEqual(removed_notice._parse_payload(removed_notice.content)['actor_name'], self.official.name)
         self.assertIn('role has been removed', removed_notice.system_message_text(self.member))
 
     def test_operator_requires_verified_email_and_phone(self):
