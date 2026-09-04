@@ -83,6 +83,8 @@ class MessageView(View):
             raise MessageErrors.SYSTEM_MESSAGE_FORBIDDEN
         if not message.is_visible_to(request.user):
             raise MessageErrors.NOT_A_MEMBER
+        if request.query.delete_scope != 'me' and message.pins.exists():
+            raise MessageErrors.MESSAGE_LOCKED
         if message.chat.submission:
             submission = message.chat.submission_record
             if (

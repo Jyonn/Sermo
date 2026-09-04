@@ -351,6 +351,28 @@ class ChatNotificationPreferenceTests(TestCase):
             'message_unpinned',
         ])
 
+    def test_locked_message_cannot_be_recalled_until_unlocked(self):
+        message = Message.create(self.chat, self.sender, MessageTypeChoice.TEXT, 'keep this')
+        PinnedMessage.pin(message, self.sender)
+
+        locked_response = self.client.delete(
+            f'/messages/?message_id={message.id}&scope=everyone',
+            **self.authorization(self.sender),
+        )
+        self.assertEqual(locked_response.status_code, 403, locked_response.content)
+        self.assertEqual(locked_response.json()['identifier'], 'MESSAGE@MESSAGE_LOCKED')
+        message.refresh_from_db()
+        self.assertFalse(message.is_deleted)
+
+        PinnedMessage.unpin(message, self.sender)
+        unlocked_response = self.client.delete(
+            f'/messages/?message_id={message.id}&scope=everyone',
+            **self.authorization(self.sender),
+        )
+        self.assertEqual(unlocked_response.status_code, 200, unlocked_response.content)
+        message.refresh_from_db()
+        self.assertTrue(message.is_deleted)
+
     def test_member_departure_creates_system_message_before_leaving(self):
         self.chat.leave(self.recipient)
 

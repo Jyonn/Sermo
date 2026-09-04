@@ -35,7 +35,7 @@ EVENT_RULES = {
         GrowthEventRule('explore:message_reply', 'explore', '首次引用回复消息', 10),
         GrowthEventRule('explore:map_access', 'explore', '首次分享足迹', 20),
         GrowthEventRule('explore:share_statement', 'explore', '首次在聊天中分享发言', 15),
-        GrowthEventRule('explore:pin_message', 'explore', '首次置顶消息', 10),
+        GrowthEventRule('explore:pin_message', 'explore', '首次锁定消息', 10),
         GrowthEventRule('explore:square_statement', 'explore', '首次发表发言', 20),
         GrowthEventRule('explore:square_image', 'explore', '首次发表图片发言', 15),
         GrowthEventRule('explore:square_audio', 'explore', '首次发表语音发言', 20),

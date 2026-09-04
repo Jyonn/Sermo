@@ -188,11 +188,14 @@ msgid "The replied message is not in this chat"
 msgstr "The replied message is not in this chat"
 
 #| msgid "You are not a member of this chat"
-msgid "You cannot manage pinned messages in this chat"
-msgstr "You cannot manage pinned messages in this chat"
+msgid "Locked messages cannot be recalled"
+msgstr "Locked messages cannot be recalled"
 
-msgid "This chat has reached the pinned message limit"
-msgstr "This chat has reached the pinned message limit"
+msgid "You cannot manage locked messages in this chat"
+msgstr "You cannot manage locked messages in this chat"
+
+msgid "This chat has reached the locked message limit"
+msgstr "This chat has reached the locked message limit"
 
 #| msgid "enabled should be 0 or 1"
 msgid "group_square_enabled should be 0 or 1"
@@ -804,11 +807,11 @@ msgstr "%(actor)s left the group"
 msgid "%(actor)s renamed the group to “%(title)s”"
 msgstr "%(actor)s renamed the group to “%(title)s”"
 
-msgid "%(actor)s pinned a message"
-msgstr "%(actor)s pinned a message"
+msgid "%(actor)s locked a message"
+msgstr "%(actor)s locked a message"
 
-msgid "%(actor)s unpinned a message"
-msgstr "%(actor)s unpinned a message"
+msgid "%(actor)s unlocked a message"
+msgstr "%(actor)s unlocked a message"
 
 msgid "You are now a space operator. You can manage Square mutes and publish merged chat records as posts."
 msgstr "You are now a space operator. You can manage Square mutes and publish merged chat records as posts."

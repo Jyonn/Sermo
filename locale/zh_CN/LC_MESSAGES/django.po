@@ -188,11 +188,14 @@ msgstr "语音消息不能超过 60 秒"
 msgid "The replied message is not in this chat"
 msgstr "引用的消息不属于当前聊天"
 
-msgid "You cannot manage pinned messages in this chat"
-msgstr "你没有权限管理这个聊天的置顶消息"
+msgid "Locked messages cannot be recalled"
+msgstr "锁定的消息无法撤回"
 
-msgid "This chat has reached the pinned message limit"
-msgstr "这个聊天最多置顶20条消息"
+msgid "You cannot manage locked messages in this chat"
+msgstr "你没有权限管理这个聊天的锁定消息"
+
+msgid "This chat has reached the locked message limit"
+msgstr "这个聊天最多锁定20条消息"
 
 #| msgid "enabled should be 0 or 1"
 msgid "group_square_enabled should be 0 or 1"
@@ -843,11 +846,11 @@ msgstr "%(actor)s 退出了群聊"
 msgid "%(actor)s renamed the group to “%(title)s”"
 msgstr "%(actor)s 将群名修改为“%(title)s”"
 
-msgid "%(actor)s pinned a message"
-msgstr "%(actor)s 置顶了一条消息"
+msgid "%(actor)s locked a message"
+msgstr "%(actor)s 锁定了一条消息"
 
-msgid "%(actor)s unpinned a message"
-msgstr "%(actor)s 取消置顶一条消息"
+msgid "%(actor)s unlocked a message"
+msgstr "%(actor)s 取消锁定一条消息"
 
 msgid "You are now a space operator. You can manage Square mutes and publish merged chat records as posts."
 msgstr "你已被设为空间运营者，现在可以管理广场禁言，并将合并聊天记录发布为发言。"
