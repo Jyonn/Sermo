@@ -11,10 +11,13 @@ from django.utils import timezone
 
 from Config.models import CI, Config
 from PlatformAdmin.models import PlatformAdminEmailCode, PlatformAdminSecurity, PlatformAuditLog
-from PlatformAdmin.views import ChatMessageView, EmailCodeView, LoginView, MessageDeliveryView
+from PlatformAdmin.views import ChatMessageView, EmailCodeView, EmailDeliveryListView, LoginView, MessageDeliveryView
 from Chat.models import Chat, ChatMember, ChatMemberStatusChoice, ChatTypeChoice
 from Space.models import Space
-from User.models import User, UserRoleChoice
+from User.models import (
+    NotificationDelivery, NotificationDeliveryStatusChoice, NotificationEvent,
+    NotificationEventTypeChoice, User, UserNotificationChoice, UserRoleChoice,
+)
 from Message.models import Message, MessageTypeChoice
 from utils import auth
 
@@ -165,3 +168,47 @@ class PlatformAdminSecurityTests(TestCase):
             action='message.deliveries_viewed',
             target_id=message.id,
         ).exists())
+
+    def test_email_delivery_list_returns_masked_paginated_send_times(self):
+        space = Space.objects.create(name='Mail Space', slug='mail-space', email='owner@example.com')
+        user = User.objects.create(
+            space=space,
+            name='Recipient',
+            email='recipient@example.com',
+            role=UserRoleChoice.MEMBER,
+        )
+        attempted_at = timezone.now().replace(microsecond=0)
+        deliveries = []
+        for index in range(3):
+            event = NotificationEvent.objects.create(
+                space=space,
+                user=user,
+                event_type=NotificationEventTypeChoice.DIRECT_MESSAGE,
+                payload={'kind': 'direct_message'},
+            )
+            deliveries.append(NotificationDelivery.objects.create(
+                event=event,
+                channel=UserNotificationChoice.EMAIL,
+                status=NotificationDeliveryStatusChoice.SENT,
+                attempted_at=attempted_at + datetime.timedelta(seconds=index),
+            ))
+        token = auth.get_platform_admin_token('admin@example.com')['auth']
+        first_request = RequestFactory().get(
+            '/platform-admin/email-deliveries?limit=2',
+            HTTP_AUTHORIZATION=f'Bearer {token}',
+        )
+
+        first_page = EmailDeliveryListView.as_view()(first_request)
+        second_request = RequestFactory().get(
+            f'/platform-admin/email-deliveries?limit=2&before={first_page["next_before"]}',
+            HTTP_AUTHORIZATION=f'Bearer {token}',
+        )
+        second_page = EmailDeliveryListView.as_view()(second_request)
+
+        self.assertTrue(first_page['has_more'])
+        self.assertEqual([item['delivery_id'] for item in first_page['items']], [deliveries[2].id, deliveries[1].id])
+        self.assertEqual(first_page['items'][0]['recipient'], 're***@example.com')
+        self.assertEqual(first_page['items'][0]['attempted_at'], (attempted_at + datetime.timedelta(seconds=2)).timestamp())
+        self.assertEqual([item['delivery_id'] for item in second_page['items']], [deliveries[0].id])
+        self.assertFalse(second_page['has_more'])
+        self.assertEqual(PlatformAuditLog.objects.filter(action='email.deliveries_viewed').count(), 2)

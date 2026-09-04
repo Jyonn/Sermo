@@ -339,6 +339,55 @@ class MessageDeliveryView(View):
         )
 
 
+class EmailDeliveryListView(View):
+    @auth.require_platform_admin
+    def get(self, request):
+        try:
+            limit = min(100, max(1, int(request.GET.get('limit', 40))))
+            before = int(request.GET.get('before')) if request.GET.get('before') else None
+        except (TypeError, ValueError):
+            raise PlatformAdminErrors.ACCESS_DENIED
+
+        queryset = NotificationDelivery.objects.filter(
+            channel=UserNotificationChoice.EMAIL,
+        ).select_related(
+            'event', 'event__user', 'event__space',
+        ).order_by('-id')
+        if before:
+            queryset = queryset.filter(id__lt=before)
+        deliveries = list(queryset[:limit + 1])
+        has_more = len(deliveries) > limit
+        deliveries = deliveries[:limit]
+        _audit(
+            request,
+            'email.deliveries_viewed',
+            summary='查看通知邮件发送记录',
+            metadata={'before': before, 'limit': limit},
+        )
+
+        items = []
+        for delivery in deliveries:
+            event = delivery.event
+            items.append(dict(
+                delivery_id=delivery.id,
+                event_id=event.id,
+                event_type=event.event_type,
+                event_kind=str((event.payload or {}).get('kind') or ''),
+                user=event.user.tiny_json(),
+                recipient=_mask_email(event.user.email) if event.user.email else '',
+                space=dict(space_id=event.space_id, name=event.space.name, slug=event.space.slug),
+                status=_delivery_status(delivery.status),
+                detail=delivery.detail or '',
+                created_at=delivery.created_at.timestamp(),
+                attempted_at=delivery.attempted_at.timestamp() if delivery.attempted_at else None,
+            ))
+        return dict(
+            items=items,
+            has_more=has_more,
+            next_before=deliveries[-1].id if has_more and deliveries else None,
+        )
+
+
 class IdentityDocumentView(View):
     @auth.require_platform_admin
     def get(self, request, space_id):
