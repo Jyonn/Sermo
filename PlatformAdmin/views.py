@@ -3,6 +3,7 @@ import json
 import secrets
 from urllib.parse import quote
 
+from django.db import transaction
 from django.db.models import Count, Q
 from django.utils import timezone
 from django.views import View
@@ -100,15 +101,25 @@ def _space_payload(space):
 class EmailCodeView(View):
     def post(self, request):
         email = _require_email(_value(_body(request), 'email'))
-        if PlatformAdminSecurity.primary().mfa_enabled:
-            _audit(request, 'auth.mfa_requested', summary='平台管理员进入 MFA 验证')
-            return dict(mfa_required=True, masked_email=_mask_email(email))
-        now = timezone.now()
-        recent = PlatformAdminEmailCode.objects.filter(email=email, created_at__gte=now - datetime.timedelta(seconds=45)).exists()
-        if recent:
-            return dict(expires_in=600, masked_email=_mask_email(email), mfa_required=False)
-        code = f'{secrets.randbelow(1_000_000):06d}'
-        PlatformAdminEmailCode.objects.create(email=email, code=code, expires_at=now + datetime.timedelta(minutes=10))
+        with transaction.atomic():
+            security = PlatformAdminSecurity.primary()
+            security = PlatformAdminSecurity.objects.select_for_update().get(id=security.id)
+            if security.mfa_enabled:
+                _audit(request, 'auth.mfa_requested', summary='平台管理员进入 MFA 验证')
+                return dict(mfa_required=True, masked_email=_mask_email(email))
+            now = timezone.now()
+            recent = PlatformAdminEmailCode.objects.filter(
+                email=email,
+                created_at__gte=now - datetime.timedelta(seconds=45),
+            ).exists()
+            if recent:
+                return dict(expires_in=600, masked_email=_mask_email(email), mfa_required=False)
+            code = f'{secrets.randbelow(1_000_000):06d}'
+            PlatformAdminEmailCode.objects.create(
+                email=email,
+                code=code,
+                expires_at=now + datetime.timedelta(minutes=10),
+            )
         send_verification_mail(email, code, 10, 'Sermo 超级管理员登录', language='zh-CN', recipient_name='Sermo 管理员')
         _audit(request, 'auth.code_sent', summary='平台管理员验证码已发送')
         return dict(expires_in=600, masked_email=_mask_email(email), mfa_required=False)
@@ -240,6 +251,7 @@ def _delivery_status(value):
         NotificationDeliveryStatusChoice.SENT: 'sent',
         NotificationDeliveryStatusChoice.FAILED: 'failed',
         NotificationDeliveryStatusChoice.SKIPPED: 'skipped',
+        NotificationDeliveryStatusChoice.PROCESSING: 'processing',
     }.get(value, 'unknown')
 
 

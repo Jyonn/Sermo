@@ -1,6 +1,7 @@
 import datetime
 import threading
 
+from django.db import transaction
 from django.utils import timezone
 from django.utils.crypto import get_random_string
 
@@ -232,8 +233,13 @@ class Space(models.Model):
         tier_number = {'email': 1, 'phone': 2, 'identity': 3}[self.verification_tier]
         if count < int(limit * .8) or self.capacity_notice_tier >= tier_number:
             return
+        claimed = type(self).objects.filter(
+            id=self.id,
+            capacity_notice_tier__lt=tier_number,
+        ).update(capacity_notice_tier=tier_number)
+        if not claimed:
+            return
         self.capacity_notice_tier = tier_number
-        self.save(update_fields=['capacity_notice_tier'])
         threading.Thread(target=self._send_capacity_email, args=(count, limit), daemon=True).start()
 
     def _send_capacity_email(self, count, limit):
@@ -418,6 +424,7 @@ class SpacePhoneVerificationCode(models.Model):
 class SpaceEmailVerificationCode(models.Model):
     CODE_LENGTH = 6
     EXPIRE_SECONDS = 10 * 60
+    SEND_COOLDOWN_SECONDS = 60
 
     space = models.ForeignKey(
         Space,
@@ -440,25 +447,31 @@ class SpaceEmailVerificationCode(models.Model):
     def issue(cls, email: str, purpose: int, space: Space = None):
         email = (email or '').strip().lower()
         now = timezone.now()
-        query = cls.objects.filter(
-            email=email,
-            purpose=purpose,
-            used_at__isnull=True,
-        )
-        if space is None:
-            query = query.filter(space__isnull=True)
-        else:
-            query = query.filter(space=space)
-        query.update(used_at=now)
+        with transaction.atomic():
+            if space is not None:
+                Space.objects.select_for_update().only('id').get(id=space.id)
+            query = cls.objects.select_for_update().filter(
+                email=email,
+                purpose=purpose,
+                used_at__isnull=True,
+            )
+            if space is None:
+                query = query.filter(space__isnull=True)
+            else:
+                query = query.filter(space=space)
+            latest = query.order_by('-created_at').first()
+            if latest and latest.created_at > now - datetime.timedelta(seconds=cls.SEND_COOLDOWN_SECONDS):
+                raise SpaceErrors.EMAIL_CODE_TOO_FREQUENT
+            query.update(used_at=now)
 
-        code = get_random_string(cls.CODE_LENGTH, allowed_chars='0123456789')
-        return cls.objects.create(
-            space=space,
-            email=email,
-            purpose=purpose,
-            code=code,
-            expires_at=now + datetime.timedelta(seconds=cls.EXPIRE_SECONDS),
-        )
+            code = get_random_string(cls.CODE_LENGTH, allowed_chars='0123456789')
+            return cls.objects.create(
+                space=space,
+                email=email,
+                purpose=purpose,
+                code=code,
+                expires_at=now + datetime.timedelta(seconds=cls.EXPIRE_SECONDS),
+            )
 
     @classmethod
     def verify(cls, email: str, code: str, purpose: int, space: Space = None):

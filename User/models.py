@@ -11,7 +11,7 @@ from urllib.parse import urlparse
 
 from notificator import NotificatorAPIError
 from django.db import IntegrityError, close_old_connections, transaction
-from django.db.models import F, Max, Q
+from django.db.models import F, Max, OuterRef, Q, Subquery
 from django.utils import timezone, translation
 from django.utils.crypto import get_random_string
 from django.utils.translation import gettext as _
@@ -1782,6 +1782,7 @@ class UserLoginLog(models.Model):
 class UserContactVerificationCode(models.Model):
     CODE_LENGTH = 6
     EXPIRE_SECONDS = 10 * 60
+    SEND_COOLDOWN_SECONDS = 60
 
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='contact_verification_codes')
     channel = models.IntegerField(choices=UserNotificationChoice.to_choices(), db_index=True)
@@ -1803,21 +1804,27 @@ class UserContactVerificationCode(models.Model):
         normalized_target = user.ensure_contact_available(channel, target)
         normalized_target = cls._normalize_target(channel, normalized_target)
         now = timezone.now()
-        cls.objects.filter(
-            user=user,
-            channel=channel,
-            target=normalized_target,
-            used_at__isnull=True,
-        ).update(used_at=now)
+        with transaction.atomic():
+            User.objects.select_for_update().only('id').get(id=user.id)
+            query = cls.objects.select_for_update().filter(
+                user=user,
+                channel=channel,
+                target=normalized_target,
+                used_at__isnull=True,
+            )
+            latest = query.order_by('-created_at').first()
+            if latest and latest.created_at > now - datetime.timedelta(seconds=cls.SEND_COOLDOWN_SECONDS):
+                raise UserErrors.CONTACT_CODE_TOO_FREQUENT
+            query.update(used_at=now)
 
-        code = get_random_string(cls.CODE_LENGTH, allowed_chars='0123456789')
-        return cls.objects.create(
-            user=user,
-            channel=channel,
-            target=normalized_target,
-            code=code,
-            expires_at=now + datetime.timedelta(seconds=cls.EXPIRE_SECONDS),
-        )
+            code = get_random_string(cls.CODE_LENGTH, allowed_chars='0123456789')
+            return cls.objects.create(
+                user=user,
+                channel=channel,
+                target=normalized_target,
+                code=code,
+                expires_at=now + datetime.timedelta(seconds=cls.EXPIRE_SECONDS),
+            )
 
     @classmethod
     def verify(cls, user: User, channel: int, target: str, code: str):
@@ -2039,17 +2046,19 @@ class UserPasswordRecoveryChallenge(models.Model):
             raise UserErrors.PASSWORD_RECOVERY_CHANNEL_INVALID
 
         now = timezone.now()
-        latest = cls.objects.filter(user=user).order_by('-created_at').first()
-        if latest and latest.created_at > now - datetime.timedelta(seconds=cls.SEND_COOLDOWN_SECONDS):
-            raise UserErrors.PASSWORD_RECOVERY_TOO_FREQUENT
-        cls.objects.filter(user=user, used_at__isnull=True).update(used_at=now)
-        return cls.objects.create(
-            user=user,
-            channel=channel,
-            target=target,
-            code=get_random_string(cls.CODE_LENGTH, allowed_chars='0123456789'),
-            code_expires_at=now + datetime.timedelta(seconds=cls.CODE_EXPIRE_SECONDS),
-        )
+        with transaction.atomic():
+            User.objects.select_for_update().only('id').get(id=user.id)
+            latest = cls.objects.filter(user=user).order_by('-created_at').first()
+            if latest and latest.created_at > now - datetime.timedelta(seconds=cls.SEND_COOLDOWN_SECONDS):
+                raise UserErrors.PASSWORD_RECOVERY_TOO_FREQUENT
+            cls.objects.filter(user=user, used_at__isnull=True).update(used_at=now)
+            return cls.objects.create(
+                user=user,
+                channel=channel,
+                target=target,
+                code=get_random_string(cls.CODE_LENGTH, allowed_chars='0123456789'),
+                code_expires_at=now + datetime.timedelta(seconds=cls.CODE_EXPIRE_SECONDS),
+            )
 
     @classmethod
     def verify_code(cls, challenge_id, code):
@@ -2137,6 +2146,7 @@ class NotificationDeliveryStatusChoice(Choice):
     SENT = 1
     FAILED = 2
     SKIPPED = 3
+    PROCESSING = 4
 
 
 class WebPushSubscription(models.Model):
@@ -2860,18 +2870,47 @@ class NotificationChannelCursor(models.Model):
         from Chat.models import ChatReadState, ChatUserPreference
         from Message.models import Message, MessageTypeChoice
 
+        NotificationDelivery._recover_abandoned_dispatches()
         snapshot_max_id = Message.objects.aggregate(value=Max('id'))['value'] or 0
         if snapshot_max_id <= 0:
-            return dict(users=0, sent=0, failed=0, advanced=0, snapshot_message_id=0)
+            return dict(
+                users=0,
+                dispatches=0,
+                sent=0,
+                failed=0,
+                advanced=0,
+                deferred=0,
+                snapshot_message_id=0,
+            )
 
-        preferences = list(
-            NotificationPreference.objects.filter(enabled=True).exclude(channel=UserNotificationChoice.BARK)
-            .select_related('user')
-            .order_by('user_id', 'channel')[:limit_users * len(NotificationPreference.supported_channels())]
+        cursor_rows = cls.objects.filter(
+            user_id=OuterRef('user_id'),
+            channel=OuterRef('channel'),
         )
-        summary = dict(users=0, sent=0, failed=0, advanced=0, snapshot_message_id=snapshot_max_id)
+        preferences = (
+            NotificationPreference.objects.filter(enabled=True).exclude(channel=UserNotificationChoice.BARK)
+            .annotate(
+                cursor_message_id=Subquery(cursor_rows.values('last_message_id')[:1]),
+                cursor_updated_at=Subquery(cursor_rows.values('updated_at')[:1]),
+            )
+            .filter(cursor_message_id__lt=snapshot_max_id)
+            .select_related('user')
+            .order_by('cursor_updated_at', 'user_id', 'channel')
+            .iterator(chunk_size=max(100, limit_users))
+        )
+        summary = dict(
+            users=0,
+            dispatches=0,
+            sent=0,
+            failed=0,
+            advanced=0,
+            deferred=0,
+            snapshot_message_id=snapshot_max_id,
+        )
         seen_users = set()
         for pref in preferences:
+            if len(seen_users) >= limit_users:
+                break
             user = pref.user
             cursor, _created = cls.objects.get_or_create(
                 user=user,
@@ -2881,8 +2920,20 @@ class NotificationChannelCursor(models.Model):
             if cursor.last_message_id >= snapshot_max_id:
                 continue
             if not NotificationDelivery._channel_available(user, pref.channel):
+                cursor.last_message_id = snapshot_max_id
+                cursor.save(update_fields=['last_message_id', 'updated_at'])
+                summary['advanced'] += 1
+                seen_users.add(user.id)
                 continue
             if not NotificationDelivery._offline_threshold_reached(user, pref.offline_threshold_minutes):
+                cursor.save(update_fields=['updated_at'])
+                summary['deferred'] += 1
+                seen_users.add(user.id)
+                continue
+            if NotificationDelivery._email_cooldown_active(user, pref):
+                cursor.save(update_fields=['updated_at'])
+                summary['deferred'] += 1
+                seen_users.add(user.id)
                 continue
 
             events = list(
@@ -2930,27 +2981,45 @@ class NotificationChannelCursor(models.Model):
                 cursor.last_message_id = snapshot_max_id
                 cursor.save(update_fields=['last_message_id', 'updated_at'])
                 summary['advanced'] += 1
+                seen_users.add(user.id)
                 continue
 
             deliveries = []
+            dispatch_in_progress = False
             for event in deliverable_events:
-                delivery = NotificationDelivery.objects.filter(event=event, channel=pref.channel).order_by('-id').first()
-                if delivery is None:
-                    delivery = NotificationDelivery.objects.create(event=event, channel=pref.channel)
-                elif delivery.status == NotificationDeliveryStatusChoice.SENT:
+                delivery, _created = NotificationDelivery.get_or_create_for_route(
+                    event,
+                    pref.channel,
+                )
+                if delivery.status == NotificationDeliveryStatusChoice.PROCESSING:
+                    dispatch_in_progress = True
                     continue
-                else:
-                    delivery.status = NotificationDeliveryStatusChoice.PENDING
-                    delivery.detail = None
-                    delivery.save(update_fields=['status', 'detail'])
+                if delivery.status in (
+                    NotificationDeliveryStatusChoice.SENT,
+                    NotificationDeliveryStatusChoice.FAILED,
+                    NotificationDeliveryStatusChoice.SKIPPED,
+                ):
+                    continue
                 deliveries.append(delivery)
 
+            if dispatch_in_progress:
+                continue
             if deliveries:
                 NotificationDelivery._attempt_send_message_digest(deliveries, pref)
-            if all(delivery.status == NotificationDeliveryStatusChoice.SENT for delivery in deliveries):
+                summary['dispatches'] += 1
+            if all(delivery.status in (
+                NotificationDeliveryStatusChoice.SENT,
+                NotificationDeliveryStatusChoice.FAILED,
+                NotificationDeliveryStatusChoice.SKIPPED,
+            ) for delivery in deliveries):
                 cursor.last_message_id = snapshot_max_id
                 cursor.save(update_fields=['last_message_id', 'updated_at'])
-                summary['sent'] += len(deliveries)
+                summary['sent'] += sum(
+                    delivery.status == NotificationDeliveryStatusChoice.SENT for delivery in deliveries
+                )
+                summary['failed'] += sum(
+                    delivery.status == NotificationDeliveryStatusChoice.FAILED for delivery in deliveries
+                )
                 summary['advanced'] += 1
             else:
                 summary['failed'] += sum(
@@ -2965,6 +3034,8 @@ class NotificationDelivery(models.Model):
     DIGEST_CHAT_LIMIT = 3
     DIGEST_MESSAGE_LIMIT_PER_CHAT = 5
     EMAIL_BATCH_BODY_LIMIT = 1200
+    PROCESSING_LEASE_MINUTES = 15
+    MIN_EMAIL_INTERVAL_MINUTES = 5
     MESSAGE_EVENT_TYPES = (
         NotificationEventTypeChoice.DIRECT_MESSAGE,
         NotificationEventTypeChoice.GROUP_MESSAGE,
@@ -2972,6 +3043,7 @@ class NotificationDelivery(models.Model):
 
     event = models.ForeignKey(NotificationEvent, on_delete=models.CASCADE, related_name='deliveries', db_index=True)
     channel = models.IntegerField(choices=UserNotificationChoice.to_choices())
+    route_key = models.CharField(max_length=80, default='channel', db_index=True)
     instant_endpoint = models.ForeignKey(
         InstantNotificationEndpoint,
         on_delete=models.SET_NULL,
@@ -2995,6 +3067,94 @@ class NotificationDelivery(models.Model):
     attempted_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
+    class Meta:
+        constraints = [models.UniqueConstraint(
+            fields=['event', 'route_key'],
+            name='unique_notification_delivery_route',
+        )]
+
+    @classmethod
+    def _route_key(cls, channel, instant_endpoint=None, web_subscription=None):
+        if web_subscription is not None:
+            return f'web:{web_subscription.id}'
+        if instant_endpoint is not None:
+            return f'instant:{instant_endpoint.id}'
+        return f'channel:{channel}'
+
+    @classmethod
+    def get_or_create_for_route(
+        cls,
+        event,
+        channel,
+        instant_endpoint=None,
+        web_subscription=None,
+        defaults=None,
+    ):
+        values = dict(defaults or {})
+        values.update(
+            channel=channel,
+            instant_endpoint=instant_endpoint,
+            web_subscription=web_subscription,
+        )
+        return cls.objects.get_or_create(
+            event=event,
+            route_key=cls._route_key(channel, instant_endpoint, web_subscription),
+            defaults=values,
+        )
+
+    @classmethod
+    def _recover_abandoned_dispatches(cls):
+        stale_before = timezone.now() - datetime.timedelta(minutes=cls.PROCESSING_LEASE_MINUTES)
+        return cls.objects.filter(
+            status=NotificationDeliveryStatusChoice.PROCESSING,
+            attempted_at__lt=stale_before,
+        ).update(
+            status=NotificationDeliveryStatusChoice.SKIPPED,
+            detail='dispatch_outcome_unknown',
+        )
+
+    @classmethod
+    def _claim_pending(cls, deliveries):
+        ids = [delivery.id for delivery in deliveries if delivery.id]
+        if not ids:
+            return []
+        token = f'dispatching:{get_random_string(24)}'
+        attempted_at = timezone.now()
+        cls.objects.filter(
+            id__in=ids,
+            status=NotificationDeliveryStatusChoice.PENDING,
+        ).update(
+            status=NotificationDeliveryStatusChoice.PROCESSING,
+            detail=token,
+            attempted_at=attempted_at,
+        )
+        claimed_ids = set(cls.objects.filter(
+            id__in=ids,
+            status=NotificationDeliveryStatusChoice.PROCESSING,
+            detail=token,
+        ).values_list('id', flat=True))
+        claimed = [delivery for delivery in deliveries if delivery.id in claimed_ids]
+        for delivery in claimed:
+            delivery.status = NotificationDeliveryStatusChoice.PROCESSING
+            delivery.detail = token
+            delivery.attempted_at = attempted_at
+        return claimed
+
+    @classmethod
+    def _email_cooldown_active(cls, user, pref):
+        if pref.channel != UserNotificationChoice.EMAIL:
+            return False
+        interval_minutes = min(60, max(
+            cls.MIN_EMAIL_INTERVAL_MINUTES,
+            int(pref.offline_threshold_minutes or 0),
+        ))
+        last_attempt = cls.objects.filter(
+            event__user=user,
+            channel=UserNotificationChoice.EMAIL,
+            attempted_at__isnull=False,
+        ).aggregate(value=Max('attempted_at'))['value']
+        return bool(last_attempt and last_attempt > timezone.now() - datetime.timedelta(minutes=interval_minutes))
+
     @classmethod
     def _channel_available(cls, user: User, channel: int):
         if channel == UserNotificationChoice.EMAIL:
@@ -3010,14 +3170,15 @@ class NotificationDelivery(models.Model):
         if not NotificationTopicPreference.is_enabled_for_event(event, NotificationRouteChannelChoice.WEB):
             return []
         subscriptions = list(WebPushSubscription.active_for_user(event.user))
-        deliveries = [
-            cls.objects.create(
-                event=event,
-                channel=UserNotificationChoice.UNSET,
+        deliveries = []
+        for subscription in subscriptions:
+            delivery, created = cls.get_or_create_for_route(
+                event,
+                UserNotificationChoice.UNSET,
                 web_subscription=subscription,
             )
-            for subscription in subscriptions
-        ]
+            if created:
+                deliveries.append(delivery)
         if deliveries:
             with ThreadPoolExecutor(
                 max_workers=min(4, len(deliveries)),
@@ -3135,14 +3296,15 @@ class NotificationDelivery(models.Model):
             or not NotificationTopicPreference.is_enabled_for_event(event, UserNotificationChoice.BARK)
         ):
             return []
-        deliveries = [
-            cls.objects.create(
-                event=event,
-                channel=UserNotificationChoice.BARK,
+        deliveries = []
+        for endpoint in InstantNotificationEndpoint.active_for_user(event.user):
+            delivery, created = cls.get_or_create_for_route(
+                event,
+                UserNotificationChoice.BARK,
                 instant_endpoint=endpoint,
             )
-            for endpoint in InstantNotificationEndpoint.active_for_user(event.user)
-        ]
+            if created:
+                deliveries.append(delivery)
         for delivery in deliveries:
             delivery._attempt_send(pref)
         return deliveries
@@ -3364,6 +3526,7 @@ class NotificationDelivery(models.Model):
 
     @classmethod
     def _attempt_send_message_digest(cls, deliveries, pref: NotificationPreference):
+        deliveries = cls._claim_pending(deliveries)
         if not deliveries:
             return []
         user = deliveries[0].event.user
@@ -3432,39 +3595,12 @@ class NotificationDelivery(models.Model):
         if not deliveries:
             return []
 
-        with translation.override(user.language):
-            title = cls._render_email_batch_title(deliveries, hide_message_content=pref.hide_message_content)
-            body = cls._render_email_batch_body(deliveries, pref)
-            footer_note = str(_('You can adjust email reminders in Notification settings.'))
-        attempted_at = timezone.now()
-        try:
-            result = notificator.mail(
-                target,
-                format='markdown',
-                title=title,
-                body=body,
-                locale=notificator_locale(user.language),
-                recipient_name=user.name,
-                action_url=cls._email_action_url(deliveries),
-                footer_note=footer_note,
-            )
-            ok, detail = True, notificator_result_detail(result)
-        except NotificatorAPIError as err:
-            ok, detail = False, str(err)
-        except Exception as err:
-            ok, detail = False, str(err)
-
-        status = NotificationDeliveryStatusChoice.SENT if ok else NotificationDeliveryStatusChoice.FAILED
-        detail = str(detail)[:255] if detail else None
-        ids = [delivery.id for delivery in deliveries]
-        cls.objects.filter(id__in=ids).update(status=status, detail=detail, attempted_at=attempted_at)
-        for delivery in deliveries:
-            delivery.status = status
-            delivery.detail = detail
-            delivery.attempted_at = attempted_at
-        return deliveries
+        return cls._attempt_send_message_digest(deliveries, pref)
 
     def _attempt_send(self, pref: NotificationPreference):
+        if not self._claim_pending([self]):
+            self.refresh_from_db(fields=['status', 'detail', 'attempted_at'])
+            return self
         target = self.instant_endpoint.target if self.instant_endpoint_id else self._channel_target(self.event.user, self.channel)
         if not target:
             self.status = NotificationDeliveryStatusChoice.SKIPPED
@@ -3573,13 +3709,18 @@ class NotificationDelivery(models.Model):
             if not cls._offline_threshold_reached(event.user, pref.offline_threshold_minutes):
                 detail = 'waiting_offline_threshold'
 
-            delivery = cls.objects.create(
-                event=event,
-                channel=pref.channel,
-                status=NotificationDeliveryStatusChoice.PENDING,
-                detail=detail,
+            delivery, created = cls.get_or_create_for_route(
+                event,
+                pref.channel,
+                defaults=dict(
+                    status=NotificationDeliveryStatusChoice.PENDING,
+                    detail=detail,
+                ),
             )
-            if detail is None:
+            if not created:
+                deliveries.append(delivery)
+                continue
+            if detail is None and pref.channel != UserNotificationChoice.EMAIL:
                 if cls._is_message_email_delivery(delivery):
                     cls._attempt_send_email_batch(event.user, pref)
                 else:
@@ -3589,11 +3730,26 @@ class NotificationDelivery(models.Model):
 
     @classmethod
     def process_pending(cls, user: User = None, limit: int = 200):
+        cls._recover_abandoned_dispatches()
         query = cls.objects.filter(status=NotificationDeliveryStatusChoice.PENDING).select_related('event', 'event__user')
         if user is not None:
             query = query.filter(event__user=user)
-        deliveries = list(query.order_by('created_at')[:limit])
+        oldest_email_for_user = cls.objects.filter(
+            status=NotificationDeliveryStatusChoice.PENDING,
+            channel=UserNotificationChoice.EMAIL,
+            event__user_id=OuterRef('event__user_id'),
+        )
+        if user is not None:
+            oldest_email_for_user = oldest_email_for_user.filter(event__user=user)
+        oldest_email_for_user = oldest_email_for_user.order_by('created_at', 'id').values('id')[:1]
+        deliveries = list(
+            query.filter(
+                ~Q(channel=UserNotificationChoice.EMAIL)
+                | Q(id=Subquery(oldest_email_for_user)),
+            ).order_by('created_at', 'id')[:limit]
+        )
         processed_delivery_ids = set()
+        processed_email_user_ids = set()
         for delivery in deliveries:
             if delivery.id in processed_delivery_ids:
                 continue
@@ -3635,6 +3791,10 @@ class NotificationDelivery(models.Model):
                 delivery.detail = 'waiting_offline_threshold'
                 delivery.save(update_fields=['detail'])
                 continue
+            if delivery.channel == UserNotificationChoice.EMAIL:
+                if delivery.event.user_id in processed_email_user_ids or cls._email_cooldown_active(delivery.event.user, pref):
+                    continue
+                processed_email_user_ids.add(delivery.event.user_id)
             if cls._is_message_email_delivery(delivery):
                 batch = cls._attempt_send_email_batch(delivery.event.user, pref)
                 processed_delivery_ids.update(item.id for item in batch)

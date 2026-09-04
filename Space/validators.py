@@ -19,6 +19,7 @@ class SpaceErrors:
     EMAIL_TRIAL_SPACE_EXISTS = Error(message=_('Verify the administrator phone for the existing space before creating another one'), code=Code.Forbidden)
     EMAIL_CODE_INVALID = Error(message=_('Invalid space email verification code'), code=Code.BadRequest)
     EMAIL_CODE_EXPIRED = Error(message=_('Space email verification code expired'), code=Code.BadRequest)
+    EMAIL_CODE_TOO_FREQUENT = Error(message=_('Please wait before requesting another space verification code'), code=Code.BadRequest)
     EMAIL_SEND_FAILED = Error(message=_('Failed to send space verification email'), code=Code.InternalServerError)
     EMAIL_MISMATCH = Error(message=_('Space email does not match'), code=Code.BadRequest)
     MEMBER_LIMIT_INVALID = Error(message=_('Member limit should be at least 1'), code=Code.BadRequest)

@@ -8,7 +8,14 @@ from django.utils import timezone
 from Chat.models import Chat, ChatMember, ChatMemberRoleChoice, ChatMemberStatusChoice, ChatTypeChoice
 from Config.models import Config, ConfigInstance
 from Message.models import Message, MessageEvent, MessageTypeChoice, MessageUserState, PinnedMessage
-from Space.models import Space, SpaceOperator, SpacePhoneVerificationCode
+from Space.models import (
+    Space,
+    SpaceEmailCodePurposeChoice,
+    SpaceEmailVerificationCode,
+    SpaceOperator,
+    SpacePhoneVerificationCode,
+)
+from Space.validators import SpaceErrors
 from Square.models import Statement, StatementComment, StatementCommentLike, StatementLike
 from User.models import GrowthEvent, NotificationPreference, User, UserEmojiUsage, UserNotificationChoice
 from User.growth import GROWTH_THRESHOLDS
@@ -75,6 +82,22 @@ class SpaceAdminApiTests(TestCase):
         with self.assertRaises(Exception):
             trial.set_admin_settings('Trial', True, True, True, 2, None)
 
+    @patch('Space.models.threading.Thread')
+    def test_capacity_email_is_claimed_once_for_stale_space_instances(self, thread):
+        trial = Space.objects.create(name='Capacity', slug='capacity-space', email='capacity@example.com')
+        for index in range(4):
+            User.create(trial, f'Capacity member {index}')
+        first = Space.index(trial.id)
+        second = Space.index(trial.id)
+
+        first.notify_capacity_if_needed()
+        second.notify_capacity_if_needed()
+
+        self.assertEqual(thread.call_count, 1)
+        thread.return_value.start.assert_called_once()
+        trial.refresh_from_db()
+        self.assertEqual(trial.capacity_notice_tier, 1)
+
     def test_email_can_create_again_only_after_existing_space_phone_verification(self):
         trial = Space.objects.create(name='Trial', slug='trial-email', email='shared@example.com')
         with self.assertRaises(Exception):
@@ -82,6 +105,20 @@ class SpaceAdminApiTests(TestCase):
         trial.admin_phone_verified_at = timezone.now()
         trial.save(update_fields=['admin_phone_verified_at'])
         self.assertEqual(Space.require_email_creation_available('shared@example.com'), 'shared@example.com')
+
+    def test_space_email_code_has_server_side_resend_cooldown(self):
+        SpaceEmailVerificationCode.issue(
+            email=self.space.email,
+            purpose=SpaceEmailCodePurposeChoice.LOGIN,
+            space=self.space,
+        )
+
+        with self.assertRaises(SpaceErrors.EMAIL_CODE_TOO_FREQUENT.__class__):
+            SpaceEmailVerificationCode.issue(
+                email=self.space.email,
+                purpose=SpaceEmailCodePurposeChoice.LOGIN,
+                space=self.space,
+            )
 
     def test_phone_verification_upgrades_space_to_one_hundred_members(self):
         trial = Space.objects.create(name='Trial', slug='trial-phone', email='phone@example.com')

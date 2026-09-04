@@ -389,20 +389,21 @@ class SpaceAdminIdentitySubmitView(View):
     @auth.require_space
     @analyse.json(SpaceIdentityParams.key)
     def post(self, request: Request):
-        space = request.space
-        if space.admin_phone_verified_at is None:
-            raise SpaceErrors.TIER_FEATURE_RESTRICTED
-        if space.identity_submitted_at is not None and space.identity_verified_at is None:
-            raise SpaceErrors.IDENTITY_ALREADY_SUBMITTED
-        space.identity_document_key = validate_space_identity_key(space.id, request.json.key)
-        space.identity_submitted_at = timezone.now()
-        space.identity_verified_at = None
-        space.save(update_fields=['identity_document_key', 'identity_submitted_at', 'identity_verified_at'])
-        transaction.on_commit(lambda: threading.Thread(
-            target=_send_identity_review_safely,
-            args=(space.id,),
-            daemon=True,
-        ).start())
+        with transaction.atomic():
+            space = Space.objects.select_for_update().get(id=request.space.id)
+            if space.admin_phone_verified_at is None:
+                raise SpaceErrors.TIER_FEATURE_RESTRICTED
+            if space.identity_submitted_at is not None and space.identity_verified_at is None:
+                raise SpaceErrors.IDENTITY_ALREADY_SUBMITTED
+            space.identity_document_key = validate_space_identity_key(space.id, request.json.key)
+            space.identity_submitted_at = timezone.now()
+            space.identity_verified_at = None
+            space.save(update_fields=['identity_document_key', 'identity_submitted_at', 'identity_verified_at'])
+            transaction.on_commit(lambda: threading.Thread(
+                target=_send_identity_review_safely,
+                args=(space.id,),
+                daemon=True,
+            ).start())
         return space.json_private()
 
 

@@ -1,6 +1,8 @@
 from datetime import timedelta
+from io import StringIO
 from unittest.mock import patch
 
+from django.core.management import call_command
 from django.test import TestCase
 from django.utils import timezone
 
@@ -11,7 +13,9 @@ from Space.models import Space
 from User.models import (
     NotificationChannelCursor,
     NotificationDelivery,
+    NotificationDeliveryStatusChoice,
     NotificationEvent,
+    NotificationEventTypeChoice,
     NotificationPreference,
     InstantNotificationEndpoint,
     User,
@@ -97,6 +101,177 @@ class NotificationDigestTests(TestCase):
         self.assertEqual(cursor.last_message_id, second.id)
         self.assertEqual(summary['sent'], 2)
         self.assertLess(first.id, cursor.last_message_id)
+
+    @patch('User.models.notificator.mail', return_value={'request_id': 'digest-paced'})
+    def test_recent_email_attempt_defers_the_next_digest(self, mail):
+        first = self.create_notified_message('first')
+        NotificationChannelCursor.process_due()
+        second = self.create_notified_message('second')
+
+        NotificationChannelCursor.process_due()
+
+        self.assertEqual(mail.call_count, 1)
+        cursor = NotificationChannelCursor.objects.get(user=self.recipient, channel=UserNotificationChoice.EMAIL)
+        self.assertEqual(cursor.last_message_id, first.id)
+
+        NotificationDelivery.objects.filter(channel=UserNotificationChoice.EMAIL).update(
+            attempted_at=timezone.now() - timedelta(minutes=31),
+        )
+        NotificationChannelCursor.process_due()
+
+        self.assertEqual(mail.call_count, 2)
+        cursor.refresh_from_db()
+        self.assertEqual(cursor.last_message_id, second.id)
+
+    @patch('User.models.notificator.mail', side_effect=RuntimeError('outcome uncertain'))
+    def test_failed_digest_is_not_automatically_resent(self, mail):
+        message = self.create_notified_message('send once')
+
+        NotificationChannelCursor.process_due()
+        cursor = NotificationChannelCursor.objects.get(user=self.recipient, channel=UserNotificationChoice.EMAIL)
+        self.assertEqual(cursor.last_message_id, message.id)
+        NotificationDelivery.objects.filter(channel=UserNotificationChoice.EMAIL).update(
+            attempted_at=timezone.now() - timedelta(minutes=31),
+        )
+        NotificationChannelCursor.process_due()
+
+        self.assertEqual(mail.call_count, 1)
+        delivery = NotificationDelivery.objects.get(channel=UserNotificationChoice.EMAIL)
+        self.assertEqual(delivery.status, NotificationDeliveryStatusChoice.FAILED)
+        cursor.refresh_from_db()
+        self.assertEqual(cursor.last_message_id, message.id)
+
+    def test_event_delivery_route_is_idempotent(self):
+        event = NotificationEvent.objects.create(
+            space=self.space,
+            user=self.recipient,
+            event_type=NotificationEventTypeChoice.SYSTEM,
+            payload={'kind': 'friend_request'},
+        )
+
+        NotificationDelivery.enqueue_for_event(event)
+        NotificationDelivery.enqueue_for_event(event)
+
+        self.assertEqual(NotificationDelivery.objects.filter(
+            event=event,
+            channel=UserNotificationChoice.EMAIL,
+        ).count(), 1)
+
+    def test_pending_delivery_can_only_be_claimed_once(self):
+        event = NotificationEvent.objects.create(
+            space=self.space,
+            user=self.recipient,
+            event_type=NotificationEventTypeChoice.SYSTEM,
+            payload={'kind': 'friend_request'},
+        )
+        delivery, _created = NotificationDelivery.get_or_create_for_route(
+            event,
+            UserNotificationChoice.EMAIL,
+        )
+
+        first_claim = NotificationDelivery._claim_pending([delivery])
+        second_claim = NotificationDelivery._claim_pending([delivery])
+
+        self.assertEqual([item.id for item in first_claim], [delivery.id])
+        self.assertEqual(second_claim, [])
+
+    @patch('User.models.notificator.mail', return_value={'request_id': 'cursor-fair'})
+    def test_digest_worker_prioritizes_the_oldest_cursor(self, mail):
+        other = User.create(self.space, 'Older cursor', verified=True)
+        other.email = 'older@example.com'
+        other.email_verified_at = timezone.now()
+        other.last_heartbeat = timezone.now() - timedelta(hours=2)
+        other.save(update_fields=['email', 'email_verified_at', 'last_heartbeat'])
+        ChatMember.objects.create(
+            chat=self.chat,
+            user=other,
+            status=ChatMemberStatusChoice.ACTIVE,
+            joined_at=timezone.now() - timedelta(minutes=1),
+        )
+        NotificationPreference.set_preference(
+            other,
+            UserNotificationChoice.EMAIL,
+            enabled=True,
+            offline_threshold_minutes=30,
+        )
+        current_message_id = Message.objects.order_by('-id').values_list('id', flat=True).first() or 0
+        other_cursor, _created = NotificationChannelCursor.objects.update_or_create(
+            user=other,
+            channel=UserNotificationChoice.EMAIL,
+            defaults={'last_message_id': current_message_id},
+        )
+        own_cursor = NotificationChannelCursor.objects.get(
+            user=self.recipient,
+            channel=UserNotificationChoice.EMAIL,
+        )
+        NotificationChannelCursor.objects.filter(id=other_cursor.id).update(
+            updated_at=timezone.now() - timedelta(days=1),
+        )
+        NotificationChannelCursor.objects.filter(id=own_cursor.id).update(updated_at=timezone.now())
+        message = self.create_notified_message('fair delivery')
+
+        NotificationChannelCursor.process_due(limit_users=1)
+
+        self.assertEqual(mail.call_count, 1)
+        self.assertEqual(mail.call_args.kwargs['recipient_name'], other.name)
+        other_cursor.refresh_from_db()
+        own_cursor.refresh_from_db()
+        self.assertEqual(other_cursor.last_message_id, message.id)
+        self.assertLess(own_cursor.last_message_id, message.id)
+
+    @patch('User.models.notificator.mail', return_value={'request_id': 'pending-paced'})
+    def test_pending_worker_sends_at_most_one_email_per_user(self, mail):
+        for kind in ('friend_request', 'friend_request_accepted'):
+            event = NotificationEvent.objects.create(
+                space=self.space,
+                user=self.recipient,
+                event_type=NotificationEventTypeChoice.SYSTEM,
+                payload={'kind': kind},
+            )
+            NotificationDelivery.enqueue_for_event(event)
+
+        NotificationDelivery.process_pending()
+
+        self.assertEqual(mail.call_count, 1)
+        self.assertEqual(NotificationDelivery.objects.filter(
+            channel=UserNotificationChoice.EMAIL,
+            status=NotificationDeliveryStatusChoice.SENT,
+        ).count(), 1)
+        self.assertEqual(NotificationDelivery.objects.filter(
+            channel=UserNotificationChoice.EMAIL,
+            status=NotificationDeliveryStatusChoice.PENDING,
+        ).count(), 1)
+
+    @patch('User.models.notificator.mail', return_value={'request_id': 'pending-fair'})
+    def test_pending_worker_does_not_let_one_user_fill_the_batch(self, mail):
+        other = User.create(self.space, 'Other recipient', verified=True)
+        other.email = 'other@example.com'
+        other.email_verified_at = timezone.now()
+        other.last_heartbeat = timezone.now() - timedelta(hours=2)
+        other.save(update_fields=['email', 'email_verified_at', 'last_heartbeat'])
+        NotificationPreference.set_preference(
+            other,
+            UserNotificationChoice.EMAIL,
+            enabled=True,
+            offline_threshold_minutes=30,
+        )
+        for recipient in (self.recipient, self.recipient, other):
+            event = NotificationEvent.objects.create(
+                space=self.space,
+                user=recipient,
+                event_type=NotificationEventTypeChoice.SYSTEM,
+                payload={'kind': 'friend_request'},
+            )
+            NotificationDelivery.enqueue_for_event(event)
+
+        NotificationDelivery.process_pending(limit=2)
+
+        self.assertEqual(mail.call_count, 2)
+        sent_user_ids = set(NotificationDelivery.objects.filter(
+            channel=UserNotificationChoice.EMAIL,
+            status=NotificationDeliveryStatusChoice.SENT,
+        ).values_list('event__user_id', flat=True))
+        self.assertEqual(sent_user_ids, {self.recipient.id, other.id})
 
     @patch('User.models.notificator.bark')
     def test_bark_is_not_processed_by_digest_cursor(self, bark):
@@ -268,3 +443,23 @@ class NotificationDigestTests(TestCase):
         self.assertNotIn('ordinary\\-group\\-omitted', body)
         self.assertIn('And 2 more messages.', body)
         self.assertEqual(NotificationDelivery.objects.filter(status=1).count(), 9)
+
+
+class NotificationDigestCommandTests(TestCase):
+    @patch('User.management.commands.process_notification_digests.NotificationDelivery.process_pending')
+    @patch(
+        'User.management.commands.process_notification_digests.NotificationChannelCursor.process_due',
+        return_value={'dispatches': 3},
+    )
+    def test_message_and_pending_delivery_share_one_dispatch_budget(self, process_due, process_pending):
+        process_pending.return_value = []
+
+        call_command(
+            'process_notification_digests',
+            limit_users=5,
+            limit_deliveries=5,
+            stdout=StringIO(),
+        )
+
+        process_due.assert_called_once_with(limit_users=5)
+        process_pending.assert_called_once_with(limit=2)

@@ -251,6 +251,9 @@ msgstr "Invalid space email verification code"
 msgid "Space email verification code expired"
 msgstr "Space email verification code expired"
 
+msgid "Please wait before requesting another space verification code"
+msgstr "Please wait before requesting another space verification code"
+
 msgid "Failed to send space verification email"
 msgstr "Failed to send space verification email"
 
@@ -598,6 +601,9 @@ msgstr "Invalid contact verification code"
 
 msgid "Contact verification code expired"
 msgstr "Contact verification code expired"
+
+msgid "Please wait before requesting another contact verification code"
+msgstr "Please wait before requesting another contact verification code"
 
 msgid "Invalid contact channel"
 msgstr "Invalid contact channel"

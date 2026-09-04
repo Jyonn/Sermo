@@ -5,6 +5,7 @@ Description=Run Sermo notification delivery every minute
 OnBootSec=1min
 OnUnitActiveSec=1min
 AccuracySec=5s
+RandomizedDelaySec=20s
 Persistent=true
 Unit=sermo-notification-digests.service
 

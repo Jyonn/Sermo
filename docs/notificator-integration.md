@@ -32,11 +32,16 @@ Config.update_value(CI.NOTIFICATOR_TIMEOUT, "15")
 
 When a `NotificationEvent` is created:
 
-1. `NotificationDelivery` rows are created per channel preference.
+1. One `NotificationDelivery` row is created per event and concrete delivery route. The database constraint makes enqueueing idempotent.
 2. Disabled/unavailable channels are marked `SKIPPED`.
-3. If offline threshold is reached, the system sends immediately via SDK.
-4. Email message deliveries for the same user are batched into one mail when multiple pending direct/group messages are ready.
+3. Web Push and instant-notification routes are sent immediately. Email is always handed to the scheduled worker so request threads cannot create bursts.
+4. Email message deliveries for the same user are batched into one mail when multiple pending direct/group messages are ready. At most one email per user is selected in each worker pass.
 5. Bark message notifications include `url=https://sermo.jyonn.space/<space>/app/chats/<chat_id>` when `open_chat_on_tap` is enabled.
-6. If threshold is not reached, delivery stays `PENDING`.
+6. If the offline threshold or per-user email cooldown is not reached, delivery stays `PENDING`.
+7. A delivery is atomically claimed as `PROCESSING` before the external API call. Concurrent workers cannot send the same row.
+8. Failed or outcome-unknown attempts are not retried automatically because Notificator does not accept an idempotency key. This favors avoiding duplicate mail over retrying an ambiguous request.
+9. The scheduled command shares one dispatch budget between message digests and other pending deliveries, limiting backlog bursts after downtime.
 
-Pending deliveries can be retried later with `NotificationDelivery.process_pending()`.
+Pending deliveries are processed later with `NotificationDelivery.process_pending()`.
+
+Verification-code endpoints enforce their resend cooldown in the database transaction, rather than relying only on the client countdown. Capacity and identity-review emails also claim their state change atomically before starting delivery.

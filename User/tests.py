@@ -351,6 +351,20 @@ class ContactAvailabilityTests(TestCase):
 
         self.assertEqual(verification.target, 'self@example.com')
 
+    def test_contact_code_has_server_side_resend_cooldown(self):
+        UserContactVerificationCode.issue(
+            self.new_user,
+            UserNotificationChoice.EMAIL,
+            'new@example.com',
+        )
+
+        with self.assertRaises(UserErrors.CONTACT_CODE_TOO_FREQUENT.__class__):
+            UserContactVerificationCode.issue(
+                self.new_user,
+                UserNotificationChoice.EMAIL,
+                'new@example.com',
+            )
+
 
 class NotificatorIntegrationTests(SimpleTestCase):
     @patch('utils.notificator_integration.notificator')

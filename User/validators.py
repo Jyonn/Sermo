@@ -47,6 +47,7 @@ class UserErrors:
     WELCOME_MESSAGES_DELETE_FIRST = Error(message=_('Delete welcome messages down to your current limit before adding new ones'), code=Code.BadRequest)
     CONTACT_CODE_INVALID = Error(message=_('Invalid contact verification code'), code=Code.BadRequest)
     CONTACT_CODE_EXPIRED = Error(message=_('Contact verification code expired'), code=Code.BadRequest)
+    CONTACT_CODE_TOO_FREQUENT = Error(message=_('Please wait before requesting another contact verification code'), code=Code.BadRequest)
     CONTACT_CHANNEL_INVALID = Error(message=_('Invalid contact channel'), code=Code.BadRequest)
     CONTACT_SEND_FAILED = Error(message=_('Failed to send contact verification message'), code=Code.InternalServerError)
     INSTANT_ENDPOINT_INVALID = Error(message=_('Invalid instant notification endpoint'), code=Code.BadRequest)

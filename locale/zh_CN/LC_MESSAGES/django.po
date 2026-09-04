@@ -251,6 +251,9 @@ msgstr "无效的空间邮箱验证码"
 msgid "Space email verification code expired"
 msgstr "空间邮箱验证码已过期"
 
+msgid "Please wait before requesting another space verification code"
+msgstr "请稍后再获取空间验证码"
+
 msgid "Failed to send space verification email"
 msgstr "发送空间验证邮件失败"
 
@@ -600,6 +603,9 @@ msgstr "无效的联系方式验证码"
 
 msgid "Contact verification code expired"
 msgstr "联系方式验证码已过期"
+
+msgid "Please wait before requesting another contact verification code"
+msgstr "请稍后再获取联系方式验证码"
 
 msgid "Invalid contact channel"
 msgstr "无效的联系方式渠道"
