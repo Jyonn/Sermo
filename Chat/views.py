@@ -2,7 +2,7 @@ from django.db import transaction
 from django.views import View
 from smartdjango import analyse, OK
 
-from Chat.models import Chat, ChatMember, ChatMemberStatusChoice, ChatPurposeChoice, ChatReadState, ChatUserPreference
+from Chat.models import Chat, ChatMember, ChatMemberStatusChoice, ChatPurposeChoice, ChatReadState, ChatUserPreference, Submission, SubmissionMemberRoleChoice
 from Chat.params import ChatParams, ChatMemberParams, ChatPreferenceParams
 from Chat.validators import ChatErrors
 from Message.models import MediaResource, Message, MessageTypeChoice
@@ -166,7 +166,9 @@ class SubmissionSubmitView(View):
         chat = request.query.chat
         if not chat.submission:
             raise ChatErrors.FORBIDDEN
-        chat.submission_record.submit(request.user)
+        with transaction.atomic():
+            submission = Submission.objects.select_for_update().get(chat=chat)
+            submission.submit(request.user)
         return ChatListView.build_chat_payload(chat, request.user, request)
 
 
@@ -179,7 +181,9 @@ class SubmissionStatusView(View):
         chat = request.query.chat
         if not chat.submission:
             raise ChatErrors.FORBIDDEN
-        chat.submission_record.review(request.user, request.json.submission_action)
+        with transaction.atomic():
+            submission = Submission.objects.select_for_update().get(chat=chat)
+            submission.review(request.user, request.json.submission_action)
         return ChatListView.build_chat_payload(chat, request.user, request)
 
 
@@ -198,22 +202,25 @@ class SubmissionWithdrawView(View):
         return ChatListView.build_chat_payload(chat, request.user, request)
 
 
-class SubmissionInviteReviewView(View):
+class SubmissionInviteView(View):
     @auth.require_user
     @analyse.query(ChatMemberParams.chat_id)
-    @analyse.json(ChatMemberParams.user_id, ChatMemberParams.accept)
+    @analyse.json(ChatMemberParams.user_id, ChatMemberParams.submission_role)
+    @auth.require_chat_member()
     def post(self, request):
-        member = ChatMember.objects.filter(chat=request.query.chat, user=request.json.user).select_related('chat').first()
-        if member is None:
-            raise ChatErrors.FORBIDDEN
-        member.review_submission_invite(request.user, bool(request.json.accept))
-        return request.query.chat.json()
+        role = {
+            'author': SubmissionMemberRoleChoice.AUTHOR,
+            'reviewer': SubmissionMemberRoleChoice.REVIEWER,
+        }[request.json.submission_role]
+        member = request.query.chat.invite_submission_member(request.user, request.json.user, role)
+        return member.json()
 
     @auth.require_user
     @analyse.query(ChatMemberParams.chat_id)
+    @auth.require_chat_member()
     def get(self, request):
         chat = request.query.chat
-        if not chat.submission or not (request.user.is_official or request.user.is_space_operator):
+        if not chat.submission or chat.submission_record.role_for(request.user) != 'reviewer':
             raise ChatErrors.FORBIDDEN
         return [
             member.json()

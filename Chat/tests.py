@@ -6,7 +6,7 @@ from unittest.mock import patch
 from django.test import TestCase
 from django.utils import timezone
 
-from Chat.models import Chat, ChatMember, ChatMemberRoleChoice, ChatMemberStatusChoice, ChatPurposeChoice, ChatReadState, ChatTypeChoice, ChatUserPreference, SubmissionStatusChoice
+from Chat.models import Chat, ChatMember, ChatMemberRoleChoice, ChatMemberStatusChoice, ChatPurposeChoice, ChatReadState, ChatTypeChoice, ChatUserPreference, SubmissionMemberRoleChoice, SubmissionStatusChoice
 from Message.models import Message, MessageTypeChoice, PinnedMessage
 from Space.models import Space, SpaceOperator
 from User.models import NotificationEvent, User, UserStateEvent, UserStateEventKindChoice
@@ -86,24 +86,82 @@ class SubmissionChatTests(TestCase):
         self.assertEqual(Chat.objects.filter(purpose=ChatPurposeChoice.SUBMISSION).count(), 1)
         self.assertEqual(Message.objects.filter(chat_id=first.json()['body']['chat']['chat_id']).count(), 1)
 
-    def test_submission_invite_requires_operator_review_and_reveals_full_history(self):
+    def test_submission_invite_requires_reviewer_and_invitee_consent_then_reveals_full_history(self):
         chat, _ = Chat.create_submission(self.author, self.operator, 'Invite review', 'invite-draft')
         old_message = Message.create(chat, self.author, MessageTypeChoice.TEXT, 'Earlier context')
         chat.submission_record.submit(self.author)
         invited = User.create(self.space, 'Invited', verified=True)
-        from Friendship.models import Friendship
-        Friendship.ensure_locked_friendship(self.author, invited)
 
-        with patch.object(self.author, 'require_capability'):
-            member = chat.invite_member(self.author, invited)
+        forbidden = self.client.post(
+            f'/chats/submissions/invites?chat_id={chat.id}',
+            data=json.dumps({'user_id': invited.id, 'role': 'author'}),
+            content_type='application/json',
+            **self.authorization(self.author),
+        )
+        self.assertEqual(forbidden.json()['identifier'], 'CHAT@SUBMISSION_REVIEW_FORBIDDEN')
+
+        response = self.client.post(
+            f'/chats/submissions/invites?chat_id={chat.id}',
+            data=json.dumps({'user_id': invited.id, 'role': 'author'}),
+            content_type='application/json',
+            **self.authorization(self.operator),
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        member = ChatMember.objects.get(chat=chat, user=invited)
         self.assertEqual(member.status, ChatMemberStatusChoice.PENDING)
+        self.assertEqual(member.submission_role, SubmissionMemberRoleChoice.AUTHOR)
         self.assertFalse(chat.has_active_member(invited))
+        pending = self.client.get('/chats/group/invites', **self.authorization(invited))
+        self.assertEqual(pending.status_code, 200, pending.content)
+        self.assertEqual(pending.json()['body'][0]['submission_role'], 'author')
 
-        member.review_submission_invite(self.operator, True)
+        accepted = self.client.post(
+            f'/chats/group/invite/respond?chat_id={chat.id}',
+            data=json.dumps({'accept': 1}),
+            content_type='application/json',
+            **self.authorization(invited),
+        )
+        self.assertEqual(accepted.status_code, 200, accepted.content)
+        member.refresh_from_db()
         self.assertTrue(chat.has_active_member(invited))
+        self.assertEqual(member.joined_at, chat.created_at)
         self.assertIn(old_message.id, Message.visible_for_user(chat, invited).values_list('id', flat=True))
         with self.assertRaises(Exception):
             chat.leave(invited)
+
+    def test_submission_supports_multiple_mutually_exclusive_authors_and_reviewers(self):
+        chat, _ = Chat.create_submission(self.author, self.operator, 'Collaborative', 'collaborative-draft')
+        coauthor = User.create(self.space, 'Coauthor', verified=True)
+        second_reviewer = User.create(self.space, 'Second reviewer', verified=True)
+        SpaceOperator.objects.create(space=self.space, user=second_reviewer)
+        invalid_reviewer = User.create(self.space, 'Not an operator', verified=True)
+
+        author_invite = chat.invite_submission_member(self.operator, coauthor, SubmissionMemberRoleChoice.AUTHOR)
+        reviewer_invite = chat.invite_submission_member(self.operator, second_reviewer, SubmissionMemberRoleChoice.REVIEWER)
+        with self.assertRaises(Exception):
+            chat.invite_submission_member(self.operator, invalid_reviewer, SubmissionMemberRoleChoice.REVIEWER)
+        with self.assertRaises(Exception):
+            chat.invite_submission_member(self.operator, coauthor, SubmissionMemberRoleChoice.REVIEWER)
+
+        ChatMember.respond(chat, coauthor, True)
+        ChatMember.respond(chat, second_reviewer, True)
+        author_invite.refresh_from_db()
+        reviewer_invite.refresh_from_db()
+        self.assertEqual(author_invite.submission_role, SubmissionMemberRoleChoice.AUTHOR)
+        self.assertEqual(reviewer_invite.submission_role, SubmissionMemberRoleChoice.REVIEWER)
+
+        Message.create(chat, coauthor, MessageTypeChoice.TEXT, 'Shared draft')
+        chat.submission_record.submit(coauthor)
+        Message.create(chat, second_reviewer, MessageTypeChoice.TEXT, 'Reviewed together')
+        chat.submission_record.review(second_reviewer, 'revision')
+
+        payload = chat.submission_record.jsonl()
+        self.assertEqual({user['user_id'] for user in payload['authors']}, {self.author.id, coauthor.id})
+        self.assertEqual({user['user_id'] for user in payload['reviewers']}, {self.operator.id, second_reviewer.id})
+        author_rows = Chat.get_user_chats(coauthor, purpose=ChatPurposeChoice.SUBMISSION, submission_role='author')
+        reviewer_rows = Chat.get_user_chats(second_reviewer, purpose=ChatPurposeChoice.SUBMISSION, submission_role='reviewer')
+        self.assertIn(chat, author_rows)
+        self.assertIn(chat, reviewer_rows)
 
     def test_submission_workflow_enforces_sending_and_draft_recall(self):
         chat, _ = Chat.create_submission(self.author, self.operator, 'Workflow', 'workflow-draft')

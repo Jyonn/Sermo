@@ -89,7 +89,7 @@ class MessageView(View):
             submission = message.chat.submission_record
             if (
                 request.query.delete_scope != 'everyone'
-                or request.user.id != submission.author_id
+                or submission.role_for(request.user) != 'author'
                 or submission.status != SubmissionStatusChoice.DRAFT
             ):
                 raise MessageErrors.RECALL_WINDOW_EXPIRED

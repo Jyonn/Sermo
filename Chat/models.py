@@ -32,6 +32,11 @@ class ChatMemberStatusChoice(Choice):
     KICKED = 4
 
 
+class SubmissionMemberRoleChoice(Choice):
+    AUTHOR = 0
+    REVIEWER = 1
+
+
 class SubmissionStatusChoice(Choice):
     DRAFT = 0
     REVIEW = 1
@@ -100,7 +105,8 @@ class Chat(models.Model):
         payload = []
         for item in members:
             user = item.user.jsonl()
-            user['joined_at'] = item.joined_at.timestamp()
+            user['joined_at'] = item.joined_at.timestamp() if item.joined_at else None
+            user['submission_role'] = item.submission_role_name
             payload.append(user)
         return payload
 
@@ -185,18 +191,18 @@ class Chat(models.Model):
         if purpose == ChatPurposeChoice.SUBMISSION:
             if submission_role == 'reviewer':
                 filters.update(
-                    submission_record__recipient=user,
+                    chat_members__submission_role=SubmissionMemberRoleChoice.REVIEWER,
                     submission_record__status__gt=SubmissionStatusChoice.DRAFT,
                 )
             else:
-                filters['submission_record__author'] = user
+                filters['chat_members__submission_role'] = SubmissionMemberRoleChoice.AUTHOR
         chats = list(
             cls.objects.filter(**filters).distinct()
         )
         return [
             chat for chat in chats
             if chat.has_active_member(user)
-            and (not chat.group or user.has_capability('chat.group.join'))
+            and (chat.submission or not chat.group or user.has_capability('chat.group.join'))
         ]
 
     @classmethod
@@ -396,6 +402,7 @@ class Chat(models.Model):
             chat=chat,
             user=creator,
             role=ChatMemberRoleChoice.MEMBER,
+            submission_role=SubmissionMemberRoleChoice.AUTHOR,
             status=ChatMemberStatusChoice.ACTIVE,
             invited_by=creator,
             joined_at=chat.created_at,
@@ -404,6 +411,7 @@ class Chat(models.Model):
             chat=chat,
             user=recipient,
             role=ChatMemberRoleChoice.OWNER,
+            submission_role=SubmissionMemberRoleChoice.REVIEWER,
             status=ChatMemberStatusChoice.ACTIVE,
             invited_by=creator,
             joined_at=chat.created_at,
@@ -440,6 +448,8 @@ class Chat(models.Model):
     def invite_member(self, inviter: User, user: User):
         if not self.group:
             raise ChatErrors.NOT_GROUP_CHAT(chat=self.id)
+        if self.submission:
+            raise ChatErrors.FORBIDDEN
         inviter.require_capability('chat.group.invite')
         if user.space_id != self.space_id:
             raise ChatErrors.UNALIGNED_SPACE
@@ -448,8 +458,29 @@ class Chat(models.Model):
         if user.id != inviter.id:
             self._require_friend_of(inviter, user)
             self.space.require_group_join_allowed(user)
-        member = ChatMember.request_submission_invite(chat=self, user=user, invited_by=inviter) \
-            if self.submission else ChatMember.invite(chat=self, user=user, invited_by=inviter)
+        member = ChatMember.invite(chat=self, user=user, invited_by=inviter)
+        self._emit_state_changed([user.id])
+        return member
+
+    def invite_submission_member(self, inviter: User, user: User, submission_role: int):
+        if not self.submission:
+            raise ChatErrors.FORBIDDEN
+        if self.submission_record.role_for(inviter) != 'reviewer':
+            raise ChatErrors.SUBMISSION_REVIEW_FORBIDDEN
+        if user.space_id != self.space_id:
+            raise ChatErrors.UNALIGNED_SPACE
+        if user.is_deleted:
+            raise ChatErrors.USER_DELETED(user=user.name)
+        if submission_role not in (SubmissionMemberRoleChoice.AUTHOR, SubmissionMemberRoleChoice.REVIEWER):
+            raise ChatErrors.SUBMISSION_ROLE_INVALID
+        if submission_role == SubmissionMemberRoleChoice.REVIEWER and not (user.is_official or user.is_space_operator):
+            raise ChatErrors.SUBMISSION_RECIPIENT_INVALID
+        member = ChatMember.request_submission_invite(
+            chat=self,
+            user=user,
+            invited_by=inviter,
+            submission_role=submission_role,
+        )
         self._emit_state_changed([user.id])
         return member
 
@@ -571,6 +602,12 @@ class ChatMember(models.Model):
         choices=ChatMemberRoleChoice.to_choices(),
         default=ChatMemberRoleChoice.MEMBER,
     )
+    submission_role = models.IntegerField(
+        choices=SubmissionMemberRoleChoice.to_choices(),
+        null=True,
+        blank=True,
+        db_index=True,
+    )
     status = models.IntegerField(
         choices=ChatMemberStatusChoice.to_choices(),
         default=ChatMemberStatusChoice.PENDING,
@@ -611,8 +648,18 @@ class ChatMember(models.Model):
     def _dictify_chat(self):
         return self.chat.jsonl()
 
+    @property
+    def submission_role_name(self):
+        return {
+            SubmissionMemberRoleChoice.AUTHOR: 'author',
+            SubmissionMemberRoleChoice.REVIEWER: 'reviewer',
+        }.get(self.submission_role)
+
+    def _dictify_submission_role(self):
+        return self.submission_role_name
+
     def json(self):
-        return self.dictify('chat_id', 'chat', 'user', 'invited_by', 'role', 'status', 'created_at', 'updated_at')
+        return self.dictify('chat_id', 'chat', 'user', 'invited_by', 'role', 'submission_role', 'status', 'created_at', 'updated_at')
 
     @classmethod
     def index(cls, member_id):
@@ -659,7 +706,7 @@ class ChatMember(models.Model):
         return member
 
     @classmethod
-    def request_submission_invite(cls, chat: Chat, user: User, invited_by: User):
+    def request_submission_invite(cls, chat: Chat, user: User, invited_by: User, submission_role: int):
         if not chat.submission:
             raise ChatErrors.FORBIDDEN
         member = cls.objects.filter(chat=chat, user=user).first()
@@ -670,26 +717,24 @@ class ChatMember(models.Model):
         if member is None:
             member = cls(chat=chat, user=user)
         member.role = ChatMemberRoleChoice.MEMBER
+        member.submission_role = submission_role
         member.status = ChatMemberStatusChoice.PENDING
         member.invited_by = invited_by
         member.joined_at = None
         member.left_at = None
         member.save()
+        from User.models import NotificationEvent
+        NotificationEvent.emit_system_event(
+            user=user,
+            actor=invited_by,
+            payload=dict(
+                kind='group_invite',
+                chat_id=chat.id,
+                chat_name=chat.title,
+                submission_role=member.submission_role_name,
+            ),
+        )
         return member
-
-    def review_submission_invite(self, reviewer: User, accept: bool):
-        if not self.chat.submission or not (reviewer.is_official or reviewer.is_space_operator):
-            raise ChatErrors.SUBMISSION_REVIEW_FORBIDDEN
-        if reviewer.space_id != self.chat.space_id:
-            raise ChatErrors.SUBMISSION_REVIEW_FORBIDDEN
-        if self.status != ChatMemberStatusChoice.PENDING:
-            raise ChatMemberErrors.INVITE_CLOSED
-        self.status = ChatMemberStatusChoice.ACTIVE if accept else ChatMemberStatusChoice.REJECTED
-        self.joined_at = self.chat.created_at if accept else None
-        self.left_at = None if accept else timezone.now()
-        self.save(update_fields=['status', 'joined_at', 'left_at', 'updated_at'])
-        self.chat._emit_state_changed([self.user_id])
-        return self
 
     @classmethod
     def respond(cls, chat: Chat, user: User, accept: bool):
@@ -701,7 +746,7 @@ class ChatMember(models.Model):
 
         if accept:
             member.status = ChatMemberStatusChoice.ACTIVE
-            member.joined_at = timezone.now()
+            member.joined_at = chat.created_at if chat.submission else timezone.now()
             member.left_at = None
             member.save(update_fields=['status', 'joined_at', 'left_at', 'updated_at'])
         else:
@@ -764,15 +809,51 @@ class Submission(models.Model):
     }
 
     def jsonl(self):
+        authors = []
+        reviewers = []
+        members = ChatMember.objects.filter(
+            chat=self.chat,
+            status=ChatMemberStatusChoice.ACTIVE,
+            user__is_deleted=False,
+            submission_role__isnull=False,
+        ).select_related('user').order_by('joined_at', 'created_at', 'id')
+        for member in members:
+            if member.submission_role == SubmissionMemberRoleChoice.AUTHOR:
+                authors.append(member.user)
+            elif member.submission_role == SubmissionMemberRoleChoice.REVIEWER:
+                reviewers.append(member.user)
         return dict(
             author=self.author.tiny_json(),
             recipient=self.recipient.tiny_json(),
+            authors=[user.tiny_json() for user in authors] or [self.author.tiny_json()],
+            reviewers=[user.tiny_json() for user in reviewers] or [self.recipient.tiny_json()],
             status=self.STATUS_NAMES[self.status],
             submitted_at=self.submitted_at.timestamp() if self.submitted_at else None,
             published_statement_id=self.published_statement_id,
         )
 
+    def member_users(self, submission_role: int):
+        return [
+            member.user
+            for member in ChatMember.objects.filter(
+                chat=self.chat,
+                submission_role=submission_role,
+                status=ChatMemberStatusChoice.ACTIVE,
+                user__is_deleted=False,
+            ).select_related('user').order_by('joined_at', 'created_at', 'id')
+        ]
+
     def role_for(self, user: User):
+        member = ChatMember.objects.filter(
+            chat=self.chat,
+            user=user,
+            status=ChatMemberStatusChoice.ACTIVE,
+        ).only('submission_role').first()
+        if member is not None:
+            role = member.submission_role_name
+            if role:
+                return role
+        # Keep legacy rows usable during rolling deployments and before migration.
         if user.id == self.author_id:
             return 'author'
         if user.id == self.recipient_id:
@@ -780,10 +861,11 @@ class Submission(models.Model):
         return 'member'
 
     def can_send(self, user: User):
+        role = self.role_for(user)
         return (
-            user.id == self.author_id and self.status in (SubmissionStatusChoice.DRAFT, SubmissionStatusChoice.REVISION)
+            role == 'author' and self.status in (SubmissionStatusChoice.DRAFT, SubmissionStatusChoice.REVISION)
         ) or (
-            user.id == self.recipient_id and self.status == SubmissionStatusChoice.REVIEW
+            role == 'reviewer' and self.status == SubmissionStatusChoice.REVIEW
         )
 
     def require_send_allowed(self, user: User):
@@ -791,7 +873,7 @@ class Submission(models.Model):
             raise ChatErrors.SUBMISSION_SEND_FORBIDDEN
 
     def submit(self, user: User):
-        if user.id != self.author_id or self.status not in (SubmissionStatusChoice.DRAFT, SubmissionStatusChoice.REVISION):
+        if self.role_for(user) != 'author' or self.status not in (SubmissionStatusChoice.DRAFT, SubmissionStatusChoice.REVISION):
             raise ChatErrors.SUBMISSION_TRANSITION_FORBIDDEN
         from Message.models import Message, MessageTypeChoice
         if not Message.objects.filter(chat=self.chat, is_deleted=False).exclude(type=MessageTypeChoice.SYSTEM).exists():
@@ -803,7 +885,7 @@ class Submission(models.Model):
         return self
 
     def review(self, user: User, action: str):
-        if user.id != self.recipient_id or self.status != SubmissionStatusChoice.REVIEW:
+        if self.role_for(user) != 'reviewer' or self.status != SubmissionStatusChoice.REVIEW:
             raise ChatErrors.SUBMISSION_TRANSITION_FORBIDDEN
         next_status = {
             'revision': SubmissionStatusChoice.REVISION,
@@ -816,18 +898,19 @@ class Submission(models.Model):
         with transaction.atomic():
             self.status = next_status
             self.save(update_fields=['status'])
-            Message.create_official_notice(
-                self.author,
-                user,
-                f'submission_{action}',
-                submission_title=self.chat.title,
-                submission_chat_id=self.chat_id,
-            )
+            for author in self.member_users(SubmissionMemberRoleChoice.AUTHOR):
+                Message.create_official_notice(
+                    author,
+                    user,
+                    f'submission_{action}',
+                    submission_title=self.chat.title,
+                    submission_chat_id=self.chat_id,
+                )
             self.chat._emit_state_changed()
         return self
 
     def withdraw(self, user: User):
-        if user.id != self.author_id or self.status not in (
+        if self.role_for(user) != 'author' or self.status not in (
             SubmissionStatusChoice.DRAFT,
             SubmissionStatusChoice.REVIEW,
             SubmissionStatusChoice.REVISION,

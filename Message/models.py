@@ -541,7 +541,7 @@ class Message(models.Model):
         queryset = cls.visible_in_chat(chat).exclude(hidden_states__user=user)
         if chat.submission:
             submission = chat.submission_record
-            if submission.status == SubmissionStatusChoice.DRAFT and user.id != submission.author_id:
+            if submission.status == SubmissionStatusChoice.DRAFT and submission.role_for(user) != 'author':
                 return queryset.none()
         if not chat.group:
             return queryset
