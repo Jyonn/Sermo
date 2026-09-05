@@ -92,6 +92,16 @@ class SubmissionChatTests(TestCase):
         chat.submission_record.submit(self.author)
         invited = User.create(self.space, 'Invited', verified=True)
 
+        non_friend = self.client.post(
+            f'/chats/submissions/invites?chat_id={chat.id}',
+            data=json.dumps({'user_id': invited.id, 'role': 'author'}),
+            content_type='application/json',
+            **self.authorization(self.author),
+        )
+        self.assertEqual(non_friend.json()['identifier'], 'CHAT@TARGET_NOT_FRIEND')
+        self.assertFalse(SubmissionInvite.objects.filter(chat=chat, invitee=invited).exists())
+
+        Chat.ensure_direct_friendship(self.author, invited)
         response = self.client.post(
             f'/chats/submissions/invites?chat_id={chat.id}',
             data=json.dumps({'user_id': invited.id, 'role': 'author'}),
@@ -134,6 +144,7 @@ class SubmissionChatTests(TestCase):
         SpaceOperator.objects.create(space=self.space, user=second_reviewer)
         invalid_reviewer = User.create(self.space, 'Not an operator', verified=True)
 
+        Chat.ensure_direct_friendship(self.author, coauthor)
         author_invite, _card = chat.invite_submission_member(self.author, coauthor, SubmissionMemberRoleChoice.AUTHOR)
         reviewer_invite, _card = chat.invite_submission_member(self.operator, second_reviewer, SubmissionMemberRoleChoice.REVIEWER)
         with self.assertRaises(Exception):
@@ -166,6 +177,7 @@ class SubmissionChatTests(TestCase):
         invited = User.create(self.space, 'Dual role operator', verified=True)
         SpaceOperator.objects.create(space=self.space, user=invited)
 
+        Chat.ensure_direct_friendship(self.operator, invited)
         author_invite, _ = chat.invite_submission_member(self.operator, invited, SubmissionMemberRoleChoice.AUTHOR)
         reviewer_invite, _ = chat.invite_submission_member(self.operator, invited, SubmissionMemberRoleChoice.REVIEWER)
         self.assertEqual(SubmissionInvite.objects.filter(chat=chat, invitee=invited).count(), 2)
@@ -182,6 +194,7 @@ class SubmissionChatTests(TestCase):
     def test_submission_invite_expires_after_seven_days(self):
         chat, _ = Chat.create_submission(self.author, self.operator, 'Expiring invite', 'expiring-invite-draft')
         invited = User.create(self.space, 'Late invitee', verified=True)
+        Chat.ensure_direct_friendship(self.author, invited)
         invitation, _ = chat.invite_submission_member(self.author, invited, SubmissionMemberRoleChoice.AUTHOR)
         invitation.expires_at = timezone.now() - timedelta(seconds=1)
         invitation.save(update_fields=['expires_at'])

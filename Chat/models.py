@@ -508,6 +508,8 @@ class Chat(models.Model):
             raise ChatErrors.SUBMISSION_ROLE_INVALID
         if inviter_role == 'author' and submission_role != SubmissionMemberRoleChoice.AUTHOR:
             raise ChatErrors.SUBMISSION_INVITE_FORBIDDEN
+        if submission_role == SubmissionMemberRoleChoice.AUTHOR:
+            self._require_friend_of(inviter, user)
         if submission_role == SubmissionMemberRoleChoice.REVIEWER and not (user.is_official or user.is_space_operator):
             raise ChatErrors.SUBMISSION_RECIPIENT_INVALID
         with transaction.atomic():
@@ -517,7 +519,8 @@ class Chat(models.Model):
                 inviter=inviter,
                 role=submission_role,
             )
-            self.ensure_direct_friendship(inviter, user)
+            if submission_role == SubmissionMemberRoleChoice.REVIEWER:
+                self.ensure_direct_friendship(inviter, user)
             from Message.models import Message
             message = Message.create_submission_invite(invitation)
             return invitation, message
