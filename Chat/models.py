@@ -497,8 +497,11 @@ class Chat(models.Model):
     def invite_submission_member(self, inviter: User, user: User, submission_role: int):
         if not self.submission:
             raise ChatErrors.FORBIDDEN
-        inviter_role = self.submission_record.role_for(inviter)
+        submission = self.submission_record
+        inviter_role = submission.role_for(inviter)
         if inviter_role not in ('author', 'reviewer'):
+            raise ChatErrors.SUBMISSION_INVITE_FORBIDDEN
+        if inviter_role == 'author' and inviter.id != submission.author_id:
             raise ChatErrors.SUBMISSION_INVITE_FORBIDDEN
         if user.space_id != self.space_id:
             raise ChatErrors.UNALIGNED_SPACE
@@ -1021,7 +1024,7 @@ class Submission(models.Model):
             raise ChatErrors.SUBMISSION_SEND_FORBIDDEN
 
     def submit(self, user: User):
-        if self.role_for(user) != 'author' or self.status not in (SubmissionStatusChoice.DRAFT, SubmissionStatusChoice.REVISION):
+        if user.id != self.author_id or self.status not in (SubmissionStatusChoice.DRAFT, SubmissionStatusChoice.REVISION):
             raise ChatErrors.SUBMISSION_TRANSITION_FORBIDDEN
         from Message.models import Message, MessageTypeChoice
         if not Message.objects.filter(chat=self.chat, is_deleted=False).exclude(type=MessageTypeChoice.SYSTEM).exists():
@@ -1058,7 +1061,7 @@ class Submission(models.Model):
         return self
 
     def withdraw(self, user: User):
-        if self.role_for(user) != 'author' or self.status not in (
+        if user.id != self.author_id or self.status not in (
             SubmissionStatusChoice.DRAFT,
             SubmissionStatusChoice.REVIEW,
             SubmissionStatusChoice.REVISION,

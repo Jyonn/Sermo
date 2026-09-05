@@ -160,7 +160,9 @@ class SubmissionChatTests(TestCase):
         self.assertEqual(reviewer_invite.role, SubmissionMemberRoleChoice.REVIEWER)
 
         Message.create(chat, coauthor, MessageTypeChoice.TEXT, 'Shared draft')
-        chat.submission_record.submit(coauthor)
+        with self.assertRaises(Exception):
+            chat.submission_record.submit(coauthor)
+        chat.submission_record.submit(self.author)
         Message.create(chat, second_reviewer, MessageTypeChoice.TEXT, 'Reviewed together')
         chat.submission_record.review(second_reviewer, 'revision')
 
@@ -171,6 +173,26 @@ class SubmissionChatTests(TestCase):
         reviewer_rows = Chat.get_user_chats(second_reviewer, purpose=ChatPurposeChoice.SUBMISSION, submission_role='reviewer')
         self.assertIn(chat, author_rows)
         self.assertIn(chat, reviewer_rows)
+
+    def test_invited_author_can_send_but_cannot_manage_submission(self):
+        chat, _ = Chat.create_submission(self.author, self.operator, 'Limited coauthor', 'limited-coauthor-draft')
+        coauthor = User.create(self.space, 'Limited coauthor', verified=True)
+        next_author = User.create(self.space, 'Next author', verified=True)
+        Chat.ensure_direct_friendship(self.author, coauthor)
+        Chat.ensure_direct_friendship(coauthor, next_author)
+        invitation, _card = chat.invite_submission_member(self.author, coauthor, SubmissionMemberRoleChoice.AUTHOR)
+        invitation.accept(coauthor)
+
+        message = Message.create(chat, coauthor, MessageTypeChoice.TEXT, 'I can contribute to the draft')
+        self.assertEqual(message.user_id, coauthor.id)
+        self.assertTrue(chat.submission_record.can_send(coauthor))
+
+        with self.assertRaises(Exception):
+            chat.submission_record.submit(coauthor)
+        with self.assertRaises(Exception):
+            chat.submission_record.withdraw(coauthor)
+        with self.assertRaises(Exception):
+            chat.invite_submission_member(coauthor, next_author, SubmissionMemberRoleChoice.AUTHOR)
 
     def test_operator_can_receive_both_roles_but_accept_only_one(self):
         chat, _ = Chat.create_submission(self.author, self.operator, 'Choose one role', 'dual-role-draft')
