@@ -483,13 +483,16 @@ class MessageAudioTranscriptView(View):
             raise MessageErrors.NOT_A_MEMBER
         if message.type != MessageTypeChoice.AUDIO:
             raise MessageErrors.TYPE_INVALID
+        if not message.media_resource_id or message.media_resource.asset.kind != MediaAsset.KIND_AUDIO:
+            raise MessageErrors.MEDIA_ASSET_INVALID
+        return message.media_resource.asset
 
     @auth.require_user
     @analyse.query(MessageParams.message_id)
     def get(self, request: Request):
         message: Message = request.query.message
-        self._require_audio_message(message, request.user)
-        transcript = AudioTranscript.objects.filter(message=message).first()
+        asset = self._require_audio_message(message, request.user)
+        transcript = AudioTranscript.objects.filter(asset=asset).first()
         return transcript.jsonl(cached=True) if transcript is not None else {
             'status': 'none',
             'text': '',
@@ -500,16 +503,15 @@ class MessageAudioTranscriptView(View):
     @analyse.query(MessageParams.message_id)
     def post(self, request: Request):
         message: Message = request.query.message
-        self._require_audio_message(message, request.user)
-        transcript, should_process = AudioTranscript.claim(message)
+        asset = self._require_audio_message(message, request.user)
+        transcript, should_process = AudioTranscript.claim(asset)
         if not should_process:
             return transcript.jsonl(
                 cached=transcript.status == AudioTranscriptStatusChoice.READY,
             )
 
         try:
-            source_uri = message.source_media_uri()
-            signed_uri = sign_private_download_url(source_uri, expire_seconds=10 * 60)
+            signed_uri = sign_private_download_url(asset.source_uri, expire_seconds=10 * 60)
             text, request_id = transcribe_short_audio(signed_uri)
         except ShortAudioTranscriptionError as err:
             transcript.mark_failed(err, request_id=err.request_id)

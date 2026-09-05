@@ -1518,8 +1518,8 @@ class Message(models.Model):
 class AudioTranscript(models.Model):
     STALE_AFTER = datetime.timedelta(minutes=2)
 
-    message = models.OneToOneField(
-        Message,
+    asset = models.OneToOneField(
+        'MediaAsset',
         on_delete=models.CASCADE,
         related_name='audio_transcript',
     )
@@ -1538,11 +1538,11 @@ class AudioTranscript(models.Model):
         default_manager_name = 'objects'
 
     @classmethod
-    def claim(cls, message):
+    def claim(cls, asset):
         now = timezone.now()
         with transaction.atomic():
             transcript, created = cls.objects.select_for_update().get_or_create(
-                message=message,
+                asset=asset,
                 defaults={
                     'status': AudioTranscriptStatusChoice.PROCESSING,
                     'started_at': now,

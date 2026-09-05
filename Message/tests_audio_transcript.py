@@ -106,7 +106,7 @@ class MessageAudioTranscriptTests(TestCase):
         self.assertEqual(second.json()['body']['cached'], True)
         transcribe.assert_called_once_with('https://signed.example.com/audio.m4a')
         sign.assert_called_once()
-        transcript = AudioTranscript.objects.get(message=self.message)
+        transcript = AudioTranscript.objects.get(asset=self.message.media_resource.asset)
         self.assertEqual(transcript.text, '你好，明天见。')
         self.assertEqual(transcript.provider_request_id, 'request-3')
 
@@ -129,7 +129,7 @@ class MessageAudioTranscriptTests(TestCase):
     @patch('Message.views.transcribe_short_audio')
     def test_recent_processing_request_is_not_duplicated(self, transcribe):
         AudioTranscript.objects.create(
-            message=self.message,
+            asset=self.message.media_resource.asset,
             status=AudioTranscriptStatusChoice.PROCESSING,
         )
 
@@ -149,4 +149,28 @@ class MessageAudioTranscriptTests(TestCase):
 
         self.assertEqual(response.status_code, 200, response.content)
         self.assertEqual(response.json()['body']['status'], 'none')
-        self.assertFalse(AudioTranscript.objects.filter(message=self.message).exists())
+        self.assertFalse(AudioTranscript.objects.filter(asset=self.message.media_resource.asset).exists())
+
+    @patch('Message.views.sign_private_download_url', return_value='https://signed.example.com/audio.m4a')
+    @patch('Message.views.transcribe_short_audio', return_value=('转发后仍然复用。', 'request-forward'))
+    def test_forwarded_audio_reuses_asset_transcript(self, transcribe, sign):
+        target_peer = User.create(self.space, 'Target', email='target@example.com', verified=True)
+        Friendship.ensure_locked_friendship(self.user, target_peer)
+        target_chat = Chat.get_or_create_direct(self.user, target_peer)
+
+        first = self.client.post(self.endpoint(), data='{}', content_type='application/json', **self.authorization(self.user))
+        forwarded = Message.forward_individual(self.message, target_chat, self.user)
+        forwarded_endpoint = f'/messages/audio-transcript?message_id={forwarded.id}'
+        second = self.client.post(forwarded_endpoint, data='{}', content_type='application/json', **self.authorization(self.user))
+
+        self.assertEqual(first.status_code, 200, first.content)
+        self.assertEqual(second.status_code, 200, second.content)
+        self.assertEqual(second.json()['body'], {
+            'status': 'ready',
+            'text': '转发后仍然复用。',
+            'cached': True,
+        })
+        self.assertEqual(forwarded.media_resource.asset_id, self.message.media_resource.asset_id)
+        self.assertEqual(AudioTranscript.objects.count(), 1)
+        transcribe.assert_called_once_with('https://signed.example.com/audio.m4a')
+        sign.assert_called_once()
