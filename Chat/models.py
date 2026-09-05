@@ -1,3 +1,4 @@
+from datetime import timedelta
 from typing import List
 
 from django.db import transaction
@@ -35,6 +36,12 @@ class ChatMemberStatusChoice(Choice):
 class SubmissionMemberRoleChoice(Choice):
     AUTHOR = 0
     REVIEWER = 1
+
+
+class SubmissionInviteStatusChoice(Choice):
+    PENDING = 0
+    ACCEPTED = 1
+    EXPIRED = 2
 
 
 class SubmissionStatusChoice(Choice):
@@ -301,6 +308,31 @@ class Chat(models.Model):
             return chat
 
     @classmethod
+    def ensure_direct_friendship(cls, initiator: User, peer: User):
+        from Friendship.models import Friendship, FriendshipStatusChoice
+
+        space, user_low, user_high = Friendship._pair(initiator, peer)
+        friendship, _created = Friendship.objects.get_or_create(
+            space=space,
+            user_low=user_low,
+            user_high=user_high,
+            defaults=dict(
+                requested_by=initiator,
+                status=FriendshipStatusChoice.ACCEPTED,
+                responded_at=timezone.now(),
+                source=Friendship.SOURCE_DIRECT,
+            ),
+        )
+        if friendship.status != FriendshipStatusChoice.ACCEPTED:
+            friendship.status = FriendshipStatusChoice.ACCEPTED
+            friendship.requested_by = initiator
+            friendship.responded_at = timezone.now()
+            friendship.source = Friendship.SOURCE_DIRECT
+            friendship.save(update_fields=['status', 'requested_by', 'responded_at', 'source', 'updated_at'])
+        friendship._emit_state_changes(chats=True, friends=True, requests=True)
+        return friendship
+
+    @classmethod
     def create_group(cls, creator: User, users: List[User], title: str = None):
         creator.space.require_chat_enabled()
         creator.require_capability('chat.group.create')
@@ -465,24 +497,30 @@ class Chat(models.Model):
     def invite_submission_member(self, inviter: User, user: User, submission_role: int):
         if not self.submission:
             raise ChatErrors.FORBIDDEN
-        if self.submission_record.role_for(inviter) != 'reviewer':
-            raise ChatErrors.SUBMISSION_REVIEW_FORBIDDEN
+        inviter_role = self.submission_record.role_for(inviter)
+        if inviter_role not in ('author', 'reviewer'):
+            raise ChatErrors.SUBMISSION_INVITE_FORBIDDEN
         if user.space_id != self.space_id:
             raise ChatErrors.UNALIGNED_SPACE
         if user.is_deleted:
             raise ChatErrors.USER_DELETED(user=user.name)
         if submission_role not in (SubmissionMemberRoleChoice.AUTHOR, SubmissionMemberRoleChoice.REVIEWER):
             raise ChatErrors.SUBMISSION_ROLE_INVALID
+        if inviter_role == 'author' and submission_role != SubmissionMemberRoleChoice.AUTHOR:
+            raise ChatErrors.SUBMISSION_INVITE_FORBIDDEN
         if submission_role == SubmissionMemberRoleChoice.REVIEWER and not (user.is_official or user.is_space_operator):
             raise ChatErrors.SUBMISSION_RECIPIENT_INVALID
-        member = ChatMember.request_submission_invite(
-            chat=self,
-            user=user,
-            invited_by=inviter,
-            submission_role=submission_role,
-        )
-        self._emit_state_changed([user.id])
-        return member
+        with transaction.atomic():
+            invitation = SubmissionInvite.create_invitation(
+                chat=self,
+                invitee=user,
+                inviter=inviter,
+                role=submission_role,
+            )
+            self.ensure_direct_friendship(inviter, user)
+            from Message.models import Message
+            message = Message.create_submission_invite(invitation)
+            return invitation, message
 
     def invite_members(self, inviter: User, users: List[User]):
         with transaction.atomic():
@@ -501,6 +539,8 @@ class Chat(models.Model):
     def respond_invite(self, user: User, accept: bool):
         if not self.group:
             raise ChatErrors.NOT_GROUP_CHAT(chat=self.id)
+        if self.submission:
+            raise ChatErrors.SUBMISSION_INVITE_FORBIDDEN
         member = ChatMember.respond(chat=self, user=user, accept=accept)
         self._emit_state_changed([user.id])
         return member
@@ -706,37 +746,6 @@ class ChatMember(models.Model):
         return member
 
     @classmethod
-    def request_submission_invite(cls, chat: Chat, user: User, invited_by: User, submission_role: int):
-        if not chat.submission:
-            raise ChatErrors.FORBIDDEN
-        member = cls.objects.filter(chat=chat, user=user).first()
-        if member is not None and member.status == ChatMemberStatusChoice.ACTIVE:
-            raise ChatMemberErrors.ALREADY_MEMBER(user=user.name, chat=chat.id)
-        if member is not None and member.status == ChatMemberStatusChoice.PENDING:
-            raise ChatMemberErrors.INVITE_PENDING(user=user.name, chat=chat.id)
-        if member is None:
-            member = cls(chat=chat, user=user)
-        member.role = ChatMemberRoleChoice.MEMBER
-        member.submission_role = submission_role
-        member.status = ChatMemberStatusChoice.PENDING
-        member.invited_by = invited_by
-        member.joined_at = None
-        member.left_at = None
-        member.save()
-        from User.models import NotificationEvent
-        NotificationEvent.emit_system_event(
-            user=user,
-            actor=invited_by,
-            payload=dict(
-                kind='group_invite',
-                chat_id=chat.id,
-                chat_name=chat.title,
-                submission_role=member.submission_role_name,
-            ),
-        )
-        return member
-
-    @classmethod
     def respond(cls, chat: Chat, user: User, accept: bool):
         member = cls.objects.filter(chat=chat, user=user).first()
         if member is None:
@@ -783,9 +792,145 @@ class ChatMember(models.Model):
         rows = cls.objects.filter(
             user=user,
             status=ChatMemberStatusChoice.PENDING,
+            chat__purpose=ChatPurposeChoice.NORMAL,
             chat__is_deleted=False,
         ).select_related('chat', 'invited_by').order_by('-created_at')[:limit]
         return [row.json() for row in rows]
+
+
+class SubmissionInvite(models.Model):
+    EXPIRY_DAYS = 7
+
+    chat = models.ForeignKey(Chat, on_delete=models.CASCADE, related_name='submission_invites')
+    inviter = models.ForeignKey(User, on_delete=models.CASCADE, related_name='sent_submission_invites')
+    invitee = models.ForeignKey(User, on_delete=models.CASCADE, related_name='received_submission_invites')
+    role = models.IntegerField(choices=SubmissionMemberRoleChoice.to_choices(), db_index=True)
+    status = models.IntegerField(
+        choices=SubmissionInviteStatusChoice.to_choices(),
+        default=SubmissionInviteStatusChoice.PENDING,
+        db_index=True,
+    )
+    expires_at = models.DateTimeField(db_index=True)
+    accepted_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['chat', 'invitee', 'status'], name='submission_invitee_status'),
+        ]
+
+    @property
+    def role_name(self):
+        return {
+            SubmissionMemberRoleChoice.AUTHOR: 'author',
+            SubmissionMemberRoleChoice.REVIEWER: 'reviewer',
+        }[self.role]
+
+    @property
+    def effective_status(self):
+        if self.status == SubmissionInviteStatusChoice.ACCEPTED:
+            return 'accepted'
+        if self.status == SubmissionInviteStatusChoice.EXPIRED or self.expires_at <= timezone.now():
+            return 'expired'
+        member = ChatMember.objects.filter(
+            chat=self.chat,
+            user=self.invitee,
+            status=ChatMemberStatusChoice.ACTIVE,
+        ).only('submission_role').first()
+        if member is not None:
+            return 'accepted' if member.submission_role == self.role else 'conflict'
+        return 'pending'
+
+    def jsonl(self, viewer: User = None):
+        submission = self.chat.submission_record.jsonl()
+        status = self.effective_status
+        return dict(
+            invite_id=self.id,
+            chat_id=self.chat_id,
+            role=self.role_name,
+            status=status,
+            inviter=self.inviter.tiny_json(),
+            invitee=self.invitee.tiny_json(),
+            created_at=self.created_at.timestamp(),
+            expires_at=self.expires_at.timestamp(),
+            accepted_at=self.accepted_at.timestamp() if self.accepted_at else None,
+            can_accept=bool(viewer and viewer.id == self.invitee_id and status == 'pending'),
+            submission=dict(
+                title=self.chat.title or '',
+                status=submission['status'],
+                authors=submission['authors'],
+                reviewers=submission['reviewers'],
+            ),
+        )
+
+    @classmethod
+    def create_invitation(cls, chat: Chat, inviter: User, invitee: User, role: int):
+        now = timezone.now()
+        with transaction.atomic():
+            Chat.objects.select_for_update().get(id=chat.id)
+            if ChatMember.objects.filter(
+                chat=chat,
+                user=invitee,
+                status=ChatMemberStatusChoice.ACTIVE,
+            ).exists():
+                raise ChatMemberErrors.ALREADY_MEMBER(user=invitee.name, chat=chat.id)
+            cls.objects.filter(
+                chat=chat,
+                invitee=invitee,
+                status=SubmissionInviteStatusChoice.PENDING,
+                expires_at__lte=now,
+            ).update(status=SubmissionInviteStatusChoice.EXPIRED, updated_at=now)
+            if cls.objects.filter(
+                chat=chat,
+                invitee=invitee,
+                role=role,
+                status=SubmissionInviteStatusChoice.PENDING,
+                expires_at__gt=now,
+            ).exists():
+                raise ChatMemberErrors.INVITE_PENDING(user=invitee.name, chat=chat.id)
+            return cls.objects.create(
+                chat=chat,
+                inviter=inviter,
+                invitee=invitee,
+                role=role,
+                expires_at=now + timedelta(days=cls.EXPIRY_DAYS),
+            )
+
+    def accept(self, user: User):
+        now = timezone.now()
+        with transaction.atomic():
+            invitation = type(self).objects.select_for_update().select_related('chat', 'invitee').get(id=self.id)
+            Chat.objects.select_for_update().get(id=invitation.chat_id)
+            if invitation.invitee_id != user.id:
+                raise ChatErrors.SUBMISSION_INVITE_FORBIDDEN
+            if invitation.status != SubmissionInviteStatusChoice.PENDING:
+                raise ChatErrors.SUBMISSION_INVITE_CLOSED
+            if invitation.expires_at <= now:
+                invitation.status = SubmissionInviteStatusChoice.EXPIRED
+                invitation.save(update_fields=['status', 'updated_at'])
+                raise ChatErrors.SUBMISSION_INVITE_EXPIRED
+
+            member = ChatMember.objects.select_for_update().filter(chat=invitation.chat, user=user).first()
+            if member is not None and member.status == ChatMemberStatusChoice.ACTIVE:
+                raise ChatErrors.SUBMISSION_ROLE_CONFLICT
+            if member is None:
+                member = ChatMember(chat=invitation.chat, user=user)
+            member.role = ChatMemberRoleChoice.MEMBER
+            member.submission_role = invitation.role
+            member.status = ChatMemberStatusChoice.ACTIVE
+            member.invited_by = invitation.inviter
+            member.joined_at = invitation.chat.created_at
+            member.left_at = None
+            member.save()
+
+            invitation.status = SubmissionInviteStatusChoice.ACCEPTED
+            invitation.accepted_at = now
+            invitation.save(update_fields=['status', 'accepted_at', 'updated_at'])
+            invitation.chat._emit_state_changed([user.id, invitation.inviter_id])
+            self.status = invitation.status
+            self.accepted_at = invitation.accepted_at
+            return member
 
 
 class Submission(models.Model):

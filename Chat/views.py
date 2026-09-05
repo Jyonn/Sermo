@@ -1,8 +1,9 @@
 from django.db import transaction
+from django.utils import timezone
 from django.views import View
 from smartdjango import analyse, OK
 
-from Chat.models import Chat, ChatMember, ChatMemberStatusChoice, ChatPurposeChoice, ChatReadState, ChatUserPreference, Submission, SubmissionMemberRoleChoice
+from Chat.models import Chat, ChatMember, ChatMemberStatusChoice, ChatPurposeChoice, ChatReadState, ChatUserPreference, Submission, SubmissionInvite, SubmissionInviteStatusChoice, SubmissionMemberRoleChoice
 from Chat.params import ChatParams, ChatMemberParams, ChatPreferenceParams
 from Chat.validators import ChatErrors
 from Message.models import MediaResource, Message, MessageTypeChoice
@@ -130,7 +131,7 @@ class SubmissionStartView(View):
     )
     def post(self, request):
         request.user.space.require_submission_enabled()
-        if request.json.type in (MessageTypeChoice.SYSTEM, MessageTypeChoice.FORWARD_BUNDLE, MessageTypeChoice.OFFICIAL_NOTICE):
+        if request.json.type in (MessageTypeChoice.SYSTEM, MessageTypeChoice.FORWARD_BUNDLE, MessageTypeChoice.OFFICIAL_NOTICE, MessageTypeChoice.SUBMISSION_INVITE):
             raise MessageErrors.SYSTEM_MESSAGE_FORBIDDEN
         with transaction.atomic():
             chat, created = Chat.create_submission(
@@ -212,23 +213,54 @@ class SubmissionInviteView(View):
             'author': SubmissionMemberRoleChoice.AUTHOR,
             'reviewer': SubmissionMemberRoleChoice.REVIEWER,
         }[request.json.submission_role]
-        member = request.query.chat.invite_submission_member(request.user, request.json.user, role)
-        return member.json()
+        invitation, message = request.query.chat.invite_submission_member(request.user, request.json.user, role)
+        return dict(
+            invitation=invitation.jsonl(request.user),
+            message=message.jsonl(request=request),
+        )
 
     @auth.require_user
     @analyse.query(ChatMemberParams.chat_id)
     @auth.require_chat_member()
     def get(self, request):
         chat = request.query.chat
-        if not chat.submission or chat.submission_record.role_for(request.user) != 'reviewer':
+        if not chat.submission or chat.submission_record.role_for(request.user) not in ('author', 'reviewer'):
             raise ChatErrors.FORBIDDEN
-        return [
-            member.json()
-            for member in ChatMember.objects.filter(
-                chat=chat,
-                status=ChatMemberStatusChoice.PENDING,
-            ).select_related('user', 'invited_by')
-        ]
+        rows = SubmissionInvite.objects.filter(
+            chat=chat,
+            status=SubmissionInviteStatusChoice.PENDING,
+            expires_at__gt=timezone.now(),
+        ).select_related('chat', 'chat__submission_record', 'invitee', 'inviter').order_by('-created_at')
+        payloads = [invitation.jsonl(request.user) for invitation in rows]
+        return [payload for payload in payloads if payload['status'] == 'pending']
+
+
+class SubmissionInviteDetailView(View):
+    @staticmethod
+    def _get_invitation(invite_id, user):
+        invitation = SubmissionInvite.objects.filter(id=invite_id).select_related(
+            'chat', 'chat__submission_record', 'inviter', 'invitee',
+        ).first()
+        if invitation is None or user.id not in (invitation.inviter_id, invitation.invitee_id):
+            raise ChatErrors.SUBMISSION_INVITE_FORBIDDEN
+        return invitation
+
+    @auth.require_user
+    @analyse.query(ChatMemberParams.invite_id)
+    def get(self, request):
+        invitation = self._get_invitation(request.query.invite_id, request.user)
+        return invitation.jsonl(request.user)
+
+    @auth.require_user
+    @analyse.query(ChatMemberParams.invite_id)
+    def post(self, request):
+        invitation = self._get_invitation(request.query.invite_id, request.user)
+        invitation.accept(request.user)
+        invitation.refresh_from_db()
+        return dict(
+            invitation=invitation.jsonl(request.user),
+            chat=ChatListView.build_chat_payload(invitation.chat, request.user, request),
+        )
 
 
 class GroupChatNameView(View):

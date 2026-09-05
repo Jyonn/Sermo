@@ -53,6 +53,11 @@ class ChatMemberParams(metaclass=Params):
         .to(str) \
         .bool(lambda x: x in ('author', 'reviewer'), message=_('Invalid submission member role'))
 
+    invite_id = Validator('invite_id').to(int).bool(
+        lambda value: value > 0,
+        message=_('Invalid submission invite'),
+    )
+
 
 class ChatPreferenceParams(metaclass=Params):
     pinned = Validator('pinned') \

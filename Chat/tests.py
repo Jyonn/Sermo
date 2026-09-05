@@ -1,12 +1,12 @@
 import json
-from datetime import datetime, timezone as datetime_timezone
+from datetime import datetime, timedelta, timezone as datetime_timezone
 from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.test import TestCase
 from django.utils import timezone
 
-from Chat.models import Chat, ChatMember, ChatMemberRoleChoice, ChatMemberStatusChoice, ChatPurposeChoice, ChatReadState, ChatTypeChoice, ChatUserPreference, SubmissionMemberRoleChoice, SubmissionStatusChoice
+from Chat.models import Chat, ChatMember, ChatMemberRoleChoice, ChatMemberStatusChoice, ChatPurposeChoice, ChatReadState, ChatTypeChoice, ChatUserPreference, SubmissionInvite, SubmissionInviteStatusChoice, SubmissionMemberRoleChoice, SubmissionStatusChoice
 from Message.models import Message, MessageTypeChoice, PinnedMessage
 from Space.models import Space, SpaceOperator
 from User.models import NotificationEvent, User, UserStateEvent, UserStateEventKindChoice
@@ -86,43 +86,41 @@ class SubmissionChatTests(TestCase):
         self.assertEqual(Chat.objects.filter(purpose=ChatPurposeChoice.SUBMISSION).count(), 1)
         self.assertEqual(Message.objects.filter(chat_id=first.json()['body']['chat']['chat_id']).count(), 1)
 
-    def test_submission_invite_requires_reviewer_and_invitee_consent_then_reveals_full_history(self):
+    def test_submission_invite_uses_private_card_and_consent_reveals_full_history(self):
         chat, _ = Chat.create_submission(self.author, self.operator, 'Invite review', 'invite-draft')
         old_message = Message.create(chat, self.author, MessageTypeChoice.TEXT, 'Earlier context')
         chat.submission_record.submit(self.author)
         invited = User.create(self.space, 'Invited', verified=True)
 
-        forbidden = self.client.post(
+        response = self.client.post(
             f'/chats/submissions/invites?chat_id={chat.id}',
             data=json.dumps({'user_id': invited.id, 'role': 'author'}),
             content_type='application/json',
             **self.authorization(self.author),
         )
-        self.assertEqual(forbidden.json()['identifier'], 'CHAT@SUBMISSION_REVIEW_FORBIDDEN')
-
-        response = self.client.post(
-            f'/chats/submissions/invites?chat_id={chat.id}',
-            data=json.dumps({'user_id': invited.id, 'role': 'author'}),
-            content_type='application/json',
-            **self.authorization(self.operator),
-        )
         self.assertEqual(response.status_code, 200, response.content)
-        member = ChatMember.objects.get(chat=chat, user=invited)
-        self.assertEqual(member.status, ChatMemberStatusChoice.PENDING)
-        self.assertEqual(member.submission_role, SubmissionMemberRoleChoice.AUTHOR)
+        invitation = SubmissionInvite.objects.get(chat=chat, invitee=invited)
+        self.assertEqual(invitation.role, SubmissionMemberRoleChoice.AUTHOR)
+        self.assertEqual(invitation.status, SubmissionInviteStatusChoice.PENDING)
+        self.assertFalse(ChatMember.objects.filter(chat=chat, user=invited).exists())
         self.assertFalse(chat.has_active_member(invited))
-        pending = self.client.get('/chats/group/invites', **self.authorization(invited))
-        self.assertEqual(pending.status_code, 200, pending.content)
-        self.assertEqual(pending.json()['body'][0]['submission_role'], 'author')
+        card = Message.objects.get(type=MessageTypeChoice.SUBMISSION_INVITE)
+        self.assertEqual(card.user, self.author)
+        self.assertTrue(card.chat.direct)
+        self.assertTrue(card.chat.has_active_member(invited))
+        card_payload = card.jsonl(request=SimpleNamespace(user=invited))['payload']['invitation']
+        self.assertEqual(card_payload['invite_id'], invitation.id)
+        self.assertEqual(card_payload['submission']['title'], 'Invite review')
+        self.assertTrue(card_payload['can_accept'])
 
         accepted = self.client.post(
-            f'/chats/group/invite/respond?chat_id={chat.id}',
-            data=json.dumps({'accept': 1}),
-            content_type='application/json',
+            f'/chats/submissions/invite?invite_id={invitation.id}',
             **self.authorization(invited),
         )
         self.assertEqual(accepted.status_code, 200, accepted.content)
-        member.refresh_from_db()
+        member = ChatMember.objects.get(chat=chat, user=invited)
+        invitation.refresh_from_db()
+        self.assertEqual(invitation.status, SubmissionInviteStatusChoice.ACCEPTED)
         self.assertTrue(chat.has_active_member(invited))
         self.assertEqual(member.joined_at, chat.created_at)
         self.assertIn(old_message.id, Message.visible_for_user(chat, invited).values_list('id', flat=True))
@@ -136,19 +134,19 @@ class SubmissionChatTests(TestCase):
         SpaceOperator.objects.create(space=self.space, user=second_reviewer)
         invalid_reviewer = User.create(self.space, 'Not an operator', verified=True)
 
-        author_invite = chat.invite_submission_member(self.operator, coauthor, SubmissionMemberRoleChoice.AUTHOR)
-        reviewer_invite = chat.invite_submission_member(self.operator, second_reviewer, SubmissionMemberRoleChoice.REVIEWER)
+        author_invite, _card = chat.invite_submission_member(self.author, coauthor, SubmissionMemberRoleChoice.AUTHOR)
+        reviewer_invite, _card = chat.invite_submission_member(self.operator, second_reviewer, SubmissionMemberRoleChoice.REVIEWER)
         with self.assertRaises(Exception):
             chat.invite_submission_member(self.operator, invalid_reviewer, SubmissionMemberRoleChoice.REVIEWER)
         with self.assertRaises(Exception):
-            chat.invite_submission_member(self.operator, coauthor, SubmissionMemberRoleChoice.REVIEWER)
+            chat.invite_submission_member(self.author, second_reviewer, SubmissionMemberRoleChoice.REVIEWER)
 
-        ChatMember.respond(chat, coauthor, True)
-        ChatMember.respond(chat, second_reviewer, True)
+        author_invite.accept(coauthor)
+        reviewer_invite.accept(second_reviewer)
         author_invite.refresh_from_db()
         reviewer_invite.refresh_from_db()
-        self.assertEqual(author_invite.submission_role, SubmissionMemberRoleChoice.AUTHOR)
-        self.assertEqual(reviewer_invite.submission_role, SubmissionMemberRoleChoice.REVIEWER)
+        self.assertEqual(author_invite.role, SubmissionMemberRoleChoice.AUTHOR)
+        self.assertEqual(reviewer_invite.role, SubmissionMemberRoleChoice.REVIEWER)
 
         Message.create(chat, coauthor, MessageTypeChoice.TEXT, 'Shared draft')
         chat.submission_record.submit(coauthor)
@@ -162,6 +160,38 @@ class SubmissionChatTests(TestCase):
         reviewer_rows = Chat.get_user_chats(second_reviewer, purpose=ChatPurposeChoice.SUBMISSION, submission_role='reviewer')
         self.assertIn(chat, author_rows)
         self.assertIn(chat, reviewer_rows)
+
+    def test_operator_can_receive_both_roles_but_accept_only_one(self):
+        chat, _ = Chat.create_submission(self.author, self.operator, 'Choose one role', 'dual-role-draft')
+        invited = User.create(self.space, 'Dual role operator', verified=True)
+        SpaceOperator.objects.create(space=self.space, user=invited)
+
+        author_invite, _ = chat.invite_submission_member(self.operator, invited, SubmissionMemberRoleChoice.AUTHOR)
+        reviewer_invite, _ = chat.invite_submission_member(self.operator, invited, SubmissionMemberRoleChoice.REVIEWER)
+        self.assertEqual(SubmissionInvite.objects.filter(chat=chat, invitee=invited).count(), 2)
+
+        author_invite.accept(invited)
+        conflict = self.client.post(
+            f'/chats/submissions/invite?invite_id={reviewer_invite.id}',
+            **self.authorization(invited),
+        )
+        self.assertEqual(conflict.json()['identifier'], 'CHAT@SUBMISSION_ROLE_CONFLICT')
+        self.assertEqual(ChatMember.objects.get(chat=chat, user=invited).submission_role, SubmissionMemberRoleChoice.AUTHOR)
+        self.assertEqual(reviewer_invite.effective_status, 'conflict')
+
+    def test_submission_invite_expires_after_seven_days(self):
+        chat, _ = Chat.create_submission(self.author, self.operator, 'Expiring invite', 'expiring-invite-draft')
+        invited = User.create(self.space, 'Late invitee', verified=True)
+        invitation, _ = chat.invite_submission_member(self.author, invited, SubmissionMemberRoleChoice.AUTHOR)
+        invitation.expires_at = timezone.now() - timedelta(seconds=1)
+        invitation.save(update_fields=['expires_at'])
+
+        response = self.client.post(
+            f'/chats/submissions/invite?invite_id={invitation.id}',
+            **self.authorization(invited),
+        )
+        self.assertEqual(response.json()['identifier'], 'CHAT@SUBMISSION_INVITE_EXPIRED')
+        self.assertFalse(ChatMember.objects.filter(chat=chat, user=invited).exists())
 
     def test_submission_workflow_enforces_sending_and_draft_recall(self):
         chat, _ = Chat.create_submission(self.author, self.operator, 'Workflow', 'workflow-draft')
@@ -341,6 +371,8 @@ class ChatNotificationPreferenceTests(TestCase):
         with self.assertRaises(Exception) as raised:
             Message.create(self.chat, self.sender, MessageTypeChoice.SYSTEM, 'forged')
         self.assertIn('System messages cannot be managed by users', str(raised.exception))
+        with self.assertRaises(Exception):
+            Message.create(self.chat, self.sender, MessageTypeChoice.SUBMISSION_INVITE, '{"invitation_id":1}')
 
         with self.assertRaises(Exception):
             Message.create(self.chat, self.sender, MessageTypeChoice.OFFICIAL_NOTICE, 'forged')

@@ -73,6 +73,7 @@ class MessageTypeChoice(Choice):
     FORWARD_BUNDLE = 10
     ACTIVITY = 11
     OFFICIAL_NOTICE = 12
+    SUBMISSION_INVITE = 13
 
 
 class MessageEventTypeChoice(Choice):
@@ -485,6 +486,7 @@ class Message(models.Model):
         MessageTypeChoice.STICKER: '[表情包]',
         MessageTypeChoice.FORWARD_BUNDLE: '[聊天记录]',
         MessageTypeChoice.ACTIVITY: '[活动]',
+        MessageTypeChoice.SUBMISSION_INVITE: '[投稿邀请]',
     }
 
     chat = models.ForeignKey(Chat, on_delete=models.CASCADE, db_index=True)
@@ -562,7 +564,7 @@ class Message(models.Model):
 
     @classmethod
     def create(cls, chat: Chat, user: User, message_type, content, reply_to=None, client_message_id=None, mention_user_ids=None, media_resource=None):
-        if message_type in (MessageTypeChoice.SYSTEM, MessageTypeChoice.FORWARD_BUNDLE, MessageTypeChoice.OFFICIAL_NOTICE):
+        if message_type in (MessageTypeChoice.SYSTEM, MessageTypeChoice.FORWARD_BUNDLE, MessageTypeChoice.OFFICIAL_NOTICE, MessageTypeChoice.SUBMISSION_INVITE):
             raise MessageErrors.SYSTEM_MESSAGE_FORBIDDEN
         if chat.has_active_member(user):
             if chat.submission:
@@ -769,8 +771,26 @@ class Message(models.Model):
         return message
 
     @classmethod
+    def create_submission_invite(cls, invitation):
+        chat = Chat.get_or_create_direct(invitation.inviter, invitation.invitee)
+        content = json.dumps(
+            {'kind': 'submission_invite', 'invitation_id': invitation.id},
+            separators=(',', ':'),
+        )
+        message = cls.objects.create(
+            chat=chat,
+            user=invitation.inviter,
+            type=MessageTypeChoice.SUBMISSION_INVITE,
+            content=content,
+        )
+        MessageEvent.record_created(message)
+        from User.models import NotificationEvent
+        NotificationEvent.emit_message_notifications(message, actor=invitation.inviter)
+        return message
+
+    @classmethod
     def forward_individual(cls, source, chat: Chat, user: User):
-        if source.type in (MessageTypeChoice.SYSTEM, MessageTypeChoice.OFFICIAL_NOTICE, MessageTypeChoice.MAP_ACCESS, MessageTypeChoice.FORWARD_BUNDLE):
+        if source.type in (MessageTypeChoice.SYSTEM, MessageTypeChoice.OFFICIAL_NOTICE, MessageTypeChoice.SUBMISSION_INVITE, MessageTypeChoice.MAP_ACCESS, MessageTypeChoice.FORWARD_BUNDLE):
             raise MessageErrors.FORWARD_UNSUPPORTED
         if not chat.has_active_member(user):
             raise MessageErrors.NOT_A_MEMBER
@@ -1188,6 +1208,19 @@ class Message(models.Model):
                 )
                 return payload
             return dict(kind='system', text=self.system_message_text())
+        if self.type == MessageTypeChoice.SUBMISSION_INVITE:
+            from Chat.models import SubmissionInvite
+
+            reference = self._parse_payload(self.content)
+            invitation = SubmissionInvite.objects.filter(id=reference.get('invitation_id')).select_related(
+                'chat', 'chat__submission_record', 'inviter', 'invitee',
+            ).first()
+            if invitation is None:
+                return dict(kind='submission_invite', invitation=None)
+            return dict(
+                kind='submission_invite',
+                invitation=invitation.jsonl(self._viewer_from_request(request)),
+            )
         if self.type == MessageTypeChoice.LOCATION:
             return self._parse_payload(self.content)
         if self.type == MessageTypeChoice.MAP_ACCESS:
@@ -1431,7 +1464,7 @@ class Message(models.Model):
         )
 
     def remove(self):
-        if self.type in (MessageTypeChoice.SYSTEM, MessageTypeChoice.OFFICIAL_NOTICE):
+        if self.type in (MessageTypeChoice.SYSTEM, MessageTypeChoice.OFFICIAL_NOTICE, MessageTypeChoice.SUBMISSION_INVITE):
             raise MessageErrors.SYSTEM_MESSAGE_FORBIDDEN
         if self.is_deleted:
             return
@@ -1445,7 +1478,7 @@ class Message(models.Model):
                 MediaResource.objects.get(id=resource_id).recalculate_reference_count()
 
     def hide_for(self, user: User):
-        if self.type in (MessageTypeChoice.SYSTEM, MessageTypeChoice.OFFICIAL_NOTICE):
+        if self.type in (MessageTypeChoice.SYSTEM, MessageTypeChoice.OFFICIAL_NOTICE, MessageTypeChoice.SUBMISSION_INVITE):
             raise MessageErrors.SYSTEM_MESSAGE_FORBIDDEN
         state, created = MessageUserState.objects.get_or_create(message=self, user=user)
         if created:
@@ -1784,7 +1817,7 @@ class PinnedMessage(models.Model):
 
     @classmethod
     def pin(cls, message, user):
-        if message.type in (MessageTypeChoice.SYSTEM, MessageTypeChoice.OFFICIAL_NOTICE):
+        if message.type in (MessageTypeChoice.SYSTEM, MessageTypeChoice.OFFICIAL_NOTICE, MessageTypeChoice.SUBMISSION_INVITE):
             raise MessageErrors.SYSTEM_MESSAGE_FORBIDDEN
         cls.require_manage_permission(message.chat, user)
         existing = cls.objects.filter(message=message, pinned_by=user).first()
@@ -1813,7 +1846,7 @@ class PinnedMessage(models.Model):
 
     @classmethod
     def unpin(cls, message, user):
-        if message.type in (MessageTypeChoice.SYSTEM, MessageTypeChoice.OFFICIAL_NOTICE):
+        if message.type in (MessageTypeChoice.SYSTEM, MessageTypeChoice.OFFICIAL_NOTICE, MessageTypeChoice.SUBMISSION_INVITE):
             raise MessageErrors.SYSTEM_MESSAGE_FORBIDDEN
         cls.require_manage_permission(message.chat, user)
         deleted, _details = cls.objects.filter(message=message, pinned_by=user).delete()
