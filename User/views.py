@@ -427,7 +427,13 @@ class NotificationTopicPreferenceView(View):
             request.json.audience,
             bool(request.json.enabled),
         )
-        return dict(channel=pref.channel, topic=pref.topic, audience=pref.audience, enabled=pref.enabled)
+        return dict(
+            channel=pref.channel,
+            topic=pref.topic,
+            audience=pref.audience,
+            supported=NotificationTopicPreference.supports_channel(pref.topic, pref.channel),
+            enabled=pref.enabled,
+        )
 
 
 class NotificationEventView(View):

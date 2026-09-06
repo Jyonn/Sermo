@@ -2394,14 +2394,25 @@ class NotificationTopicPreference(models.Model):
         )]
 
     @classmethod
+    def supports_channel(cls, topic, channel):
+        if topic == NotificationTopicChoice.ONLINE:
+            return channel in (
+                NotificationRouteChannelChoice.WEB,
+                NotificationRouteChannelChoice.BARK,
+            )
+        return True
+
+    @classmethod
     def default_enabled(cls, channel, topic):
-        return channel != NotificationRouteChannelChoice.SMS and topic != NotificationTopicChoice.ONLINE
+        return channel != NotificationRouteChannelChoice.SMS and cls.supports_channel(topic, channel)
 
     @classmethod
     def is_enabled_for_event(cls, event, channel):
         topic = event.topic()
         if topic is None:
             return True
+        if not cls.supports_channel(topic, channel):
+            return False
         audience = event.audience()
         pref = cls.objects.filter(user=event.user, channel=channel, topic=topic, audience=audience).first()
         if pref is None and audience != NotificationAudienceChoice.ANY:
@@ -2424,16 +2435,22 @@ class NotificationTopicPreference(models.Model):
             for topic in range(1, 7):
                 audiences = (NotificationAudienceChoice.FRIEND, NotificationAudienceChoice.OTHER) if topic in square_topics else (NotificationAudienceChoice.ANY,)
                 for audience in audiences:
+                    supported = cls.supports_channel(topic, channel)
                     rows.append(dict(
                         channel=channel,
                         topic=topic,
                         audience=audience,
-                        enabled=existing.get((channel, topic, audience), cls.default_enabled(channel, topic)),
+                        supported=supported,
+                        enabled=supported and existing.get(
+                            (channel, topic, audience),
+                            cls.default_enabled(channel, topic),
+                        ),
                     ))
         return rows
 
     @classmethod
     def set_enabled(cls, user, channel, topic, audience, enabled):
+        enabled = bool(enabled) and cls.supports_channel(topic, channel)
         pref, _ = cls.objects.update_or_create(
             user=user, channel=channel, topic=topic, audience=audience, defaults=dict(enabled=enabled),
         )

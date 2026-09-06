@@ -17,6 +17,9 @@ from User.models import (
     NotificationEvent,
     NotificationEventTypeChoice,
     NotificationPreference,
+    NotificationRouteChannelChoice,
+    NotificationTopicChoice,
+    NotificationTopicPreference,
     InstantNotificationEndpoint,
     User,
     UserNotificationChoice,
@@ -87,6 +90,66 @@ class NotificationDigestTests(TestCase):
             enabled=True,
             offline_threshold_minutes=60,
         )
+
+    def create_peer_online_event(self):
+        return NotificationEvent.objects.create(
+            space=self.space,
+            user=self.recipient,
+            actor=self.sender,
+            event_type=NotificationEventTypeChoice.SYSTEM,
+            payload={'kind': 'peer_online'},
+        )
+
+    @patch('User.models.NotificationDelivery.enqueue_instant_for_event', return_value=[])
+    @patch('User.models.NotificationDelivery.enqueue_web_for_event', return_value=[])
+    def test_peer_online_event_never_enqueues_delayed_channels(self, _web, _instant):
+        NotificationTopicPreference.objects.create(
+            user=self.recipient,
+            channel=NotificationRouteChannelChoice.EMAIL,
+            topic=NotificationTopicChoice.ONLINE,
+            enabled=True,
+        )
+
+        deliveries = NotificationDelivery.enqueue_for_event(self.create_peer_online_event())
+
+        self.assertEqual(deliveries, [])
+        self.assertFalse(NotificationDelivery.objects.filter(
+            channel__in=(UserNotificationChoice.EMAIL, UserNotificationChoice.SMS),
+        ).exists())
+
+    @patch('User.models.notificator.mail')
+    def test_pending_peer_online_email_is_skipped_before_sending(self, mail):
+        event = self.create_peer_online_event()
+        NotificationTopicPreference.objects.create(
+            user=self.recipient,
+            channel=NotificationRouteChannelChoice.EMAIL,
+            topic=NotificationTopicChoice.ONLINE,
+            enabled=True,
+        )
+        delivery = NotificationDelivery.objects.create(
+            event=event,
+            channel=UserNotificationChoice.EMAIL,
+        )
+
+        NotificationDelivery.process_pending(user=self.recipient)
+
+        delivery.refresh_from_db()
+        self.assertEqual(delivery.status, NotificationDeliveryStatusChoice.SKIPPED)
+        self.assertEqual(delivery.detail, 'topic_disabled')
+        mail.assert_not_called()
+
+    def test_peer_online_topic_only_supports_immediate_channels(self):
+        rows = NotificationTopicPreference.matrix(self.recipient)
+        online = {row['channel']: row for row in rows if row['topic'] == NotificationTopicChoice.ONLINE}
+
+        self.assertTrue(online[NotificationRouteChannelChoice.WEB]['supported'])
+        self.assertTrue(online[NotificationRouteChannelChoice.BARK]['supported'])
+        self.assertFalse(online[NotificationRouteChannelChoice.EMAIL]['supported'])
+        self.assertFalse(online[NotificationRouteChannelChoice.SMS]['supported'])
+        self.assertTrue(online[NotificationRouteChannelChoice.WEB]['enabled'])
+        self.assertTrue(online[NotificationRouteChannelChoice.BARK]['enabled'])
+        self.assertFalse(online[NotificationRouteChannelChoice.EMAIL]['enabled'])
+        self.assertFalse(online[NotificationRouteChannelChoice.SMS]['enabled'])
 
     @patch('User.models.notificator.mail', return_value={'request_id': 'digest-1'})
     def test_due_messages_are_merged_and_cursor_advances(self, mail):
