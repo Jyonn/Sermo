@@ -75,6 +75,10 @@ class UserErrors:
     PERSONALIZATION_NOT_OWNED = Error(message=_('This personalization item has not been unlocked'), code=Code.Forbidden)
     CITY_BUBBLE_CHECKIN_REQUIRED = Error(message=_('Check in to {region} to unlock this city bubble'), code=Code.Forbidden)
     WEB_PUSH_SUBSCRIPTION_INVALID = Error(message=_('Invalid web push subscription'), code=Code.BadRequest)
+    NOTIFICATION_THRESHOLD_INVALID = Error(
+        message=_('Email notification threshold must be one of: {options} minutes'),
+        code=Code.BadRequest,
+    )
     EMAIL_NOT_VERIFIED = Error(message=_('Email is not verified'), code=Code.Forbidden)
     GESTURE_LOCK_PAYLOAD_INVALID = Error(message=_('Invalid gesture lock payload'), code=Code.BadRequest)
     GROWTH_LEVEL_REQUIRED = Error(message=_('Level {level} is required for this feature'), code=Code.Forbidden)

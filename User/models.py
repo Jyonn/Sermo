@@ -2243,6 +2243,7 @@ class NotificationPreference(models.Model):
         UserNotificationChoice.SMS: 15,
         UserNotificationChoice.BARK: 5,
     }
+    EMAIL_OFFLINE_THRESHOLD_OPTIONS = (10, 20, 30, 60, 120, 180, 360, 720, 1440)
 
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notification_preferences')
     channel = models.IntegerField(choices=UserNotificationChoice.to_choices())
@@ -2276,6 +2277,21 @@ class NotificationPreference(models.Model):
         return cls.CHANNEL_DEFAULT_THRESHOLDS.get(channel, 30)
 
     @classmethod
+    def offline_threshold_options(cls, channel: int):
+        if channel == UserNotificationChoice.EMAIL:
+            return cls.EMAIL_OFFLINE_THRESHOLD_OPTIONS
+        return ()
+
+    @classmethod
+    def validate_offline_threshold(cls, channel: int, value: int):
+        options = cls.offline_threshold_options(channel)
+        if options and value not in options:
+            raise UserErrors.NOTIFICATION_THRESHOLD_INVALID(
+                options=', '.join(str(option) for option in options),
+            )
+        return value
+
+    @classmethod
     def ensure_defaults(cls, user: User):
         prefs = []
         for channel in cls.supported_channels():
@@ -2302,6 +2318,8 @@ class NotificationPreference(models.Model):
         open_chat_on_tap=None,
         bark_icon_mode=None,
     ):
+        if offline_threshold_minutes is not None:
+            cls.validate_offline_threshold(channel, offline_threshold_minutes)
         pref, _created = cls.objects.get_or_create(
             user=user,
             channel=channel,
@@ -2357,6 +2375,7 @@ class NotificationPreference(models.Model):
         )
         if self.channel == UserNotificationChoice.BARK:
             payload['offline_threshold_minutes'] = None
+        payload['offline_threshold_options'] = list(self.offline_threshold_options(self.channel))
         return payload
 
 

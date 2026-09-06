@@ -172,7 +172,7 @@ class NotificationPreferenceParams(metaclass=Params):
         .null().default(None) \
         .bool(
             lambda x: x is None or 1 <= x <= 10080,
-            message=_('offline_threshold_minutes should be between 1 and 10080')
+            message=_('Invalid offline notification threshold')
         )
     hide_message_content = Validator('hide_message_content') \
         .to(int) \

@@ -10,6 +10,7 @@ from User.models import (
     NotificationEvent,
     NotificationEventTypeChoice,
     NotificationDelivery,
+    NotificationPreference,
     WebPushSubscription,
     User,
     UserResourceInventory,
@@ -25,6 +26,52 @@ from TravelMap.models import MapCheckIn
 from User.validators import UserErrors
 from utils.notificator_integration import send_verification_mail
 from utils import auth
+
+
+class NotificationPreferencePolicyTests(SimpleTestCase):
+    def test_email_threshold_options_are_shared_with_api_payload(self):
+        preference = NotificationPreference(
+            channel=UserNotificationChoice.EMAIL,
+            offline_threshold_minutes=30,
+        )
+
+        self.assertEqual(
+            preference.json()['offline_threshold_options'],
+            list(NotificationPreference.EMAIL_OFFLINE_THRESHOLD_OPTIONS),
+        )
+
+    def test_email_threshold_only_accepts_discrete_options(self):
+        for threshold in NotificationPreference.EMAIL_OFFLINE_THRESHOLD_OPTIONS:
+            self.assertEqual(
+                NotificationPreference.validate_offline_threshold(
+                    UserNotificationChoice.EMAIL,
+                    threshold,
+                ),
+                threshold,
+            )
+
+        for threshold in (1, 9, 15, 31, 1441):
+            with self.assertRaises(UserErrors.NOTIFICATION_THRESHOLD_INVALID.__class__):
+                NotificationPreference.validate_offline_threshold(
+                    UserNotificationChoice.EMAIL,
+                    threshold,
+                )
+
+        with self.assertRaises(UserErrors.NOTIFICATION_THRESHOLD_INVALID.__class__):
+            NotificationPreference.set_preference(
+                user=User(),
+                channel=UserNotificationChoice.EMAIL,
+                offline_threshold_minutes=15,
+            )
+
+    def test_other_channels_keep_their_existing_threshold_policy(self):
+        self.assertEqual(
+            NotificationPreference.validate_offline_threshold(
+                UserNotificationChoice.SMS,
+                15,
+            ),
+            15,
+        )
 
 
 class UserPresentationTests(SimpleTestCase):

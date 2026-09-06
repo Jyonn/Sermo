@@ -317,7 +317,7 @@ class SpaceAdminApiTests(TestCase):
             self.member,
             UserNotificationChoice.EMAIL,
             enabled=1,
-            offline_threshold_minutes=12,
+            offline_threshold_minutes=20,
         )
 
         response = self.client.get('/spaces/admin/users', **self.authorization())
@@ -332,7 +332,7 @@ class SpaceAdminApiTests(TestCase):
             if item['channel'] == UserNotificationChoice.EMAIL
         )
         self.assertTrue(email_pref['enabled'])
-        self.assertEqual(email_pref['offline_threshold_minutes'], 12)
+        self.assertEqual(email_pref['offline_threshold_minutes'], 20)
 
     def test_admin_can_name_space_growth_levels(self):
         level_names = [f'阶段{index}' for index in range(1, 19)]
