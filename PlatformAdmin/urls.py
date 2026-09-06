@@ -2,6 +2,7 @@ from django.urls import path
 
 from PlatformAdmin.views import (
     AuditLogView, ChatListView, ChatMessageView, DashboardView, EmailCodeView, EmailDeliveryListView,
+    EmailReviewDetailView, EmailReviewView,
     IdentityDocumentView, IdentityReviewView, LoginView, MemberListView, MessageDeliveryView,
     MfaDisableView, MfaSetupView, MfaVerifyView, SpaceListView,
 )
@@ -19,6 +20,8 @@ urlpatterns = [
     path('chats/<int:chat_id>/messages', ChatMessageView.as_view()),
     path('messages/<int:message_id>/deliveries', MessageDeliveryView.as_view()),
     path('email-deliveries', EmailDeliveryListView.as_view()),
+    path('email-review', EmailReviewView.as_view()),
+    path('email-review/<int:record_id>', EmailReviewDetailView.as_view()),
     path('identity/<int:space_id>/document', IdentityDocumentView.as_view()),
     path('identity/<int:space_id>/review', IdentityReviewView.as_view()),
     path('mfa/setup', MfaSetupView.as_view()),

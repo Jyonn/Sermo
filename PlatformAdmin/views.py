@@ -13,7 +13,13 @@ from Chat.models import Chat, ChatMember, ChatMemberStatusChoice
 from Config.models import CI, Config
 from Friendship.models import Friendship, FriendshipStatusChoice
 from Message.models import Message
-from PlatformAdmin.models import PlatformAdminEmailCode, PlatformAdminSecurity, PlatformAuditLog
+from PlatformAdmin.models import (
+    PlatformAdminEmailCode,
+    PlatformAdminEmailReviewRecord,
+    PlatformAdminEmailReviewState,
+    PlatformAdminSecurity,
+    PlatformAuditLog,
+)
 from PlatformAdmin.validators import PlatformAdminErrors
 from Space.models import Space
 from User.models import (
@@ -398,6 +404,43 @@ class EmailDeliveryListView(View):
             has_more=has_more,
             next_before=deliveries[-1].id if has_more and deliveries else None,
         )
+
+
+class EmailReviewView(View):
+    @auth.require_platform_admin
+    def get(self, request):
+        state = PlatformAdminEmailReviewState.primary()
+        payload = state.json()
+        payload['items'] = [item.summary_json() for item in state.records.all()]
+        return payload
+
+    @auth.require_platform_admin
+    def post(self, request):
+        enabled = _boolean(_value(_body(request), 'enabled', False))
+        state = PlatformAdminEmailReviewState.start() if enabled else PlatformAdminEmailReviewState.stop()
+        _audit(
+            request,
+            'email.review_started' if enabled else 'email.review_stopped',
+            summary='开启邮件审阅' if enabled else '停止邮件审阅',
+            metadata={'captured_count': state.captured_count, 'limit': state.CAPTURE_LIMIT},
+        )
+        payload = state.json()
+        payload['items'] = [item.summary_json() for item in state.records.all()]
+        return payload
+
+
+class EmailReviewDetailView(View):
+    @auth.require_platform_admin
+    def get(self, request, record_id):
+        record = PlatformAdminEmailReviewRecord.objects.get(id=record_id)
+        _audit(
+            request,
+            'email.review_detail_viewed',
+            'email_review',
+            record.id,
+            f'查看审阅邮件 #{record.sequence} 正文',
+        )
+        return record.detail_json()
 
 
 class IdentityDocumentView(View):

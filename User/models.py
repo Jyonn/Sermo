@@ -19,7 +19,7 @@ from pypinyin import lazy_pinyin
 from smartdjango import models, Choice
 
 from utils.global_settings import notificator
-from utils.notificator_integration import notificator_locale, notificator_result_detail
+from utils.notificator_integration import notificator_locale, notificator_result_detail, send_reviewable_mail
 from utils.qiniu import (
     sign_private_download_url,
     delete_avatar_by_uri,
@@ -3556,7 +3556,7 @@ class NotificationDelivery(models.Model):
                 title = cls._render_email_batch_title(deliveries, hide_message_content=pref.hide_message_content)
                 if pref.channel == UserNotificationChoice.EMAIL:
                     body = cls._render_email_batch_body(deliveries, pref)
-                    result = notificator.mail(
+                    result = send_reviewable_mail(
                         target,
                         format='markdown',
                         title=title,
@@ -3637,7 +3637,7 @@ class NotificationDelivery(models.Model):
         try:
             if self.channel == UserNotificationChoice.EMAIL:
                 safe_body = self._escape_email_markdown(body)
-                result = notificator.mail(
+                result = send_reviewable_mail(
                     target,
                     format='markdown',
                     title=title,

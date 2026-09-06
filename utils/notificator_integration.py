@@ -1,8 +1,76 @@
-from django.utils import translation
+import json
+import logging
+
+from django.utils import timezone, translation
 from django.utils.translation import gettext as _
 
 from utils.global_settings import notificator
 from Config.models import Config, CI
+
+
+logger = logging.getLogger(__name__)
+
+
+def _json_safe(value):
+    try:
+        return json.loads(json.dumps(value, ensure_ascii=False, default=str))
+    except (TypeError, ValueError):
+        return str(value)
+
+
+def _body_text(value):
+    if isinstance(value, str):
+        return value
+    return json.dumps(_json_safe(value), ensure_ascii=False, indent=2)
+
+
+def send_reviewable_mail(target, **kwargs):
+    record = None
+    try:
+        from PlatformAdmin.models import PlatformAdminEmailReviewState
+        body = kwargs.get('body')
+        record = PlatformAdminEmailReviewState.claim_email(
+            recipient=str(target or ''),
+            mail_format=str(kwargs.get('format') or ''),
+            title=str(kwargs.get('title') or ''),
+            body=_json_safe(body),
+            body_text=_body_text(body),
+            locale=str(kwargs.get('locale') or ''),
+            recipient_name=str(kwargs.get('recipient_name') or ''),
+            action_url=str(kwargs.get('action_url') or ''),
+            footer_note=str(kwargs.get('footer_note') or ''),
+        )
+    except Exception:
+        logger.exception('Unable to capture email for platform review')
+
+    try:
+        result = notificator.mail(target, **kwargs)
+    except Exception as error:
+        if record is not None:
+            try:
+                record.__class__.objects.filter(id=record.id).update(
+                    status=record.STATUS_FAILED,
+                    detail=str(error),
+                    completed_at=timezone.now(),
+                )
+            except Exception:
+                logger.exception('Unable to mark reviewed email as failed')
+        raise
+
+    if record is not None:
+        try:
+            safe_result = _json_safe(result)
+            request_id = safe_result.get('request_id') if isinstance(safe_result, dict) else ''
+            record.__class__.objects.filter(id=record.id).update(
+                status=record.STATUS_SENT,
+                detail='',
+                request_id=str(request_id or ''),
+                provider_response=safe_result,
+                completed_at=timezone.now(),
+            )
+        except Exception:
+            logger.exception('Unable to mark reviewed email as sent')
+    return result
 
 
 def notificator_locale(language=None):
@@ -41,7 +109,7 @@ def space_administrator_name(language=None):
 
 def send_verification_mail(target, code, time, title, language=None, recipient_name=None):
     locale = notificator_locale(language)
-    return notificator.mail(
+    return send_reviewable_mail(
         target,
         format='verification',
         title=title,
@@ -66,7 +134,7 @@ def send_space_capacity_mail(space, count, limit):
     admin_email = Config.get_value_by_key(CI.ADMIN_EMAIL, default='')
     identity_tier = space.verification_tier == 'identity'
     contact_note = f' 请联系 Sermo 管理员 {admin_email} 手动调整空间规模。' if identity_tier and admin_email else ''
-    return notificator.mail(
+    return send_reviewable_mail(
         space.email,
         format='markdown',
         title=f'{space.name} 的成员容量即将用完',
@@ -80,7 +148,7 @@ def send_space_identity_review_mail(space):
     admin_email = Config.get_value_by_key(CI.ADMIN_EMAIL, default='')
     if not admin_email:
         return None
-    return notificator.mail(
+    return send_reviewable_mail(
         admin_email,
         format='markdown',
         title=f'空间实名认证待审：{space.name}',

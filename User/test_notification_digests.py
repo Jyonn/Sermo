@@ -283,7 +283,7 @@ class NotificationDigestTests(TestCase):
         bark.assert_not_called()
         self.assertFalse(NotificationDelivery.objects.filter(channel=UserNotificationChoice.BARK).exists())
 
-    @patch('User.models.notificator.ntfy')
+    @patch('User.models.notificator.ntfy', create=True)
     def test_ntfy_only_receiver_is_sent_without_legacy_bark_fields(self, ntfy):
         endpoint = InstantNotificationEndpoint.objects.create(
             user=self.recipient,

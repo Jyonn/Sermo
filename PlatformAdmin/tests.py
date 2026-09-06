@@ -10,8 +10,22 @@ from django.contrib.auth.models import AnonymousUser
 from django.utils import timezone
 
 from Config.models import CI, Config
-from PlatformAdmin.models import PlatformAdminEmailCode, PlatformAdminSecurity, PlatformAuditLog
-from PlatformAdmin.views import ChatMessageView, EmailCodeView, EmailDeliveryListView, LoginView, MessageDeliveryView
+from PlatformAdmin.models import (
+    PlatformAdminEmailCode,
+    PlatformAdminEmailReviewRecord,
+    PlatformAdminEmailReviewState,
+    PlatformAdminSecurity,
+    PlatformAuditLog,
+)
+from PlatformAdmin.views import (
+    ChatMessageView,
+    EmailCodeView,
+    EmailDeliveryListView,
+    EmailReviewDetailView,
+    EmailReviewView,
+    LoginView,
+    MessageDeliveryView,
+)
 from Chat.models import Chat, ChatMember, ChatMemberStatusChoice, ChatTypeChoice
 from Space.models import Space
 from User.models import (
@@ -20,6 +34,98 @@ from User.models import (
 )
 from Message.models import Message, MessageTypeChoice
 from utils import auth
+from utils.notificator_integration import send_reviewable_mail
+
+
+class PlatformAdminEmailReviewTests(TestCase):
+    def setUp(self):
+        Config.objects.update_or_create(key=CI.ADMIN_EMAIL, defaults={'value': 'admin@example.com'})
+        self.token = auth.get_platform_admin_token('admin@example.com')['auth']
+
+    def authorization(self):
+        return {'HTTP_AUTHORIZATION': f'Bearer {self.token}'}
+
+    @patch('utils.notificator_integration.notificator.mail', return_value={'request_id': 'mail-review'})
+    def test_review_captures_exactly_twenty_then_stops(self, mail):
+        PlatformAdminEmailReviewState.start()
+
+        for index in range(21):
+            send_reviewable_mail(
+                f'user-{index}@example.com',
+                format='markdown',
+                title=f'Message {index}',
+                body=f'Body {index}',
+                locale='zh-CN',
+            )
+
+        state = PlatformAdminEmailReviewState.primary()
+        self.assertFalse(state.enabled)
+        self.assertEqual(state.captured_count, 20)
+        self.assertEqual(PlatformAdminEmailReviewRecord.objects.count(), 20)
+        self.assertEqual(mail.call_count, 21)
+        first = PlatformAdminEmailReviewRecord.objects.get(sequence=1)
+        last = PlatformAdminEmailReviewRecord.objects.get(sequence=20)
+        self.assertEqual(first.body_text, 'Body 0')
+        self.assertEqual(last.recipient, 'user-19@example.com')
+        self.assertEqual(last.status, PlatformAdminEmailReviewRecord.STATUS_SENT)
+        self.assertEqual(last.request_id, 'mail-review')
+
+    @patch('utils.notificator_integration.notificator.mail', side_effect=RuntimeError('provider unavailable'))
+    def test_review_records_failed_email_content(self, _mail):
+        PlatformAdminEmailReviewState.start()
+
+        with self.assertRaises(RuntimeError):
+            send_reviewable_mail(
+                'failed@example.com',
+                format='verification',
+                title='Verify account',
+                body={'code': '123456', 'time': 10},
+                recipient_name='Recipient',
+            )
+
+        record = PlatformAdminEmailReviewRecord.objects.get()
+        self.assertEqual(record.status, PlatformAdminEmailReviewRecord.STATUS_FAILED)
+        self.assertEqual(record.body, {'code': '123456', 'time': 10})
+        self.assertIn('provider unavailable', record.detail)
+
+    @patch('utils.notificator_integration.notificator.mail', return_value={'request_id': 'detail'})
+    def test_review_api_resets_batch_and_protects_body_detail(self, _mail):
+        PlatformAdminEmailReviewState.start()
+        send_reviewable_mail(
+            'reader@example.com',
+            format='markdown',
+            title='Readable title',
+            body='Full body',
+            footer_note='Footer',
+        )
+        record = PlatformAdminEmailReviewRecord.objects.get()
+
+        list_request = RequestFactory().get('/platform-admin/email-review', **self.authorization())
+        payload = EmailReviewView.as_view()(list_request)
+        self.assertEqual(payload['captured_count'], 1)
+        self.assertNotIn('body_text', payload['items'][0])
+
+        detail_request = RequestFactory().get(
+            f'/platform-admin/email-review/{record.id}',
+            **self.authorization(),
+        )
+        detail = EmailReviewDetailView.as_view()(detail_request, record_id=record.id)
+        self.assertEqual(detail['body_text'], 'Full body')
+        self.assertTrue(PlatformAuditLog.objects.filter(
+            action='email.review_detail_viewed',
+            target_id=record.id,
+        ).exists())
+
+        restart_request = RequestFactory().post(
+            '/platform-admin/email-review',
+            data='{"enabled":true}',
+            content_type='application/json',
+            **self.authorization(),
+        )
+        restarted = EmailReviewView.as_view()(restart_request)
+        self.assertTrue(restarted['enabled'])
+        self.assertEqual(restarted['captured_count'], 0)
+        self.assertFalse(PlatformAdminEmailReviewRecord.objects.exists())
 
 
 class PlatformAdminSecurityTests(TestCase):
