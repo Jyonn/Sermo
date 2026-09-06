@@ -1,0 +1,15 @@
+[Unit]
+Description=Sermo operational data cleanup
+After=network-online.target mysql.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/home/ubuntu/Sermo
+EnvironmentFile=-/home/ubuntu/Sermo/.env
+Environment="VIRTUAL_ENV=/home/ubuntu/envs/sermo"
+Environment="PATH=/home/ubuntu/envs/sermo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+ExecStart=/home/ubuntu/envs/sermo/bin/python manage.py prune_operational_data --execute --batch-size 1000
+Nice=10
+IOSchedulingClass=idle
