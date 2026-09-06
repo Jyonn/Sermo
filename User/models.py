@@ -2396,10 +2396,7 @@ class NotificationTopicPreference(models.Model):
     @classmethod
     def supports_channel(cls, topic, channel):
         if topic == NotificationTopicChoice.ONLINE:
-            return channel in (
-                NotificationRouteChannelChoice.WEB,
-                NotificationRouteChannelChoice.BARK,
-            )
+            return channel == NotificationRouteChannelChoice.BARK
         return True
 
     @classmethod

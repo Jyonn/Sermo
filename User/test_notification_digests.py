@@ -142,12 +142,12 @@ class NotificationDigestTests(TestCase):
         rows = NotificationTopicPreference.matrix(self.recipient)
         online = {row['channel']: row for row in rows if row['topic'] == NotificationTopicChoice.ONLINE}
 
-        self.assertTrue(online[NotificationRouteChannelChoice.WEB]['supported'])
         self.assertTrue(online[NotificationRouteChannelChoice.BARK]['supported'])
+        self.assertFalse(online[NotificationRouteChannelChoice.WEB]['supported'])
         self.assertFalse(online[NotificationRouteChannelChoice.EMAIL]['supported'])
         self.assertFalse(online[NotificationRouteChannelChoice.SMS]['supported'])
-        self.assertTrue(online[NotificationRouteChannelChoice.WEB]['enabled'])
         self.assertTrue(online[NotificationRouteChannelChoice.BARK]['enabled'])
+        self.assertFalse(online[NotificationRouteChannelChoice.WEB]['enabled'])
         self.assertFalse(online[NotificationRouteChannelChoice.EMAIL]['enabled'])
         self.assertFalse(online[NotificationRouteChannelChoice.SMS]['enabled'])
 
