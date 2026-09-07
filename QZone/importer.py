@@ -35,6 +35,48 @@ QZONE_EMOTICON_EXTENSIONS = {'.gif', '.png', '.jpg', '.jpeg', '.webp', '.bmp'}
 EXPORT_TABLE_KEYS = ('qzone_user', 'qzone_post', 'qzone_comment')
 
 
+class _ProgressReporter:
+    BAR_WIDTH = 24
+
+    def __init__(self, stdout, label, total):
+        self.stdout = stdout
+        self.label = label
+        self.total = max(0, int(total))
+        output = getattr(stdout, '_out', stdout)
+        self.interactive = bool(stdout and getattr(output, 'isatty', lambda: False)())
+        self.log_interval = max(1, (self.total + 19) // 20)
+        self.last_current = -1
+
+    def _write(self, message, ending):
+        if self.stdout is None:
+            return
+        try:
+            self.stdout.write(message, ending=ending)
+        except TypeError:
+            self.stdout.write(f'{message}{ending}')
+        if self.interactive:
+            flush = getattr(self.stdout, 'flush', None)
+            if flush is not None:
+                flush()
+
+    def update(self, current, detail=''):
+        current = min(max(0, int(current)), self.total)
+        if current == self.last_current:
+            return
+        if not self.interactive and current not in {0, self.total} and current % self.log_interval:
+            return
+        self.last_current = current
+        ratio = current / self.total if self.total else 1
+        completed = min(self.BAR_WIDTH, round(ratio * self.BAR_WIDTH))
+        bar = f'[{"#" * completed}{"-" * (self.BAR_WIDTH - completed)}]'
+        suffix = f' {detail}' if detail else ''
+        line = f'{self.label} {bar} {ratio:6.1%} {current}/{self.total}{suffix}'
+        if self.interactive:
+            self._write(f'\r{line}', '' if current < self.total else '\n')
+        else:
+            self._write(line, '\n')
+
+
 def _chunks(rows, size):
     for start in range(0, len(rows), size):
         yield rows[start:start + size]
@@ -487,7 +529,9 @@ class QZoneImporter:
         emoticon_codes = set()
         post_emoticon_links = []
         comment_emoticon_links = []
-        for post in posts.iterator(chunk_size=self.batch_size):
+        post_progress = _ProgressReporter(self.stdout, 'manifest posts   ', posts.count())
+        post_progress.update(0)
+        for post_index, post in enumerate(posts.iterator(chunk_size=self.batch_size), start=1):
             root = self._source_root(post.source_payload)
             for position, item in enumerate(post.media or []):
                 self._upsert_media(post=post, position=position, item=item, root=root)
@@ -498,7 +542,13 @@ class QZoneImporter:
             emoticon_references += len(codes)
             emoticon_codes.update(codes)
             post_emoticon_links.extend(links)
-        for comment in comments.iterator(chunk_size=self.batch_size):
+            post_progress.update(
+                post_index,
+                f'attachments={prepared} emoticons={emoticon_references}',
+            )
+        comment_progress = _ProgressReporter(self.stdout, 'manifest comments', comments.count())
+        comment_progress.update(0)
+        for comment_index, comment in enumerate(comments.iterator(chunk_size=self.batch_size), start=1):
             root = self._source_root(comment.source_payload)
             for position, item in enumerate((comment.source_payload or {}).get('pic') or []):
                 normalized = dict(item)
@@ -511,6 +561,10 @@ class QZoneImporter:
             emoticon_references += len(codes)
             emoticon_codes.update(codes)
             comment_emoticon_links.extend(links)
+            comment_progress.update(
+                comment_index,
+                f'attachments={prepared} emoticons={emoticon_references}',
+            )
         QZonePost.emoticons.through.objects.bulk_create(
             post_emoticon_links, batch_size=self.batch_size, ignore_conflicts=True,
         )
@@ -608,7 +662,9 @@ class QZoneImporter:
         ids = list(queryset.values_list('id', flat=True))
         qiniu_auth = bucket = None
         completed = reused = missing = failed = 0
-        for media_id in ids:
+        attachment_progress = _ProgressReporter(self.stdout, 'upload attachments', len(ids))
+        attachment_progress.update(0)
+        for media_index, media_id in enumerate(ids, start=1):
             media = QZoneMedia.objects.get(id=media_id)
             path = self.data_root / media.source_path
             if not path.is_file():
@@ -616,6 +672,7 @@ class QZoneImporter:
                 media.error = f'File not found: {media.source_path}'[:500]
                 media.save(update_fields=['status', 'error', 'updated_at'])
                 missing += 1
+                attachment_progress.update(media_index, f'uploaded={completed} reused={reused} missing={missing} failed={failed}')
                 continue
             try:
                 content_hash, file_size = self._file_digest(path)
@@ -630,6 +687,7 @@ class QZoneImporter:
                         'media_asset', 'content_hash', 'file_size', 'status', 'error', 'updated_at',
                     ])
                     reused += 1
+                    attachment_progress.update(media_index, f'uploaded={completed} reused={reused} missing={missing} failed={failed}')
                     continue
                 if qiniu_auth is None:
                     qiniu_auth, bucket = self._qiniu_client()
@@ -675,6 +733,7 @@ class QZoneImporter:
                 media.error = str(error)[:500]
                 media.save(update_fields=['status', 'error', 'updated_at'])
                 failed += 1
+            attachment_progress.update(media_index, f'uploaded={completed} reused={reused} missing={missing} failed={failed}')
         emoticon_stats = {'uploaded': 0, 'reused': 0, 'missing': 0, 'failed': 0}
         emoticon_statuses = [QZoneEmoticon.STATUS_PENDING]
         if retry_failed:
@@ -682,7 +741,10 @@ class QZoneImporter:
         emoticons = QZoneEmoticon.objects.filter(status__in=emoticon_statuses).order_by('code')
         if limit:
             emoticons = emoticons[:limit]
-        for code in list(emoticons.values_list('code', flat=True)):
+        emoticon_codes_to_upload = list(emoticons.values_list('code', flat=True))
+        emoticon_progress = _ProgressReporter(self.stdout, 'upload emoticons ', len(emoticon_codes_to_upload))
+        emoticon_progress.update(0)
+        for emoticon_index, code in enumerate(emoticon_codes_to_upload, start=1):
             emoticon = QZoneEmoticon.objects.get(code=code)
             path = self.data_root / emoticon.source_path
             if not emoticon.source_path or not path.is_file():
@@ -691,6 +753,7 @@ class QZoneImporter:
                 emoticon.save(update_fields=['status', 'error', 'updated_at'])
                 emoticon_stats['missing'] += 1
                 missing += 1
+                emoticon_progress.update(emoticon_index, self._emoticon_progress_detail(emoticon_stats))
                 continue
             try:
                 content_hash, file_size = self._file_digest(path)
@@ -706,6 +769,7 @@ class QZoneImporter:
                     ])
                     emoticon_stats['reused'] += 1
                     reused += 1
+                    emoticon_progress.update(emoticon_index, self._emoticon_progress_detail(emoticon_stats))
                     continue
                 if qiniu_auth is None:
                     qiniu_auth, bucket = self._qiniu_client()
@@ -753,6 +817,7 @@ class QZoneImporter:
                 emoticon.save(update_fields=['status', 'error', 'updated_at'])
                 emoticon_stats['failed'] += 1
                 failed += 1
+            emoticon_progress.update(emoticon_index, self._emoticon_progress_detail(emoticon_stats))
         result = {
             'uploaded': completed,
             'reused': reused,
@@ -762,6 +827,13 @@ class QZoneImporter:
         }
         self.write(f'media upload: {result}')
         return result
+
+    @staticmethod
+    def _emoticon_progress_detail(stats):
+        return (
+            f'uploaded={stats["uploaded"]} reused={stats["reused"]} '
+            f'missing={stats["missing"]} failed={stats["failed"]}'
+        )
 
     def project(self, limit=0):
         self.space.require_qq_binding_granted()

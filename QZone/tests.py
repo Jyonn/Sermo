@@ -1,4 +1,5 @@
 import hashlib
+import io
 import json
 import tempfile
 from pathlib import Path
@@ -374,7 +375,8 @@ class QZoneImporterTests(TestCase):
                 **dates,
             }],
         )
-        importer = QZoneImporter(self.space, self.input_path)
+        output = io.StringIO()
+        importer = QZoneImporter(self.space, self.input_path, stdout=output)
         importer.import_source()
         importer.import_identities()
 
@@ -422,3 +424,9 @@ class QZoneImporterTests(TestCase):
         projected_comment.refresh_from_db()
         self.assertEqual(statement.text, '历史[em]e101[/em]说说')
         self.assertEqual(projected_comment.text, '评论[em]e101[/em][em]e999[/em]')
+        progress_output = output.getvalue()
+        self.assertIn('manifest posts', progress_output)
+        self.assertIn('manifest comments', progress_output)
+        self.assertIn('upload attachments', progress_output)
+        self.assertIn('upload emoticons', progress_output)
+        self.assertIn('100.0%', progress_output)
