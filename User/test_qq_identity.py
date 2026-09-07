@@ -1,11 +1,15 @@
+import json
+from unittest.mock import patch
+
 from django.core.exceptions import ValidationError
 from django.test import TestCase
 
 from Friendship.models import Friendship
 from Space.models import Space, SpaceFeatureGrant, SpaceFeatureKeyChoice, SpaceOperator
 from Square.models import Statement, StatementComment
-from User.models import QQIdentity, User, UserAccountKindChoice
+from User.models import QQIdentity, User, UserAccountKindChoice, UserContactVerificationCode
 from User.qq_identity import claim_qq_identity, ensure_qzone_placeholder
+from utils import auth
 
 
 class QQIdentityTests(TestCase):
@@ -106,3 +110,66 @@ class QQIdentityTests(TestCase):
         disabled_space.qq_binding_enabled = True
         disabled_space.save(update_fields=['qq_binding_enabled'])
         self.assertEqual(claim_qq_identity(member, '1493732945').user_id, member.id)
+
+
+class QQIdentityAPITests(TestCase):
+    def setUp(self):
+        self.space = Space.objects.create(name='江中东西墙', slug='jzdxq-api', email='api@example.com')
+        SpaceFeatureGrant.set_granted(
+            self.space,
+            SpaceFeatureKeyChoice.QQ_IDENTITY_BINDING,
+            True,
+            granted_by='platform@example.com',
+        )
+        self.space.qq_binding_enabled = True
+        self.space.save(update_fields=['qq_binding_enabled'])
+        self.user = User.create(space=self.space, name='普通成员', password='secret123')
+
+    def authorization(self):
+        return {'HTTP_AUTHORIZATION': f"Bearer {auth.get_login_token(self.user)['auth']}"}
+
+    def post_json(self, path, payload):
+        return self.client.post(
+            path,
+            data=json.dumps(payload),
+            content_type='application/json',
+            **self.authorization(),
+        )
+
+    @patch('User.views.send_verification_mail')
+    def test_member_verifies_qq_mailbox_and_claims_imported_identity(self, send_mail):
+        placeholder = ensure_qzone_placeholder(self.space, '1493732945', '江中东墙').user
+        statement = Statement.objects.create(space=self.space, user=placeholder, text='历史说说')
+
+        initial = self.client.get('/users/me/qq-identity', **self.authorization())
+        code_response = self.post_json('/users/me/qq-identity/code', {'qq': '1493732945'})
+
+        self.assertEqual(initial.status_code, 200, initial.content)
+        self.assertTrue(initial.json()['body']['available'])
+        self.assertFalse(initial.json()['body']['bound'])
+        self.assertEqual(code_response.status_code, 200, code_response.content)
+        self.assertEqual(code_response.json()['body']['target'], '1493732945@qq.com')
+        verification = UserContactVerificationCode.objects.get(user=self.user)
+        send_mail.assert_called_once()
+
+        claim_response = self.post_json('/users/me/qq-identity', {
+            'qq': '1493732945',
+            'code': verification.code,
+        })
+
+        self.assertEqual(claim_response.status_code, 200, claim_response.content)
+        self.assertTrue(claim_response.json()['body']['bound'])
+        self.assertEqual(claim_response.json()['body']['qq'], '1493732945')
+        statement.refresh_from_db()
+        self.assertEqual(statement.user_id, self.user.id)
+
+    @patch('User.views.send_verification_mail')
+    def test_code_request_requires_space_switch(self, send_mail):
+        self.space.qq_binding_enabled = False
+        self.space.save(update_fields=['qq_binding_enabled'])
+
+        response = self.post_json('/users/me/qq-identity/code', {'qq': '1493732945'})
+
+        self.assertEqual(response.status_code, 403, response.content)
+        self.assertFalse(UserContactVerificationCode.objects.filter(user=self.user).exists())
+        send_mail.assert_not_called()

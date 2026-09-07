@@ -12,6 +12,7 @@ from User.models import (
     WebPushSubscription,
 )
 from User.validators import UserErrors
+from User.qq_identity import normalize_qq
 
 
 class UserParams(metaclass=Params):
@@ -278,6 +279,11 @@ class UserContactVerificationCodeParams(metaclass=Params):
 class UserContactUnbindParams(metaclass=Params):
     channel = NotificationPreferenceParams.channel.copy()
     code = UserContactVerificationCodeParams.code.copy().null().default(None)
+
+
+class QQIdentityParams(metaclass=Params):
+    qq = Validator('qq').to(str).to(normalize_qq)
+    code = UserContactVerificationCodeParams.code.copy()
 
 
 class WebPushSubscriptionParams(metaclass=Params):

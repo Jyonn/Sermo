@@ -1,4 +1,5 @@
 from django.views import View
+from django.db import transaction
 from django.utils import timezone
 from notificator import NotificatorAPIError
 from smartdjango import analyse, OK
@@ -29,6 +30,7 @@ from User.models import (
     RefreshToken,
     UserGestureLockPreference,
     UserContactVerificationCode,
+    QQIdentity,
     InstantNotificationEndpoint,
     InstantNotificationVerification,
     InstantNotificationProviderChoice,
@@ -60,11 +62,13 @@ from User.params import (
     UserFeatureDiscoveryParams,
     UserPrivateAccountParams,
     UserContactUnbindParams,
+    QQIdentityParams,
     UserPasswordRecoveryParams,
     WeChatMiniProgramAuthParams,
 )
 from User.validators import UserErrors
 from Space.models import Space
+from User.qq_identity import claim_qq_identity
 
 
 def _require_password_enabled(user):
@@ -766,6 +770,67 @@ class ContactBindingConfirmView(View):
                 enabled=True,
             )
         return request.user.json_me()
+
+
+def _qq_identity_payload(user):
+    identity = QQIdentity.objects.filter(user=user).first()
+    return dict(
+        available=user.space.qq_binding_available,
+        bound=identity is not None and identity.verified_at is not None,
+        qq=identity.qq if identity is not None else None,
+        verified_at=identity.verified_at.timestamp() if identity and identity.verified_at else None,
+    )
+
+
+class QQIdentityView(View):
+    @auth.require_user
+    def get(self, request: Request):
+        return _qq_identity_payload(request.user)
+
+    @auth.require_user
+    @analyse.json(QQIdentityParams.qq, QQIdentityParams.code)
+    def post(self, request: Request):
+        _require_password_enabled(request.user)
+        request.user.space.require_qq_binding_enabled()
+        target = f'{request.json.qq}@qq.com'
+        with transaction.atomic():
+            verification = UserContactVerificationCode.verify(
+                user=request.user,
+                channel=UserNotificationChoice.EMAIL,
+                target=target,
+                code=request.json.code,
+            )
+            claim_qq_identity(request.user, request.json.qq, verified_at=verification.used_at)
+        return _qq_identity_payload(request.user)
+
+
+class QQIdentityCodeView(View):
+    @auth.require_user
+    @analyse.json(QQIdentityParams.qq)
+    def post(self, request: Request):
+        _require_password_enabled(request.user)
+        request.user.space.require_qq_binding_enabled()
+        target = f'{request.json.qq}@qq.com'
+        code_obj = UserContactVerificationCode.issue(
+            user=request.user,
+            channel=UserNotificationChoice.EMAIL,
+            target=target,
+        )
+        try:
+            send_verification_mail(
+                code_obj.target,
+                code=code_obj.code,
+                time=UserContactVerificationCode.EXPIRE_SECONDS // 60,
+                title=verification_title('contact', request.user.language),
+                language=request.user.language,
+                recipient_name=request.user.name,
+            )
+        except NotificatorAPIError as error:
+            raise UserErrors.CONTACT_SEND_FAILED(details=error)
+        return dict(
+            expires_in=UserContactVerificationCode.EXPIRE_SECONDS,
+            target=code_obj.target,
+        )
 
 
 class ContactUnbindView(View):
