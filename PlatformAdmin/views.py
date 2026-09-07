@@ -29,6 +29,7 @@ from User.models import (
     NotificationPreference,
     NotificationRouteChannelChoice,
     User,
+    UserAccountKindChoice,
     UserNotificationChoice,
     UserRoleChoice,
 )
@@ -184,7 +185,15 @@ class SpaceListView(View):
     def get(self, request):
         query = request.GET.get('q', '').strip()
         spaces = Space.objects.select_related('official_user').annotate(
-            admin_member_count=Count('users', filter=Q(users__role=UserRoleChoice.MEMBER, users__is_deleted=False), distinct=True),
+            admin_member_count=Count(
+                'users',
+                filter=Q(
+                    users__role=UserRoleChoice.MEMBER,
+                    users__is_deleted=False,
+                    users__account_kind=UserAccountKindChoice.MEMBER,
+                ),
+                distinct=True,
+            ),
         )
         if query:
             spaces = spaces.filter(Q(name__icontains=query) | Q(slug__icontains=query) | Q(email__icontains=query))
@@ -196,7 +205,11 @@ class MemberListView(View):
     def get(self, request, space_id):
         space = Space.index(space_id)
         _audit(request, 'space.members_viewed', 'space', space.id, f'查看空间 {space.slug} 的成员')
-        users = User.objects.filter(space=space, is_deleted=False).order_by('role', 'name_pinyin', 'id')
+        users = User.objects.filter(
+            space=space,
+            is_deleted=False,
+            account_kind=UserAccountKindChoice.MEMBER,
+        ).order_by('role', 'name_pinyin', 'id')
         payload = []
         for user in users:
             item = user.json_admin()

@@ -34,6 +34,7 @@ from User.models import (
     NotificationPreference,
     OfficialLoginTicket,
     User,
+    UserAccountKindChoice,
     UserNotificationChoice,
     UserRoleChoice,
 )
@@ -503,6 +504,7 @@ class SpaceAdminUserListView(SpaceUserListView):
             space=request.space,
             is_deleted=False,
             role=UserRoleChoice.MEMBER,
+            account_kind=UserAccountKindChoice.MEMBER,
         ).annotate(
             admin_statement_count=Count('statements', filter=Q(statements__is_deleted=False), distinct=True),
         )
@@ -534,6 +536,7 @@ class SpaceAdminUserListView(SpaceUserListView):
                 space=request.space,
                 is_deleted=True,
                 role=UserRoleChoice.MEMBER,
+                account_kind=UserAccountKindChoice.MEMBER,
             ).order_by('name_pinyin', 'name', 'id')
             if request.query.q:
                 keyword = request.query.q.strip()

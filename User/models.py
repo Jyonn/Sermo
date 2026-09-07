@@ -10,6 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import urlparse
 
 from notificator import NotificatorAPIError
+from django.core.exceptions import ValidationError
 from django.db import IntegrityError, close_old_connections, transaction
 from django.db.models import F, Max, OuterRef, Q, Subquery
 from django.utils import timezone, translation
@@ -130,6 +131,11 @@ class UserAccountLevelChoice(Choice):
     VERIFIED = 1
 
 
+class UserAccountKindChoice(Choice):
+    MEMBER = 'member'
+    IMPORTED_PLACEHOLDER = 'imported_placeholder'
+
+
 class UserRoleChoice(Choice):
     OFFICIAL = 0
     MEMBER = 1
@@ -203,6 +209,19 @@ class User(models.Model):
     account_level = models.IntegerField(
         choices=UserAccountLevelChoice.to_choices(),
         default=UserAccountLevelChoice.BASIC,
+    )
+    account_kind = models.CharField(
+        max_length=24,
+        choices=UserAccountKindChoice.to_choices(),
+        default=UserAccountKindChoice.MEMBER,
+        db_index=True,
+    )
+    merged_into = models.ForeignKey(
+        'self',
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='merged_legacy_users',
     )
     role = models.IntegerField(
         choices=UserRoleChoice.to_choices(),
@@ -279,6 +298,16 @@ class User(models.Model):
 
     class Meta:
         unique_together = ('space', 'lower_name')
+        constraints = [
+            models.CheckConstraint(
+                condition=Q(account_kind=UserAccountKindChoice.MEMBER) | Q(is_deleted=True),
+                name='imported_placeholder_is_not_active',
+            ),
+            models.CheckConstraint(
+                condition=Q(merged_into__isnull=True) | Q(account_kind=UserAccountKindChoice.IMPORTED_PLACEHOLDER),
+                name='merged_user_is_imported_placeholder',
+            ),
+        ]
 
     @classmethod
     def index(cls, user_id):
@@ -409,10 +438,20 @@ class User(models.Model):
         name = (name or '').strip()
         lower_name = name.lower()
         normalized_language = cls.vldt.language(language)
-        user = cls.objects.filter(space=space, lower_name=lower_name, is_deleted=False).first()
+        user = cls.objects.filter(
+            space=space,
+            lower_name=lower_name,
+            is_deleted=False,
+            account_kind=UserAccountKindChoice.MEMBER,
+        ).first()
         if user is None:
             cls.vldt.nickname(name)
-            deleted_user = cls.objects.filter(space=space, lower_name=lower_name, is_deleted=True).first()
+            deleted_user = cls.objects.filter(
+                space=space,
+                lower_name=lower_name,
+                is_deleted=True,
+                account_kind=UserAccountKindChoice.MEMBER,
+            ).first()
             if deleted_user is not None:
                 deleted_user.release_deleted_identity()
             space.ensure_member_limit_available()
@@ -792,6 +831,10 @@ class User(models.Model):
     @property
     def verified(self):
         return self.account_level == UserAccountLevelChoice.VERIFIED
+
+    @property
+    def is_imported_placeholder(self):
+        return self.account_kind == UserAccountKindChoice.IMPORTED_PLACEHOLDER
 
     @property
     def is_official(self):
@@ -1303,6 +1346,32 @@ class WeChatMiniProgramIdentity(models.Model):
                 fields=['app_id', 'open_id', 'space'], name='unique_wechat_miniprogram_identity_space',
             ),
         ]
+
+
+class QQIdentity(models.Model):
+    user = models.OneToOneField(
+        User,
+        on_delete=models.CASCADE,
+        related_name='qq_identity',
+    )
+    space = models.ForeignKey(
+        'Space.Space',
+        on_delete=models.CASCADE,
+        related_name='qq_identities',
+    )
+    qq = models.CharField(max_length=20)
+    verified_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['space', 'qq'], name='unique_qq_identity_space'),
+        ]
+
+    def clean(self):
+        if self.user_id and self.space_id and self.user.space_id != self.space_id:
+            raise ValidationError('QQ identity and user must belong to the same space.')
 
 
 class GrowthEvent(models.Model):

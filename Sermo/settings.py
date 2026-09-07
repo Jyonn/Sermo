@@ -52,6 +52,7 @@ INSTALLED_APPS = [
     'Message',
     'Sticker',
     'Square',
+    'QZone',
     'PlatformAdmin',
     'AccessPolicy',
     'Activity',

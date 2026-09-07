@@ -197,12 +197,13 @@ class Space(models.Model):
         return official_user
 
     def active_member_count(self):
-        from User.models import User, UserRoleChoice
+        from User.models import User, UserAccountKindChoice, UserRoleChoice
 
         return User.objects.filter(
             space=self,
             is_deleted=False,
             role=UserRoleChoice.MEMBER,
+            account_kind=UserAccountKindChoice.MEMBER,
         ).count()
 
     @property
