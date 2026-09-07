@@ -4,7 +4,10 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
+from django.core.management.base import CommandError
+from django.db import connection
 from django.test import TestCase
+from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
 from Message.models import MediaAsset
@@ -209,6 +212,70 @@ class QZoneImporterTests(TestCase):
         self.assertEqual(list(QZonePost.objects.values_list('id', flat=True)), [1])
         self.assertEqual(list(QZoneComment.objects.values_list('id', flat=True)), [1])
         self.assertSetEqual(set(QZoneUser.objects.values_list('qq', flat=True)), {'1493732945', '377489624'})
+
+    def test_source_import_preserves_comment_parents_and_skips_unchanged_updates(self):
+        dates = self._row_dates()
+        self._write(
+            posts=[{
+                'id': 1,
+                'source_post_id': 'east-1',
+                'author_qq': '1493732945',
+                'content_raw': '历史说说',
+                'content_text': '历史说说',
+                'published_at': '2014-12-13 12:22:06',
+                'visibility': 'public',
+                'media': '[]',
+                'source_payload': '{"source_file":"east.json"}',
+                **dates,
+            }],
+            comments=[
+                {
+                    'id': 1,
+                    'post_id': 1,
+                    'author_qq': '377489624',
+                    'parent_comment_id': '',
+                    'reply_to_qq': '',
+                    'content_raw': '首条评论',
+                    'published_at': '2014-12-13 13:00:00',
+                    'source_payload': '{}',
+                    **dates,
+                },
+                {
+                    'id': 2,
+                    'post_id': 1,
+                    'author_qq': '1493732945',
+                    'parent_comment_id': 1,
+                    'reply_to_qq': '377489624',
+                    'content_raw': '回复评论',
+                    'published_at': '2014-12-13 13:01:00',
+                    'source_payload': '{}',
+                    **dates,
+                },
+            ],
+        )
+        importer = QZoneImporter(self.space, self.input_path, batch_size=1)
+
+        importer.import_source()
+
+        self.assertEqual(QZoneComment.objects.get(id=2).parent_id, 1)
+        with CaptureQueriesContext(connection) as queries:
+            importer.import_source()
+        source_updates = [
+            query['sql'] for query in queries.captured_queries
+            if query['sql'].lstrip().upper().startswith('UPDATE')
+            and ('qzone_post' in query['sql'] or 'qzone_comment' in query['sql'])
+        ]
+        self.assertEqual(source_updates, [])
+
+    def test_preflight_rejects_non_list_source_tables(self):
+        self.input_path.write_text(json.dumps({
+            'qzone_user': {},
+            'qzone_post': [],
+            'qzone_comment': [],
+        }), encoding='utf-8')
+
+        with self.assertRaisesMessage(CommandError, 'qzone_user must be a list.'):
+            QZoneImporter(self.space, self.input_path).preflight()
 
     @patch('QZone.importer.put_file')
     def test_media_stage_reuses_existing_asset_by_content_hash(self, put_file_mock):

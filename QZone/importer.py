@@ -5,6 +5,7 @@ import mimetypes
 import re
 from pathlib import Path
 
+import ijson
 from django.core.management.base import CommandError
 from django.db import IntegrityError, transaction
 from django.db.models import Q
@@ -29,11 +30,61 @@ from utils.qiniu import avatar_uri_for_key
 
 
 STRUCTURED_MENTION_RE = re.compile(r'@\{uin:(?P<qq>\d+),nick:(?P<nick>.*?)(?:,who:.*)?\}')
+EXPORT_TABLE_KEYS = ('qzone_user', 'qzone_post', 'qzone_comment')
 
 
 def _chunks(rows, size):
     for start in range(0, len(rows), size):
         yield rows[start:start + size]
+
+
+def _top_level_value_event(path, table_key):
+    try:
+        with path.open('rb') as source:
+            waiting_for_value = False
+            for prefix, event, value in ijson.parse(source, use_float=True):
+                if prefix == '' and event == 'map_key':
+                    waiting_for_value = value == table_key
+                    continue
+                if waiting_for_value:
+                    return event
+            return None
+    except (OSError, UnicodeError, ijson.JSONError) as error:
+        raise CommandError(f'Cannot parse migration file: {error}') from error
+
+
+def iter_qzone_export(path):
+    path = Path(path)
+    if not path.is_file():
+        raise CommandError(f'Input file does not exist: {path}')
+    try:
+        for table_key in EXPORT_TABLE_KEYS:
+            found_row = False
+            with path.open('rb') as source:
+                for row in ijson.items(source, f'{table_key}.item', use_float=True):
+                    found_row = True
+                    if not isinstance(row, dict):
+                        raise CommandError(f'{table_key} must contain JSON objects.')
+                    yield table_key, row
+            if not found_row:
+                value_event = _top_level_value_event(path, table_key)
+                if value_event is None:
+                    raise CommandError(f'Migration file is missing list {table_key}.')
+                if value_event != 'start_array':
+                    raise CommandError(f'{table_key} must be a list.')
+    except (OSError, UnicodeError, ijson.JSONError) as error:
+        raise CommandError(f'Cannot parse migration file: {error}') from error
+
+
+def _file_sha256(path):
+    digest = hashlib.sha256()
+    try:
+        with path.open('rb') as source:
+            for chunk in iter(lambda: source.read(1024 * 1024), b''):
+                digest.update(chunk)
+    except OSError as error:
+        raise CommandError(f'Cannot read migration file: {error}') from error
+    return digest.hexdigest()
 
 
 def _json_value(value, expected_type, field_name):
@@ -71,101 +122,130 @@ class QZoneImporter:
         self.data_root = self.input_path.parent
         self.stdout = stdout
         self.batch_size = max(1, int(batch_size))
-        self.data = None
 
     def write(self, message):
         if self.stdout is not None:
             self.stdout.write(str(message))
 
-    def load(self):
-        if self.data is not None:
-            return self.data
-        if not self.input_path.is_file():
-            raise CommandError(f'Input file does not exist: {self.input_path}')
-        try:
-            self.data = json.loads(self.input_path.read_text(encoding='utf-8'))
-        except (OSError, json.JSONDecodeError) as error:
-            raise CommandError(f'Cannot read migration file: {error}') from error
-        if not isinstance(self.data, dict):
-            raise CommandError('Migration file root must be an object.')
-        for key in ('qzone_user', 'qzone_post', 'qzone_comment'):
-            if not isinstance(self.data.get(key), list):
-                raise CommandError(f'Migration file is missing list {key}.')
-        return self.data
-
     def preflight(self):
-        data = self.load()
-        users = data['qzone_user']
-        posts = data['qzone_post']
-        comments = data['qzone_comment']
-        qqs = [str(row.get('qq') or '').strip() for row in users]
-        post_ids = [int(row['id']) for row in posts]
-        comment_ids = [int(row['id']) for row in comments]
-        if len(qqs) != len(set(qqs)):
-            raise CommandError('qzone_user contains duplicate QQ numbers.')
-        if len(post_ids) != len(set(post_ids)):
-            raise CommandError('qzone_post contains duplicate IDs.')
-        if len(comment_ids) != len(set(comment_ids)):
-            raise CommandError('qzone_comment contains duplicate IDs.')
-        user_set = set(qqs)
-        post_set = set(post_ids)
-        comment_set = set(comment_ids)
-        missing_users = {
-            str(row.get(field) or '').strip()
-            for rows, fields in ((posts, ('author_qq',)), (comments, ('author_qq', 'reply_to_qq')))
-            for row in rows
-            for field in fields
-            if row.get(field) and str(row.get(field)).strip() not in user_set
-        }
-        missing_posts = {int(row['post_id']) for row in comments if int(row['post_id']) not in post_set}
-        missing_parents = {
-            int(row['parent_comment_id'])
-            for row in comments
-            if row.get('parent_comment_id') and int(row['parent_comment_id']) not in comment_set
-        }
-        late_parents = {
-            int(row['parent_comment_id'])
-            for row in comments
-            if row.get('parent_comment_id') and int(row['parent_comment_id']) >= int(row['id'])
-        }
+        counts = {key: 0 for key in EXPORT_TABLE_KEYS}
+        user_set = set()
+        post_set = set()
+        comment_set = set()
+        unresolved_parents = set()
+        missing_users = set()
+        missing_posts = set()
+        late_parents = set()
+        private_posts = post_text_over_140 = comment_text_over_140 = 0
+
+        for table_key, row in iter_qzone_export(self.input_path):
+            counts[table_key] += 1
+            if table_key == 'qzone_user':
+                qq = str(row.get('qq') or '').strip()
+                if qq in user_set:
+                    raise CommandError('qzone_user contains duplicate QQ numbers.')
+                user_set.add(qq)
+                continue
+            if table_key == 'qzone_post':
+                post_id = int(row['id'])
+                if post_id in post_set:
+                    raise CommandError('qzone_post contains duplicate IDs.')
+                post_set.add(post_id)
+                author_qq = str(row.get('author_qq') or '').strip()
+                if author_qq and author_qq not in user_set:
+                    missing_users.add(author_qq)
+                private_posts += row.get('visibility') == 'private'
+                post_text_over_140 += len(str(row.get('content_text') or '')) > 140
+                continue
+
+            comment_id = int(row['id'])
+            if comment_id in comment_set:
+                raise CommandError('qzone_comment contains duplicate IDs.')
+            post_id = int(row['post_id'])
+            if post_id not in post_set:
+                missing_posts.add(post_id)
+            for field in ('author_qq', 'reply_to_qq'):
+                qq = str(row.get(field) or '').strip()
+                if qq and qq not in user_set:
+                    missing_users.add(qq)
+            if row.get('parent_comment_id'):
+                parent_id = int(row['parent_comment_id'])
+                if parent_id not in comment_set:
+                    unresolved_parents.add(parent_id)
+                if parent_id >= comment_id:
+                    late_parents.add(parent_id)
+            comment_set.add(comment_id)
+            comment_text_over_140 += len(str(row.get('content_raw') or '')) > 140
+
+        missing_parents = unresolved_parents - comment_set
+        late_parents.update(unresolved_parents & comment_set)
         if missing_users or missing_posts or missing_parents or late_parents:
             raise CommandError(
                 f'Dangling references: users={len(missing_users)}, posts={len(missing_posts)}, '
                 f'parents={len(missing_parents)}, parents_not_before_children={len(late_parents)}'
             )
         report = {
-            'file_sha256': hashlib.sha256(self.input_path.read_bytes()).hexdigest(),
-            'users': len(users),
-            'posts': len(posts),
-            'comments': len(comments),
-            'private_posts': sum(row.get('visibility') == 'private' for row in posts),
-            'post_text_over_140': sum(len(str(row.get('content_text') or '')) > 140 for row in posts),
-            'comment_text_over_140': sum(len(str(row.get('content_raw') or '')) > 140 for row in comments),
+            'file_sha256': _file_sha256(self.input_path),
+            'users': counts['qzone_user'],
+            'posts': counts['qzone_post'],
+            'comments': counts['qzone_comment'],
+            'private_posts': private_posts,
+            'post_text_over_140': post_text_over_140,
+            'comment_text_over_140': comment_text_over_140,
         }
         self.write(json.dumps(report, ensure_ascii=False, indent=2))
         return report
 
     def import_source(self, limit=0):
-        data = self.load()
-        posts = data['qzone_post'][:limit or None]
         if limit:
-            post_ids = {int(row['id']) for row in posts}
-            comments = [row for row in data['qzone_comment'] if int(row['post_id']) in post_ids]
-            required_qqs = {
-                str(row.get(field) or '').strip()
-                for rows, fields in ((posts, ('author_qq',)), (comments, ('author_qq', 'reply_to_qq')))
-                for row in rows
-                for field in fields
-                if row.get(field)
-            }
-            users = [row for row in data['qzone_user'] if str(row.get('qq') or '').strip() in required_qqs]
+            users_by_qq = {}
+            posts = []
+            comments = []
+            post_ids = set()
+            required_qqs = set()
+            for table_key, row in iter_qzone_export(self.input_path):
+                if table_key == 'qzone_user':
+                    users_by_qq[str(row.get('qq') or '').strip()] = row
+                elif table_key == 'qzone_post' and len(posts) < limit:
+                    posts.append(row)
+                    post_ids.add(int(row['id']))
+                    required_qqs.add(str(row.get('author_qq') or '').strip())
+                elif table_key == 'qzone_comment' and int(row['post_id']) in post_ids:
+                    comments.append(row)
+                    required_qqs.add(str(row.get('author_qq') or '').strip())
+                    if row.get('reply_to_qq'):
+                        required_qqs.add(str(row['reply_to_qq']).strip())
+            users = [users_by_qq[qq] for qq in required_qqs if qq in users_by_qq]
+            self._import_users(users)
+            self._import_posts(posts)
+            self._import_comments(comments)
+            result = {'users': len(users), 'posts': len(posts), 'comments': len(comments)}
         else:
-            users = data['qzone_user']
-            comments = data['qzone_comment']
-        self._import_users(users)
-        self._import_posts(posts)
-        self._import_comments(comments)
-        result = {'users': len(users), 'posts': len(posts), 'comments': len(comments)}
+            handlers = {
+                'qzone_user': self._import_users,
+                'qzone_post': self._import_posts,
+                'qzone_comment': self._import_comments,
+            }
+            counts = {key: 0 for key in EXPORT_TABLE_KEYS}
+            active_key = None
+            batch = []
+            for table_key, row in iter_qzone_export(self.input_path):
+                if active_key is not None and table_key != active_key and batch:
+                    handlers[active_key](batch)
+                    batch = []
+                active_key = table_key
+                batch.append(row)
+                counts[table_key] += 1
+                if len(batch) >= self.batch_size:
+                    handlers[table_key](batch)
+                    batch = []
+            if active_key is not None and batch:
+                handlers[active_key](batch)
+            result = {
+                'users': counts['qzone_user'],
+                'posts': counts['qzone_post'],
+                'comments': counts['qzone_comment'],
+            }
         self.write(f'source: {result}')
         return result
 
@@ -206,6 +286,8 @@ class QZoneImporter:
                     continue
                 if item.source_post_id != values['source_post_id'] or item.author_id != values['author_id']:
                     raise CommandError(f'QZone post ID {item.id} conflicts with existing source identity.')
+                if not any(getattr(item, field) != value for field, value in values.items()):
+                    continue
                 for field, value in values.items():
                     setattr(item, field, value)
                 updates.append(item)
@@ -238,26 +320,31 @@ class QZoneImporter:
             existing = QZoneComment.objects.in_bulk(ids)
             creates = []
             updates = []
+            parent_updates = []
             for row in batch:
                 values = self._comment_values(row)
                 item = existing.get(int(row['id']))
                 if item is None:
                     creates.append(QZoneComment(id=int(row['id']), parent_id=None, **values))
+                    if row.get('parent_comment_id'):
+                        parent_updates.append(QZoneComment(
+                            id=int(row['id']),
+                            parent_id=int(row['parent_comment_id']),
+                        ))
                     continue
-                for field, value in values.items():
-                    setattr(item, field, value)
-                updates.append(item)
+                if any(getattr(item, field) != value for field, value in values.items()):
+                    for field, value in values.items():
+                        setattr(item, field, value)
+                    updates.append(item)
+                parent_id = int(row['parent_comment_id']) if row.get('parent_comment_id') else None
+                if item.parent_id != parent_id:
+                    item.parent_id = parent_id
+                    parent_updates.append(item)
             QZoneComment.objects.bulk_create(creates, batch_size=self.batch_size)
             if updates:
                 QZoneComment.objects.bulk_update(updates, fields, batch_size=self.batch_size)
-
-        parent_updates = []
-        for row in rows:
-            parent_id = int(row['parent_comment_id']) if row.get('parent_comment_id') else None
-            item = QZoneComment(id=int(row['id']), parent_id=parent_id)
-            parent_updates.append(item)
-        for batch in _chunks(parent_updates, self.batch_size):
-            QZoneComment.objects.bulk_update(batch, ['parent'], batch_size=self.batch_size)
+            if parent_updates:
+                QZoneComment.objects.bulk_update(parent_updates, ['parent'], batch_size=self.batch_size)
 
     @staticmethod
     def _comment_values(row):
