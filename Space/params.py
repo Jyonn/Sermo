@@ -28,6 +28,8 @@ class SpaceParams(metaclass=Params):
         lambda x: x in (0, 1), message=_('submission_enabled should be 0 or 1'))
     square_explore_enabled = Validator('square_explore_enabled').to(int).null().default(1).bool(
         lambda x: x in (0, 1), message=_('square_explore_enabled should be 0 or 1'))
+    qq_binding_enabled = Validator('qq_binding_enabled').to(int).null().default(None).bool(
+        lambda x: x is None or x in (0, 1), message=_('qq_binding_enabled should be 0 or 1'))
     unverified_group_policy = Validator('unverified_group_policy').to(int).null().default(2).to(SpaceValidator.unverified_group_policy)
 
 

@@ -2,7 +2,7 @@ from django.core.exceptions import ValidationError
 from django.test import TestCase
 
 from Friendship.models import Friendship
-from Space.models import Space, SpaceOperator
+from Space.models import Space, SpaceFeatureGrant, SpaceFeatureKeyChoice, SpaceOperator
 from Square.models import Statement, StatementComment
 from User.models import QQIdentity, User, UserAccountKindChoice
 from User.qq_identity import claim_qq_identity, ensure_qzone_placeholder
@@ -11,6 +11,14 @@ from User.qq_identity import claim_qq_identity, ensure_qzone_placeholder
 class QQIdentityTests(TestCase):
     def setUp(self):
         self.space = Space.objects.create(name='江中东西墙', slug='jzdxq', email='wall@example.com')
+        SpaceFeatureGrant.set_granted(
+            self.space,
+            SpaceFeatureKeyChoice.QQ_IDENTITY_BINDING,
+            True,
+            granted_by='platform@example.com',
+        )
+        self.space.qq_binding_enabled = True
+        self.space.save(update_fields=['qq_binding_enabled'])
 
     def test_placeholder_is_not_an_active_space_member(self):
         identity = ensure_qzone_placeholder(self.space, '1493732945', '江中东墙')
@@ -78,3 +86,23 @@ class QQIdentityTests(TestCase):
 
         with self.assertRaises(ValidationError):
             claim_qq_identity(second, '1493732945')
+
+    def test_claim_requires_platform_grant_and_space_switch(self):
+        disabled_space = Space.objects.create(name='普通空间', slug='normal-space', email='normal@example.com')
+        member = User.create(space=disabled_space, name='普通成员')
+
+        with self.assertRaises(Exception):
+            claim_qq_identity(member, '1493732945')
+
+        SpaceFeatureGrant.set_granted(
+            disabled_space,
+            SpaceFeatureKeyChoice.QQ_IDENTITY_BINDING,
+            True,
+            granted_by='platform@example.com',
+        )
+        with self.assertRaises(Exception):
+            claim_qq_identity(member, '1493732945')
+
+        disabled_space.qq_binding_enabled = True
+        disabled_space.save(update_fields=['qq_binding_enabled'])
+        self.assertEqual(claim_qq_identity(member, '1493732945').user_id, member.id)

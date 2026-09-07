@@ -33,6 +33,10 @@ class SpaceNormalizers:
         return (value or '').strip().lower()
 
 
+class SpaceFeatureKeyChoice(Choice):
+    QQ_IDENTITY_BINDING = 'qq_identity_binding'
+
+
 class Space(models.Model):
     normalizers = SpaceNormalizers
     validators = SpaceValidator
@@ -66,6 +70,7 @@ class Space(models.Model):
     chat_enabled = models.BooleanField(default=True)
     submission_enabled = models.BooleanField(default=False)
     square_explore_enabled = models.BooleanField(default=True)
+    qq_binding_enabled = models.BooleanField(default=False)
     unverified_group_policy = models.PositiveSmallIntegerField(default=2)
     member_limit = models.PositiveIntegerField(null=True, blank=True, default=None)
     level_names = models.JSONField(default=default_level_names)
@@ -253,7 +258,8 @@ class Space(models.Model):
 
     def set_admin_settings(
             self, name, group_square_enabled, chat_enabled, square_explore_enabled,
-            unverified_group_policy, member_limit, level_names=None, submission_enabled=None):
+            unverified_group_policy, member_limit, level_names=None, submission_enabled=None,
+            qq_binding_enabled=None):
         normalized_name = self.vldt.name(name)
         normalized_member_limit = self.vldt.member_limit(member_limit)
         normalized_level_names = self.vldt.level_names(level_names or self.level_names)
@@ -274,15 +280,43 @@ class Space(models.Model):
         self.chat_enabled = normalized_chat_enabled
         if submission_enabled is not None:
             self.submission_enabled = bool(submission_enabled) and normalized_chat_enabled
+        if qq_binding_enabled is not None:
+            requested_qq_binding = bool(qq_binding_enabled)
+            if requested_qq_binding and not self.is_feature_granted(SpaceFeatureKeyChoice.QQ_IDENTITY_BINDING):
+                raise SpaceErrors.QQ_BINDING_NOT_GRANTED
+            self.qq_binding_enabled = requested_qq_binding
         self.square_explore_enabled = bool(square_explore_enabled) and normalized_square_enabled
         self.unverified_group_policy = self.vldt.unverified_group_policy(unverified_group_policy)
         self.member_limit = normalized_member_limit
         self.level_names = normalized_level_names
         self.save(update_fields=[
             'name', 'group_square_enabled', 'chat_enabled', 'submission_enabled', 'square_explore_enabled',
-            'unverified_group_policy', 'member_limit', 'level_names',
+            'unverified_group_policy', 'member_limit', 'level_names', 'qq_binding_enabled',
         ])
         return self
+
+    def is_feature_granted(self, feature_key):
+        prefetched = getattr(self, '_prefetched_objects_cache', {}).get('feature_grants')
+        if prefetched is not None:
+            return any(item.feature_key == feature_key and item.revoked_at is None for item in prefetched)
+        return self.feature_grants.filter(feature_key=feature_key, revoked_at__isnull=True).exists()
+
+    @property
+    def qq_binding_granted(self):
+        return self.is_feature_granted(SpaceFeatureKeyChoice.QQ_IDENTITY_BINDING)
+
+    @property
+    def qq_binding_available(self):
+        return self.qq_binding_granted and self.qq_binding_enabled
+
+    def require_qq_binding_granted(self):
+        if not self.qq_binding_granted:
+            raise SpaceErrors.QQ_BINDING_NOT_GRANTED
+
+    def require_qq_binding_enabled(self):
+        self.require_qq_binding_granted()
+        if not self.qq_binding_enabled:
+            raise SpaceErrors.QQ_BINDING_DISABLED
 
     def require_chat_enabled(self):
         if not self.chat_enabled:
@@ -318,6 +352,7 @@ class Space(models.Model):
             'chat_enabled',
             'submission_enabled',
             'square_explore_enabled',
+            'qq_binding_available',
             'unverified_group_policy',
             'member_limit',
             'verification_tier',
@@ -338,6 +373,8 @@ class Space(models.Model):
             'chat_enabled',
             'submission_enabled',
             'square_explore_enabled',
+            'qq_binding_enabled',
+            'qq_binding_granted',
             'unverified_group_policy',
             'member_limit',
             'verification_tier',
@@ -349,6 +386,41 @@ class Space(models.Model):
             'level_names',
             'created_at',
         )
+
+
+class SpaceFeatureGrant(models.Model):
+    space = models.ForeignKey(Space, on_delete=models.CASCADE, related_name='feature_grants')
+    feature_key = models.CharField(max_length=64, choices=SpaceFeatureKeyChoice.to_choices())
+    granted_by = models.EmailField(blank=True, default='')
+    granted_at = models.DateTimeField(default=timezone.now)
+    revoked_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['space', 'feature_key'], name='unique_space_feature_grant'),
+        ]
+
+    @classmethod
+    def set_granted(cls, space, feature_key, granted, granted_by=''):
+        if feature_key not in dict(SpaceFeatureKeyChoice.to_choices()):
+            raise ValueError('Unsupported space feature.')
+        with transaction.atomic():
+            item, _created = cls.objects.select_for_update().get_or_create(
+                space=space,
+                feature_key=feature_key,
+                defaults={'granted_by': granted_by if granted else ''},
+            )
+            if granted:
+                item.granted_by = str(granted_by or '')[:254]
+                item.granted_at = timezone.now()
+                item.revoked_at = None
+            else:
+                item.revoked_at = timezone.now()
+            item.save(update_fields=['granted_by', 'granted_at', 'revoked_at'])
+            if not granted and feature_key == SpaceFeatureKeyChoice.QQ_IDENTITY_BINDING:
+                Space.objects.filter(id=space.id).update(qq_binding_enabled=False)
+                space.qq_binding_enabled = False
+        return item
 
 
 class SpaceOperator(models.Model):

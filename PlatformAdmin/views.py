@@ -21,7 +21,7 @@ from PlatformAdmin.models import (
     PlatformAuditLog,
 )
 from PlatformAdmin.validators import PlatformAdminErrors
-from Space.models import Space
+from Space.models import Space, SpaceFeatureGrant, SpaceFeatureKeyChoice
 from User.models import (
     NotificationDelivery,
     NotificationDeliveryStatusChoice,
@@ -99,6 +99,8 @@ def _space_payload(space):
         member_count=getattr(space, 'admin_member_count', space.active_member_count()),
         chat_enabled=space.chat_enabled,
         square_enabled=space.group_square_enabled,
+        qq_binding_granted=space.qq_binding_granted,
+        qq_binding_enabled=space.qq_binding_enabled,
         identity_submitted_at=space.identity_submitted_at.timestamp() if space.identity_submitted_at else None,
         identity_verified_at=space.identity_verified_at.timestamp() if space.identity_verified_at else None,
         created_at=space.created_at.timestamp(),
@@ -184,7 +186,7 @@ class SpaceListView(View):
     @auth.require_platform_admin
     def get(self, request):
         query = request.GET.get('q', '').strip()
-        spaces = Space.objects.select_related('official_user').annotate(
+        spaces = Space.objects.select_related('official_user').prefetch_related('feature_grants').annotate(
             admin_member_count=Count(
                 'users',
                 filter=Q(
@@ -198,6 +200,35 @@ class SpaceListView(View):
         if query:
             spaces = spaces.filter(Q(name__icontains=query) | Q(slug__icontains=query) | Q(email__icontains=query))
         return [_space_payload(space) for space in spaces.order_by('-created_at', '-id')[:100]]
+
+
+class SpaceFeatureGrantView(View):
+    @auth.require_platform_admin
+    def post(self, request, space_id, feature_key):
+        if feature_key not in dict(SpaceFeatureKeyChoice.to_choices()):
+            raise PlatformAdminErrors.SPACE_FEATURE_INVALID
+        enabled = _value(_body(request), 'enabled')
+        if enabled not in (True, False, 0, 1):
+            raise PlatformAdminErrors.SPACE_FEATURE_ENABLED_INVALID
+        space = Space.index(space_id)
+        grant = SpaceFeatureGrant.set_granted(
+            space,
+            feature_key,
+            bool(enabled),
+            granted_by=request.platform_admin_email,
+        )
+        space.refresh_from_db()
+        if hasattr(space, '_prefetched_objects_cache'):
+            space._prefetched_objects_cache.pop('feature_grants', None)
+        _audit(
+            request,
+            'space.feature_granted' if grant.revoked_at is None else 'space.feature_revoked',
+            'space',
+            space.id,
+            f'{"授予" if grant.revoked_at is None else "撤销"}空间 {space.slug} 功能 {feature_key}',
+            metadata={'feature_key': feature_key},
+        )
+        return _space_payload(space)
 
 
 class MemberListView(View):

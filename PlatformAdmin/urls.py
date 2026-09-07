@@ -4,7 +4,7 @@ from PlatformAdmin.views import (
     AuditLogView, ChatListView, ChatMessageView, DashboardView, EmailCodeView, EmailDeliveryListView,
     EmailReviewDetailView, EmailReviewView,
     IdentityDocumentView, IdentityReviewView, LoginView, MemberListView, MessageDeliveryView,
-    MfaDisableView, MfaSetupView, MfaVerifyView, SpaceListView,
+    MfaDisableView, MfaSetupView, MfaVerifyView, SpaceFeatureGrantView, SpaceListView,
 )
 from AccessPolicy.views import (
     PlatformPolicyDetailView, PlatformPolicyListView, PlatformPolicySimulateView,
@@ -16,6 +16,7 @@ urlpatterns = [
     path('dashboard', DashboardView.as_view()),
     path('spaces', SpaceListView.as_view()),
     path('spaces/<int:space_id>/members', MemberListView.as_view()),
+    path('spaces/<int:space_id>/features/<str:feature_key>', SpaceFeatureGrantView.as_view()),
     path('members/<int:user_id>/chats', ChatListView.as_view()),
     path('chats/<int:chat_id>/messages', ChatMessageView.as_view()),
     path('messages/<int:message_id>/deliveries', MessageDeliveryView.as_view()),

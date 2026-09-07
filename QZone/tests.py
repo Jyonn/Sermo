@@ -1,9 +1,17 @@
+import hashlib
+import json
+import tempfile
+from pathlib import Path
+from unittest.mock import patch
+
 from django.test import TestCase
 from django.utils import timezone
 
-from QZone.models import QZoneComment, QZonePost, QZoneUser
-from Space.models import Space
-from Square.models import Statement, StatementComment
+from Message.models import MediaAsset
+from QZone.importer import QZoneImporter
+from QZone.models import QZoneComment, QZoneMedia, QZonePost, QZoneUser
+from Space.models import Space, SpaceFeatureGrant, SpaceFeatureKeyChoice
+from Square.models import Statement, StatementComment, StatementMedia
 from User.qq_identity import ensure_qzone_placeholder
 
 
@@ -47,3 +55,210 @@ class QZoneSourceModelTests(TestCase):
         self.assertEqual(source_comment.reply_to_id, wall.qq)
         self.assertEqual(statement.qzone_source.id, post.id)
         self.assertEqual(statement_comment.qzone_source.id, source_comment.id)
+
+
+class QZoneImporterTests(TestCase):
+    def setUp(self):
+        self.space = Space.objects.create(name='江中东西墙', slug='jzdxq', email='wall@example.com')
+        SpaceFeatureGrant.set_granted(
+            self.space,
+            SpaceFeatureKeyChoice.QQ_IDENTITY_BINDING,
+            True,
+            granted_by='platform@example.com',
+        )
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp_dir.cleanup)
+        self.input_path = Path(self.temp_dir.name) / 'qzone-migration.json'
+
+    @staticmethod
+    def _row_dates():
+        return {
+            'created_at': '2026-09-07T04:59:39.374Z',
+            'updated_at': '2026-09-07T04:59:39.374Z',
+        }
+
+    def _write(self, posts, comments, users=None):
+        payload = {
+            'qzone_user': users or [
+                {'qq': '1493732945', 'nickname': '江中东墙'},
+                {'qq': '377489624', 'nickname': 'ugly'},
+            ],
+            'qzone_post': posts,
+            'qzone_comment': comments,
+        }
+        self.input_path.write_text(json.dumps(payload, ensure_ascii=False), encoding='utf-8')
+
+    def test_imports_source_identities_and_historical_projection(self):
+        dates = self._row_dates()
+        self._write(
+            posts=[
+                {
+                    'id': 1,
+                    'source_post_id': 'east-1',
+                    'author_qq': '1493732945',
+                    'content_raw': '历史说说',
+                    'content_text': '历史说说',
+                    'published_at': '2014-12-13 12:22:06',
+                    'visibility': 'public',
+                    'media': '[]',
+                    'source_payload': '{}',
+                    **dates,
+                },
+                {
+                    'id': 2,
+                    'source_post_id': 'east-private',
+                    'author_qq': '1493732945',
+                    'content_raw': '私密内容',
+                    'content_text': '私密内容',
+                    'published_at': '2014-12-14 12:22:06',
+                    'visibility': 'private',
+                    'media': '[]',
+                    'source_payload': '{}',
+                    **dates,
+                },
+            ],
+            comments=[{
+                'id': 1,
+                'post_id': 1,
+                'author_qq': '377489624',
+                'parent_comment_id': '',
+                'reply_to_qq': '1493732945',
+                'content_raw': '@{uin:1493732945,nick:江中东墙,who:1,auto:1}你好',
+                'published_at': '2014-12-13 13:00:00',
+                'source_payload': '{}',
+                **dates,
+            }],
+        )
+        importer = QZoneImporter(self.space, self.input_path)
+
+        importer.preflight()
+        importer.import_source()
+        importer.import_identities()
+        result = importer.project()
+
+        self.assertEqual(result, {'posts_created': 1, 'comments_created': 1})
+        self.assertIsNotNone(QZonePost.objects.get(id=1).statement_id)
+        self.assertIsNone(QZonePost.objects.get(id=2).statement_id)
+        statement = Statement.objects.get(qzone_source__id=1)
+        comment = StatementComment.objects.get(qzone_source__id=1)
+        self.assertEqual(statement.created_at.year, 2014)
+        self.assertEqual(comment.created_at.year, 2014)
+        self.assertEqual(comment.text, '@江中东墙你好')
+        self.assertEqual(comment.reply_to_user.qq_identity.qq, '1493732945')
+
+        self.assertEqual(importer.project(), {'posts_created': 0, 'comments_created': 0})
+
+    def test_source_limit_keeps_all_dependencies_for_selected_posts(self):
+        dates = self._row_dates()
+        self._write(
+            posts=[
+                {
+                    'id': 1,
+                    'source_post_id': 'east-1',
+                    'author_qq': '1493732945',
+                    'content_raw': '首条',
+                    'content_text': '首条',
+                    'published_at': '2014-12-13 12:22:06',
+                    'visibility': 'public',
+                    'media': '[]',
+                    'source_payload': '{}',
+                    **dates,
+                },
+                {
+                    'id': 2,
+                    'source_post_id': 'east-2',
+                    'author_qq': '1493732945',
+                    'content_raw': '第二条',
+                    'content_text': '第二条',
+                    'published_at': '2014-12-14 12:22:06',
+                    'visibility': 'public',
+                    'media': '[]',
+                    'source_payload': '{}',
+                    **dates,
+                },
+            ],
+            comments=[
+                {
+                    'id': 1,
+                    'post_id': 1,
+                    'author_qq': '377489624',
+                    'parent_comment_id': '',
+                    'reply_to_qq': '',
+                    'content_raw': '首条评论',
+                    'published_at': '2014-12-13 13:00:00',
+                    'source_payload': '{}',
+                    **dates,
+                },
+                {
+                    'id': 2,
+                    'post_id': 2,
+                    'author_qq': '377489624',
+                    'parent_comment_id': '',
+                    'reply_to_qq': '',
+                    'content_raw': '第二条评论',
+                    'published_at': '2014-12-14 13:00:00',
+                    'source_payload': '{}',
+                    **dates,
+                },
+            ],
+        )
+
+        result = QZoneImporter(self.space, self.input_path).import_source(limit=1)
+
+        self.assertEqual(result, {'users': 2, 'posts': 1, 'comments': 1})
+        self.assertEqual(list(QZonePost.objects.values_list('id', flat=True)), [1])
+        self.assertEqual(list(QZoneComment.objects.values_list('id', flat=True)), [1])
+        self.assertSetEqual(set(QZoneUser.objects.values_list('qq', flat=True)), {'1493732945', '377489624'})
+
+    @patch('QZone.importer.put_file')
+    def test_media_stage_reuses_existing_asset_by_content_hash(self, put_file_mock):
+        media_directory = Path(self.temp_dir.name) / '江中东墙HTML' / 'Messages' / 'images'
+        media_directory.mkdir(parents=True)
+        media_path = media_directory / 'photo.jpeg'
+        media_path.write_bytes(b'legacy-image')
+        digest = hashlib.sha256(b'legacy-image').hexdigest()
+        asset = MediaAsset.objects.create(
+            source_key='sermo/messages/image/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.jpeg',
+            source_uri='https://resource.example.com/existing.jpeg',
+            kind=MediaAsset.KIND_IMAGE,
+            content_hash=digest,
+            file_size=len(b'legacy-image'),
+            status=MediaAsset.STATUS_READY,
+        )
+        dates = self._row_dates()
+        self._write(
+            posts=[{
+                'id': 1,
+                'source_post_id': 'east-media',
+                'author_qq': '1493732945',
+                'content_raw': '',
+                'content_text': '',
+                'published_at': '2014-12-13 12:22:06',
+                'visibility': 'public',
+                'media': json.dumps([{
+                    'type': 'image',
+                    'custom_filepath': 'Messages/images/photo.jpeg',
+                    'custom_url': 'https://qzone.example/photo.jpeg',
+                }]),
+                'source_payload': json.dumps({
+                    'source_file': '江中东墙HTML/Messages/json/messages.json',
+                }),
+                **dates,
+            }],
+            comments=[],
+            users=[{'qq': '1493732945', 'nickname': '江中东墙'}],
+        )
+        importer = QZoneImporter(self.space, self.input_path)
+        importer.import_source()
+        importer.import_identities()
+        importer.prepare_media()
+
+        result = importer.upload_media()
+        importer.project()
+
+        self.assertEqual(result['reused'], 1)
+        put_file_mock.assert_not_called()
+        media = QZoneMedia.objects.get()
+        self.assertEqual(media.media_asset_id, asset.id)
+        self.assertEqual(media.status, QZoneMedia.STATUS_READY)
+        self.assertEqual(StatementMedia.objects.get().media_asset_id, asset.id)

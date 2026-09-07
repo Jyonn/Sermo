@@ -127,6 +127,10 @@ def statement_forward_bundle_prefetch():
     )
 
 
+def statement_comment_media_prefetch():
+    return Prefetch('media', queryset=StatementCommentMedia.objects.select_related('media_asset'))
+
+
 def _frequency_limits(level):
     if level <= 5:
         return 1, 5
@@ -182,7 +186,7 @@ def _enforce_frequency(queryset, user, multiplier=1):
 class Statement(models.Model):
     space = models.ForeignKey('Space.Space', on_delete=models.CASCADE, related_name='statements', db_index=True)
     user = models.ForeignKey('User.User', on_delete=models.CASCADE, related_name='statements')
-    text = models.CharField(max_length=140, blank=True, default='')
+    text = models.TextField(blank=True, default='')
     visibility = models.IntegerField(
         choices=StatementVisibilityChoice.to_choices(),
         default=StatementVisibilityChoice.PUBLIC,
@@ -203,6 +207,18 @@ class Statement(models.Model):
 
     class Meta:
         ordering = ['-id']
+
+    @classmethod
+    def _apply_before_cursor(cls, queryset, space, before):
+        if not before:
+            return queryset
+        cursor = cls.objects.filter(space=space, id=before).values('created_at', 'id').first()
+        if cursor is None:
+            return queryset.none()
+        return queryset.filter(
+            Q(created_at__lt=cursor['created_at'])
+            | Q(created_at=cursor['created_at'], id__lt=cursor['id'])
+        )
 
     @classmethod
     def visible_for(cls, user):
@@ -238,8 +254,7 @@ class Statement(models.Model):
             queryset = queryset.filter(user=user)
         if user_id is not None:
             queryset = queryset.filter(user_id=user_id, is_anonymous=False)
-        if before:
-            queryset = queryset.filter(id__lt=before)
+        queryset = cls._apply_before_cursor(queryset, user.space, before)
         return [item.jsonl(request=request) for item in queryset.order_by('-created_at', '-id')[:limit]]
 
     @classmethod
@@ -251,8 +266,7 @@ class Statement(models.Model):
             visible_like_count=Count('likes', distinct=True),
             viewer_liked=Exists(StatementLike.objects.filter(statement_id=OuterRef('pk'), user=viewer)),
         )
-        if before:
-            queryset = queryset.filter(id__lt=before)
+        queryset = cls._apply_before_cursor(queryset, space, before)
         return [item.jsonl(request=request) for item in queryset.order_by('-created_at', '-id')[:limit]]
 
     @classmethod
@@ -418,7 +432,14 @@ class StatementComment(models.Model):
     statement = models.ForeignKey(Statement, on_delete=models.CASCADE, related_name='comments', db_index=True)
     user = models.ForeignKey('User.User', on_delete=models.CASCADE, related_name='statement_comments')
     parent = models.ForeignKey('self', null=True, blank=True, on_delete=models.CASCADE, related_name='replies')
-    text = models.CharField(max_length=140, blank=True, default='')
+    reply_to_user = models.ForeignKey(
+        'User.User',
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='targeted_statement_comments',
+    )
+    text = models.TextField(blank=True, default='')
     sticker_asset = models.ForeignKey(
         'Sticker.StickerAsset',
         null=True,
@@ -444,8 +465,8 @@ class StatementComment(models.Model):
     def feed(cls, user, statement_id, offset=0, limit=30, sort='hot', request=None):
         statement = cls.statement_for_user(user, statement_id)
         queryset = cls.objects.filter(statement=statement, is_deleted=False).select_related(
-            'statement', 'user', 'parent__user', 'sticker_asset',
-        ).prefetch_related('comment_mentions__user').annotate(
+            'statement', 'user', 'parent__user', 'reply_to_user', 'sticker_asset',
+        ).prefetch_related('comment_mentions__user', statement_comment_media_prefetch()).annotate(
             visible_like_count=Count('likes', distinct=True),
             viewer_liked=Exists(StatementCommentLike.objects.filter(comment_id=OuterRef('pk'), user=user)),
         )
@@ -524,6 +545,7 @@ class StatementComment(models.Model):
             user=user,
             text=normalized_text,
             parent=parent,
+            reply_to_user=parent.user if parent is not None else None,
             is_anonymous=is_anonymous,
             sticker_asset=sticker_asset,
         )
@@ -552,7 +574,11 @@ class StatementComment(models.Model):
             statement_id=self.statement_id,
             parent_id=self.parent_id,
             root_id=getattr(self, 'thread_root_id', self.parent_id),
-            reply_to_user=(anonymous_user_json() if self.parent.is_anonymous else self.parent.user.tiny_json()) if self.parent_id else None,
+            reply_to_user=(
+                anonymous_user_json()
+                if self.parent_id and self.parent.is_anonymous
+                else self.reply_to_user.tiny_json() if self.reply_to_user_id else None
+            ),
             user=anonymous_user_json() if self.is_anonymous else self.user.tiny_json(),
             is_anonymous=self.is_anonymous,
             # A public reply must not reveal that it came from an anonymous statement's author.
@@ -560,6 +586,7 @@ class StatementComment(models.Model):
             kind='sticker' if self.sticker_asset_id else 'text',
             text=self.text,
             sticker=self.sticker_asset.jsonl(request=request) if self.sticker_asset_id else None,
+            media=[item.jsonl(request=request) for item in self.media.all()],
             mentions=[mention.user.tiny_json() for mention in self.comment_mentions.all()],
             like_count=like_count,
             reply_count=reply_count,
@@ -618,6 +645,45 @@ class StatementCommentMention(models.Model):
             cls(comment=comment, user_id=user_id)
             for user_id in valid_ids
         ], ignore_conflicts=True)
+
+
+class StatementCommentMedia(models.Model):
+    comment = models.ForeignKey(StatementComment, on_delete=models.CASCADE, related_name='media')
+    media_asset = models.ForeignKey(
+        'Message.MediaAsset',
+        on_delete=models.PROTECT,
+        related_name='statement_comment_media_items',
+    )
+    position = models.PositiveSmallIntegerField(default=0)
+
+    class Meta:
+        ordering = ['position', 'id']
+        constraints = [
+            models.UniqueConstraint(fields=['comment', 'position'], name='unique_statement_comment_media_position'),
+        ]
+
+    def jsonl(self, request=None):
+        asset = self.media_asset
+        path = reverse('square media', kwargs={'blob_slug': asset.blob_slug})
+        if asset.transcode_status == asset.TRANSCODE_READY:
+            path = f'{path}?variant=playback'
+        uri = request.build_absolute_uri(path) if request else path
+        thumbnail_uri = None
+        if asset.kind in (asset.KIND_IMAGE, asset.KIND_VIDEO):
+            thumbnail_path = reverse('square media thumbnail', kwargs={'blob_slug': asset.blob_slug})
+            if asset.transcode_status == asset.TRANSCODE_READY:
+                thumbnail_path = f'{thumbnail_path}?variant=playback'
+            thumbnail_uri = request.build_absolute_uri(thumbnail_path) if request else thumbnail_path
+        return dict(
+            media_id=self.id,
+            kind={asset.KIND_IMAGE: 'image', asset.KIND_AUDIO: 'audio', asset.KIND_VIDEO: 'video'}[asset.kind],
+            uri=uri,
+            thumbnail_uri=thumbnail_uri,
+            mime_type=asset.mime_type,
+            duration_seconds=asset.duration_seconds,
+            metadata_status=asset.status,
+            metadata=asset.jsonl(),
+        )
 
 
 class StatementLike(models.Model):

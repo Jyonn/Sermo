@@ -72,6 +72,7 @@ def claim_qq_identity(user, qq, verified_at=None):
     target = User.objects.select_for_update().get(id=user.id)
     if target.is_deleted or target.account_kind != UserAccountKindChoice.MEMBER:
         raise ValidationError('Only an active Sermo member can bind a QQ identity.')
+    target.space.require_qq_binding_enabled()
 
     existing_for_user = QQIdentity.objects.select_for_update().filter(user=target).first()
     if existing_for_user is not None and existing_for_user.qq != qq:
@@ -100,6 +101,7 @@ def claim_qq_identity(user, qq, verified_at=None):
 
     Statement.objects.filter(user=placeholder).update(user=target)
     StatementComment.objects.filter(user=placeholder).update(user=target)
+    StatementComment.objects.filter(reply_to_user=placeholder).update(reply_to_user=target)
     for mention in StatementCommentMention.objects.filter(user=placeholder).iterator():
         duplicate = StatementCommentMention.objects.filter(comment_id=mention.comment_id, user=target).exists()
         if duplicate:

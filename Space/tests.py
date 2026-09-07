@@ -12,6 +12,8 @@ from Space.models import (
     Space,
     SpaceEmailCodePurposeChoice,
     SpaceEmailVerificationCode,
+    SpaceFeatureGrant,
+    SpaceFeatureKeyChoice,
     SpaceOperator,
     SpacePhoneVerificationCode,
 )
@@ -375,6 +377,42 @@ class SpaceAdminApiTests(TestCase):
         self.assertTrue(self.space.group_square_enabled)
         self.assertFalse(self.space.square_explore_enabled)
         self.assertEqual(self.space.unverified_group_policy, 1)
+
+    def test_admin_can_enable_qq_binding_only_after_platform_grant(self):
+        payload = {
+            'name': self.space.name,
+            'group_square_enabled': 1,
+            'chat_enabled': 1,
+            'submission_enabled': 0,
+            'square_explore_enabled': 1,
+            'qq_binding_enabled': 1,
+            'unverified_group_policy': 2,
+            'member_limit': 100,
+            'level_names': self.space.level_names,
+        }
+        denied = self.client.post(
+            '/spaces/admin/settings',
+            data=json.dumps(payload),
+            content_type='application/json',
+            **self.authorization(),
+        )
+        self.assertEqual(denied.status_code, 403, denied.content)
+
+        SpaceFeatureGrant.set_granted(
+            self.space,
+            SpaceFeatureKeyChoice.QQ_IDENTITY_BINDING,
+            True,
+            granted_by='platform@example.com',
+        )
+        enabled = self.client.post(
+            '/spaces/admin/settings',
+            data=json.dumps(payload),
+            content_type='application/json',
+            **self.authorization(),
+        )
+        self.assertEqual(enabled.status_code, 200, enabled.content)
+        self.assertTrue(enabled.json()['body']['qq_binding_enabled'])
+        self.assertTrue(enabled.json()['body']['qq_binding_granted'])
 
     def test_admin_cannot_disable_chat_and_square_together(self):
         response = self.client.post(

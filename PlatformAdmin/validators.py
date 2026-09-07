@@ -10,3 +10,5 @@ class PlatformAdminErrors:
     MFA_INVALID = Error(_('MFA code is invalid'), code=Code.BadRequest)
     MFA_NOT_PENDING = Error(_('MFA setup has not started'), code=Code.BadRequest)
     IDENTITY_NOT_PENDING = Error(_('Identity review is not pending'), code=Code.BadRequest)
+    SPACE_FEATURE_INVALID = Error(_('Unsupported space feature'), code=Code.BadRequest)
+    SPACE_FEATURE_ENABLED_INVALID = Error(_('Feature enabled must be a boolean'), code=Code.BadRequest)

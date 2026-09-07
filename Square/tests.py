@@ -515,6 +515,17 @@ class StatementApiTests(TestCase):
         self.assertEqual(response.status_code, 200, response.content)
         self.assertEqual(response.json()['body'][0]['text'], '朋友可见')
 
+    def test_feed_cursor_uses_timestamp_when_historical_post_has_newer_id(self):
+        current = Statement.objects.create(space=self.space, user=self.author, text='当前发言')
+        historical = Statement.objects.create(space=self.space, user=self.author, text='迁移历史发言')
+        Statement.objects.filter(id=historical.id).update(created_at=timezone.now() - timedelta(days=3650))
+
+        first_page = Statement.feed(self.friend, limit=1)
+        second_page = Statement.feed(self.friend, before=current.id, limit=1)
+
+        self.assertEqual(first_page[0]['text'], '当前发言')
+        self.assertEqual(second_page[0]['text'], '迁移历史发言')
+
     def test_square_status_tracks_new_feed_items_without_counting_own_posts(self):
         baseline = self.client.get('/square/status', **self.authorization(self.friend))
         self.assertFalse(baseline.json()['body']['explore_unread'])

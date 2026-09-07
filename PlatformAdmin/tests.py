@@ -25,9 +25,10 @@ from PlatformAdmin.views import (
     EmailReviewView,
     LoginView,
     MessageDeliveryView,
+    SpaceFeatureGrantView,
 )
 from Chat.models import Chat, ChatMember, ChatMemberStatusChoice, ChatTypeChoice
-from Space.models import Space
+from Space.models import Space, SpaceFeatureGrant, SpaceFeatureKeyChoice
 from User.models import (
     NotificationDelivery, NotificationDeliveryStatusChoice, NotificationEvent,
     NotificationEventTypeChoice, User, UserNotificationChoice, UserRoleChoice,
@@ -159,6 +160,41 @@ class PlatformAdminSecurityTests(TestCase):
         self.assertEqual(auth.decrypt(response['auth'], expected_type='platform_admin_access')['email'], 'admin@example.com')
         self.assertIsNotNone(PlatformAdminEmailCode.objects.get().consumed_at)
         self.assertTrue(PlatformAuditLog.objects.filter(action='auth.login').exists())
+
+    def test_platform_admin_can_grant_and_revoke_qq_binding(self):
+        space = Space.objects.create(name='QQ Space', slug='qq-space', email='qq@example.com')
+        token = auth.get_platform_admin_token('admin@example.com')['auth']
+        url = f'/platform-admin/spaces/{space.id}/features/{SpaceFeatureKeyChoice.QQ_IDENTITY_BINDING}'
+        grant_request = RequestFactory().post(
+            url,
+            data='{"enabled":true}',
+            content_type='application/json',
+            HTTP_AUTHORIZATION=f'Bearer {token}',
+        )
+        granted = SpaceFeatureGrantView.as_view()(
+            grant_request,
+            space_id=space.id,
+            feature_key=SpaceFeatureKeyChoice.QQ_IDENTITY_BINDING,
+        )
+        self.assertTrue(granted['qq_binding_granted'])
+        grant = SpaceFeatureGrant.objects.get(space=space)
+        self.assertEqual(grant.granted_by, 'admin@example.com')
+
+        space.qq_binding_enabled = True
+        space.save(update_fields=['qq_binding_enabled'])
+        revoke_request = RequestFactory().post(
+            url,
+            data='{"enabled":false}',
+            content_type='application/json',
+            HTTP_AUTHORIZATION=f'Bearer {token}',
+        )
+        revoked = SpaceFeatureGrantView.as_view()(
+            revoke_request,
+            space_id=space.id,
+            feature_key=SpaceFeatureKeyChoice.QQ_IDENTITY_BINDING,
+        )
+        self.assertFalse(revoked['qq_binding_granted'])
+        self.assertFalse(revoked['qq_binding_enabled'])
 
     def test_mfa_enabled_skips_email_code_and_logs_in_with_totp(self):
         secret = PlatformAdminSecurity.new_secret()

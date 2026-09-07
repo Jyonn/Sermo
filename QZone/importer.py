@@ -1,0 +1,589 @@
+import datetime
+import hashlib
+import json
+import mimetypes
+import re
+from pathlib import Path
+
+from django.core.management.base import CommandError
+from django.db import IntegrityError, transaction
+from django.db.models import Q
+from django.utils import timezone
+from django.utils.dateparse import parse_datetime
+from qiniu import Auth, put_file
+
+from Config.models import CI, Config
+from Message.models import MediaAsset
+from QZone.models import QZoneComment, QZoneMedia, QZonePost, QZoneUser
+from Space.models import Space
+from Square.models import (
+    Statement,
+    StatementComment,
+    StatementCommentMedia,
+    StatementMedia,
+    StatementVisibilityChoice,
+)
+from User.models import QQIdentity
+from User.qq_identity import ensure_qzone_placeholder
+from utils.qiniu import avatar_uri_for_key
+
+
+STRUCTURED_MENTION_RE = re.compile(r'@\{uin:(?P<qq>\d+),nick:(?P<nick>.*?)(?:,who:.*)?\}')
+
+
+def _chunks(rows, size):
+    for start in range(0, len(rows), size):
+        yield rows[start:start + size]
+
+
+def _json_value(value, expected_type, field_name):
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError as error:
+            raise CommandError(f'{field_name} is not valid JSON: {error}') from error
+    if not isinstance(value, expected_type):
+        raise CommandError(f'{field_name} must be {expected_type.__name__}')
+    return value
+
+
+def _datetime_value(value):
+    parsed = parse_datetime(str(value or ''))
+    if parsed is None:
+        try:
+            parsed = datetime.datetime.fromisoformat(str(value or ''))
+        except ValueError as error:
+            raise CommandError(f'Invalid datetime: {value}') from error
+    if timezone.is_naive(parsed):
+        parsed = timezone.make_aware(parsed, timezone.get_current_timezone())
+    return parsed
+
+
+def normalize_qzone_text(value):
+    text = str(value or '').strip()
+    return STRUCTURED_MENTION_RE.sub(lambda match: f'@{match.group("nick")}', text)
+
+
+class QZoneImporter:
+    def __init__(self, space, input_path, stdout=None, batch_size=500):
+        self.space = space
+        self.input_path = Path(input_path).expanduser().resolve()
+        self.data_root = self.input_path.parent
+        self.stdout = stdout
+        self.batch_size = max(1, int(batch_size))
+        self.data = None
+
+    def write(self, message):
+        if self.stdout is not None:
+            self.stdout.write(str(message))
+
+    def load(self):
+        if self.data is not None:
+            return self.data
+        if not self.input_path.is_file():
+            raise CommandError(f'Input file does not exist: {self.input_path}')
+        try:
+            self.data = json.loads(self.input_path.read_text(encoding='utf-8'))
+        except (OSError, json.JSONDecodeError) as error:
+            raise CommandError(f'Cannot read migration file: {error}') from error
+        if not isinstance(self.data, dict):
+            raise CommandError('Migration file root must be an object.')
+        for key in ('qzone_user', 'qzone_post', 'qzone_comment'):
+            if not isinstance(self.data.get(key), list):
+                raise CommandError(f'Migration file is missing list {key}.')
+        return self.data
+
+    def preflight(self):
+        data = self.load()
+        users = data['qzone_user']
+        posts = data['qzone_post']
+        comments = data['qzone_comment']
+        qqs = [str(row.get('qq') or '').strip() for row in users]
+        post_ids = [int(row['id']) for row in posts]
+        comment_ids = [int(row['id']) for row in comments]
+        if len(qqs) != len(set(qqs)):
+            raise CommandError('qzone_user contains duplicate QQ numbers.')
+        if len(post_ids) != len(set(post_ids)):
+            raise CommandError('qzone_post contains duplicate IDs.')
+        if len(comment_ids) != len(set(comment_ids)):
+            raise CommandError('qzone_comment contains duplicate IDs.')
+        user_set = set(qqs)
+        post_set = set(post_ids)
+        comment_set = set(comment_ids)
+        missing_users = {
+            str(row.get(field) or '').strip()
+            for rows, fields in ((posts, ('author_qq',)), (comments, ('author_qq', 'reply_to_qq')))
+            for row in rows
+            for field in fields
+            if row.get(field) and str(row.get(field)).strip() not in user_set
+        }
+        missing_posts = {int(row['post_id']) for row in comments if int(row['post_id']) not in post_set}
+        missing_parents = {
+            int(row['parent_comment_id'])
+            for row in comments
+            if row.get('parent_comment_id') and int(row['parent_comment_id']) not in comment_set
+        }
+        late_parents = {
+            int(row['parent_comment_id'])
+            for row in comments
+            if row.get('parent_comment_id') and int(row['parent_comment_id']) >= int(row['id'])
+        }
+        if missing_users or missing_posts or missing_parents or late_parents:
+            raise CommandError(
+                f'Dangling references: users={len(missing_users)}, posts={len(missing_posts)}, '
+                f'parents={len(missing_parents)}, parents_not_before_children={len(late_parents)}'
+            )
+        report = {
+            'file_sha256': hashlib.sha256(self.input_path.read_bytes()).hexdigest(),
+            'users': len(users),
+            'posts': len(posts),
+            'comments': len(comments),
+            'private_posts': sum(row.get('visibility') == 'private' for row in posts),
+            'post_text_over_140': sum(len(str(row.get('content_text') or '')) > 140 for row in posts),
+            'comment_text_over_140': sum(len(str(row.get('content_raw') or '')) > 140 for row in comments),
+        }
+        self.write(json.dumps(report, ensure_ascii=False, indent=2))
+        return report
+
+    def import_source(self, limit=0):
+        data = self.load()
+        posts = data['qzone_post'][:limit or None]
+        if limit:
+            post_ids = {int(row['id']) for row in posts}
+            comments = [row for row in data['qzone_comment'] if int(row['post_id']) in post_ids]
+            required_qqs = {
+                str(row.get(field) or '').strip()
+                for rows, fields in ((posts, ('author_qq',)), (comments, ('author_qq', 'reply_to_qq')))
+                for row in rows
+                for field in fields
+                if row.get(field)
+            }
+            users = [row for row in data['qzone_user'] if str(row.get('qq') or '').strip() in required_qqs]
+        else:
+            users = data['qzone_user']
+            comments = data['qzone_comment']
+        self._import_users(users)
+        self._import_posts(posts)
+        self._import_comments(comments)
+        result = {'users': len(users), 'posts': len(posts), 'comments': len(comments)}
+        self.write(f'source: {result}')
+        return result
+
+    def _import_users(self, rows):
+        for batch in _chunks(rows, self.batch_size):
+            qqs = [str(row['qq']).strip() for row in batch]
+            existing = QZoneUser.objects.in_bulk(qqs)
+            creates = []
+            updates = []
+            for row in batch:
+                qq = str(row['qq']).strip()
+                nickname = str(row.get('nickname') or '')[:255]
+                item = existing.get(qq)
+                if item is None:
+                    creates.append(QZoneUser(qq=qq, nickname=nickname))
+                elif item.nickname != nickname:
+                    item.nickname = nickname
+                    updates.append(item)
+            QZoneUser.objects.bulk_create(creates, batch_size=self.batch_size)
+            if updates:
+                QZoneUser.objects.bulk_update(updates, ['nickname'], batch_size=self.batch_size)
+
+    def _import_posts(self, rows):
+        fields = [
+            'source_post_id', 'author', 'content_raw', 'content_text', 'published_at',
+            'visibility', 'media', 'source_payload', 'created_at', 'updated_at',
+        ]
+        for batch in _chunks(rows, self.batch_size):
+            ids = [int(row['id']) for row in batch]
+            existing = QZonePost.objects.in_bulk(ids)
+            creates = []
+            updates = []
+            for row in batch:
+                values = self._post_values(row)
+                item = existing.get(int(row['id']))
+                if item is None:
+                    creates.append(QZonePost(id=int(row['id']), **values))
+                    continue
+                if item.source_post_id != values['source_post_id'] or item.author_id != values['author_id']:
+                    raise CommandError(f'QZone post ID {item.id} conflicts with existing source identity.')
+                for field, value in values.items():
+                    setattr(item, field, value)
+                updates.append(item)
+            QZonePost.objects.bulk_create(creates, batch_size=self.batch_size)
+            if updates:
+                QZonePost.objects.bulk_update(updates, fields, batch_size=self.batch_size)
+
+    @staticmethod
+    def _post_values(row):
+        return {
+            'source_post_id': str(row.get('source_post_id') or '')[:64],
+            'author_id': str(row.get('author_qq') or '').strip(),
+            'content_raw': str(row.get('content_raw') or ''),
+            'content_text': str(row.get('content_text') or ''),
+            'published_at': _datetime_value(row.get('published_at')),
+            'visibility': str(row.get('visibility') or 'public')[:16],
+            'media': _json_value(row.get('media') or [], list, 'qzone_post.media'),
+            'source_payload': _json_value(row.get('source_payload') or {}, dict, 'qzone_post.source_payload'),
+            'created_at': _datetime_value(row.get('created_at') or row.get('published_at')),
+            'updated_at': _datetime_value(row.get('updated_at') or row.get('created_at') or row.get('published_at')),
+        }
+
+    def _import_comments(self, rows):
+        fields = [
+            'post', 'author', 'reply_to', 'content_raw', 'published_at',
+            'source_payload', 'created_at', 'updated_at',
+        ]
+        for batch in _chunks(rows, self.batch_size):
+            ids = [int(row['id']) for row in batch]
+            existing = QZoneComment.objects.in_bulk(ids)
+            creates = []
+            updates = []
+            for row in batch:
+                values = self._comment_values(row)
+                item = existing.get(int(row['id']))
+                if item is None:
+                    creates.append(QZoneComment(id=int(row['id']), parent_id=None, **values))
+                    continue
+                for field, value in values.items():
+                    setattr(item, field, value)
+                updates.append(item)
+            QZoneComment.objects.bulk_create(creates, batch_size=self.batch_size)
+            if updates:
+                QZoneComment.objects.bulk_update(updates, fields, batch_size=self.batch_size)
+
+        parent_updates = []
+        for row in rows:
+            parent_id = int(row['parent_comment_id']) if row.get('parent_comment_id') else None
+            item = QZoneComment(id=int(row['id']), parent_id=parent_id)
+            parent_updates.append(item)
+        for batch in _chunks(parent_updates, self.batch_size):
+            QZoneComment.objects.bulk_update(batch, ['parent'], batch_size=self.batch_size)
+
+    @staticmethod
+    def _comment_values(row):
+        reply_to = str(row.get('reply_to_qq') or '').strip() or None
+        return {
+            'post_id': int(row['post_id']),
+            'author_id': str(row.get('author_qq') or '').strip(),
+            'reply_to_id': reply_to,
+            'content_raw': str(row.get('content_raw') or ''),
+            'published_at': _datetime_value(row.get('published_at')),
+            'source_payload': _json_value(row.get('source_payload') or {}, dict, 'qzone_comment.source_payload'),
+            'created_at': _datetime_value(row.get('created_at') or row.get('published_at')),
+            'updated_at': _datetime_value(row.get('updated_at') or row.get('created_at') or row.get('published_at')),
+        }
+
+    def import_identities(self, limit=0):
+        self.space.require_qq_binding_granted()
+        authored_qqs = set(QZonePost.objects.values_list('author_id', flat=True))
+        authored_qqs.update(QZoneComment.objects.values_list('author_id', flat=True))
+        authored_qqs.update(
+            qq for qq in QZoneComment.objects.exclude(reply_to_id=None).values_list('reply_to_id', flat=True)
+        )
+        users = QZoneUser.objects.filter(qq__in=authored_qqs).order_by('qq')
+        if limit:
+            users = users[:limit]
+        completed = 0
+        for source_user in users.iterator(chunk_size=self.batch_size):
+            ensure_qzone_placeholder(self.space, source_user.qq, source_user.nickname)
+            completed += 1
+        self.write(f'identities: {completed}')
+        return completed
+
+    @staticmethod
+    def _source_root(payload):
+        source_file = str((payload or {}).get('source_file') or '')
+        marker = '/Messages/'
+        return source_file.split(marker, 1)[0] if marker in source_file else ''
+
+    def prepare_media(self, limit=0):
+        posts = QZonePost.objects.order_by('id')
+        comments = QZoneComment.objects.order_by('id')
+        if limit:
+            posts = posts[:limit]
+            comments = comments[:limit]
+        prepared = 0
+        for post in posts.iterator(chunk_size=self.batch_size):
+            root = self._source_root(post.source_payload)
+            for position, item in enumerate(post.media or []):
+                self._upsert_media(post=post, position=position, item=item, root=root)
+                prepared += 1
+        for comment in comments.iterator(chunk_size=self.batch_size):
+            root = self._source_root(comment.source_payload)
+            for position, item in enumerate((comment.source_payload or {}).get('pic') or []):
+                normalized = dict(item)
+                normalized['type'] = 'image'
+                self._upsert_media(comment=comment, position=position, item=normalized, root=root)
+                prepared += 1
+        self.write(f'media manifest: {prepared}')
+        return prepared
+
+    def _upsert_media(self, *, position, item, root, post=None, comment=None):
+        kind = str(item.get('type') or 'image').strip().lower()
+        if kind not in {'image', 'video', 'audio'}:
+            kind = 'image'
+        relative_path = str(item.get('custom_filepath') or '').strip().lstrip('/')
+        source_path = str(Path(root) / relative_path) if root and relative_path else relative_path
+        source_url = str(
+            item.get('custom_url') or item.get('url3') or item.get('url2')
+            or item.get('o_url') or item.get('b_url') or ''
+        )[:1000]
+        mime_type = mimetypes.guess_type(relative_path)[0] or ''
+        lookup = {'position': position, 'post': post} if post is not None else {'position': position, 'comment': comment}
+        media, created = QZoneMedia.objects.get_or_create(
+            **lookup,
+            defaults={
+                'kind': kind,
+                'source_path': source_path,
+                'source_url': source_url,
+                'mime_type': mime_type,
+            },
+        )
+        if created:
+            return media
+        changed = media.source_path != source_path or media.kind != kind
+        media.kind = kind
+        media.source_path = source_path
+        media.source_url = source_url
+        media.mime_type = mime_type
+        update_fields = ['kind', 'source_path', 'source_url', 'mime_type', 'updated_at']
+        if changed and media.status != QZoneMedia.STATUS_READY:
+            media.status = QZoneMedia.STATUS_PENDING
+            media.error = ''
+            update_fields.extend(['status', 'error'])
+        media.save(update_fields=update_fields)
+        return media
+
+    @staticmethod
+    def _file_digest(path):
+        digest = hashlib.sha256()
+        size = 0
+        with path.open('rb') as source:
+            for chunk in iter(lambda: source.read(1024 * 1024), b''):
+                digest.update(chunk)
+                size += len(chunk)
+        return digest.hexdigest(), size
+
+    @staticmethod
+    def _qiniu_client():
+        access_key = Config.get_value_by_key(CI.QINIU_ACCESS_KEY, default='')
+        secret_key = Config.get_value_by_key(CI.QINIU_SECRET_KEY, default='')
+        bucket = Config.get_value_by_key(CI.QINIU_BUCKET, default='')
+        if not access_key or not secret_key or not bucket:
+            raise CommandError('Qiniu access key, secret key and bucket must be configured.')
+        return Auth(access_key, secret_key), bucket
+
+    @staticmethod
+    def _media_key(media, content_hash):
+        extension = Path(media.source_path).suffix.lower()
+        if not re.fullmatch(r'\.[a-z0-9][a-z0-9._+-]{0,31}', extension):
+            extension = mimetypes.guess_extension(media.mime_type or '') or '.bin'
+        return f'sermo/messages/{media.kind}/{content_hash[:32]}{extension}'
+
+    def upload_media(self, limit=0, retry_failed=False):
+        statuses = [QZoneMedia.STATUS_PENDING]
+        if retry_failed:
+            statuses.extend([QZoneMedia.STATUS_FAILED, QZoneMedia.STATUS_MISSING])
+        queryset = QZoneMedia.objects.filter(status__in=statuses).order_by('id')
+        if limit:
+            queryset = queryset[:limit]
+        ids = list(queryset.values_list('id', flat=True))
+        qiniu_auth = bucket = None
+        completed = reused = missing = failed = 0
+        for media_id in ids:
+            media = QZoneMedia.objects.get(id=media_id)
+            path = self.data_root / media.source_path
+            if not path.is_file():
+                media.status = QZoneMedia.STATUS_MISSING
+                media.error = f'File not found: {media.source_path}'[:500]
+                media.save(update_fields=['status', 'error', 'updated_at'])
+                missing += 1
+                continue
+            try:
+                content_hash, file_size = self._file_digest(path)
+                duplicate = MediaAsset.find_duplicate(content_hash, file_size=file_size)
+                if duplicate is not None:
+                    media.media_asset = duplicate
+                    media.content_hash = content_hash
+                    media.file_size = file_size
+                    media.status = QZoneMedia.STATUS_READY
+                    media.error = ''
+                    media.save(update_fields=[
+                        'media_asset', 'content_hash', 'file_size', 'status', 'error', 'updated_at',
+                    ])
+                    reused += 1
+                    continue
+                if qiniu_auth is None:
+                    qiniu_auth, bucket = self._qiniu_client()
+                key = self._media_key(media, content_hash)
+                token = qiniu_auth.upload_token(bucket, key, 3600)
+                _result, info = put_file(token, key, str(path), check_crc=True)
+                if info.status_code not in (200, 614):
+                    raise RuntimeError(f'Qiniu upload failed with status {info.status_code}: {info.text_body}')
+                source_uri = avatar_uri_for_key(key)
+                try:
+                    asset = MediaAsset.objects.create(
+                        source_key=key,
+                        source_uri=source_uri,
+                        original_key=key,
+                        original_uri=source_uri,
+                        kind=MediaAsset.kind_for_name(media.kind),
+                        content_hash=content_hash,
+                        mime_type=(media.mime_type or mimetypes.guess_type(path.name)[0] or '')[:100],
+                        file_size=file_size,
+                        status=MediaAsset.STATUS_PENDING if media.kind in {'image', 'video'} else MediaAsset.STATUS_READY,
+                        geocoding_status=(
+                            MediaAsset.GEOCODING_PENDING
+                            if media.kind in {'image', 'video'}
+                            else MediaAsset.GEOCODING_UNAVAILABLE
+                        ),
+                        raw_metadata={'source': 'qzone_import', 'source_path': media.source_path},
+                    )
+                except IntegrityError:
+                    asset = MediaAsset.find_duplicate(content_hash, file_size=file_size)
+                    if asset is None:
+                        asset = MediaAsset.objects.get(source_key=key)
+                media.media_asset = asset
+                media.content_hash = content_hash
+                media.file_size = file_size
+                media.status = QZoneMedia.STATUS_READY
+                media.error = ''
+                media.save(update_fields=[
+                    'media_asset', 'content_hash', 'file_size', 'status', 'error', 'updated_at',
+                ])
+                completed += 1
+            except Exception as error:
+                media.status = QZoneMedia.STATUS_FAILED
+                media.error = str(error)[:500]
+                media.save(update_fields=['status', 'error', 'updated_at'])
+                failed += 1
+        result = {'uploaded': completed, 'reused': reused, 'missing': missing, 'failed': failed}
+        self.write(f'media upload: {result}')
+        return result
+
+    def project(self, limit=0):
+        self.space.require_qq_binding_granted()
+        identity_by_qq = dict(
+            QQIdentity.objects.filter(space=self.space).values_list('qq', 'user_id')
+        )
+        required_qqs = set(QZonePost.objects.values_list('author_id', flat=True))
+        required_qqs.update(QZoneComment.objects.values_list('author_id', flat=True))
+        missing_identities = required_qqs - set(identity_by_qq)
+        if missing_identities:
+            raise CommandError(f'Run identity stage first; {len(missing_identities)} QQ identities are missing.')
+        posts = QZonePost.objects.select_related('statement').prefetch_related(
+            'media_items__media_asset',
+        ).order_by('published_at', 'id')
+        if limit:
+            posts = posts[:limit]
+        post_count = self._project_posts(posts, identity_by_qq)
+        comments = QZoneComment.objects.select_related('post', 'statement_comment').prefetch_related(
+            'media_items__media_asset',
+        ).order_by('id')
+        if limit:
+            comments = comments[:limit]
+        comment_count = self._project_comments(comments, identity_by_qq)
+        result = {'posts_created': post_count, 'comments_created': comment_count}
+        self.write(f'projection: {result}')
+        return result
+
+    def _project_posts(self, queryset, identity_by_qq):
+        created = 0
+        for source in queryset.iterator(chunk_size=self.batch_size):
+            ready_media = [item for item in source.media_items.all() if item.media_asset_id]
+            text = normalize_qzone_text(source.content_text)
+            if source.visibility != 'public' or (not text and not ready_media):
+                continue
+            with transaction.atomic():
+                if source.statement_id is None:
+                    statement = Statement.objects.create(
+                        space=self.space,
+                        user_id=identity_by_qq[source.author_id],
+                        text=text,
+                        visibility=StatementVisibilityChoice.PUBLIC,
+                    )
+                    Statement.objects.filter(id=statement.id).update(created_at=source.published_at)
+                    statement.created_at = source.published_at
+                    source.statement = statement
+                    source.save(update_fields=['statement'])
+                    created += 1
+                else:
+                    statement = source.statement
+                existing_positions = set(statement.media.values_list('position', flat=True))
+                StatementMedia.objects.bulk_create([
+                    StatementMedia(statement=statement, media_asset=item.media_asset, position=item.position)
+                    for item in ready_media
+                    if item.position not in existing_positions
+                ], ignore_conflicts=True)
+        return created
+
+    def _project_comments(self, queryset, identity_by_qq):
+        created = 0
+        projected_by_source_id = dict(
+            QZoneComment.objects.exclude(statement_comment_id=None).values_list('id', 'statement_comment_id')
+        )
+        for source in queryset.iterator(chunk_size=self.batch_size):
+            if source.post.statement_id is None:
+                continue
+            ready_media = [item for item in source.media_items.all() if item.media_asset_id]
+            text = normalize_qzone_text(source.content_raw)
+            if not text and not ready_media:
+                continue
+            parent_id = projected_by_source_id.get(source.parent_id) if source.parent_id else None
+            if source.parent_id and parent_id is None:
+                continue
+            reply_to_user_id = identity_by_qq.get(source.reply_to_id) if source.reply_to_id else None
+            with transaction.atomic():
+                if source.statement_comment_id is None:
+                    comment = StatementComment.objects.create(
+                        statement_id=source.post.statement_id,
+                        user_id=identity_by_qq[source.author_id],
+                        parent_id=parent_id,
+                        reply_to_user_id=reply_to_user_id,
+                        text=text,
+                    )
+                    StatementComment.objects.filter(id=comment.id).update(created_at=source.published_at)
+                    comment.created_at = source.published_at
+                    source.statement_comment = comment
+                    source.save(update_fields=['statement_comment'])
+                    projected_by_source_id[source.id] = comment.id
+                    created += 1
+                else:
+                    comment = source.statement_comment
+                existing_positions = set(comment.media.values_list('position', flat=True))
+                StatementCommentMedia.objects.bulk_create([
+                    StatementCommentMedia(comment=comment, media_asset=item.media_asset, position=item.position)
+                    for item in ready_media
+                    if item.position not in existing_positions
+                ], ignore_conflicts=True)
+        return created
+
+    def verify(self):
+        report = {
+            'source_users': QZoneUser.objects.count(),
+            'source_posts': QZonePost.objects.count(),
+            'source_comments': QZoneComment.objects.count(),
+            'qq_identities': QQIdentity.objects.filter(space=self.space).count(),
+            'projected_posts': QZonePost.objects.exclude(statement_id=None).count(),
+            'projected_comments': QZoneComment.objects.exclude(statement_comment_id=None).count(),
+            'media_total': QZoneMedia.objects.count(),
+            'media_ready': QZoneMedia.objects.filter(status=QZoneMedia.STATUS_READY).count(),
+            'media_pending': QZoneMedia.objects.filter(status=QZoneMedia.STATUS_PENDING).count(),
+            'media_missing': QZoneMedia.objects.filter(status=QZoneMedia.STATUS_MISSING).count(),
+            'media_failed': QZoneMedia.objects.filter(status=QZoneMedia.STATUS_FAILED).count(),
+            'projected_comment_without_projected_post': QZoneComment.objects.exclude(
+                statement_comment_id=None,
+            ).filter(post__statement_id=None).count(),
+            'projected_reply_without_parent': QZoneComment.objects.exclude(
+                statement_comment_id=None,
+            ).filter(parent_id__isnull=False, parent__statement_comment_id=None).count(),
+        }
+        self.write(json.dumps(report, ensure_ascii=False, indent=2))
+        return report
+
+
+def resolve_space(slug):
+    try:
+        return Space.objects.get(slug=str(slug or '').strip().lower())
+    except Space.DoesNotExist as error:
+        raise CommandError(f'Space does not exist: {slug}') from error
