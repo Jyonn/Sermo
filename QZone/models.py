@@ -1,4 +1,5 @@
 from django.db import models
+from django.urls import reverse
 from django.utils import timezone
 
 
@@ -34,6 +35,11 @@ class QZonePost(models.Model):
         blank=True,
         on_delete=models.SET_NULL,
         related_name='qzone_source',
+    )
+    emoticons = models.ManyToManyField(
+        'QZoneEmoticon',
+        blank=True,
+        related_name='posts',
     )
 
     class Meta:
@@ -89,6 +95,11 @@ class QZoneComment(models.Model):
         blank=True,
         on_delete=models.SET_NULL,
         related_name='qzone_source',
+    )
+    emoticons = models.ManyToManyField(
+        'QZoneEmoticon',
+        blank=True,
+        related_name='comments',
     )
 
     class Meta:
@@ -155,3 +166,43 @@ class QZoneMedia(models.Model):
             models.UniqueConstraint(fields=['post', 'position'], name='unique_qzone_post_media_position'),
             models.UniqueConstraint(fields=['comment', 'position'], name='unique_qzone_comment_media_position'),
         ]
+
+
+class QZoneEmoticon(models.Model):
+    STATUS_PENDING = 'pending'
+    STATUS_READY = 'ready'
+    STATUS_MISSING = 'missing'
+    STATUS_FAILED = 'failed'
+    STATUS_CHOICES = QZoneMedia.STATUS_CHOICES
+
+    code = models.CharField(max_length=32, primary_key=True)
+    source_path = models.CharField(max_length=500, blank=True, default='')
+    mime_type = models.CharField(max_length=100, blank=True, default='')
+    content_hash = models.CharField(max_length=64, blank=True, default='', db_index=True)
+    file_size = models.BigIntegerField(null=True, blank=True)
+    media_asset = models.ForeignKey(
+        'Message.MediaAsset',
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='qzone_emoticons',
+    )
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default=STATUS_PENDING, db_index=True)
+    error = models.CharField(max_length=500, blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'qzone_emoticon'
+        ordering = ('code',)
+
+    def jsonl(self, request=None):
+        uri = None
+        if self.media_asset_id:
+            path = reverse('square emoticon', kwargs={'blob_slug': self.media_asset.blob_slug})
+            uri = request.build_absolute_uri(path) if request else path
+        return {
+            'code': self.code,
+            'token': f'[em]{self.code}[/em]',
+            'uri': uri,
+        }

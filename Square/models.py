@@ -131,6 +131,17 @@ def statement_comment_media_prefetch():
     return Prefetch('media', queryset=StatementCommentMedia.objects.select_related('media_asset'))
 
 
+def _qzone_inline_emoticons(instance, request=None):
+    source = instance._state.fields_cache.get('qzone_source')
+    if source is None:
+        return []
+    return [
+        emoticon.jsonl(request=request)
+        for emoticon in source.emoticons.all()
+        if emoticon.media_asset_id
+    ]
+
+
 def _frequency_limits(level):
     if level <= 5:
         return 1, 5
@@ -238,6 +249,7 @@ class Statement(models.Model):
     def feed(cls, user, before=None, limit=20, request=None, scope='all', user_id=None):
         queryset = cls.visible_for(user).select_related('user', 'forward_bundle').prefetch_related(
             statement_media_prefetch(), statement_forward_bundle_prefetch(),
+            'qzone_source__emoticons__media_asset',
         ).annotate(
             visible_comment_count=Count('comments', filter=Q(comments__is_deleted=False), distinct=True),
             visible_like_count=Count('likes', distinct=True),
@@ -261,6 +273,7 @@ class Statement(models.Model):
     def admin_feed(cls, space, viewer, before=None, limit=20, request=None):
         queryset = cls.objects.filter(space=space, is_deleted=False).select_related('user', 'forward_bundle').prefetch_related(
             statement_media_prefetch(), statement_forward_bundle_prefetch(),
+            'qzone_source__emoticons__media_asset',
         ).annotate(
             visible_comment_count=Count('comments', filter=Q(comments__is_deleted=False), distinct=True),
             visible_like_count=Count('likes', distinct=True),
@@ -274,6 +287,7 @@ class Statement(models.Model):
         try:
             statement = cls.visible_for(user).select_related('user', 'forward_bundle').prefetch_related(
                 statement_media_prefetch(), statement_forward_bundle_prefetch(),
+                'qzone_source__emoticons__media_asset',
             ).annotate(
                 visible_comment_count=Count('comments', filter=Q(comments__is_deleted=False), distinct=True),
                 visible_like_count=Count('likes', distinct=True),
@@ -397,6 +411,7 @@ class Statement(models.Model):
             is_anonymous=self.is_anonymous,
             is_mine=bool(viewer and viewer.id == self.user_id),
             text=self.text,
+            inline_emoticons=_qzone_inline_emoticons(self, request=request),
             visibility='friends' if self.visibility == StatementVisibilityChoice.FRIENDS else 'public',
             location=(dict(
                 latitude=float(self.latitude),
@@ -466,7 +481,10 @@ class StatementComment(models.Model):
         statement = cls.statement_for_user(user, statement_id)
         queryset = cls.objects.filter(statement=statement, is_deleted=False).select_related(
             'statement', 'user', 'parent__user', 'reply_to_user', 'sticker_asset',
-        ).prefetch_related('comment_mentions__user', statement_comment_media_prefetch()).annotate(
+        ).prefetch_related(
+            'comment_mentions__user', statement_comment_media_prefetch(),
+            'qzone_source__emoticons__media_asset',
+        ).annotate(
             visible_like_count=Count('likes', distinct=True),
             viewer_liked=Exists(StatementCommentLike.objects.filter(comment_id=OuterRef('pk'), user=user)),
         )
@@ -585,6 +603,7 @@ class StatementComment(models.Model):
             is_author=self.user_id == self.statement.user_id and (not self.statement.is_anonymous or self.is_anonymous),
             kind='sticker' if self.sticker_asset_id else 'text',
             text=self.text,
+            inline_emoticons=_qzone_inline_emoticons(self, request=request),
             sticker=self.sticker_asset.jsonl(request=request) if self.sticker_asset_id else None,
             media=[item.jsonl(request=request) for item in self.media.all()],
             mentions=[mention.user.tiny_json() for mention in self.comment_mentions.all()],

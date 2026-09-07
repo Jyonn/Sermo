@@ -15,7 +15,7 @@ from qiniu import Auth, put_file
 
 from Config.models import CI, Config
 from Message.models import MediaAsset
-from QZone.models import QZoneComment, QZoneMedia, QZonePost, QZoneUser
+from QZone.models import QZoneComment, QZoneEmoticon, QZoneMedia, QZonePost, QZoneUser
 from Space.models import Space
 from Square.models import (
     Statement,
@@ -30,6 +30,8 @@ from utils.qiniu import avatar_uri_for_key
 
 
 STRUCTURED_MENTION_RE = re.compile(r'@\{uin:(?P<qq>\d+),nick:(?P<nick>.*?)(?:,who:.*)?\}')
+QZONE_EMOTICON_RE = re.compile(r'\[em\](?P<code>e\d+)\[/em\]', re.IGNORECASE)
+QZONE_EMOTICON_EXTENSIONS = {'.gif', '.png', '.jpg', '.jpeg', '.webp', '.bmp'}
 EXPORT_TABLE_KEYS = ('qzone_user', 'qzone_post', 'qzone_comment')
 
 
@@ -115,6 +117,13 @@ def normalize_qzone_text(value):
     return STRUCTURED_MENTION_RE.sub(lambda match: f'@{match.group("nick")}', text)
 
 
+def extract_qzone_emoticon_codes(value):
+    return tuple(dict.fromkeys(
+        match.group('code').lower()
+        for match in QZONE_EMOTICON_RE.finditer(str(value or ''))
+    ))
+
+
 class QZoneImporter:
     def __init__(self, space, input_path, stdout=None, batch_size=500):
         self.space = space
@@ -122,6 +131,8 @@ class QZoneImporter:
         self.data_root = self.input_path.parent
         self.stdout = stdout
         self.batch_size = max(1, int(batch_size))
+        self._emoticon_files = None
+        self._emoticons_by_code = None
 
     def write(self, message):
         if self.stdout is not None:
@@ -383,6 +394,88 @@ class QZoneImporter:
         marker = '/Messages/'
         return source_file.split(marker, 1)[0] if marker in source_file else ''
 
+    def _emoticon_file_index(self):
+        if self._emoticon_files is not None:
+            return self._emoticon_files
+        index = {}
+        for directory in sorted(self.data_root.glob('*/Common/images')):
+            if not directory.is_dir():
+                continue
+            for path in sorted(directory.iterdir()):
+                code = path.stem.lower()
+                if (
+                    path.is_file()
+                    and path.suffix.lower() in QZONE_EMOTICON_EXTENSIONS
+                    and re.fullmatch(r'e\d+', code)
+                ):
+                    index.setdefault(code, []).append(path)
+        self._emoticon_files = index
+        return index
+
+    def _emoticon_source_path(self, code, root):
+        candidates = self._emoticon_file_index().get(code, [])
+        preferred_root = self.data_root / root if root else None
+        if preferred_root is not None:
+            for path in candidates:
+                if path.is_relative_to(preferred_root):
+                    return path.relative_to(self.data_root).as_posix()
+        return candidates[0].relative_to(self.data_root).as_posix() if candidates else ''
+
+    def _upsert_emoticon(self, code, root):
+        if self._emoticons_by_code is None:
+            self._emoticons_by_code = QZoneEmoticon.objects.in_bulk()
+        emoticon = self._emoticons_by_code.get(code)
+        existing_path = self.data_root / emoticon.source_path if emoticon and emoticon.source_path else None
+        source_path = (
+            emoticon.source_path
+            if existing_path is not None and existing_path.is_file()
+            else self._emoticon_source_path(code, root)
+        )
+        mime_type = mimetypes.guess_type(source_path)[0] or ''
+        if emoticon is None:
+            emoticon = QZoneEmoticon.objects.create(
+                code=code,
+                source_path=source_path,
+                mime_type=mime_type,
+                status=QZoneEmoticon.STATUS_PENDING if source_path else QZoneEmoticon.STATUS_MISSING,
+                error='' if source_path else f'File not found for QQ emoticon: {code}',
+            )
+            self._emoticons_by_code[code] = emoticon
+            return emoticon
+
+        changed = emoticon.source_path != source_path or emoticon.mime_type != mime_type
+        if not changed and (
+            source_path
+            or emoticon.media_asset_id is not None
+            or emoticon.status == QZoneEmoticon.STATUS_MISSING
+        ):
+            return emoticon
+        emoticon.source_path = source_path
+        emoticon.mime_type = mime_type
+        update_fields = ['source_path', 'mime_type', 'updated_at']
+        if not source_path:
+            if emoticon.media_asset_id is None:
+                emoticon.status = QZoneEmoticon.STATUS_MISSING
+                emoticon.error = f'File not found for QQ emoticon: {code}'
+                update_fields.extend(['status', 'error'])
+        elif changed and emoticon.status != QZoneEmoticon.STATUS_READY:
+            emoticon.status = QZoneEmoticon.STATUS_PENDING
+            emoticon.error = ''
+            update_fields.extend(['status', 'error'])
+        emoticon.save(update_fields=update_fields)
+        return emoticon
+
+    def _prepare_emoticon_links(self, owner, root, through_model, owner_field):
+        codes = extract_qzone_emoticon_codes(owner.content_raw)
+        links = []
+        for code in codes:
+            emoticon = self._upsert_emoticon(code, root)
+            links.append(through_model(**{
+                f'{owner_field}_id': owner.id,
+                'qzoneemoticon_id': emoticon.code,
+            }))
+        return codes, links
+
     def prepare_media(self, limit=0):
         posts = QZonePost.objects.order_by('id')
         comments = QZoneComment.objects.order_by('id')
@@ -390,11 +483,21 @@ class QZoneImporter:
             posts = posts[:limit]
             comments = comments[:limit]
         prepared = 0
+        emoticon_references = 0
+        emoticon_codes = set()
+        post_emoticon_links = []
+        comment_emoticon_links = []
         for post in posts.iterator(chunk_size=self.batch_size):
             root = self._source_root(post.source_payload)
             for position, item in enumerate(post.media or []):
                 self._upsert_media(post=post, position=position, item=item, root=root)
                 prepared += 1
+            codes, links = self._prepare_emoticon_links(
+                post, root, QZonePost.emoticons.through, 'qzonepost',
+            )
+            emoticon_references += len(codes)
+            emoticon_codes.update(codes)
+            post_emoticon_links.extend(links)
         for comment in comments.iterator(chunk_size=self.batch_size):
             root = self._source_root(comment.source_payload)
             for position, item in enumerate((comment.source_payload or {}).get('pic') or []):
@@ -402,8 +505,29 @@ class QZoneImporter:
                 normalized['type'] = 'image'
                 self._upsert_media(comment=comment, position=position, item=normalized, root=root)
                 prepared += 1
-        self.write(f'media manifest: {prepared}')
-        return prepared
+            codes, links = self._prepare_emoticon_links(
+                comment, root, QZoneComment.emoticons.through, 'qzonecomment',
+            )
+            emoticon_references += len(codes)
+            emoticon_codes.update(codes)
+            comment_emoticon_links.extend(links)
+        QZonePost.emoticons.through.objects.bulk_create(
+            post_emoticon_links, batch_size=self.batch_size, ignore_conflicts=True,
+        )
+        QZoneComment.emoticons.through.objects.bulk_create(
+            comment_emoticon_links, batch_size=self.batch_size, ignore_conflicts=True,
+        )
+        result = {
+            'attachments': prepared,
+            'emoticon_references': emoticon_references,
+            'emoticon_codes': len(emoticon_codes),
+            'emoticons_missing': QZoneEmoticon.objects.filter(
+                code__in=emoticon_codes,
+                status=QZoneEmoticon.STATUS_MISSING,
+            ).count(),
+        }
+        self.write(f'media manifest: {result}')
+        return result
 
     def _upsert_media(self, *, position, item, root, post=None, comment=None):
         kind = str(item.get('type') or 'image').strip().lower()
@@ -466,6 +590,13 @@ class QZoneImporter:
         if not re.fullmatch(r'\.[a-z0-9][a-z0-9._+-]{0,31}', extension):
             extension = mimetypes.guess_extension(media.mime_type or '') or '.bin'
         return f'sermo/messages/{media.kind}/{content_hash[:32]}{extension}'
+
+    @staticmethod
+    def _emoticon_key(emoticon, content_hash):
+        extension = Path(emoticon.source_path).suffix.lower()
+        if not re.fullmatch(r'\.[a-z0-9][a-z0-9._+-]{0,31}', extension):
+            extension = mimetypes.guess_extension(emoticon.mime_type or '') or '.bin'
+        return f'sermo/qzone/emoticon/{content_hash[:32]}{extension}'
 
     def upload_media(self, limit=0, retry_failed=False):
         statuses = [QZoneMedia.STATUS_PENDING]
@@ -544,7 +675,91 @@ class QZoneImporter:
                 media.error = str(error)[:500]
                 media.save(update_fields=['status', 'error', 'updated_at'])
                 failed += 1
-        result = {'uploaded': completed, 'reused': reused, 'missing': missing, 'failed': failed}
+        emoticon_stats = {'uploaded': 0, 'reused': 0, 'missing': 0, 'failed': 0}
+        emoticon_statuses = [QZoneEmoticon.STATUS_PENDING]
+        if retry_failed:
+            emoticon_statuses.extend([QZoneEmoticon.STATUS_FAILED, QZoneEmoticon.STATUS_MISSING])
+        emoticons = QZoneEmoticon.objects.filter(status__in=emoticon_statuses).order_by('code')
+        if limit:
+            emoticons = emoticons[:limit]
+        for code in list(emoticons.values_list('code', flat=True)):
+            emoticon = QZoneEmoticon.objects.get(code=code)
+            path = self.data_root / emoticon.source_path
+            if not emoticon.source_path or not path.is_file():
+                emoticon.status = QZoneEmoticon.STATUS_MISSING
+                emoticon.error = f'File not found: {emoticon.source_path or emoticon.code}'[:500]
+                emoticon.save(update_fields=['status', 'error', 'updated_at'])
+                emoticon_stats['missing'] += 1
+                missing += 1
+                continue
+            try:
+                content_hash, file_size = self._file_digest(path)
+                duplicate = MediaAsset.find_duplicate(content_hash, file_size=file_size)
+                if duplicate is not None:
+                    emoticon.media_asset = duplicate
+                    emoticon.content_hash = content_hash
+                    emoticon.file_size = file_size
+                    emoticon.status = QZoneEmoticon.STATUS_READY
+                    emoticon.error = ''
+                    emoticon.save(update_fields=[
+                        'media_asset', 'content_hash', 'file_size', 'status', 'error', 'updated_at',
+                    ])
+                    emoticon_stats['reused'] += 1
+                    reused += 1
+                    continue
+                if qiniu_auth is None:
+                    qiniu_auth, bucket = self._qiniu_client()
+                key = self._emoticon_key(emoticon, content_hash)
+                token = qiniu_auth.upload_token(bucket, key, 3600)
+                _result, info = put_file(token, key, str(path), check_crc=True)
+                if info.status_code not in (200, 614):
+                    raise RuntimeError(f'Qiniu upload failed with status {info.status_code}: {info.text_body}')
+                source_uri = avatar_uri_for_key(key)
+                try:
+                    asset = MediaAsset.objects.create(
+                        source_key=key,
+                        source_uri=source_uri,
+                        original_key=key,
+                        original_uri=source_uri,
+                        kind=MediaAsset.KIND_IMAGE,
+                        content_hash=content_hash,
+                        mime_type=(emoticon.mime_type or mimetypes.guess_type(path.name)[0] or '')[:100],
+                        file_size=file_size,
+                        status=MediaAsset.STATUS_READY,
+                        geocoding_status=MediaAsset.GEOCODING_UNAVAILABLE,
+                        raw_metadata={
+                            'source': 'qzone_emoticon_import',
+                            'source_path': emoticon.source_path,
+                            'code': emoticon.code,
+                        },
+                    )
+                except IntegrityError:
+                    asset = MediaAsset.find_duplicate(content_hash, file_size=file_size)
+                    if asset is None:
+                        asset = MediaAsset.objects.get(source_key=key)
+                emoticon.media_asset = asset
+                emoticon.content_hash = content_hash
+                emoticon.file_size = file_size
+                emoticon.status = QZoneEmoticon.STATUS_READY
+                emoticon.error = ''
+                emoticon.save(update_fields=[
+                    'media_asset', 'content_hash', 'file_size', 'status', 'error', 'updated_at',
+                ])
+                emoticon_stats['uploaded'] += 1
+                completed += 1
+            except Exception as error:
+                emoticon.status = QZoneEmoticon.STATUS_FAILED
+                emoticon.error = str(error)[:500]
+                emoticon.save(update_fields=['status', 'error', 'updated_at'])
+                emoticon_stats['failed'] += 1
+                failed += 1
+        result = {
+            'uploaded': completed,
+            'reused': reused,
+            'missing': missing,
+            'failed': failed,
+            'emoticons': emoticon_stats,
+        }
         self.write(f'media upload: {result}')
         return result
 
@@ -559,13 +774,13 @@ class QZoneImporter:
         if missing_identities:
             raise CommandError(f'Run identity stage first; {len(missing_identities)} QQ identities are missing.')
         posts = QZonePost.objects.select_related('statement').prefetch_related(
-            'media_items__media_asset',
+            'media_items__media_asset', 'emoticons__media_asset',
         ).order_by('published_at', 'id')
         if limit:
             posts = posts[:limit]
         post_count = self._project_posts(posts, identity_by_qq)
         comments = QZoneComment.objects.select_related('post', 'statement_comment').prefetch_related(
-            'media_items__media_asset',
+            'media_items__media_asset', 'emoticons__media_asset',
         ).order_by('id')
         if limit:
             comments = comments[:limit]
@@ -578,7 +793,7 @@ class QZoneImporter:
         created = 0
         for source in queryset.iterator(chunk_size=self.batch_size):
             ready_media = [item for item in source.media_items.all() if item.media_asset_id]
-            text = normalize_qzone_text(source.content_text)
+            text = normalize_qzone_text(source.content_raw or source.content_text)
             if source.visibility != 'public' or (not text and not ready_media):
                 continue
             with transaction.atomic():
@@ -596,6 +811,9 @@ class QZoneImporter:
                     created += 1
                 else:
                     statement = source.statement
+                    if statement.text != text:
+                        statement.text = text
+                        statement.save(update_fields=['text'])
                 existing_positions = set(statement.media.values_list('position', flat=True))
                 StatementMedia.objects.bulk_create([
                     StatementMedia(statement=statement, media_asset=item.media_asset, position=item.position)
@@ -637,6 +855,9 @@ class QZoneImporter:
                     created += 1
                 else:
                     comment = source.statement_comment
+                    if comment.text != text:
+                        comment.text = text
+                        comment.save(update_fields=['text'])
                 existing_positions = set(comment.media.values_list('position', flat=True))
                 StatementCommentMedia.objects.bulk_create([
                     StatementCommentMedia(comment=comment, media_asset=item.media_asset, position=item.position)
@@ -658,6 +879,11 @@ class QZoneImporter:
             'media_pending': QZoneMedia.objects.filter(status=QZoneMedia.STATUS_PENDING).count(),
             'media_missing': QZoneMedia.objects.filter(status=QZoneMedia.STATUS_MISSING).count(),
             'media_failed': QZoneMedia.objects.filter(status=QZoneMedia.STATUS_FAILED).count(),
+            'emoticons_total': QZoneEmoticon.objects.count(),
+            'emoticons_ready': QZoneEmoticon.objects.filter(status=QZoneEmoticon.STATUS_READY).count(),
+            'emoticons_pending': QZoneEmoticon.objects.filter(status=QZoneEmoticon.STATUS_PENDING).count(),
+            'emoticons_missing': QZoneEmoticon.objects.filter(status=QZoneEmoticon.STATUS_MISSING).count(),
+            'emoticons_failed': QZoneEmoticon.objects.filter(status=QZoneEmoticon.STATUS_FAILED).count(),
             'projected_comment_without_projected_post': QZoneComment.objects.exclude(
                 statement_comment_id=None,
             ).filter(post__statement_id=None).count(),

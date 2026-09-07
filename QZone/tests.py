@@ -12,7 +12,7 @@ from django.utils import timezone
 
 from Message.models import MediaAsset
 from QZone.importer import QZoneImporter
-from QZone.models import QZoneComment, QZoneMedia, QZonePost, QZoneUser
+from QZone.models import QZoneComment, QZoneEmoticon, QZoneMedia, QZonePost, QZoneUser
 from Space.models import Space, SpaceFeatureGrant, SpaceFeatureKeyChoice
 from Square.models import Statement, StatementComment, StatementMedia
 from User.qq_identity import ensure_qzone_placeholder
@@ -329,3 +329,96 @@ class QZoneImporterTests(TestCase):
         self.assertEqual(media.media_asset_id, asset.id)
         self.assertEqual(media.status, QZoneMedia.STATUS_READY)
         self.assertEqual(StatementMedia.objects.get().media_asset_id, asset.id)
+
+    @patch('QZone.importer.put_file')
+    def test_media_stage_prepares_and_projects_inline_emoticons(self, put_file_mock):
+        emoticon_directory = Path(self.temp_dir.name) / '江中东墙HTML' / 'Common' / 'images'
+        emoticon_directory.mkdir(parents=True)
+        emoticon_path = emoticon_directory / 'e101.gif'
+        emoticon_path.write_bytes(b'legacy-emoticon')
+        digest = hashlib.sha256(b'legacy-emoticon').hexdigest()
+        asset = MediaAsset.objects.create(
+            source_key='sermo/qzone/emoticon/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.gif',
+            source_uri='https://resource.example.com/e101.gif',
+            kind=MediaAsset.KIND_IMAGE,
+            content_hash=digest,
+            file_size=len(b'legacy-emoticon'),
+            status=MediaAsset.STATUS_READY,
+        )
+        dates = self._row_dates()
+        source_payload = json.dumps({
+            'source_file': '江中东墙HTML/Messages/json/messages.json',
+        })
+        self._write(
+            posts=[{
+                'id': 1,
+                'source_post_id': 'east-emoticon',
+                'author_qq': '1493732945',
+                'content_raw': '历史[em]e101[/em]说说',
+                'content_text': '历史说说',
+                'published_at': '2014-12-13 12:22:06',
+                'visibility': 'public',
+                'media': '[]',
+                'source_payload': source_payload,
+                **dates,
+            }],
+            comments=[{
+                'id': 1,
+                'post_id': 1,
+                'author_qq': '377489624',
+                'parent_comment_id': '',
+                'reply_to_qq': '',
+                'content_raw': '评论[em]e101[/em][em]e999[/em]',
+                'published_at': '2014-12-13 13:00:00',
+                'source_payload': source_payload,
+                **dates,
+            }],
+        )
+        importer = QZoneImporter(self.space, self.input_path)
+        importer.import_source()
+        importer.import_identities()
+
+        manifest = importer.prepare_media()
+
+        self.assertEqual(manifest, {
+            'attachments': 0,
+            'emoticon_references': 3,
+            'emoticon_codes': 2,
+            'emoticons_missing': 1,
+        })
+        self.assertSetEqual(set(QZonePost.objects.get(id=1).emoticons.values_list('code', flat=True)), {'e101'})
+        self.assertSetEqual(
+            set(QZoneComment.objects.get(id=1).emoticons.values_list('code', flat=True)),
+            {'e101', 'e999'},
+        )
+        self.assertEqual(QZoneEmoticon.objects.get(code='e999').status, QZoneEmoticon.STATUS_MISSING)
+
+        result = importer.upload_media()
+        importer.project()
+
+        self.assertEqual(result['emoticons']['reused'], 1)
+        put_file_mock.assert_not_called()
+        self.assertEqual(QZoneEmoticon.objects.get(code='e101').media_asset_id, asset.id)
+        statement = QZonePost.objects.select_related('statement').get(id=1).statement
+        self.assertEqual(statement.text, '历史[em]e101[/em]说说')
+        statement_payload = Statement.detail(statement.user, statement.id)
+        self.assertEqual(statement_payload['inline_emoticons'], [{
+            'code': 'e101',
+            'token': '[em]e101[/em]',
+            'uri': f'/square/emoticons/{asset.blob_slug}',
+        }])
+        comment_payload = StatementComment.feed(statement.user, statement.id)[0]
+        self.assertEqual(comment_payload['text'], '评论[em]e101[/em][em]e999[/em]')
+        self.assertEqual([item['code'] for item in comment_payload['inline_emoticons']], ['e101'])
+
+        statement.text = '历史说说'
+        statement.save(update_fields=['text'])
+        projected_comment = QZoneComment.objects.select_related('statement_comment').get(id=1).statement_comment
+        projected_comment.text = '评论'
+        projected_comment.save(update_fields=['text'])
+
+        self.assertEqual(importer.project(), {'posts_created': 0, 'comments_created': 0})
+        statement.refresh_from_db()
+        projected_comment.refresh_from_db()
+        self.assertEqual(statement.text, '历史[em]e101[/em]说说')
+        self.assertEqual(projected_comment.text, '评论[em]e101[/em][em]e999[/em]')

@@ -10,6 +10,7 @@ from Chat.models import Chat
 from Friendship.models import Friendship, FriendshipStatusChoice
 from django.db.models import Q
 from Message.models import ForwardBundle, MediaAsset, Message, MessageTypeChoice
+from QZone.models import QZoneEmoticon
 from Message.params import MessageParams
 from Square.params import SquareParams
 from Square.quota import quota_for_user
@@ -555,5 +556,20 @@ class StatementMediaThumbnailView(View):
             raise SquareErrors.NOT_EXISTS
         thumbnail_uri = build_message_image_thumbnail_uri(asset.source_uri, width=480) if asset.kind == MediaAsset.KIND_IMAGE else build_message_video_thumbnail_uri(asset.source_uri, width=480)
         response = HttpResponseRedirect(thumbnail_uri)
+        response['Cache-Control'] = 'private, max-age=86400'
+        return response
+
+
+class StatementEmoticonView(View):
+    def get(self, request: Request, blob_slug: str):
+        emoticon = QZoneEmoticon.objects.select_related('media_asset').filter(
+            media_asset__blob_slug=str(blob_slug or '').strip().lower(),
+        ).filter(
+            Q(posts__statement__is_deleted=False)
+            | Q(comments__post__statement__is_deleted=False)
+        ).distinct().first()
+        if emoticon is None or emoticon.media_asset_id is None:
+            raise SquareErrors.NOT_EXISTS
+        response = HttpResponseRedirect(sign_private_download_url(emoticon.media_asset.source_uri))
         response['Cache-Control'] = 'private, max-age=86400'
         return response

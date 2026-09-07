@@ -1,6 +1,6 @@
 from django.urls import path
 
-from Square.views import AdminSquareMuteView, AdminStatementView, PinnedStatementView, SquareChatRecordStatementView, SquareQuotaView, SquareStatusView, StatementAuthorMuteView, StatementCommentDetailView, StatementCommentLikeView, StatementCommentView, StatementDetailView, StatementLikeView, StatementLocationView, StatementMediaThumbnailView, StatementMediaView, StatementPinView, StatementUploadView, StatementView
+from Square.views import AdminSquareMuteView, AdminStatementView, PinnedStatementView, SquareChatRecordStatementView, SquareQuotaView, SquareStatusView, StatementAuthorMuteView, StatementCommentDetailView, StatementCommentLikeView, StatementCommentView, StatementDetailView, StatementEmoticonView, StatementLikeView, StatementLocationView, StatementMediaThumbnailView, StatementMediaView, StatementPinView, StatementUploadView, StatementView
 
 
 urlpatterns = [
@@ -8,6 +8,7 @@ urlpatterns = [
     path('status', SquareStatusView.as_view(), name='square status'),
     path('media/<slug:blob_slug>/thumbnail', StatementMediaThumbnailView.as_view(), name='square media thumbnail'),
     path('media/<slug:blob_slug>', StatementMediaView.as_view(), name='square media'),
+    path('emoticons/<slug:blob_slug>', StatementEmoticonView.as_view(), name='square emoticon'),
     path('upload', StatementUploadView.as_view(), name='square upload'),
     path('location', StatementLocationView.as_view(), name='square location'),
     path('statements', StatementView.as_view(), name='square statements'),
