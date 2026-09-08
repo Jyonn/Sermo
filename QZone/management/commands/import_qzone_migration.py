@@ -18,6 +18,11 @@ class Command(BaseCommand):
         parser.add_argument('--limit', type=int, default=0)
         parser.add_argument('--upload-media', action='store_true')
         parser.add_argument('--retry-failed', action='store_true')
+        parser.add_argument(
+            '--skip-projected',
+            action='store_true',
+            help='Resume projection by processing only source rows that are not linked yet.',
+        )
         parser.add_argument('--dry-run', action='store_true')
 
     def handle(self, *args, **options):
@@ -44,6 +49,6 @@ class Command(BaseCommand):
             if options['upload_media']:
                 importer.upload_media(limit=limit, retry_failed=options['retry_failed'])
         if stage in ('projection', 'all'):
-            importer.project(limit=limit)
+            importer.project(limit=limit, skip_projected=options['skip_projected'])
         if stage in ('verify', 'all'):
             importer.verify()

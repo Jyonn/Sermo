@@ -214,6 +214,57 @@ class QZoneImporterTests(TestCase):
         self.assertEqual(list(QZoneComment.objects.values_list('id', flat=True)), [1])
         self.assertSetEqual(set(QZoneUser.objects.values_list('qq', flat=True)), {'1493732945', '377489624'})
 
+    def test_projection_resumes_from_comments_when_statement_is_already_linked(self):
+        dates = self._row_dates()
+        self._write(
+            posts=[{
+                'id': 1,
+                'source_post_id': 'east-1',
+                'author_qq': '1493732945',
+                'content_raw': '历史说说',
+                'content_text': '历史说说',
+                'published_at': '2014-12-13 12:22:06',
+                'visibility': 'public',
+                'media': '[]',
+                'source_payload': '{}',
+                **dates,
+            }],
+            comments=[{
+                'id': 1,
+                'post_id': 1,
+                'author_qq': '377489624',
+                'parent_comment_id': '',
+                'reply_to_qq': '',
+                'content_raw': '等待恢复的评论',
+                'published_at': '2014-12-13 13:00:00',
+                'source_payload': '{}',
+                **dates,
+            }],
+        )
+        output = io.StringIO()
+        importer = QZoneImporter(self.space, self.input_path, stdout=output, batch_size=1)
+        importer.import_source()
+        importer.import_identities()
+        source_post = QZonePost.objects.get(id=1)
+        identity = ensure_qzone_placeholder(self.space, source_post.author_id, source_post.author.nickname)
+        statement = Statement.objects.create(
+            space=self.space,
+            user=identity.user,
+            text='保留已投影内容',
+        )
+        source_post.statement = statement
+        source_post.save(update_fields=['statement'])
+
+        result = importer.project(skip_projected=True)
+
+        statement.refresh_from_db()
+        self.assertEqual(result, {'posts_created': 0, 'comments_created': 1})
+        self.assertEqual(statement.text, '保留已投影内容')
+        self.assertEqual(StatementComment.objects.get().text, '等待恢复的评论')
+        self.assertIn('projection posts', output.getvalue())
+        self.assertIn('projection comments', output.getvalue())
+        self.assertIn('100.0%', output.getvalue())
+
     def test_source_import_preserves_comment_parents_and_skips_unchanged_updates(self):
         dates = self._row_dates()
         self._write(

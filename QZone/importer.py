@@ -8,7 +8,7 @@ from pathlib import Path
 import ijson
 from django.core.management.base import CommandError
 from django.db import IntegrityError, transaction
-from django.db.models import Q
+from django.db.models import Prefetch, Q
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from qiniu import Auth, put_file
@@ -863,7 +863,7 @@ class QZoneImporter:
             f'missing={stats["missing"]} failed={stats["failed"]}'
         )
 
-    def project(self, limit=0):
+    def project(self, limit=0, skip_projected=False):
         self.space.require_qq_binding_granted()
         identity_by_qq = dict(
             QQIdentity.objects.filter(space=self.space).values_list('qq', 'user_id')
@@ -873,28 +873,69 @@ class QZoneImporter:
         missing_identities = required_qqs - set(identity_by_qq)
         if missing_identities:
             raise CommandError(f'Run identity stage first; {len(missing_identities)} QQ identities are missing.')
-        posts = QZonePost.objects.select_related('statement').prefetch_related(
-            'media_items__media_asset', 'emoticons__media_asset',
-        ).order_by('published_at', 'id')
-        if limit:
-            posts = posts[:limit]
-        post_count = self._project_posts(posts, identity_by_qq)
-        comments = QZoneComment.objects.select_related('post', 'statement_comment').prefetch_related(
-            'media_items__media_asset', 'emoticons__media_asset',
-        ).order_by('id')
-        if limit:
-            comments = comments[:limit]
-        comment_count = self._project_comments(comments, identity_by_qq)
+        media_prefetch = Prefetch(
+            'media_items',
+            queryset=QZoneMedia.objects.only(
+                'id', 'post_id', 'comment_id', 'position', 'media_asset_id',
+            ).order_by('position'),
+        )
+        posts = QZonePost.objects.defer(
+            'media', 'source_payload', 'created_at', 'updated_at',
+        ).prefetch_related(media_prefetch)
+        if skip_projected:
+            posts = posts.filter(statement_id=None)
+        else:
+            posts = posts.select_related('statement')
+        post_count = self._project_posts(posts, identity_by_qq, limit=limit)
+
+        post_statement_by_source_id = dict(
+            QZonePost.objects.exclude(statement_id=None).values_list('id', 'statement_id')
+        )
+        comments = QZoneComment.objects.defer(
+            'source_payload', 'created_at', 'updated_at',
+        ).prefetch_related(media_prefetch)
+        if skip_projected:
+            comments = comments.filter(statement_comment_id=None)
+        else:
+            comments = comments.select_related('statement_comment')
+        comment_count = self._project_comments(
+            comments,
+            identity_by_qq,
+            post_statement_by_source_id,
+            limit=limit,
+        )
         result = {'posts_created': post_count, 'comments_created': comment_count}
         self.write(f'projection: {result}')
         return result
 
-    def _project_posts(self, queryset, identity_by_qq):
+    def _projection_rows(self, queryset, limit=0):
+        remaining = max(0, int(limit)) or None
+        last_id = 0
+        while remaining is None or remaining > 0:
+            chunk_size = self.batch_size if remaining is None else min(self.batch_size, remaining)
+            batch = list(queryset.filter(id__gt=last_id).order_by('id')[:chunk_size])
+            if not batch:
+                return
+            yield from batch
+            last_id = batch[-1].id
+            if remaining is not None:
+                remaining -= len(batch)
+
+    @staticmethod
+    def _projection_total(queryset, limit=0):
+        total = queryset.count()
+        return min(total, limit) if limit else total
+
+    def _project_posts(self, queryset, identity_by_qq, limit=0):
         created = 0
-        for source in queryset.iterator(chunk_size=self.batch_size):
+        total = self._projection_total(queryset, limit)
+        progress = _ProgressReporter(self.stdout, 'projection posts   ', total)
+        progress.update(0)
+        for index, source in enumerate(self._projection_rows(queryset, limit), start=1):
             ready_media = [item for item in source.media_items.all() if item.media_asset_id]
             text = normalize_qzone_text(source.content_raw or source.content_text)
             if source.visibility != 'public' or (not text and not ready_media):
+                progress.update(index, f'created={created}')
                 continue
             with transaction.atomic():
                 if source.statement_id is None:
@@ -914,34 +955,47 @@ class QZoneImporter:
                     if statement.text != text:
                         statement.text = text
                         statement.save(update_fields=['text'])
-                existing_positions = set(statement.media.values_list('position', flat=True))
-                StatementMedia.objects.bulk_create([
-                    StatementMedia(statement=statement, media_asset=item.media_asset, position=item.position)
-                    for item in ready_media
-                    if item.position not in existing_positions
-                ], ignore_conflicts=True)
+                if ready_media:
+                    existing_positions = set(statement.media.values_list('position', flat=True))
+                    StatementMedia.objects.bulk_create([
+                        StatementMedia(
+                            statement=statement,
+                            media_asset_id=item.media_asset_id,
+                            position=item.position,
+                        )
+                        for item in ready_media
+                        if item.position not in existing_positions
+                    ], ignore_conflicts=True)
+            progress.update(index, f'created={created}')
         return created
 
-    def _project_comments(self, queryset, identity_by_qq):
+    def _project_comments(self, queryset, identity_by_qq, post_statement_by_source_id, limit=0):
         created = 0
         projected_by_source_id = dict(
             QZoneComment.objects.exclude(statement_comment_id=None).values_list('id', 'statement_comment_id')
         )
-        for source in queryset.iterator(chunk_size=self.batch_size):
-            if source.post.statement_id is None:
+        total = self._projection_total(queryset, limit)
+        progress = _ProgressReporter(self.stdout, 'projection comments', total)
+        progress.update(0)
+        for index, source in enumerate(self._projection_rows(queryset, limit), start=1):
+            statement_id = post_statement_by_source_id.get(source.post_id)
+            if statement_id is None:
+                progress.update(index, f'created={created}')
                 continue
             ready_media = [item for item in source.media_items.all() if item.media_asset_id]
             text = normalize_qzone_text(source.content_raw)
             if not text and not ready_media:
+                progress.update(index, f'created={created}')
                 continue
             parent_id = projected_by_source_id.get(source.parent_id) if source.parent_id else None
             if source.parent_id and parent_id is None:
+                progress.update(index, f'created={created}')
                 continue
             reply_to_user_id = identity_by_qq.get(source.reply_to_id) if source.reply_to_id else None
             with transaction.atomic():
                 if source.statement_comment_id is None:
                     comment = StatementComment.objects.create(
-                        statement_id=source.post.statement_id,
+                        statement_id=statement_id,
                         user_id=identity_by_qq[source.author_id],
                         parent_id=parent_id,
                         reply_to_user_id=reply_to_user_id,
@@ -958,12 +1012,18 @@ class QZoneImporter:
                     if comment.text != text:
                         comment.text = text
                         comment.save(update_fields=['text'])
-                existing_positions = set(comment.media.values_list('position', flat=True))
-                StatementCommentMedia.objects.bulk_create([
-                    StatementCommentMedia(comment=comment, media_asset=item.media_asset, position=item.position)
-                    for item in ready_media
-                    if item.position not in existing_positions
-                ], ignore_conflicts=True)
+                if ready_media:
+                    existing_positions = set(comment.media.values_list('position', flat=True))
+                    StatementCommentMedia.objects.bulk_create([
+                        StatementCommentMedia(
+                            comment=comment,
+                            media_asset_id=item.media_asset_id,
+                            position=item.position,
+                        )
+                        for item in ready_media
+                        if item.position not in existing_positions
+                    ], ignore_conflicts=True)
+            progress.update(index, f'created={created}')
         return created
 
     def verify(self):
