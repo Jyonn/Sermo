@@ -6,7 +6,7 @@ from django.test import TestCase
 
 from Friendship.models import Friendship
 from Space.models import Space, SpaceFeatureGrant, SpaceFeatureKeyChoice, SpaceOperator
-from Square.models import Statement, StatementComment
+from Square.models import Statement, StatementComment, StatementCommentMention
 from User.models import QQIdentity, User, UserAccountKindChoice, UserContactVerificationCode
 from User.qq_identity import claim_qq_identity, ensure_qzone_placeholder
 from utils import auth
@@ -31,6 +31,7 @@ class QQIdentityTests(TestCase):
         self.assertEqual(placeholder.account_kind, UserAccountKindChoice.IMPORTED_PLACEHOLDER)
         self.assertTrue(placeholder.is_deleted)
         self.assertFalse(placeholder.has_password)
+        self.assertEqual(placeholder.avatar_uri, 'https://q1.qlogo.cn/g?b=qq&nk=1493732945&s=100')
         self.assertEqual(self.space.active_member_count(), 0)
         self.assertFalse(
             Friendship.objects.filter(user_low=placeholder).exists()
@@ -59,7 +60,12 @@ class QQIdentityTests(TestCase):
         identity = ensure_qzone_placeholder(self.space, '1493732945', '江中东墙')
         placeholder = identity.user
         statement = Statement.objects.create(space=self.space, user=placeholder, text='历史说说')
-        comment = StatementComment.objects.create(statement=statement, user=placeholder, text='历史评论')
+        comment = StatementComment.objects.create(
+            statement=statement,
+            user=placeholder,
+            text=f'<@{placeholder.id}> 历史评论',
+        )
+        StatementCommentMention.objects.create(comment=comment, user=placeholder)
         member = User.create(space=self.space, name='东墙运营')
 
         claimed = claim_qq_identity(member, '1493732945')
@@ -71,7 +77,18 @@ class QQIdentityTests(TestCase):
         self.assertIsNotNone(claimed.verified_at)
         self.assertEqual(statement.user_id, member.id)
         self.assertEqual(comment.user_id, member.id)
+        self.assertEqual(comment.text, f'<@{member.id}> 历史评论')
+        self.assertEqual(comment.comment_mentions.get().user_id, member.id)
         self.assertEqual(placeholder.merged_into_id, member.id)
+
+    def test_existing_placeholder_receives_qzone_avatar(self):
+        identity = ensure_qzone_placeholder(self.space, '1493732945', '江中东墙')
+        identity.user.avatar_uri = User.build_preset_avatar_uri(1)
+        identity.user.save(update_fields=['avatar_uri'])
+
+        refreshed = ensure_qzone_placeholder(self.space, '1493732945', '江中东墙')
+
+        self.assertEqual(refreshed.user.avatar_uri, 'https://q1.qlogo.cn/g?b=qq&nk=1493732945&s=100')
 
     def test_two_wall_accounts_use_the_same_binding_flow(self):
         east_identity = ensure_qzone_placeholder(self.space, '1493732945', '江中东墙')

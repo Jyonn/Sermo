@@ -21,6 +21,7 @@ from Square.models import (
     Statement,
     StatementComment,
     StatementCommentMedia,
+    StatementCommentMention,
     StatementMedia,
     StatementVisibilityChoice,
 )
@@ -29,7 +30,7 @@ from User.qq_identity import ensure_qzone_placeholder
 from utils.qiniu import avatar_uri_for_key
 
 
-STRUCTURED_MENTION_RE = re.compile(r'@\{uin:(?P<qq>\d+),nick:(?P<nick>.*?)(?:,who:.*)?\}')
+STRUCTURED_MENTION_RE = re.compile(r'@\{uin:(?P<qq>\d+),nick:(?P<nick>.*?)(?:,who:[^}]*)?\}')
 QZONE_EMOTICON_RE = re.compile(r'\[em\](?P<code>e\d+)\[/em\]', re.IGNORECASE)
 QZONE_EMOTICON_EXTENSIONS = {'.gif', '.png', '.jpg', '.jpeg', '.webp', '.bmp'}
 EXPORT_TABLE_KEYS = ('qzone_user', 'qzone_post', 'qzone_comment')
@@ -157,6 +158,34 @@ def _datetime_value(value):
 def normalize_qzone_text(value):
     text = str(value or '').strip()
     return STRUCTURED_MENTION_RE.sub(lambda match: f'@{match.group("nick")}', text)
+
+
+def project_qzone_comment_text(value, identity_by_qq, implicit_reply_qq=None, reply_to_qq=None):
+    text = str(value or '').strip()
+    leading_mention = STRUCTURED_MENTION_RE.match(text)
+    if (
+        leading_mention
+        and leading_mention.group('qq') == implicit_reply_qq
+        and reply_to_qq in (None, implicit_reply_qq)
+    ):
+        text = text[leading_mention.end():].lstrip()
+
+    mention_user_ids = set()
+
+    def replace_mention(match):
+        user_id = identity_by_qq.get(match.group('qq'))
+        if user_id is None:
+            return f'@{match.group("nick")}'
+        mention_user_ids.add(user_id)
+        return f'<@{user_id}>'
+
+    text = STRUCTURED_MENTION_RE.sub(replace_mention, text).strip()
+    if reply_to_qq and reply_to_qq != implicit_reply_qq:
+        reply_to_user_id = identity_by_qq.get(reply_to_qq)
+        if reply_to_user_id is not None and reply_to_user_id not in mention_user_ids:
+            text = f'<@{reply_to_user_id}> {text}'.strip()
+            mention_user_ids.add(reply_to_user_id)
+    return text, mention_user_ids
 
 
 def extract_qzone_emoticon_codes(value):
@@ -441,12 +470,26 @@ class QZoneImporter:
         authored_qqs.update(
             qq for qq in QZoneComment.objects.exclude(reply_to_id=None).values_list('reply_to_id', flat=True)
         )
-        users = QZoneUser.objects.filter(qq__in=authored_qqs).order_by('qq')
+        mention_nickname_by_qq = {}
+        for content_raw in QZoneComment.objects.values_list('content_raw', flat=True).iterator(
+            chunk_size=self.batch_size,
+        ):
+            for match in STRUCTURED_MENTION_RE.finditer(content_raw or ''):
+                qq = match.group('qq')
+                authored_qqs.add(qq)
+                mention_nickname_by_qq[qq] = match.group('nick').strip()
+        source_nickname_by_qq = dict(
+            QZoneUser.objects.filter(qq__in=authored_qqs).values_list('qq', 'nickname')
+        )
+        identity_rows = [
+            (qq, source_nickname_by_qq.get(qq, mention_nickname_by_qq.get(qq, '')))
+            for qq in sorted(authored_qqs)
+        ]
         if limit:
-            users = users[:limit]
+            identity_rows = identity_rows[:limit]
         completed = 0
-        for source_user in users.iterator(chunk_size=self.batch_size):
-            ensure_qzone_placeholder(self.space, source_user.qq, source_user.nickname)
+        for qq, nickname in identity_rows:
+            ensure_qzone_placeholder(self.space, qq, nickname)
             completed += 1
         self.write(f'identities: {completed}')
         return completed
@@ -891,6 +934,13 @@ class QZoneImporter:
         post_statement_by_source_id = dict(
             QZonePost.objects.exclude(statement_id=None).values_list('id', 'statement_id')
         )
+        post_author_by_source_id = dict(QZonePost.objects.values_list('id', 'author_id'))
+        comment_links_by_source_id = {
+            comment_id: (parent_id, author_id)
+            for comment_id, parent_id, author_id in QZoneComment.objects.values_list(
+                'id', 'parent_id', 'author_id',
+            )
+        }
         comments = QZoneComment.objects.defer(
             'source_payload', 'created_at', 'updated_at',
         ).prefetch_related(media_prefetch)
@@ -902,6 +952,8 @@ class QZoneImporter:
             comments,
             identity_by_qq,
             post_statement_by_source_id,
+            post_author_by_source_id,
+            comment_links_by_source_id,
             limit=limit,
         )
         result = {'posts_created': post_count, 'comments_created': comment_count}
@@ -969,7 +1021,29 @@ class QZoneImporter:
             progress.update(index, f'created={created}')
         return created
 
-    def _project_comments(self, queryset, identity_by_qq, post_statement_by_source_id, limit=0):
+    @staticmethod
+    def _comment_thread_owner_qq(source, post_author_by_source_id, comment_links_by_source_id):
+        if source.parent_id is None:
+            return post_author_by_source_id.get(source.post_id)
+        source_id = source.parent_id
+        visited = set()
+        while source_id and source_id not in visited:
+            visited.add(source_id)
+            parent_id, author_id = comment_links_by_source_id.get(source_id, (None, None))
+            if parent_id is None:
+                return author_id
+            source_id = parent_id
+        return None
+
+    def _project_comments(
+        self,
+        queryset,
+        identity_by_qq,
+        post_statement_by_source_id,
+        post_author_by_source_id,
+        comment_links_by_source_id,
+        limit=0,
+    ):
         created = 0
         projected_by_source_id = dict(
             QZoneComment.objects.exclude(statement_comment_id=None).values_list('id', 'statement_comment_id')
@@ -983,8 +1057,21 @@ class QZoneImporter:
                 progress.update(index, f'created={created}')
                 continue
             ready_media = [item for item in source.media_items.all() if item.media_asset_id]
-            text = normalize_qzone_text(source.content_raw)
+            implicit_reply_qq = self._comment_thread_owner_qq(
+                source,
+                post_author_by_source_id,
+                comment_links_by_source_id,
+            )
+            text, mention_user_ids = project_qzone_comment_text(
+                source.content_raw,
+                identity_by_qq,
+                implicit_reply_qq=implicit_reply_qq,
+                reply_to_qq=source.reply_to_id,
+            )
             if not text and not ready_media:
+                if source.statement_comment_id is not None and not source.statement_comment.is_deleted:
+                    source.statement_comment.is_deleted = True
+                    source.statement_comment.save(update_fields=['is_deleted'])
                 progress.update(index, f'created={created}')
                 continue
             parent_id = projected_by_source_id.get(source.parent_id) if source.parent_id else None
@@ -1012,6 +1099,11 @@ class QZoneImporter:
                     if comment.text != text:
                         comment.text = text
                         comment.save(update_fields=['text'])
+                if mention_user_ids:
+                    StatementCommentMention.objects.bulk_create([
+                        StatementCommentMention(comment=comment, user_id=user_id)
+                        for user_id in mention_user_ids
+                    ], ignore_conflicts=True)
                 if ready_media:
                     existing_positions = set(comment.media.values_list('position', flat=True))
                     StatementCommentMedia.objects.bulk_create([

@@ -15,7 +15,8 @@ from Message.models import MediaAsset
 from QZone.importer import QZoneImporter
 from QZone.models import QZoneComment, QZoneEmoticon, QZoneMedia, QZonePost, QZoneUser
 from Space.models import Space, SpaceFeatureGrant, SpaceFeatureKeyChoice
-from Square.models import Statement, StatementComment, StatementMedia
+from Square.models import Statement, StatementComment, StatementCommentMention, StatementMedia
+from User.models import QQIdentity
 from User.qq_identity import ensure_qzone_placeholder
 
 
@@ -147,7 +148,8 @@ class QZoneImporterTests(TestCase):
         comment = StatementComment.objects.get(qzone_source__id=1)
         self.assertEqual(statement.created_at.year, 2014)
         self.assertEqual(comment.created_at.year, 2014)
-        self.assertEqual(comment.text, '@江中东墙你好')
+        self.assertEqual(comment.text, '你好')
+        self.assertFalse(comment.comment_mentions.exists())
         self.assertEqual(comment.reply_to_user.qq_identity.qq, '1493732945')
 
         self.assertEqual(importer.project(), {'posts_created': 0, 'comments_created': 0})
@@ -264,6 +266,88 @@ class QZoneImporterTests(TestCase):
         self.assertIn('projection posts', output.getvalue())
         self.assertIn('projection comments', output.getvalue())
         self.assertIn('100.0%', output.getvalue())
+
+    def test_projection_distinguishes_thread_owner_replies_from_other_mentions(self):
+        dates = self._row_dates()
+        self._write(
+            posts=[{
+                'id': 1,
+                'source_post_id': 'east-mentions',
+                'author_qq': '1493732945',
+                'content_raw': '历史说说',
+                'content_text': '历史说说',
+                'published_at': '2014-12-13 12:22:06',
+                'visibility': 'public',
+                'media': '[]',
+                'source_payload': '{}',
+                **dates,
+            }],
+            comments=[
+                {
+                    'id': 1,
+                    'post_id': 1,
+                    'author_qq': '377489624',
+                    'parent_comment_id': '',
+                    'reply_to_qq': '',
+                    'content_raw': '根评论',
+                    'published_at': '2014-12-13 13:00:00',
+                    'source_payload': '{}',
+                    **dates,
+                },
+                {
+                    'id': 2,
+                    'post_id': 1,
+                    'author_qq': '1493732945',
+                    'parent_comment_id': 1,
+                    'reply_to_qq': '377489624',
+                    'content_raw': '@{uin:377489624,nick:层主,who:1} 对的',
+                    'published_at': '2014-12-13 13:01:00',
+                    'source_payload': '{}',
+                    **dates,
+                },
+                {
+                    'id': 3,
+                    'post_id': 1,
+                    'author_qq': '1493732945',
+                    'parent_comment_id': 1,
+                    'reply_to_qq': '850845285',
+                    'content_raw': (
+                        '@{uin:850845285,nick:漪,who:1} 看这里'
+                        '@{uin:2048123456,nick:仅被提及的人,who:1}'
+                    ),
+                    'published_at': '2014-12-13 13:02:00',
+                    'source_payload': '{}',
+                    **dates,
+                },
+            ],
+            users=[
+                {'qq': '1493732945', 'nickname': '江中东墙'},
+                {'qq': '377489624', 'nickname': '层主'},
+                {'qq': '850845285', 'nickname': '漪'},
+            ],
+        )
+        importer = QZoneImporter(self.space, self.input_path)
+        importer.import_source()
+        importer.import_identities()
+
+        importer.project()
+
+        owner_reply = QZoneComment.objects.get(id=2).statement_comment
+        other_reply = QZoneComment.objects.get(id=3).statement_comment
+        mentioned_user_id = other_reply.reply_to_user_id
+        mention_only_identity = QQIdentity.objects.get(space=self.space, qq='2048123456')
+        self.assertEqual(owner_reply.text, '对的')
+        self.assertFalse(owner_reply.comment_mentions.exists())
+        self.assertEqual(
+            other_reply.text,
+            f'<@{mentioned_user_id}> 看这里<@{mention_only_identity.user_id}>',
+        )
+        self.assertSetEqual(
+            set(other_reply.comment_mentions.values_list('user_id', flat=True)),
+            {mentioned_user_id, mention_only_identity.user_id},
+        )
+        self.assertEqual(mention_only_identity.user.name, '仅被提及的人')
+        self.assertEqual(StatementCommentMention.objects.count(), 2)
 
     def test_source_import_preserves_comment_parents_and_skips_unchanged_updates(self):
         dates = self._row_dates()
