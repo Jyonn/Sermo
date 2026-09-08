@@ -3,6 +3,7 @@ from unittest.mock import patch
 
 from django.core.exceptions import ValidationError
 from django.test import TestCase
+from django.utils import timezone
 
 from Friendship.models import Friendship
 from Space.models import Space, SpaceFeatureGrant, SpaceFeatureKeyChoice, SpaceOperator
@@ -202,6 +203,51 @@ class QQIdentityAPITests(TestCase):
         self.assertEqual(claim_response.json()['body']['qq'], '1493732945')
         statement.refresh_from_db()
         self.assertEqual(statement.user_id, self.user.id)
+
+    def test_verified_numeric_qq_email_can_claim_without_another_code(self):
+        placeholder = ensure_qzone_placeholder(self.space, '1493732945', '江中东墙').user
+        statement = Statement.objects.create(space=self.space, user=placeholder, text='历史说说')
+        self.user.email = '1493732945@qq.com'
+        self.user.email_verified_at = timezone.now()
+        self.user.save(update_fields=['email', 'email_verified_at'])
+
+        initial = self.client.get('/users/me/qq-identity', **self.authorization())
+        claim_response = self.post_json('/users/me/qq-identity/from-verified-email', {})
+
+        self.assertEqual(initial.status_code, 200, initial.content)
+        self.assertEqual(initial.json()['body']['email_qq'], '1493732945')
+        self.assertEqual(claim_response.status_code, 200, claim_response.content)
+        self.assertTrue(claim_response.json()['body']['bound'])
+        self.assertEqual(claim_response.json()['body']['qq'], '1493732945')
+        statement.refresh_from_db()
+        self.assertEqual(statement.user_id, self.user.id)
+
+    def test_unverified_or_non_numeric_qq_email_cannot_claim_directly(self):
+        for email, verified_at in (
+            ('1493732945@qq.com', None),
+            ('nickname@qq.com', timezone.now()),
+            ('1493732945@example.com', timezone.now()),
+        ):
+            self.user.email = email
+            self.user.email_verified_at = verified_at
+            self.user.save(update_fields=['email', 'email_verified_at'])
+
+            response = self.post_json('/users/me/qq-identity/from-verified-email', {})
+
+            self.assertEqual(response.status_code, 400, response.content)
+            self.assertFalse(QQIdentity.objects.filter(user=self.user).exists())
+
+    def test_verified_qq_email_claim_requires_space_switch(self):
+        self.user.email = '1493732945@qq.com'
+        self.user.email_verified_at = timezone.now()
+        self.user.save(update_fields=['email', 'email_verified_at'])
+        self.space.qq_binding_enabled = False
+        self.space.save(update_fields=['qq_binding_enabled'])
+
+        response = self.post_json('/users/me/qq-identity/from-verified-email', {})
+
+        self.assertEqual(response.status_code, 403, response.content)
+        self.assertFalse(QQIdentity.objects.filter(user=self.user).exists())
 
     @patch('User.views.send_verification_mail')
     def test_code_request_requires_space_switch(self, send_mail):

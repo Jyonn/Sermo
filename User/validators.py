@@ -56,6 +56,9 @@ class UserErrors:
     CONTACT_NOT_BOUND = Error(message=_('Contact is not bound'), code=Code.BadRequest)
     CONTACT_UNBIND_TARGET_MISMATCH = Error(message=_('Contact verification target does not match current binding'), code=Code.BadRequest)
     CONTACT_UNBIND_TOO_FREQUENT = Error(message=_('Contact cannot be unbound again until {available_at}'), code=Code.BadRequest)
+    QQ_EMAIL_BINDING_UNAVAILABLE = Error(
+        message=_('A verified numeric QQ email is required'), code=Code.BadRequest,
+    )
     PRIVATE_ACCOUNT_CONTACTS_REQUIRED = Error(message=_('Verified phone is required for a private account'), code=Code.BadRequest)
     ACCOUNT_SWITCH_FORBIDDEN = Error(message=_('Account switch is not allowed'), code=Code.Forbidden)
     ACCOUNT_SWITCH_TICKET_INVALID = Error(message=_('Invalid account switch ticket'), code=Code.BadRequest)

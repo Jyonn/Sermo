@@ -779,7 +779,17 @@ def _qq_identity_payload(user):
         bound=identity is not None and identity.verified_at is not None,
         qq=identity.qq if identity is not None else None,
         verified_at=identity.verified_at.timestamp() if identity and identity.verified_at else None,
+        email_qq=_verified_email_qq(user),
     )
+
+
+def _verified_email_qq(user):
+    if user.email_verified_at is None or not user.email:
+        return None
+    local, separator, domain = user.email.strip().lower().partition('@')
+    if separator != '@' or domain != 'qq.com' or not local.isdigit() or not 5 <= len(local) <= 20:
+        return None
+    return local
 
 
 class QQIdentityView(View):
@@ -801,6 +811,18 @@ class QQIdentityView(View):
                 code=request.json.code,
             )
             claim_qq_identity(request.user, request.json.qq, verified_at=verification.used_at)
+        return _qq_identity_payload(request.user)
+
+
+class QQIdentityFromVerifiedEmailView(View):
+    @auth.require_user
+    def post(self, request: Request):
+        _require_password_enabled(request.user)
+        request.user.space.require_qq_binding_enabled()
+        qq = _verified_email_qq(request.user)
+        if qq is None:
+            raise UserErrors.QQ_EMAIL_BINDING_UNAVAILABLE
+        claim_qq_identity(request.user, qq, verified_at=request.user.email_verified_at)
         return _qq_identity_payload(request.user)
 
 
