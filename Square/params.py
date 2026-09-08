@@ -1,3 +1,5 @@
+import datetime
+
 from django.utils.translation import gettext_lazy as _
 from smartdjango import ListValidator, Params, Validator
 
@@ -67,6 +69,13 @@ def validate_mute_reason(value):
     return normalized[:240]
 
 
+def validate_feed_date(value):
+    try:
+        return datetime.date.fromisoformat(str(value))
+    except (TypeError, ValueError):
+        raise SquareErrors.DATE_INVALID
+
+
 class SquareParams(metaclass=Params):
     text = Validator('text').to(validate_text).null().default('')
     visibility = Validator('visibility').to(validate_visibility).default('public')
@@ -74,9 +83,18 @@ class SquareParams(metaclass=Params):
     location = Validator('location').to(validate_location).null().default(None)
     pin = Validator('pin').to(int).bool(lambda value: value in (0, 1)).default(0)
     before = Validator('before').to(int).null().default(None)
+    feed_date = Validator('date', final_name='feed_date').to(validate_feed_date).null().default(None)
     offset = Validator('offset').to(int).bool(lambda value: 0 <= value <= 5000).default(0)
     scope = Validator('scope').to(str).bool(lambda value: value in ('all', 'friends', 'mine')).default('all')
     user_id = Validator('user_id').to(int).null().default(None)
+    calendar_year = Validator('year', final_name='calendar_year').to(int).bool(
+        lambda value: 2000 <= value <= 2100,
+        message=_('Unsupported calendar year'),
+    )
+    calendar_month = Validator('month', final_name='calendar_month').to(int).bool(
+        lambda value: 1 <= value <= 12,
+        message=_('Unsupported calendar month'),
+    )
     parent_id = Validator('parent_id').to(int).null().default(None)
     comment_sort = Validator('sort').to(str).bool(lambda value: value in ('hot', 'latest')).default('hot')
     limit = Validator('limit').to(int).bool(

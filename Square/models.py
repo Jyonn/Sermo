@@ -1,5 +1,7 @@
+import datetime
 from datetime import timedelta
 import re
+from zoneinfo import ZoneInfo
 
 from django.db import transaction
 from django.db.models import Count, Exists, OuterRef, Prefetch, Q
@@ -253,15 +255,7 @@ class Statement(models.Model):
         )
 
     @classmethod
-    def feed(cls, user, before=None, limit=20, request=None, scope='all', user_id=None):
-        queryset = cls.visible_for(user).select_related('user', 'user__qq_identity', 'forward_bundle').prefetch_related(
-            statement_media_prefetch(), statement_forward_bundle_prefetch(),
-            'qzone_source__emoticons__media_asset',
-        ).annotate(
-            visible_comment_count=Count('comments', filter=Q(comments__is_deleted=False), distinct=True),
-            visible_like_count=Count('likes', distinct=True),
-            viewer_liked=Exists(StatementLike.objects.filter(statement_id=OuterRef('pk'), user=user)),
-        )
+    def _apply_feed_scope(cls, queryset, user, scope='all', user_id=None):
         if scope == 'friends':
             friendships = Friendship.objects.filter(
                 space=user.space,
@@ -273,8 +267,54 @@ class Statement(models.Model):
             queryset = queryset.filter(user=user)
         if user_id is not None:
             queryset = queryset.filter(user_id=user_id, is_anonymous=False)
+        return queryset
+
+    @staticmethod
+    def _local_day_bounds(day):
+        base_tz = ZoneInfo('Asia/Shanghai')
+        start = datetime.datetime.combine(day, datetime.time.min, tzinfo=base_tz)
+        return start, start + datetime.timedelta(days=1)
+
+    @classmethod
+    def feed(cls, user, before=None, limit=20, request=None, scope='all', user_id=None, feed_date=None):
+        queryset = cls.visible_for(user)
+        queryset = cls._apply_feed_scope(queryset, user, scope=scope, user_id=user_id)
+        if feed_date is not None:
+            day_start, day_end = cls._local_day_bounds(feed_date)
+            queryset = queryset.filter(created_at__gte=day_start, created_at__lt=day_end)
+        queryset = queryset.select_related('user', 'user__qq_identity', 'forward_bundle').prefetch_related(
+            statement_media_prefetch(), statement_forward_bundle_prefetch(),
+            'qzone_source__emoticons__media_asset',
+        ).annotate(
+            visible_comment_count=Count('comments', filter=Q(comments__is_deleted=False), distinct=True),
+            visible_like_count=Count('likes', distinct=True),
+            viewer_liked=Exists(StatementLike.objects.filter(statement_id=OuterRef('pk'), user=user)),
+        )
         queryset = cls._apply_before_cursor(queryset, user.space, before)
         return [item.jsonl(request=request) for item in queryset.order_by('-created_at', '-id')[:limit]]
+
+    @classmethod
+    def calendar_days(cls, user, year, month, scope='all', user_id=None):
+        base_tz = ZoneInfo('Asia/Shanghai')
+        month_start = datetime.datetime(year, month, 1, tzinfo=base_tz)
+        if month == 12:
+            month_end = datetime.datetime(year + 1, 1, 1, tzinfo=base_tz)
+        else:
+            month_end = datetime.datetime(year, month + 1, 1, tzinfo=base_tz)
+        queryset = cls._apply_feed_scope(cls.visible_for(user), user, scope=scope, user_id=user_id)
+        rows = queryset.filter(
+            created_at__gte=month_start,
+            created_at__lt=month_end,
+        ).order_by('created_at', 'id').values_list('created_at', flat=True)
+        days = {}
+        for created_at in rows.iterator(chunk_size=2000):
+            day = timezone.localtime(created_at, base_tz).date().isoformat()
+            days[day] = days.get(day, 0) + 1
+        return dict(
+            year=year,
+            month=month,
+            days=[dict(date=day, statement_count=count) for day, count in days.items()],
+        )
 
     @classmethod
     def admin_feed(cls, space, viewer, before=None, limit=20, request=None):

@@ -51,7 +51,7 @@ class StatementLocationView(View):
 
 class StatementView(View):
     @auth.require_user
-    @analyse.query(SquareParams.before, SquareParams.limit, SquareParams.scope, SquareParams.user_id)
+    @analyse.query(SquareParams.before, SquareParams.limit, SquareParams.scope, SquareParams.user_id, SquareParams.feed_date)
     def get(self, request: Request):
         request.user.space.require_square_enabled(scope=request.query.scope)
         return Statement.feed(
@@ -61,6 +61,7 @@ class StatementView(View):
             request=request,
             scope=request.query.scope,
             user_id=request.query.user_id,
+            feed_date=request.query.feed_date,
         )
 
     @auth.require_user
@@ -82,6 +83,25 @@ class StatementView(View):
                 request.user.pinned_square_statement_id = statement.id
                 request.user.save(update_fields=['pinned_square_statement_id'])
         return statement.jsonl(request=request)
+
+
+class StatementCalendarView(View):
+    @auth.require_user
+    @analyse.query(
+        SquareParams.calendar_year,
+        SquareParams.calendar_month,
+        SquareParams.scope,
+        SquareParams.user_id,
+    )
+    def get(self, request: Request):
+        request.user.space.require_square_enabled(scope=request.query.scope)
+        return Statement.calendar_days(
+            request.user,
+            year=request.query.calendar_year,
+            month=request.query.calendar_month,
+            scope=request.query.scope,
+            user_id=request.query.user_id,
+        )
 
 
 class SquareChatRecordStatementView(View):

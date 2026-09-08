@@ -1,3 +1,4 @@
+import datetime
 import json
 from datetime import timedelta
 from unittest.mock import patch
@@ -9,7 +10,7 @@ from Friendship.models import Friendship
 from Chat.models import Chat
 from Space.models import Space, SpaceOperator
 from Message.models import ForwardBundleItem, MediaAsset, Message, MessageTypeChoice
-from Square.models import SquareMute, Statement, StatementComment, StatementCommentLike, StatementLike, StatementMedia
+from Square.models import SquareMute, Statement, StatementComment, StatementCommentLike, StatementLike, StatementMedia, StatementVisibilityChoice
 from Sticker.models import StickerAsset
 from Square.views import SquareStatusView
 from User.models import NotificationEvent, NotificationEventTypeChoice, User
@@ -328,6 +329,56 @@ class StatementApiTests(TestCase):
 
         self.assertEqual(len(friend_feed.json()['body']), 1)
         self.assertEqual(stranger_feed.json()['body'], [])
+
+    def test_calendar_and_date_feed_share_visibility_scope_in_shanghai_time(self):
+        late_day_one = Statement.objects.create(
+            space=self.space, user=self.author, text='一月一日晚', visibility=StatementVisibilityChoice.PUBLIC,
+        )
+        early_day_two = Statement.objects.create(
+            space=self.space, user=self.author, text='一月二日早', visibility=StatementVisibilityChoice.PUBLIC,
+        )
+        friends_day_two = Statement.objects.create(
+            space=self.space, user=self.author, text='一月二日好友', visibility=StatementVisibilityChoice.FRIENDS,
+        )
+        anonymous_day_two = Statement.objects.create(
+            space=self.space, user=self.author, text='一月二日匿名',
+            visibility=StatementVisibilityChoice.PUBLIC, is_anonymous=True,
+        )
+        Statement.objects.filter(id=late_day_one.id).update(
+            created_at=datetime.datetime(2026, 1, 1, 15, 30, tzinfo=datetime.timezone.utc),
+        )
+        Statement.objects.filter(id__in=[early_day_two.id, friends_day_two.id, anonymous_day_two.id]).update(
+            created_at=datetime.datetime(2026, 1, 1, 16, 30, tzinfo=datetime.timezone.utc),
+        )
+
+        calendar = self.client.get(
+            '/square/statements/calendar?scope=friends&year=2026&month=1',
+            **self.authorization(self.friend),
+        )
+        feed = self.client.get(
+            '/square/statements?scope=friends&date=2026-01-02&limit=20',
+            **self.authorization(self.friend),
+        )
+
+        self.assertEqual(calendar.status_code, 200, calendar.content)
+        self.assertEqual(calendar.json()['body']['days'], [
+            {'date': '2026-01-01', 'statement_count': 1},
+            {'date': '2026-01-02', 'statement_count': 2},
+        ])
+        self.assertEqual(feed.status_code, 200, feed.content)
+        self.assertCountEqual(
+            [item['statement_id'] for item in feed.json()['body']],
+            [early_day_two.id, friends_day_two.id],
+        )
+
+    def test_date_feed_rejects_invalid_date(self):
+        response = self.client.get(
+            '/square/statements?scope=all&date=2026-02-31&limit=20',
+            **self.authorization(self.friend),
+        )
+
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertEqual(response.json()['identifier'], 'SQUARE@DATE_INVALID')
 
     def test_anonymous_statement_is_sanitized_and_only_appears_in_explore_and_mine(self):
         response = self.post_statement(self.author, {
