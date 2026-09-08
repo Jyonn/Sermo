@@ -11,6 +11,7 @@ from utils import function
 
 
 QQ_PATTERN = re.compile(r'^\d{5,20}$')
+QZONE_EMOTICON_RE = re.compile(r'\[em\]e\d+\[/em\]', re.IGNORECASE)
 
 
 def normalize_qq(qq):
@@ -21,7 +22,7 @@ def normalize_qq(qq):
 
 
 def _placeholder_display_name(qq, nickname):
-    value = str(nickname or '').strip()
+    value = QZONE_EMOTICON_RE.sub('', str(nickname or '')).strip()
     if not value:
         value = f'QQ用户{qq[-4:]}'
     return value[:User.vldt.NAME_MAX_LENGTH]

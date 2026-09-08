@@ -278,6 +278,31 @@ class QZoneImporterTests(TestCase):
         with self.assertRaisesMessage(CommandError, 'qzone_user must be a list.'):
             QZoneImporter(self.space, self.input_path).preflight()
 
+    def test_source_removes_unavailable_emoticons_from_nicknames(self):
+        emoticon_directory = Path(self.temp_dir.name) / '江中东墙HTML' / 'Common' / 'images'
+        emoticon_directory.mkdir(parents=True)
+        (emoticon_directory / 'e101.gif').write_bytes(b'available-emoticon')
+        self._write(
+            posts=[],
+            comments=[],
+            users=[
+                {'qq': '1493732945', 'nickname': '昵称[em]e101[/em][em]e999[/em]'},
+                {'qq': '377489624', 'nickname': '[em]e998[/em][em]e998[/em]'},
+            ],
+        )
+        importer = QZoneImporter(self.space, self.input_path)
+
+        report = importer.preflight()
+        importer.import_source()
+
+        self.assertEqual(report['nickname_rows_cleaned'], 2)
+        self.assertEqual(report['nickname_missing_emoticon_references_removed'], 3)
+        self.assertEqual(report['nickname_empty_after_cleaning'], 1)
+        self.assertEqual(report['nickname_visible_length_min'], 0)
+        self.assertEqual(report['nickname_visible_length_max'], 3)
+        self.assertEqual(QZoneUser.objects.get(qq='1493732945').nickname, '昵称[em]e101[/em]')
+        self.assertEqual(QZoneUser.objects.get(qq='377489624').nickname, '')
+
     @patch('QZone.importer.put_file')
     def test_media_stage_reuses_existing_asset_by_content_hash(self, put_file_mock):
         media_directory = Path(self.temp_dir.name) / '江中东墙HTML' / 'Messages' / 'images'

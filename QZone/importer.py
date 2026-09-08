@@ -190,6 +190,10 @@ class QZoneImporter:
         missing_posts = set()
         late_parents = set()
         private_posts = post_text_over_140 = comment_text_over_140 = 0
+        nickname_rows_cleaned = nickname_missing_emoticon_references_removed = 0
+        nickname_empty_after_cleaning = 0
+        nickname_visible_lengths = []
+        available_emoticons = set(self._emoticon_file_index())
 
         for table_key, row in iter_qzone_export(self.input_path):
             counts[table_key] += 1
@@ -198,6 +202,16 @@ class QZoneImporter:
                 if qq in user_set:
                     raise CommandError('qzone_user contains duplicate QQ numbers.')
                 user_set.add(qq)
+                raw_nickname = str(row.get('nickname') or '').strip()
+                missing_emoticon_count = sum(
+                    match.group('code').lower() not in available_emoticons
+                    for match in QZONE_EMOTICON_RE.finditer(raw_nickname)
+                )
+                nickname_missing_emoticon_references_removed += missing_emoticon_count
+                nickname = self.normalize_qzone_nickname(raw_nickname)
+                nickname_rows_cleaned += bool(missing_emoticon_count)
+                nickname_empty_after_cleaning += not nickname
+                nickname_visible_lengths.append(len(QZONE_EMOTICON_RE.sub('x', nickname)))
                 continue
             if table_key == 'qzone_post':
                 post_id = int(row['id'])
@@ -245,6 +259,13 @@ class QZoneImporter:
             'private_posts': private_posts,
             'post_text_over_140': post_text_over_140,
             'comment_text_over_140': comment_text_over_140,
+            'nickname_rows_cleaned': nickname_rows_cleaned,
+            'nickname_missing_emoticon_references_removed': nickname_missing_emoticon_references_removed,
+            'nickname_empty_after_cleaning': nickname_empty_after_cleaning,
+            'nickname_visible_length_min': min(nickname_visible_lengths, default=0),
+            'nickname_visible_length_max': max(nickname_visible_lengths, default=0),
+            'nickname_visible_length_over_8': sum(length > 8 for length in nickname_visible_lengths),
+            'nickname_visible_length_over_20': sum(length > 20 for length in nickname_visible_lengths),
         }
         self.write(json.dumps(report, ensure_ascii=False, indent=2))
         return report
@@ -310,7 +331,7 @@ class QZoneImporter:
             updates = []
             for row in batch:
                 qq = str(row['qq']).strip()
-                nickname = str(row.get('nickname') or '')[:255]
+                nickname = self.normalize_qzone_nickname(row.get('nickname'))[:255]
                 item = existing.get(qq)
                 if item is None:
                     creates.append(QZoneUser(qq=qq, nickname=nickname))
@@ -462,6 +483,13 @@ class QZoneImporter:
                 if path.is_relative_to(preferred_root):
                     return path.relative_to(self.data_root).as_posix()
         return candidates[0].relative_to(self.data_root).as_posix() if candidates else ''
+
+    def normalize_qzone_nickname(self, value):
+        available_codes = self._emoticon_file_index()
+        return QZONE_EMOTICON_RE.sub(
+            lambda match: match.group(0) if match.group('code').lower() in available_codes else '',
+            str(value or '').strip(),
+        ).strip()
 
     def _upsert_emoticon(self, code, root):
         if self._emoticons_by_code is None:

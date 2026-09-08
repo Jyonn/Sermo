@@ -37,6 +37,24 @@ class QQIdentityTests(TestCase):
             or Friendship.objects.filter(user_high=placeholder).exists()
         )
 
+    def test_placeholder_name_does_not_expose_qzone_emoticon_markup(self):
+        identity = ensure_qzone_placeholder(
+            self.space,
+            '1493732945',
+            '[em]e101[/em]一个很长但可读的QQ昵称[em]e102[/em]',
+        )
+
+        self.assertEqual(identity.user.name, '一个很长但可读的QQ昵称')
+
+    def test_placeholder_uses_fallback_when_nickname_only_contains_emoticons(self):
+        identity = ensure_qzone_placeholder(
+            self.space,
+            '1493732945',
+            '[em]e101[/em][em]e102[/em]',
+        )
+
+        self.assertEqual(identity.user.name, 'QQ用户2945')
+
     def test_claim_moves_imported_content_to_bound_user(self):
         identity = ensure_qzone_placeholder(self.space, '1493732945', '江中东墙')
         placeholder = identity.user
