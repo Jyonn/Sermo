@@ -348,6 +348,13 @@ class QZoneImporterTests(TestCase):
         )
         self.assertEqual(mention_only_identity.user.name, '仅被提及的人')
         self.assertEqual(StatementCommentMention.objects.count(), 2)
+        thread = StatementComment.feed(other_reply.statement.user, other_reply.statement_id)[0]
+        reply_payload = next(item for item in thread['replies'] if item['comment_id'] == other_reply.id)
+        self.assertEqual(reply_payload['user']['external_identity']['provider'], 'qq')
+        self.assertEqual(
+            {mention['external_identity']['identifier'] for mention in reply_payload['mentions']},
+            {'850845285', '2048123456'},
+        )
 
     def test_source_import_preserves_comment_parents_and_skips_unchanged_updates(self):
         dates = self._row_dates()

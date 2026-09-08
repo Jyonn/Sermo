@@ -1208,6 +1208,13 @@ class User(models.Model):
             'profile_card_theme',
         )
         payload['permanent_vip_slot'] = self.permanent_vip_slot()
+        if self.is_imported_placeholder:
+            try:
+                qq = self.qq_identity.qq
+            except QQIdentity.DoesNotExist:
+                qq = ''
+            if qq:
+                payload['external_identity'] = {'provider': 'qq', 'identifier': qq}
         return payload
 
     def permanent_vip_slot(self):

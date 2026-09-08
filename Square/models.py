@@ -183,6 +183,13 @@ def anonymous_user_json():
     )
 
 
+def statement_comment_mentions_prefetch():
+    return Prefetch(
+        'comment_mentions',
+        queryset=StatementCommentMention.objects.select_related('user', 'user__qq_identity'),
+    )
+
+
 def _enforce_frequency(queryset, user, multiplier=1):
     if user.can_operate_square:
         return
@@ -247,7 +254,7 @@ class Statement(models.Model):
 
     @classmethod
     def feed(cls, user, before=None, limit=20, request=None, scope='all', user_id=None):
-        queryset = cls.visible_for(user).select_related('user', 'forward_bundle').prefetch_related(
+        queryset = cls.visible_for(user).select_related('user', 'user__qq_identity', 'forward_bundle').prefetch_related(
             statement_media_prefetch(), statement_forward_bundle_prefetch(),
             'qzone_source__emoticons__media_asset',
         ).annotate(
@@ -271,7 +278,9 @@ class Statement(models.Model):
 
     @classmethod
     def admin_feed(cls, space, viewer, before=None, limit=20, request=None):
-        queryset = cls.objects.filter(space=space, is_deleted=False).select_related('user', 'forward_bundle').prefetch_related(
+        queryset = cls.objects.filter(space=space, is_deleted=False).select_related(
+            'user', 'user__qq_identity', 'forward_bundle',
+        ).prefetch_related(
             statement_media_prefetch(), statement_forward_bundle_prefetch(),
             'qzone_source__emoticons__media_asset',
         ).annotate(
@@ -285,7 +294,9 @@ class Statement(models.Model):
     @classmethod
     def detail(cls, user, statement_id, request=None):
         try:
-            statement = cls.visible_for(user).select_related('user', 'forward_bundle').prefetch_related(
+            statement = cls.visible_for(user).select_related(
+                'user', 'user__qq_identity', 'forward_bundle',
+            ).prefetch_related(
                 statement_media_prefetch(), statement_forward_bundle_prefetch(),
                 'qzone_source__emoticons__media_asset',
             ).annotate(
@@ -480,9 +491,10 @@ class StatementComment(models.Model):
     def feed(cls, user, statement_id, offset=0, limit=30, sort='hot', request=None):
         statement = cls.statement_for_user(user, statement_id)
         queryset = cls.objects.filter(statement=statement, is_deleted=False).select_related(
-            'statement', 'user', 'parent__user', 'reply_to_user', 'sticker_asset',
+            'statement', 'user', 'user__qq_identity', 'parent__user', 'parent__user__qq_identity',
+            'reply_to_user', 'reply_to_user__qq_identity', 'sticker_asset',
         ).prefetch_related(
-            'comment_mentions__user', statement_comment_media_prefetch(),
+            statement_comment_mentions_prefetch(), statement_comment_media_prefetch(),
             'qzone_source__emoticons__media_asset',
         ).annotate(
             visible_like_count=Count('likes', distinct=True),

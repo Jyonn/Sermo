@@ -32,6 +32,10 @@ class QQIdentityTests(TestCase):
         self.assertTrue(placeholder.is_deleted)
         self.assertFalse(placeholder.has_password)
         self.assertEqual(placeholder.avatar_uri, 'https://q1.qlogo.cn/g?b=qq&nk=1493732945&s=100')
+        self.assertEqual(placeholder.tiny_json()['external_identity'], {
+            'provider': 'qq',
+            'identifier': '1493732945',
+        })
         self.assertEqual(self.space.active_member_count(), 0)
         self.assertFalse(
             Friendship.objects.filter(user_low=placeholder).exists()
@@ -80,6 +84,7 @@ class QQIdentityTests(TestCase):
         self.assertEqual(comment.text, f'<@{member.id}> 历史评论')
         self.assertEqual(comment.comment_mentions.get().user_id, member.id)
         self.assertEqual(placeholder.merged_into_id, member.id)
+        self.assertNotIn('external_identity', member.tiny_json())
 
     def test_existing_placeholder_receives_qzone_avatar(self):
         identity = ensure_qzone_placeholder(self.space, '1493732945', '江中东墙')
