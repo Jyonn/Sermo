@@ -960,6 +960,45 @@ class QZoneImporter:
         self.write(f'projection: {result}')
         return result
 
+    def repair_comment_replies(self, limit=0):
+        self.space.require_qq_binding_granted()
+        identity_by_qq = dict(
+            QQIdentity.objects.filter(space=self.space).values_list('qq', 'user_id')
+        )
+        post_statement_by_source_id = dict(
+            QZonePost.objects.exclude(statement_id=None).values_list('id', 'statement_id')
+        )
+        post_author_by_source_id = dict(QZonePost.objects.values_list('id', 'author_id'))
+        comment_links_by_source_id = {
+            comment_id: (parent_id, author_id)
+            for comment_id, parent_id, author_id in QZoneComment.objects.values_list(
+                'id', 'parent_id', 'author_id',
+            )
+        }
+        media_prefetch = Prefetch(
+            'media_items',
+            queryset=QZoneMedia.objects.only(
+                'id', 'post_id', 'comment_id', 'position', 'media_asset_id',
+            ).order_by('position'),
+        )
+        comments = QZoneComment.objects.exclude(statement_comment_id=None).select_related(
+            'statement_comment',
+        ).defer(
+            'source_payload', 'created_at', 'updated_at',
+        ).prefetch_related(media_prefetch)
+        processed = self._projection_total(comments, limit)
+        self._project_comments(
+            comments,
+            identity_by_qq,
+            post_statement_by_source_id,
+            post_author_by_source_id,
+            comment_links_by_source_id,
+            limit=limit,
+        )
+        result = {'comments_processed': processed}
+        self.write(f'reply repair: {result}')
+        return result
+
     def _projection_rows(self, queryset, limit=0):
         remaining = max(0, int(limit)) or None
         last_id = 0
@@ -969,6 +1008,27 @@ class QZoneImporter:
             if not batch:
                 return
             yield from batch
+            last_id = batch[-1].id
+            if remaining is not None:
+                remaining -= len(batch)
+
+    def _comment_projection_rows(self, queryset, limit=0):
+        remaining = max(0, int(limit)) or None
+        last_published_at = None
+        last_id = 0
+        while remaining is None or remaining > 0:
+            chunk_size = self.batch_size if remaining is None else min(self.batch_size, remaining)
+            batch_queryset = queryset
+            if last_published_at is not None:
+                batch_queryset = batch_queryset.filter(
+                    Q(published_at__gt=last_published_at)
+                    | Q(published_at=last_published_at, id__gt=last_id)
+                )
+            batch = list(batch_queryset.order_by('published_at', 'id')[:chunk_size])
+            if not batch:
+                return
+            yield from batch
+            last_published_at = batch[-1].published_at
             last_id = batch[-1].id
             if remaining is not None:
                 remaining -= len(batch)
@@ -1035,6 +1095,46 @@ class QZoneImporter:
             source_id = parent_id
         return None
 
+    @staticmethod
+    def _comment_thread_root_source_id(source_id, parent_id, comment_links_by_source_id):
+        if parent_id is None:
+            return source_id
+        current_id = parent_id
+        visited = set()
+        while current_id and current_id not in visited:
+            visited.add(current_id)
+            next_parent_id, _author_id = comment_links_by_source_id.get(current_id, (None, None))
+            if next_parent_id is None:
+                return current_id
+            current_id = next_parent_id
+        return None
+
+    def _resolve_comment_reply_targets(self, comment_links_by_source_id):
+        targets = {}
+        latest_by_thread_author = {}
+        rows = QZoneComment.objects.order_by('published_at', 'id').values_list(
+            'id', 'parent_id', 'author_id', 'reply_to_id', 'content_raw',
+        )
+        for comment_id, parent_id, author_qq, reply_to_qq, content_raw in rows.iterator(
+            chunk_size=self.batch_size,
+        ):
+            root_id = self._comment_thread_root_source_id(
+                comment_id,
+                parent_id,
+                comment_links_by_source_id,
+            )
+            if root_id is None:
+                continue
+            leading_mention = STRUCTURED_MENTION_RE.match(str(content_raw or '').strip())
+            target_qq = reply_to_qq or (leading_mention.group('qq') if leading_mention else None)
+            if parent_id is not None:
+                targets[comment_id] = latest_by_thread_author.get(
+                    (root_id, target_qq),
+                    parent_id,
+                )
+            latest_by_thread_author[(root_id, author_qq)] = comment_id
+        return targets
+
     def _project_comments(
         self,
         queryset,
@@ -1045,23 +1145,27 @@ class QZoneImporter:
         limit=0,
     ):
         created = 0
+        reply_target_by_source_id = self._resolve_comment_reply_targets(comment_links_by_source_id)
         projected_by_source_id = dict(
             QZoneComment.objects.exclude(statement_comment_id=None).values_list('id', 'statement_comment_id')
         )
         total = self._projection_total(queryset, limit)
         progress = _ProgressReporter(self.stdout, 'projection comments', total)
         progress.update(0)
-        for index, source in enumerate(self._projection_rows(queryset, limit), start=1):
+        for index, source in enumerate(self._comment_projection_rows(queryset, limit), start=1):
             statement_id = post_statement_by_source_id.get(source.post_id)
             if statement_id is None:
                 progress.update(index, f'created={created}')
                 continue
             ready_media = [item for item in source.media_items.all() if item.media_asset_id]
-            implicit_reply_qq = self._comment_thread_owner_qq(
+            thread_owner_qq = self._comment_thread_owner_qq(
                 source,
                 post_author_by_source_id,
                 comment_links_by_source_id,
             )
+            target_source_id = reply_target_by_source_id.get(source.id) if source.parent_id else None
+            target_author_qq = comment_links_by_source_id.get(target_source_id, (None, None))[1]
+            implicit_reply_qq = target_author_qq or thread_owner_qq
             text, mention_user_ids = project_qzone_comment_text(
                 source.content_raw,
                 identity_by_qq,
@@ -1074,11 +1178,12 @@ class QZoneImporter:
                     source.statement_comment.save(update_fields=['is_deleted'])
                 progress.update(index, f'created={created}')
                 continue
-            parent_id = projected_by_source_id.get(source.parent_id) if source.parent_id else None
-            if source.parent_id and parent_id is None:
+            parent_id = projected_by_source_id.get(target_source_id) if target_source_id else None
+            if target_source_id and parent_id is None:
                 progress.update(index, f'created={created}')
                 continue
-            reply_to_user_id = identity_by_qq.get(source.reply_to_id) if source.reply_to_id else None
+            reply_to_qq = source.reply_to_id or target_author_qq
+            reply_to_user_id = identity_by_qq.get(reply_to_qq) if reply_to_qq else None
             with transaction.atomic():
                 if source.statement_comment_id is None:
                     comment = StatementComment.objects.create(
@@ -1096,9 +1201,19 @@ class QZoneImporter:
                     created += 1
                 else:
                     comment = source.statement_comment
+                    update_fields = []
                     if comment.text != text:
                         comment.text = text
-                        comment.save(update_fields=['text'])
+                        update_fields.append('text')
+                    if comment.parent_id != parent_id:
+                        comment.parent_id = parent_id
+                        update_fields.append('parent')
+                    if comment.reply_to_user_id != reply_to_user_id:
+                        comment.reply_to_user_id = reply_to_user_id
+                        update_fields.append('reply_to_user')
+                    if update_fields:
+                        comment.save(update_fields=update_fields)
+                comment.comment_mentions.exclude(user_id__in=mention_user_ids).delete()
                 if mention_user_ids:
                     StatementCommentMention.objects.bulk_create([
                         StatementCommentMention(comment=comment, user_id=user_id)

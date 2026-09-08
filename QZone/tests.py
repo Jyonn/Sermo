@@ -152,7 +152,7 @@ class QZoneImporterTests(TestCase):
         self.assertFalse(comment.comment_mentions.exists())
         self.assertEqual(comment.reply_to_user.qq_identity.qq, '1493732945')
 
-        self.assertEqual(importer.project(), {'posts_created': 0, 'comments_created': 0})
+        self.assertEqual(importer.repair_comment_replies(), {'comments_processed': 1})
 
     def test_source_limit_keeps_all_dependencies_for_selected_posts(self):
         dates = self._row_dates()
@@ -355,6 +355,99 @@ class QZoneImporterTests(TestCase):
             {mention['external_identity']['identifier'] for mention in reply_payload['mentions']},
             {'850845285', '2048123456'},
         )
+
+    def test_projection_resolves_reply_target_to_latest_prior_comment_by_mentioned_author(self):
+        dates = self._row_dates()
+        self._write(
+            posts=[{
+                'id': 1,
+                'source_post_id': 'east-conversation',
+                'author_qq': '1493732945',
+                'content_raw': '历史说说',
+                'content_text': '历史说说',
+                'published_at': '2014-12-13 12:22:06',
+                'visibility': 'public',
+                'media': '[]',
+                'source_payload': '{}',
+                **dates,
+            }],
+            comments=[
+                {
+                    'id': 10,
+                    'post_id': 1,
+                    'author_qq': '377489624',
+                    'parent_comment_id': '',
+                    'reply_to_qq': '',
+                    'content_raw': '根评论',
+                    'published_at': '2014-12-13 13:00:00',
+                    'source_payload': '{}',
+                    **dates,
+                },
+                {
+                    'id': 30,
+                    'post_id': 1,
+                    'author_qq': '850845285',
+                    'parent_comment_id': 10,
+                    'reply_to_qq': '377489624',
+                    'content_raw': '@{uin:377489624,nick:A,who:1} 第一次',
+                    'published_at': '2014-12-13 13:01:00',
+                    'source_payload': '{}',
+                    **dates,
+                },
+                {
+                    'id': 20,
+                    'post_id': 1,
+                    'author_qq': '377489624',
+                    'parent_comment_id': 10,
+                    'reply_to_qq': '850845285',
+                    'content_raw': '@{uin:850845285,nick:B,who:1} 收到',
+                    'published_at': '2014-12-13 13:02:00',
+                    'source_payload': '{}',
+                    **dates,
+                },
+                {
+                    'id': 40,
+                    'post_id': 1,
+                    'author_qq': '850845285',
+                    'parent_comment_id': 10,
+                    'reply_to_qq': '377489624',
+                    'content_raw': '@{uin:377489624,nick:A,who:1} 继续',
+                    'published_at': '2014-12-13 13:03:00',
+                    'source_payload': '{}',
+                    **dates,
+                },
+            ],
+            users=[
+                {'qq': '1493732945', 'nickname': '江中东墙'},
+                {'qq': '377489624', 'nickname': 'A'},
+                {'qq': '850845285', 'nickname': 'B'},
+            ],
+        )
+        importer = QZoneImporter(self.space, self.input_path, batch_size=1)
+        importer.import_source()
+        importer.import_identities()
+
+        importer.project()
+
+        root = QZoneComment.objects.get(id=10).statement_comment
+        first_b = QZoneComment.objects.get(id=30).statement_comment
+        reply_a = QZoneComment.objects.get(id=20).statement_comment
+        reply_b = QZoneComment.objects.get(id=40).statement_comment
+        self.assertEqual(first_b.parent_id, root.id)
+        self.assertEqual(reply_a.parent_id, first_b.id)
+        self.assertEqual(reply_b.parent_id, reply_a.id)
+        self.assertEqual([first_b.text, reply_a.text, reply_b.text], ['第一次', '收到', '继续'])
+        self.assertFalse(StatementCommentMention.objects.exists())
+
+        StatementComment.objects.filter(id__in=[reply_a.id, reply_b.id]).update(parent_id=root.id)
+        StatementCommentMention.objects.create(comment=reply_a, user=first_b.user)
+        self.assertEqual(importer.repair_comment_replies(), {'comments_processed': 4})
+
+        reply_a.refresh_from_db()
+        reply_b.refresh_from_db()
+        self.assertEqual(reply_a.parent_id, first_b.id)
+        self.assertEqual(reply_b.parent_id, reply_a.id)
+        self.assertFalse(StatementCommentMention.objects.exists())
 
     def test_source_import_preserves_comment_parents_and_skips_unchanged_updates(self):
         dates = self._row_dates()

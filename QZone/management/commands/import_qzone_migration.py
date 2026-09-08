@@ -11,7 +11,7 @@ class Command(BaseCommand):
         parser.add_argument('--input', required=True, help='Path to qzone-migration.json.')
         parser.add_argument(
             '--stage',
-            choices=('preflight', 'source', 'identity', 'media', 'projection', 'verify', 'all'),
+            choices=('preflight', 'source', 'identity', 'media', 'projection', 'repair-replies', 'verify', 'all'),
             default='preflight',
         )
         parser.add_argument('--batch-size', type=int, default=500)
@@ -33,12 +33,13 @@ class Command(BaseCommand):
             stdout=self.stdout,
             batch_size=options['batch_size'],
         )
-        importer.preflight()
-        if options['dry_run'] or options['stage'] == 'preflight':
+        stage = options['stage']
+        if stage != 'repair-replies':
+            importer.preflight()
+        if options['dry_run'] or stage == 'preflight':
             return
 
         space.require_qq_binding_granted()
-        stage = options['stage']
         limit = max(0, options['limit'])
         if stage in ('source', 'all'):
             importer.import_source(limit=limit)
@@ -50,5 +51,7 @@ class Command(BaseCommand):
                 importer.upload_media(limit=limit, retry_failed=options['retry_failed'])
         if stage in ('projection', 'all'):
             importer.project(limit=limit, skip_projected=options['skip_projected'])
+        if stage == 'repair-replies':
+            importer.repair_comment_replies(limit=limit)
         if stage in ('verify', 'all'):
             importer.verify()
