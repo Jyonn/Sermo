@@ -6,6 +6,7 @@ from Space.models import Space, SpaceEmailVerificationCode
 from Space.validators import SpaceValidator
 from Message.params import MessageParams
 from User.params import UserParams
+from utils.chat_moderation import CHAT_MUTE_DURATIONS
 
 
 class SpaceParams(metaclass=Params):
@@ -59,6 +60,14 @@ class SpaceUserListParams(metaclass=Params):
 
 class SpaceOperatorParams(metaclass=Params):
     user_id = Validator('user_id').to(int)
+
+
+class SpaceAdminChatMuteParams(metaclass=Params):
+    user_id = UserParams.admin_user_id
+    duration = Validator('duration').to(str).bool(
+        lambda value: value in CHAT_MUTE_DURATIONS,
+        message=_('Invalid chat mute duration'),
+    )
 
 
 class SpaceLookupParams(metaclass=Params):

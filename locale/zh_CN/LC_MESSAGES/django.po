@@ -983,3 +983,35 @@ msgstr "欢迎消息已达到上限"
 
 msgid "Delete welcome messages down to your current limit before adding new ones"
 msgstr "请先将欢迎消息删除到当前额度以内，再添加新消息"
+msgid "Invalid chat mute duration"
+msgstr "无效的聊天禁言时长"
+
+msgid "You are currently muted from sending chat messages"
+msgstr "你当前处于聊天禁言中，暂时无法发送消息"
+
+msgid "10 seconds"
+msgstr "10 秒"
+
+msgid "2 minutes"
+msgstr "2 分钟"
+
+msgid "10 minutes"
+msgstr "10 分钟"
+
+msgid "1 hour"
+msgstr "1 小时"
+
+msgid "6 hours"
+msgstr "6 小时"
+
+msgid "%(actor)s muted %(member)s for %(duration)s"
+msgstr "%(actor)s 将 %(member)s 禁言 %(duration)s"
+
+msgid "%(actor)s lifted the group mute for %(member)s"
+msgstr "%(actor)s 解除了 %(member)s 的群内禁言"
+
+msgid "Your ability to send chat messages has been restricted %(duration)s by the space administrator."
+msgstr "空间管理员已将你全局聊天禁言 %(duration)s。"
+
+msgid "Your global chat mute has been lifted. You can send messages again."
+msgstr "空间管理员已解除你的全局聊天禁言，现在可以重新发送消息。"

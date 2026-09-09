@@ -21,6 +21,7 @@ from Space.params import (
     SpacePhoneVerificationParams,
     SpaceIdentityParams,
     SpaceOperatorParams,
+    SpaceAdminChatMuteParams,
 )
 from Space.validators import SpaceErrors
 from utils import auth
@@ -644,6 +645,48 @@ class SpaceAdminUserRemoveView(View):
             raise UserErrors.USER_FORBIDDEN
         user.remove()
         return {}
+
+
+class SpaceAdminChatMuteView(View):
+    @staticmethod
+    def _target(space, user):
+        if user.space_id != space.id or user.is_deleted or user.is_official:
+            raise UserErrors.USER_FORBIDDEN
+        return user
+
+    @auth.require_space
+    @analyse.json(SpaceAdminChatMuteParams.user_id, SpaceAdminChatMuteParams.duration)
+    def post(self, request: Request):
+        from utils.chat_moderation import resolve_chat_mute
+
+        user = self._target(request.space, request.json.user)
+        permanent, muted_until = resolve_chat_mute(request.json.duration)
+        with transaction.atomic():
+            user.chat_muted_permanently = permanent
+            user.chat_muted_until = muted_until
+            user.save(update_fields=['chat_muted_permanently', 'chat_muted_until'])
+            official = request.space.ensure_official_user()
+            Message.create_official_notice(
+                user,
+                official,
+                'global_chat_muted',
+                duration=request.json.duration,
+            )
+        return dict(user_id=user.id, **user.chat_mute_payload())
+
+    @auth.require_space
+    @analyse.query(SpaceAdminChatMuteParams.user_id)
+    def delete(self, request: Request):
+        user = self._target(request.space, request.query.user)
+        was_active = user.chat_mute_payload()['active']
+        with transaction.atomic():
+            user.chat_muted_permanently = False
+            user.chat_muted_until = None
+            user.save(update_fields=['chat_muted_permanently', 'chat_muted_until'])
+            if was_active:
+                official = request.space.ensure_official_user()
+                Message.create_official_notice(user, official, 'global_chat_unmuted')
+        return dict(user_id=user.id, **user.chat_mute_payload())
 
 
 class SpaceOfficialLoginExchangeView(View):

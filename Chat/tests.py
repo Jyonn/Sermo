@@ -373,6 +373,90 @@ class ChatNotificationPreferenceTests(TestCase):
         self.assertTrue(any(event.user_id == self.recipient.id for event in events))
         self.assertFalse(ChatUserPreference.ensure(self.chat, self.recipient).notifications_muted)
 
+    def test_owner_can_mute_and_unmute_group_member_with_system_messages(self):
+        muted = self.client.post(
+            f'/chats/group/mutes?chat_id={self.chat.id}',
+            data=json.dumps({'user_id': self.recipient.id, 'duration': '10m'}),
+            content_type='application/json',
+            **self.authorization(self.sender),
+        )
+        self.assertEqual(muted.status_code, 200, muted.content)
+        member = ChatMember.objects.get(chat=self.chat, user=self.recipient)
+        self.assertTrue(member.mute_payload()['active'])
+        self.assertFalse(member.mute_payload()['permanent'])
+
+        blocked = self.client.post(
+            f'/messages/?chat_id={self.chat.id}',
+            data=json.dumps({'type': MessageTypeChoice.TEXT, 'content': 'blocked'}),
+            content_type='application/json',
+            **self.authorization(self.recipient),
+        )
+        self.assertEqual(blocked.json()['identifier'], 'MESSAGE@CHAT_MUTED')
+
+        unmuted = self.client.delete(
+            f'/chats/group/mutes?chat_id={self.chat.id}&user_id={self.recipient.id}',
+            **self.authorization(self.sender),
+        )
+        self.assertEqual(unmuted.status_code, 200, unmuted.content)
+        sent = self.client.post(
+            f'/messages/?chat_id={self.chat.id}',
+            data=json.dumps({'type': MessageTypeChoice.TEXT, 'content': 'allowed'}),
+            content_type='application/json',
+            **self.authorization(self.recipient),
+        )
+        self.assertEqual(sent.status_code, 200, sent.content)
+        events = [json.loads(value)['event'] for value in Message.objects.filter(
+            chat=self.chat,
+            type=MessageTypeChoice.SYSTEM,
+        ).order_by('id').values_list('content', flat=True)]
+        self.assertEqual(events, ['group_member_muted', 'group_member_unmuted'])
+
+    def test_expired_group_mute_allows_sending_and_member_cannot_mute(self):
+        member = ChatMember.objects.get(chat=self.chat, user=self.recipient)
+        member.chat_muted_until = timezone.now() - timedelta(seconds=1)
+        member.save(update_fields=['chat_muted_until'])
+        sent = self.client.post(
+            f'/messages/?chat_id={self.chat.id}',
+            data=json.dumps({'type': MessageTypeChoice.TEXT, 'content': 'after expiry'}),
+            content_type='application/json',
+            **self.authorization(self.recipient),
+        )
+        self.assertEqual(sent.status_code, 200, sent.content)
+
+        forbidden = self.client.post(
+            f'/chats/group/mutes?chat_id={self.chat.id}',
+            data=json.dumps({'user_id': self.sender.id, 'duration': '2m'}),
+            content_type='application/json',
+            **self.authorization(self.recipient),
+        )
+        self.assertEqual(forbidden.json()['identifier'], 'CHAT@FORBIDDEN')
+
+    def test_operator_in_group_can_mute_regular_member(self):
+        operator = User.create(self.space, 'Operator', verified=True)
+        SpaceOperator.objects.create(space=self.space, user=operator)
+        ChatMember.objects.create(
+            chat=self.chat,
+            user=operator,
+            status=ChatMemberStatusChoice.ACTIVE,
+            joined_at=timezone.now(),
+        )
+        response = self.client.post(
+            f'/chats/group/mutes?chat_id={self.chat.id}',
+            data=json.dumps({'user_id': self.recipient.id, 'duration': 'permanent'}),
+            content_type='application/json',
+            **self.authorization(operator),
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertTrue(ChatMember.objects.get(chat=self.chat, user=self.recipient).mute_payload()['permanent'])
+
+        protected_owner = self.client.post(
+            f'/chats/group/mutes?chat_id={self.chat.id}',
+            data=json.dumps({'user_id': self.sender.id, 'duration': '10s'}),
+            content_type='application/json',
+            **self.authorization(operator),
+        )
+        self.assertEqual(protected_owner.json()['identifier'], 'CHAT@FORBIDDEN')
+
     def test_removed_member_and_remaining_members_receive_chat_state_event(self):
         UserStateEvent.objects.all().delete()
 

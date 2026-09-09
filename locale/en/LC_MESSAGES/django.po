@@ -872,3 +872,35 @@ msgstr "Owner cannot transfer the group to themselves"
 
 msgid "%(actor)s transferred group ownership to %(owner)s"
 msgstr "%(actor)s transferred group ownership to %(owner)s"
+msgid "Invalid chat mute duration"
+msgstr "Invalid chat mute duration"
+
+msgid "You are currently muted from sending chat messages"
+msgstr "You are currently muted from sending chat messages"
+
+msgid "10 seconds"
+msgstr "10 seconds"
+
+msgid "2 minutes"
+msgstr "2 minutes"
+
+msgid "10 minutes"
+msgstr "10 minutes"
+
+msgid "1 hour"
+msgstr "1 hour"
+
+msgid "6 hours"
+msgstr "6 hours"
+
+msgid "%(actor)s muted %(member)s for %(duration)s"
+msgstr "%(actor)s muted %(member)s for %(duration)s"
+
+msgid "%(actor)s lifted the group mute for %(member)s"
+msgstr "%(actor)s lifted the group mute for %(member)s"
+
+msgid "Your ability to send chat messages has been restricted %(duration)s by the space administrator."
+msgstr "Your ability to send chat messages has been restricted %(duration)s by the space administrator."
+
+msgid "Your global chat mute has been lifted. You can send messages again."
+msgstr "Your global chat mute has been lifted. You can send messages again."

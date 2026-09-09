@@ -3,6 +3,7 @@ from smartdjango import Params, Validator, ListValidator
 
 from Chat.models import Chat, ChatMember
 from User.models import User
+from utils.chat_moderation import CHAT_MUTE_DURATIONS
 
 
 class ChatParams(metaclass=Params):
@@ -48,6 +49,11 @@ class ChatMemberParams(metaclass=Params):
     user_id = Validator('user_id', final_name='user') \
         .to(int) \
         .to(User.index)
+
+    mute_duration = Validator('duration').to(str).bool(
+        lambda value: value in CHAT_MUTE_DURATIONS,
+        message=_('Invalid chat mute duration'),
+    )
 
     submission_role = Validator('role', final_name='submission_role') \
         .to(str) \

@@ -162,6 +162,46 @@ class SpaceAdminApiTests(TestCase):
 
         self.assertEqual(response.status_code, 403, response.content)
 
+    def test_admin_global_chat_mute_blocks_messages_and_sends_official_notice(self):
+        peer = User.create(self.space, 'Peer', verified=True)
+        Chat.ensure_direct_friendship(self.member, peer)
+        chat = Chat.get_or_create_direct(self.member, peer)
+        muted = self.client.post(
+            '/spaces/admin/users/chat-mute',
+            data=json.dumps({'user_id': self.member.id, 'duration': '1h'}),
+            content_type='application/json',
+            **self.authorization(),
+        )
+        self.assertEqual(muted.status_code, 200, muted.content)
+        self.assertTrue(muted.json()['body']['active'])
+
+        blocked = self.client.post(
+            f'/messages/?chat_id={chat.id}',
+            data=json.dumps({'type': MessageTypeChoice.TEXT, 'content': 'blocked'}),
+            content_type='application/json',
+            **self.user_authorization(self.member),
+        )
+        self.assertEqual(blocked.json()['identifier'], 'MESSAGE@CHAT_MUTED')
+        notice = Message.objects.filter(
+            user=self.official,
+            type=MessageTypeChoice.OFFICIAL_NOTICE,
+        ).order_by('-id').first()
+        self.assertIsNotNone(notice)
+        self.assertEqual(notice._parse_payload(notice.content)['event'], 'global_chat_muted')
+
+        unmuted = self.client.delete(
+            f'/spaces/admin/users/chat-mute?user_id={self.member.id}',
+            **self.authorization(),
+        )
+        self.assertEqual(unmuted.status_code, 200, unmuted.content)
+        allowed = self.client.post(
+            f'/messages/?chat_id={chat.id}',
+            data=json.dumps({'type': MessageTypeChoice.TEXT, 'content': 'allowed'}),
+            content_type='application/json',
+            **self.user_authorization(self.member),
+        )
+        self.assertEqual(allowed.status_code, 200, allowed.content)
+
     def test_admin_can_assign_dual_verified_operator_without_consent(self):
         self.member.phone = '+8613800000001'
         self.member.phone_verified_at = timezone.now()

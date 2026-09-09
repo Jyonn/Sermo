@@ -567,6 +567,7 @@ class Message(models.Model):
         if message_type in (MessageTypeChoice.SYSTEM, MessageTypeChoice.FORWARD_BUNDLE, MessageTypeChoice.OFFICIAL_NOTICE, MessageTypeChoice.SUBMISSION_INVITE):
             raise MessageErrors.SYSTEM_MESSAGE_FORBIDDEN
         if chat.has_active_member(user):
+            chat.require_user_message_allowed(user)
             if chat.submission:
                 chat.submission_record.require_send_allowed(user)
             if message_type == MessageTypeChoice.TEXT:
@@ -790,6 +791,7 @@ class Message(models.Model):
 
     @classmethod
     def forward_individual(cls, source, chat: Chat, user: User):
+        chat.require_user_message_allowed(user)
         if source.type in (MessageTypeChoice.SYSTEM, MessageTypeChoice.OFFICIAL_NOTICE, MessageTypeChoice.SUBMISSION_INVITE, MessageTypeChoice.MAP_ACCESS, MessageTypeChoice.FORWARD_BUNDLE):
             raise MessageErrors.FORWARD_UNSUPPORTED
         if not chat.has_active_member(user):
@@ -810,6 +812,7 @@ class Message(models.Model):
 
     @classmethod
     def forward_bundle_message(cls, bundle, chat: Chat, user: User):
+        chat.require_user_message_allowed(user)
         if not chat.has_active_member(user):
             raise MessageErrors.NOT_A_MEMBER
         message = cls.objects.create(
@@ -862,6 +865,27 @@ class Message(models.Model):
                     actor=actor,
                     owner=str(payload.get('new_owner_name') or '').strip(),
                 )
+            if event == 'group_member_muted':
+                duration = {
+                    '10s': _('10 seconds'),
+                    '2m': _('2 minutes'),
+                    '10m': _('10 minutes'),
+                    '1h': _('1 hour'),
+                    '6h': _('6 hours'),
+                    '1d': _('1 day'),
+                    '7d': _('7 days'),
+                    'permanent': _('permanently'),
+                }.get(payload.get('duration'), _('temporarily'))
+                return _('%(actor)s muted %(member)s for %(duration)s') % dict(
+                    actor=actor,
+                    member=str(payload.get('member_name') or '').strip(),
+                    duration=duration,
+                )
+            if event == 'group_member_unmuted':
+                return _('%(actor)s lifted the group mute for %(member)s') % dict(
+                    actor=actor,
+                    member=str(payload.get('member_name') or '').strip(),
+                )
             if event == 'message_pinned':
                 return _('%(actor)s locked a message') % dict(actor=actor)
             if event == 'message_unpinned':
@@ -884,6 +908,20 @@ class Message(models.Model):
                 )
             if event == 'square_unmuted':
                 return _('Your Square mute has been lifted. You can post and comment again.')
+            if event == 'global_chat_muted':
+                duration = {
+                    '10s': _('10 seconds'),
+                    '2m': _('2 minutes'),
+                    '10m': _('10 minutes'),
+                    '1h': _('1 hour'),
+                    '6h': _('6 hours'),
+                    '1d': _('1 day'),
+                    '7d': _('7 days'),
+                    'permanent': _('permanently'),
+                }.get(payload.get('duration'), _('temporarily'))
+                return _('Your ability to send chat messages has been restricted %(duration)s by the space administrator.') % dict(duration=duration)
+            if event == 'global_chat_unmuted':
+                return _('Your global chat mute has been lifted. You can send messages again.')
             if event == 'submission_revision':
                 return _('Submission “%(title)s” needs changes') % dict(
                     title=str(payload.get('submission_title') or '').strip(),

@@ -114,6 +114,7 @@ class Chat(models.Model):
             user = item.user.jsonl()
             user['joined_at'] = item.joined_at.timestamp() if item.joined_at else None
             user['submission_role'] = item.submission_role_name
+            user['group_chat_mute'] = item.mute_payload()
             payload.append(user)
         return payload
 
@@ -186,6 +187,87 @@ class Chat(models.Model):
             role=ChatMemberRoleChoice.OWNER,
             status=ChatMemberStatusChoice.ACTIVE,
         ).exists()
+
+    def send_restriction_for(self, user: User):
+        global_mute = user.chat_mute_payload()
+        if global_mute['active']:
+            return {'scope': 'global', **global_mute}
+        if self.group:
+            member = ChatMember.objects.filter(
+                chat=self,
+                user=user,
+                status=ChatMemberStatusChoice.ACTIVE,
+            ).first()
+            if member:
+                group_mute = member.mute_payload()
+                if group_mute['active']:
+                    return {'scope': 'group', **group_mute}
+        return {'scope': None, 'active': False, 'permanent': False, 'muted_until': None}
+
+    def require_user_message_allowed(self, user: User):
+        from Message.validators import MessageErrors
+
+        if self.send_restriction_for(user)['active']:
+            raise MessageErrors.CHAT_MUTED
+        return self
+
+    def mute_member(self, operator: User, target: User, duration: str):
+        from utils.chat_moderation import resolve_chat_mute
+
+        if not self.group or self.submission:
+            raise ChatErrors.NOT_GROUP_CHAT(chat=self.id)
+        if not (self.is_owner(operator) or operator.is_space_operator):
+            raise ChatErrors.FORBIDDEN
+        if target.id == operator.id or target.is_official or target.is_space_operator:
+            raise ChatErrors.FORBIDDEN
+        member = ChatMember.objects.filter(
+            chat=self,
+            user=target,
+            status=ChatMemberStatusChoice.ACTIVE,
+        ).first()
+        if member is None:
+            raise ChatMemberErrors.NOT_MEMBER(user=target.name, chat=self.id)
+        if member.role == ChatMemberRoleChoice.OWNER:
+            raise ChatErrors.FORBIDDEN
+        permanent, muted_until = resolve_chat_mute(duration)
+        with transaction.atomic():
+            member.chat_muted_permanently = permanent
+            member.chat_muted_until = muted_until
+            member.chat_muted_by = operator
+            member.save(update_fields=['chat_muted_permanently', 'chat_muted_until', 'chat_muted_by', 'updated_at'])
+            from Message.models import Message
+            Message.create_system(
+                self,
+                operator,
+                'group_member_muted',
+                member_name=target.name,
+                duration=duration,
+            )
+            self._emit_state_changed()
+        return member
+
+    def unmute_member(self, operator: User, target: User):
+        if not self.group or self.submission:
+            raise ChatErrors.NOT_GROUP_CHAT(chat=self.id)
+        if not (self.is_owner(operator) or operator.is_space_operator):
+            raise ChatErrors.FORBIDDEN
+        member = ChatMember.objects.filter(
+            chat=self,
+            user=target,
+            status=ChatMemberStatusChoice.ACTIVE,
+        ).first()
+        if member is None:
+            raise ChatMemberErrors.NOT_MEMBER(user=target.name, chat=self.id)
+        was_active = member.mute_payload()['active']
+        member.chat_muted_permanently = False
+        member.chat_muted_until = None
+        member.chat_muted_by = None
+        member.save(update_fields=['chat_muted_permanently', 'chat_muted_until', 'chat_muted_by', 'updated_at'])
+        if was_active:
+            from Message.models import Message
+            Message.create_system(self, operator, 'group_member_unmuted', member_name=target.name)
+            self._emit_state_changed()
+        return member
 
     @classmethod
     def get_user_chats(cls, user: User, purpose=ChatPurposeChoice.NORMAL, submission_role=None):
@@ -668,6 +750,15 @@ class ChatMember(models.Model):
     )
     joined_at = models.DateTimeField(null=True, blank=True)
     left_at = models.DateTimeField(null=True, blank=True)
+    chat_muted_until = models.DateTimeField(null=True, blank=True, db_index=True)
+    chat_muted_permanently = models.BooleanField(default=False, db_index=True)
+    chat_muted_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='managed_group_chat_mutes',
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -693,6 +784,11 @@ class ChatMember(models.Model):
 
     def _dictify_chat(self):
         return self.chat.jsonl()
+
+    def mute_payload(self):
+        from utils.chat_moderation import chat_mute_payload
+
+        return chat_mute_payload(self.chat_muted_permanently, self.chat_muted_until)
 
     @property
     def submission_role_name(self):

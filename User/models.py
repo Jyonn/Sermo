@@ -250,6 +250,8 @@ class User(models.Model):
 
     is_online = models.BooleanField(default=False)
     last_heartbeat = models.DateTimeField(default=timezone.now)
+    chat_muted_until = models.DateTimeField(null=True, blank=True, db_index=True)
+    chat_muted_permanently = models.BooleanField(default=False, db_index=True)
 
     email = models.EmailField(null=True, blank=True)
     email_verified_at = models.DateTimeField(null=True, blank=True)
@@ -840,6 +842,11 @@ class User(models.Model):
     def is_official(self):
         return self.role == UserRoleChoice.OFFICIAL
 
+    def chat_mute_payload(self):
+        from utils.chat_moderation import chat_mute_payload
+
+        return chat_mute_payload(self.chat_muted_permanently, self.chat_muted_until)
+
     @property
     def is_space_operator(self):
         if self.is_official:
@@ -1280,6 +1287,7 @@ class User(models.Model):
         data = self.jsonl()
         data['is_deleted'] = bool(self.is_deleted)
         data['has_removal_residue'] = self.has_removal_residue() if self.is_deleted else False
+        data['chat_mute'] = self.chat_mute_payload()
         return data
 
     def json_me(self):
@@ -1331,6 +1339,7 @@ class User(models.Model):
             interval_days=self.nickname_change_interval_days(),
             available_at=available_at.timestamp() if available_at else None,
         )
+        payload['chat_mute'] = self.chat_mute_payload()
         return payload
 
 

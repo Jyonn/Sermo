@@ -38,6 +38,7 @@ class ChatListView(View):
         data['statement_reminder_enabled'] = bool(preference and preference.statement_reminder_enabled)
         data['notifications_muted'] = bool(preference and preference.notifications_muted)
         data['unread_badge_muted'] = bool(preference and preference.unread_badge_muted)
+        data['send_restriction'] = chat.send_restriction_for(user)
         return data
 
     @auth.require_user
@@ -302,6 +303,25 @@ class GroupChatOwnerView(View):
     def post(self, request):
         chat: Chat = request.query.chat
         chat.transfer_ownership(request.user, request.json.user)
+        return chat.json()
+
+
+class GroupChatMuteView(View):
+    @auth.require_user
+    @analyse.query(ChatMemberParams.chat_id)
+    @analyse.json(ChatMemberParams.user_id, ChatMemberParams.mute_duration)
+    @auth.require_chat_member()
+    def post(self, request):
+        chat: Chat = request.query.chat
+        chat.mute_member(request.user, request.json.user, request.json.duration)
+        return chat.json()
+
+    @auth.require_user
+    @analyse.query(ChatMemberParams.chat_id, ChatMemberParams.user_id)
+    @auth.require_chat_member()
+    def delete(self, request):
+        chat: Chat = request.query.chat
+        chat.unmute_member(request.user, request.query.user)
         return chat.json()
 
 
