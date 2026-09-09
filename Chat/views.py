@@ -163,7 +163,7 @@ class SubmissionStartView(View):
 class SubmissionSubmitView(View):
     @auth.require_user
     @analyse.query(ChatParams.chat_id)
-    @auth.require_chat_member()
+    @auth.require_submission_participant()
     def post(self, request):
         chat = request.query.chat
         if not chat.submission:
@@ -178,7 +178,7 @@ class SubmissionStatusView(View):
     @auth.require_user
     @analyse.query(ChatParams.chat_id)
     @analyse.json(ChatParams.submission_action)
-    @auth.require_chat_member()
+    @auth.require_submission_participant()
     def post(self, request):
         chat = request.query.chat
         if not chat.submission:
@@ -192,7 +192,7 @@ class SubmissionStatusView(View):
 class SubmissionWithdrawView(View):
     @auth.require_user
     @analyse.query(ChatParams.chat_id)
-    @auth.require_chat_member()
+    @auth.require_submission_participant()
     def post(self, request):
         chat = request.query.chat
         if not chat.submission:

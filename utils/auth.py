@@ -228,6 +228,23 @@ def _is_chat_member(request):
     return chat.has_active_member(request.user)
 
 
+def _is_submission_participant(request):
+    chat: Chat = request.query.chat
+    if not chat.submission:
+        return False
+    from Chat.models import ChatMember, ChatMemberStatusChoice, Submission, SubmissionMemberRoleChoice
+
+    if ChatMember.objects.filter(
+        chat=chat,
+        user=request.user,
+        status=ChatMemberStatusChoice.ACTIVE,
+        submission_role__in=(SubmissionMemberRoleChoice.AUTHOR, SubmissionMemberRoleChoice.REVIEWER),
+    ).exists():
+        return True
+    legacy_roles = Submission.objects.filter(chat=chat).values_list('author_id', 'recipient_id').first()
+    return bool(legacy_roles and request.user.id in legacy_roles)
+
+
 def _is_message_owner(request):
     return request.user.id == request.data.message.user_id
 
@@ -241,6 +258,10 @@ def require_chat_owner():
 
 def require_chat_member():
     return analyse.request(_is_chat_member, message=_("You are not a member of this chat"))
+
+
+def require_submission_participant():
+    return analyse.request(_is_submission_participant, message=_("You are not allowed to operate this chat"))
 
 
 def require_message_owner():

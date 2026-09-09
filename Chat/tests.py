@@ -68,6 +68,55 @@ class SubmissionChatTests(TestCase):
         self.assertIn(chat.id, [item['chat_id'] for item in reviewer_rows])
         self.assertEqual(reviewer_rows[0]['submission']['status'], 'review')
 
+    def test_operator_can_review_submission_authored_by_space_official(self):
+        chat, _ = Chat.create_submission(
+            self.official,
+            self.operator,
+            'Official submission',
+            'official-submission',
+        )
+        Message.create(chat, self.official, MessageTypeChoice.TEXT, 'Official draft')
+        chat.submission_record.submit(self.official)
+
+        response = self.client.post(
+            f'/chats/submissions/status?chat_id={chat.id}',
+            data=json.dumps({'action': 'ready'}),
+            content_type='application/json',
+            **self.authorization(self.operator),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        chat.submission_record.refresh_from_db()
+        self.assertEqual(chat.submission_record.status, SubmissionStatusChoice.READY)
+
+    def test_legacy_submission_recipient_can_review_without_active_member_row(self):
+        chat, _ = Chat.create_submission(self.official, self.operator, 'Legacy submission', 'legacy-submission')
+        Message.create(chat, self.official, MessageTypeChoice.TEXT, 'Legacy draft')
+        chat.submission_record.submit(self.official)
+        ChatMember.objects.filter(chat=chat, user=self.operator).delete()
+        outsider = User.create(self.space, 'Outsider', verified=True)
+
+        forbidden = self.client.post(
+            f'/chats/submissions/status?chat_id={chat.id}',
+            data=json.dumps({'action': 'ready'}),
+            content_type='application/json',
+            **self.authorization(outsider),
+        )
+        self.assertIsNone(forbidden.json()['body'])
+        chat.submission_record.refresh_from_db()
+        self.assertEqual(chat.submission_record.status, SubmissionStatusChoice.REVIEW)
+
+        response = self.client.post(
+            f'/chats/submissions/status?chat_id={chat.id}',
+            data=json.dumps({'action': 'ready'}),
+            content_type='application/json',
+            **self.authorization(self.operator),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        chat.submission_record.refresh_from_db()
+        self.assertEqual(chat.submission_record.status, SubmissionStatusChoice.READY)
+
     def test_submission_start_is_idempotent(self):
         payload = {
             'peer_user_id': self.operator.id,

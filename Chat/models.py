@@ -1188,7 +1188,10 @@ class Submission(models.Model):
             self.current_round += 1
             self.status = next_status
             self.save(update_fields=['status', 'current_round'])
+            official = self.chat.space.ensure_official_user()
             for author in self.member_users(SubmissionMemberRoleChoice.AUTHOR):
+                if author.id == official.id:
+                    continue
                 Message.create_official_notice(
                     author,
                     user,
