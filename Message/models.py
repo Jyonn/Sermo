@@ -23,7 +23,7 @@ from django.utils.translation import gettext as _, override
 
 from smartdjango import models, Choice
 
-from Chat.models import Chat, ChatMember, ChatMemberStatusChoice, SubmissionStatusChoice
+from Chat.models import Chat, ChatMember, ChatMemberStatusChoice, ChatPurposeChoice, SubmissionMemberRoleChoice, SubmissionStatusChoice
 from Message.validators import MessageErrors, MessageValidator
 from User.models import User, UserEmojiUsage
 from User.validators import UserErrors
@@ -81,6 +81,7 @@ class MessageEventTypeChoice(Choice):
     HIDDEN = 1
     RECALLED = 2
     RESTORED = 3
+    RELEASED = 4
 
 
 class LinkPreviewStatusChoice(Choice):
@@ -499,6 +500,8 @@ class Message(models.Model):
         related_name='replies',
     )
     client_message_id = models.CharField(max_length=64, null=True, blank=True)
+    submission_round = models.PositiveIntegerField(null=True, blank=True, db_index=True)
+    submission_visible_at = models.DateTimeField(null=True, blank=True, db_index=True)
 
     type = models.IntegerField(choices=MessageTypeChoice.to_choices())
     content = models.CharField(max_length=vldt.MAX_CONTENT_LENGTH, blank=True, default='')
@@ -545,9 +548,21 @@ class Message(models.Model):
             submission = chat.submission_record
             if submission.status == SubmissionStatusChoice.DRAFT and submission.role_for(user) != 'author':
                 return queryset.none()
+            role_value = {
+                'author': SubmissionMemberRoleChoice.AUTHOR,
+                'reviewer': SubmissionMemberRoleChoice.REVIEWER,
+            }.get(submission.role_for(user))
+            visible = Q(submission_round__isnull=True) | Q(submission_visible_at__isnull=False)
+            if role_value is not None:
+                side_user_ids = ChatMember.objects.filter(
+                    chat=chat,
+                    status=ChatMemberStatusChoice.ACTIVE,
+                    submission_role=role_value,
+                ).values_list('user_id', flat=True)
+                visible |= Q(submission_round=submission.current_round, user_id__in=side_user_ids)
+            queryset = queryset.filter(visible)
         if not chat.group:
             return queryset
-        from Chat.models import ChatMember, ChatMemberStatusChoice
         membership = ChatMember.objects.filter(
             chat=chat,
             user=user,
@@ -661,6 +676,7 @@ class Message(models.Model):
                         media_resource=media_resource,
                         reply_to=reply_to,
                         client_message_id=normalized_client_id,
+                        submission_round=chat.submission_record.current_round if chat.submission else None,
                     )
             except IntegrityError:
                 if normalized_client_id is None:
@@ -924,6 +940,10 @@ class Message(models.Model):
                 return _('Your global chat mute has been lifted. You can send messages again.')
             if event == 'submission_revision':
                 return _('Submission “%(title)s” needs changes') % dict(
+                    title=str(payload.get('submission_title') or '').strip(),
+                )
+            if event == 'submission_submitted':
+                return _('Submission “%(title)s” is ready for review') % dict(
                     title=str(payload.get('submission_title') or '').strip(),
                 )
             if event == 'submission_terminate':
@@ -1424,6 +1444,8 @@ class Message(models.Model):
             reply_to=self._reply_to_payload(request=request),
             mentions=[mention.user.tiny_json() for mention in self.chat_mentions.all()],
             created_at=self.created_at.timestamp(),
+            submission_round=self.submission_round,
+            submission_visible=bool(self.submission_visible_at or self.submission_round is None),
         )
         if include_deleted:
             payload['is_deleted'] = self.is_deleted
@@ -1758,8 +1780,14 @@ class MessageEvent(models.Model):
         return cls.objects.create(message=message, chat=message.chat, actor=message.user, type=MessageEventTypeChoice.RECALLED)
 
     @classmethod
+    def record_released(cls, message):
+        return cls.objects.create(message=message, chat=message.chat, actor=message.user, type=MessageEventTypeChoice.RELEASED)
+
+    @classmethod
     def visible_for_user(cls, user: User):
         chat_ids = [chat.id for chat in Chat.get_user_chats(user)]
+        chat_ids.extend(chat.id for chat in Chat.get_user_chats(user, purpose=ChatPurposeChoice.SUBMISSION, submission_role='author'))
+        chat_ids.extend(chat.id for chat in Chat.get_user_chats(user, purpose=ChatPurposeChoice.SUBMISSION, submission_role='reviewer'))
         return cls.objects.filter(Q(target_user=user) | Q(target_user__isnull=True, chat_id__in=chat_ids))
 
     @classmethod
@@ -1786,11 +1814,12 @@ class MessageEvent(models.Model):
             MessageEventTypeChoice.HIDDEN: 'message.hidden',
             MessageEventTypeChoice.RECALLED: 'message.recalled',
             MessageEventTypeChoice.RESTORED: 'message.restored',
+            MessageEventTypeChoice.RELEASED: 'message.created',
         }
         visible_created_message_ids = set()
         created_rows_by_chat = {}
         for row in rows:
-            if row.type in (MessageEventTypeChoice.CREATED, MessageEventTypeChoice.RESTORED):
+            if row.type in (MessageEventTypeChoice.CREATED, MessageEventTypeChoice.RESTORED, MessageEventTypeChoice.RELEASED):
                 created_rows_by_chat.setdefault(row.chat_id, []).append(row.message_id)
         for chat_id, message_ids in created_rows_by_chat.items():
             chat = next(row.chat for row in rows if row.chat_id == chat_id)
@@ -1800,7 +1829,7 @@ class MessageEvent(models.Model):
 
         for row in rows:
             event = dict(event_id=row.id, type=names[row.type], chat_id=row.chat_id, message_id=row.message_id)
-            if row.type in (MessageEventTypeChoice.CREATED, MessageEventTypeChoice.RESTORED) and not row.message.is_deleted:
+            if row.type in (MessageEventTypeChoice.CREATED, MessageEventTypeChoice.RESTORED, MessageEventTypeChoice.RELEASED) and not row.message.is_deleted:
                 if row.message_id in visible_created_message_ids and not MessageUserState.objects.filter(message=row.message, user=user).exists():
                     event['message'] = row.message.jsonl(request=request)
                     event['message']['mentioned_me'] = row.message.chat_mentions.filter(user=user).exists()

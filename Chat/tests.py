@@ -7,7 +7,7 @@ from django.test import TestCase
 from django.utils import timezone
 
 from Chat.models import Chat, ChatMember, ChatMemberRoleChoice, ChatMemberStatusChoice, ChatPurposeChoice, ChatReadState, ChatTypeChoice, ChatUserPreference, SubmissionInvite, SubmissionInviteStatusChoice, SubmissionMemberRoleChoice, SubmissionStatusChoice
-from Message.models import Message, MessageTypeChoice, PinnedMessage
+from Message.models import Message, MessageEvent, MessageTypeChoice, PinnedMessage
 from Space.models import Space, SpaceOperator
 from User.models import NotificationEvent, User, UserStateEvent, UserStateEventKindChoice
 from utils import auth
@@ -86,6 +86,41 @@ class SubmissionChatTests(TestCase):
         self.assertEqual(Chat.objects.filter(purpose=ChatPurposeChoice.SUBMISSION).count(), 1)
         self.assertEqual(Message.objects.filter(chat_id=first.json()['body']['chat']['chat_id']).count(), 1)
 
+    def test_submission_rounds_hide_current_work_and_release_it_on_transition(self):
+        chat, _ = Chat.create_submission(self.author, self.operator, 'Round trip', 'round-trip')
+        submission = chat.submission_record
+        ChatReadState.mark_read(chat, self.operator)
+
+        draft = Message.create(chat, self.author, MessageTypeChoice.TEXT, 'draft round')
+        self.assertIn(draft.id, Message.visible_for_user(chat, self.author).values_list('id', flat=True))
+        self.assertNotIn(draft.id, Message.visible_for_user(chat, self.operator).values_list('id', flat=True))
+        self.assertEqual(ChatReadState.unread_count(chat, self.operator), 0)
+        baseline = MessageEvent.sync_baseline_for_user(self.operator)['next_after']
+
+        submission.submit(self.author)
+        submission.refresh_from_db()
+        draft.refresh_from_db()
+        self.assertEqual(submission.current_round, 2)
+        self.assertIsNotNone(draft.submission_visible_at)
+        self.assertIn(draft.id, Message.visible_for_user(chat, self.operator).values_list('id', flat=True))
+        self.assertEqual(ChatReadState.unread_count(chat, self.operator), 1)
+        sync = MessageEvent.sync_for_user(self.operator, baseline, 20)
+        self.assertTrue(any(event.get('message', {}).get('message_id') == draft.id for event in sync['events']), sync)
+
+        review = Message.create(chat, self.operator, MessageTypeChoice.TEXT, 'review round')
+        self.assertNotIn(review.id, Message.visible_for_user(chat, self.author).values_list('id', flat=True))
+        self.assertEqual(ChatReadState.unread_count(chat, self.author), 0)
+        self.assertIn(draft.id, Message.visible_for_user(chat, self.author).values_list('id', flat=True))
+        submission.review(self.operator, 'revision')
+        submission.refresh_from_db()
+        self.assertEqual(submission.current_round, 3)
+        self.assertIn(review.id, Message.visible_for_user(chat, self.author).values_list('id', flat=True))
+
+        revision = Message.create(chat, self.author, MessageTypeChoice.TEXT, 'revision round')
+        self.assertNotIn(revision.id, Message.visible_for_user(chat, self.operator).values_list('id', flat=True))
+        self.assertIn(draft.id, Message.visible_for_user(chat, self.operator).values_list('id', flat=True))
+        self.assertIn(review.id, Message.visible_for_user(chat, self.operator).values_list('id', flat=True))
+
     def test_submission_invite_uses_private_card_and_consent_reveals_full_history(self):
         chat, _ = Chat.create_submission(self.author, self.operator, 'Invite review', 'invite-draft')
         old_message = Message.create(chat, self.author, MessageTypeChoice.TEXT, 'Earlier context')
@@ -137,42 +172,37 @@ class SubmissionChatTests(TestCase):
         with self.assertRaises(Exception):
             chat.leave(invited)
 
-    def test_submission_supports_multiple_mutually_exclusive_authors_and_reviewers(self):
+    def test_only_originator_can_invite_additional_authors(self):
         chat, _ = Chat.create_submission(self.author, self.operator, 'Collaborative', 'collaborative-draft')
         coauthor = User.create(self.space, 'Coauthor', verified=True)
         second_reviewer = User.create(self.space, 'Second reviewer', verified=True)
         SpaceOperator.objects.create(space=self.space, user=second_reviewer)
-        invalid_reviewer = User.create(self.space, 'Not an operator', verified=True)
 
         Chat.ensure_direct_friendship(self.author, coauthor)
         author_invite, _card = chat.invite_submission_member(self.author, coauthor, SubmissionMemberRoleChoice.AUTHOR)
-        reviewer_invite, _card = chat.invite_submission_member(self.operator, second_reviewer, SubmissionMemberRoleChoice.REVIEWER)
         with self.assertRaises(Exception):
-            chat.invite_submission_member(self.operator, invalid_reviewer, SubmissionMemberRoleChoice.REVIEWER)
+            chat.invite_submission_member(self.operator, second_reviewer, SubmissionMemberRoleChoice.REVIEWER)
+        with self.assertRaises(Exception):
+            chat.invite_submission_member(self.operator, coauthor, SubmissionMemberRoleChoice.AUTHOR)
         with self.assertRaises(Exception):
             chat.invite_submission_member(self.author, second_reviewer, SubmissionMemberRoleChoice.REVIEWER)
 
         author_invite.accept(coauthor)
-        reviewer_invite.accept(second_reviewer)
         author_invite.refresh_from_db()
-        reviewer_invite.refresh_from_db()
         self.assertEqual(author_invite.role, SubmissionMemberRoleChoice.AUTHOR)
-        self.assertEqual(reviewer_invite.role, SubmissionMemberRoleChoice.REVIEWER)
 
         Message.create(chat, coauthor, MessageTypeChoice.TEXT, 'Shared draft')
         with self.assertRaises(Exception):
             chat.submission_record.submit(coauthor)
         chat.submission_record.submit(self.author)
-        Message.create(chat, second_reviewer, MessageTypeChoice.TEXT, 'Reviewed together')
-        chat.submission_record.review(second_reviewer, 'revision')
+        Message.create(chat, self.operator, MessageTypeChoice.TEXT, 'Reviewed together')
+        chat.submission_record.review(self.operator, 'revision')
 
         payload = chat.submission_record.jsonl()
         self.assertEqual({user['user_id'] for user in payload['authors']}, {self.author.id, coauthor.id})
-        self.assertEqual({user['user_id'] for user in payload['reviewers']}, {self.operator.id, second_reviewer.id})
+        self.assertEqual({user['user_id'] for user in payload['reviewers']}, {self.operator.id})
         author_rows = Chat.get_user_chats(coauthor, purpose=ChatPurposeChoice.SUBMISSION, submission_role='author')
-        reviewer_rows = Chat.get_user_chats(second_reviewer, purpose=ChatPurposeChoice.SUBMISSION, submission_role='reviewer')
         self.assertIn(chat, author_rows)
-        self.assertIn(chat, reviewer_rows)
 
     def test_invited_author_can_send_but_cannot_manage_submission(self):
         chat, _ = Chat.create_submission(self.author, self.operator, 'Limited coauthor', 'limited-coauthor-draft')
@@ -194,24 +224,17 @@ class SubmissionChatTests(TestCase):
         with self.assertRaises(Exception):
             chat.invite_submission_member(coauthor, next_author, SubmissionMemberRoleChoice.AUTHOR)
 
-    def test_operator_can_receive_both_roles_but_accept_only_one(self):
+    def test_operator_can_be_invited_as_author_but_cannot_invite_members(self):
         chat, _ = Chat.create_submission(self.author, self.operator, 'Choose one role', 'dual-role-draft')
         invited = User.create(self.space, 'Dual role operator', verified=True)
         SpaceOperator.objects.create(space=self.space, user=invited)
 
-        Chat.ensure_direct_friendship(self.operator, invited)
-        author_invite, _ = chat.invite_submission_member(self.operator, invited, SubmissionMemberRoleChoice.AUTHOR)
-        reviewer_invite, _ = chat.invite_submission_member(self.operator, invited, SubmissionMemberRoleChoice.REVIEWER)
-        self.assertEqual(SubmissionInvite.objects.filter(chat=chat, invitee=invited).count(), 2)
-
+        Chat.ensure_direct_friendship(self.author, invited)
+        author_invite, _ = chat.invite_submission_member(self.author, invited, SubmissionMemberRoleChoice.AUTHOR)
         author_invite.accept(invited)
-        conflict = self.client.post(
-            f'/chats/submissions/invite?invite_id={reviewer_invite.id}',
-            **self.authorization(invited),
-        )
-        self.assertEqual(conflict.json()['identifier'], 'CHAT@SUBMISSION_ROLE_CONFLICT')
         self.assertEqual(ChatMember.objects.get(chat=chat, user=invited).submission_role, SubmissionMemberRoleChoice.AUTHOR)
-        self.assertEqual(reviewer_invite.effective_status, 'conflict')
+        with self.assertRaises(Exception):
+            chat.invite_submission_member(invited, self.author, SubmissionMemberRoleChoice.AUTHOR)
 
     def test_submission_invite_expires_after_seven_days(self):
         chat, _ = Chat.create_submission(self.author, self.operator, 'Expiring invite', 'expiring-invite-draft')
@@ -236,12 +259,23 @@ class SubmissionChatTests(TestCase):
             **self.authorization(self.author),
         )
         self.assertEqual(delete.status_code, 200, delete.content)
-        Message.create(chat, self.author, MessageTypeChoice.TEXT, 'Final draft')
+        final_draft = Message.create(chat, self.author, MessageTypeChoice.TEXT, 'Final draft')
         submission = chat.submission_record
         submission.submit(self.author)
         self.assertEqual(submission.status, SubmissionStatusChoice.REVIEW)
+        historical_recall = self.client.delete(
+            f'/messages/?message_id={final_draft.id}&scope=everyone',
+            **self.authorization(self.author),
+        )
+        self.assertEqual(historical_recall.json()['identifier'], 'MESSAGE@RECALL_WINDOW_EXPIRED')
         with self.assertRaises(Exception):
             Message.create(chat, self.author, MessageTypeChoice.TEXT, 'Locked author message')
+        reviewer_draft = Message.create(chat, self.operator, MessageTypeChoice.TEXT, 'Reviewer draft')
+        reviewer_recall = self.client.delete(
+            f'/messages/?message_id={reviewer_draft.id}&scope=everyone',
+            **self.authorization(self.operator),
+        )
+        self.assertEqual(reviewer_recall.status_code, 200, reviewer_recall.content)
         Message.create(chat, self.operator, MessageTypeChoice.TEXT, 'Please revise')
         revision = self.client.post(
             f'/chats/submissions/status?chat_id={chat.id}',

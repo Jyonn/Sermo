@@ -2,6 +2,7 @@ from datetime import timedelta
 from typing import List
 
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 from django.utils.translation import gettext as _
 from smartdjango import models, Choice
@@ -581,9 +582,7 @@ class Chat(models.Model):
             raise ChatErrors.FORBIDDEN
         submission = self.submission_record
         inviter_role = submission.role_for(inviter)
-        if inviter_role not in ('author', 'reviewer'):
-            raise ChatErrors.SUBMISSION_INVITE_FORBIDDEN
-        if inviter_role == 'author' and inviter.id != submission.author_id:
+        if inviter_role != 'author' or inviter.id != submission.author_id:
             raise ChatErrors.SUBMISSION_INVITE_FORBIDDEN
         if user.space_id != self.space_id:
             raise ChatErrors.UNALIGNED_SPACE
@@ -591,7 +590,7 @@ class Chat(models.Model):
             raise ChatErrors.USER_DELETED(user=user.name)
         if submission_role not in (SubmissionMemberRoleChoice.AUTHOR, SubmissionMemberRoleChoice.REVIEWER):
             raise ChatErrors.SUBMISSION_ROLE_INVALID
-        if inviter_role == 'author' and submission_role != SubmissionMemberRoleChoice.AUTHOR:
+        if submission_role != SubmissionMemberRoleChoice.AUTHOR:
             raise ChatErrors.SUBMISSION_INVITE_FORBIDDEN
         if submission_role == SubmissionMemberRoleChoice.AUTHOR:
             self._require_friend_of(inviter, user)
@@ -1041,6 +1040,7 @@ class Submission(models.Model):
     recipient = models.ForeignKey(User, on_delete=models.PROTECT, related_name='received_submissions')
     client_draft_id = models.CharField(max_length=64, unique=True)
     status = models.IntegerField(choices=SubmissionStatusChoice.to_choices(), default=SubmissionStatusChoice.DRAFT, db_index=True)
+    current_round = models.PositiveIntegerField(default=1)
     submitted_at = models.DateTimeField(null=True, blank=True)
     published_statement = models.ForeignKey('Square.Statement', on_delete=models.SET_NULL, null=True, blank=True, related_name='source_submissions')
     created_at = models.DateTimeField(auto_now_add=True)
@@ -1055,7 +1055,7 @@ class Submission(models.Model):
         SubmissionStatusChoice.WITHDRAWN: 'withdrawn',
     }
 
-    def jsonl(self):
+    def jsonl(self, viewer=None):
         authors = []
         reviewers = []
         members = ChatMember.objects.filter(
@@ -1077,6 +1077,8 @@ class Submission(models.Model):
             status=self.STATUS_NAMES[self.status],
             submitted_at=self.submitted_at.timestamp() if self.submitted_at else None,
             published_statement_id=self.published_statement_id,
+            current_round=self.current_round,
+            action_required=self.action_required_for(viewer) if viewer else False,
         )
 
     def member_users(self, submission_role: int):
@@ -1115,6 +1117,31 @@ class Submission(models.Model):
             role == 'reviewer' and self.status == SubmissionStatusChoice.REVIEW
         )
 
+    def action_required_for(self, user: User):
+        role = self.role_for(user)
+        return bool(
+            (role == 'author' and self.status == SubmissionStatusChoice.REVISION)
+            or (role == 'reviewer' and self.status == SubmissionStatusChoice.REVIEW)
+        )
+
+    def release_current_round(self):
+        from Message.models import Message, MessageEvent
+
+        messages = list(Message.objects.filter(
+            chat=self.chat,
+            submission_round=self.current_round,
+            submission_visible_at__isnull=True,
+            is_deleted=False,
+        ))
+        if not messages:
+            return []
+        released_at = timezone.now()
+        Message.objects.filter(id__in=[message.id for message in messages]).update(submission_visible_at=released_at)
+        for message in messages:
+            message.submission_visible_at = released_at
+            MessageEvent.record_released(message)
+        return messages
+
     def require_send_allowed(self, user: User):
         if not self.can_send(user):
             raise ChatErrors.SUBMISSION_SEND_FORBIDDEN
@@ -1125,10 +1152,24 @@ class Submission(models.Model):
         from Message.models import Message, MessageTypeChoice
         if not Message.objects.filter(chat=self.chat, is_deleted=False).exclude(type=MessageTypeChoice.SYSTEM).exists():
             raise ChatErrors.SUBMISSION_EMPTY
-        self.status = SubmissionStatusChoice.REVIEW
-        self.submitted_at = timezone.now()
-        self.save(update_fields=['status', 'submitted_at'])
-        self.chat._emit_state_changed()
+        with transaction.atomic():
+            self.release_current_round()
+            self.current_round += 1
+            self.status = SubmissionStatusChoice.REVIEW
+            self.submitted_at = timezone.now()
+            self.save(update_fields=['status', 'submitted_at', 'current_round'])
+            from Message.models import Message
+            official = self.chat.space.ensure_official_user()
+            for reviewer in self.member_users(SubmissionMemberRoleChoice.REVIEWER):
+                Message.create_official_notice(
+                    reviewer,
+                    official,
+                    'submission_submitted',
+                    submission_title=self.chat.title,
+                    submission_chat_id=self.chat_id,
+                    submitted_by=user.name,
+                )
+            self.chat._emit_state_changed()
         return self
 
     def review(self, user: User, action: str):
@@ -1143,8 +1184,10 @@ class Submission(models.Model):
             raise ChatErrors.SUBMISSION_TRANSITION_FORBIDDEN
         from Message.models import Message
         with transaction.atomic():
+            self.release_current_round()
+            self.current_round += 1
             self.status = next_status
-            self.save(update_fields=['status'])
+            self.save(update_fields=['status', 'current_round'])
             for author in self.member_users(SubmissionMemberRoleChoice.AUTHOR):
                 Message.create_official_notice(
                     author,
@@ -1200,6 +1243,11 @@ class ChatReadState(models.Model):
         ).exclude(type=MessageTypeChoice.SYSTEM)
         if last_read_at is None:
             return unread_messages.count()
+        if chat.submission:
+            return unread_messages.filter(
+                Q(submission_visible_at__gt=last_read_at)
+                | Q(submission_visible_at__isnull=True, created_at__gt=last_read_at)
+            ).count()
         return unread_messages.filter(created_at__gt=last_read_at).count()
 
     @classmethod

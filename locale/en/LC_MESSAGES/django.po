@@ -904,3 +904,7 @@ msgstr "Your ability to send chat messages has been restricted %(duration)s by t
 
 msgid "Your global chat mute has been lifted. You can send messages again."
 msgstr "Your global chat mute has been lifted. You can send messages again."
+
+#, python-format
+msgid "Submission “%(title)s” is ready for review"
+msgstr "Submission “%(title)s” is ready for review"

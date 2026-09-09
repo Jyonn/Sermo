@@ -19,7 +19,7 @@ class ChatListView(View):
     def build_chat_payload(chat, user, request):
         data = chat.jsonl()
         if chat.submission:
-            data['submission'] = chat.submission_record.jsonl()
+            data['submission'] = chat.submission_record.jsonl(user)
             data['submission_role'] = chat.submission_record.role_for(user)
         last_message = Message.latest_preview_for_user(chat, user)
         if last_message is not None:

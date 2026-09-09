@@ -68,10 +68,7 @@ class MessageView(View):
                 client_message_id=request.json.client_message_id,
                 mention_user_ids=request.json.mention_user_ids,
                 media_resource=media_resource)
-            if getattr(message, '_was_created', True) and not (
-                message.chat.submission
-                and message.chat.submission_record.status == SubmissionStatusChoice.DRAFT
-            ):
+            if getattr(message, '_was_created', True) and not message.chat.submission:
                 NotificationEvent.emit_message_notifications(message, actor=request.user)
         return message.jsonl(request=request)
 
@@ -89,8 +86,9 @@ class MessageView(View):
             submission = message.chat.submission_record
             if (
                 request.query.delete_scope != 'everyone'
-                or submission.role_for(request.user) != 'author'
-                or submission.status != SubmissionStatusChoice.DRAFT
+                or not submission.can_send(request.user)
+                or message.submission_round != submission.current_round
+                or message.submission_visible_at is not None
             ):
                 raise MessageErrors.RECALL_WINDOW_EXPIRED
             if message.user_id != request.user.id:

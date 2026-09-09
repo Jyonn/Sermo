@@ -1015,3 +1015,7 @@ msgstr "空间管理员已将你全局聊天禁言 %(duration)s。"
 
 msgid "Your global chat mute has been lifted. You can send messages again."
 msgstr "空间管理员已解除你的全局聊天禁言，现在可以重新发送消息。"
+
+#, python-format
+msgid "Submission “%(title)s” is ready for review"
+msgstr "投稿“%(title)s”已提交，等待审批"
