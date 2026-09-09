@@ -4,7 +4,7 @@ import re
 from zoneinfo import ZoneInfo
 
 from django.db import transaction
-from django.db.models import Count, Exists, OuterRef, Prefetch, Q
+from django.db.models import Count, Exists, Max, Min, OuterRef, Prefetch, Q
 from django.utils import timezone
 from django.urls import reverse
 from smartdjango import Choice, models
@@ -276,12 +276,36 @@ class Statement(models.Model):
         return start, start + datetime.timedelta(days=1)
 
     @classmethod
-    def feed(cls, user, before=None, limit=20, request=None, scope='all', user_id=None, feed_date=None):
+    def _local_date_filter_bounds(cls, value):
+        if not value:
+            return None, None
+        if len(value) == 4:
+            year = int(value)
+            start = datetime.date(year, 1, 1)
+            end = datetime.date(year + 1, 1, 1)
+        elif len(value) == 7:
+            year, month = (int(part) for part in value.split('-'))
+            start = datetime.date(year, month, 1)
+            end = datetime.date(year + 1, 1, 1) if month == 12 else datetime.date(year, month + 1, 1)
+        else:
+            start = datetime.date.fromisoformat(value)
+            end = start + datetime.timedelta(days=1)
+        base_tz = ZoneInfo('Asia/Shanghai')
+        return (
+            datetime.datetime.combine(start, datetime.time.min, tzinfo=base_tz),
+            datetime.datetime.combine(end, datetime.time.min, tzinfo=base_tz),
+        )
+
+    @classmethod
+    def feed(cls, user, before=None, limit=20, request=None, scope='all', user_id=None, feed_date=None, keyword=None):
         queryset = cls.visible_for(user)
         queryset = cls._apply_feed_scope(queryset, user, scope=scope, user_id=user_id)
         if feed_date is not None:
-            day_start, day_end = cls._local_day_bounds(feed_date)
-            queryset = queryset.filter(created_at__gte=day_start, created_at__lt=day_end)
+            period_start, period_end = cls._local_date_filter_bounds(feed_date)
+            queryset = queryset.filter(created_at__gte=period_start, created_at__lt=period_end)
+        normalized_keyword = (keyword or '').strip()
+        if normalized_keyword:
+            queryset = queryset.filter(text__icontains=normalized_keyword)
         queryset = queryset.select_related('user', 'user__qq_identity', 'forward_bundle').prefetch_related(
             statement_media_prefetch(), statement_forward_bundle_prefetch(),
             'qzone_source__emoticons__media_asset',
@@ -297,14 +321,13 @@ class Statement(models.Model):
     def calendar_days(cls, user, year, month, scope='all', user_id=None):
         base_tz = ZoneInfo('Asia/Shanghai')
         month_start = datetime.datetime(year, month, 1, tzinfo=base_tz)
-        if month == 12:
-            month_end = datetime.datetime(year + 1, 1, 1, tzinfo=base_tz)
-        else:
-            month_end = datetime.datetime(year, month + 1, 1, tzinfo=base_tz)
         queryset = cls._apply_feed_scope(cls.visible_for(user), user, scope=scope, user_id=user_id)
+        bounds = queryset.aggregate(earliest=Min('created_at'), latest=Max('created_at'))
+        leading_blanks = (month_start.weekday() + 1) % 7
+        calendar_end = month_start + datetime.timedelta(days=42 - leading_blanks)
         rows = queryset.filter(
             created_at__gte=month_start,
-            created_at__lt=month_end,
+            created_at__lt=calendar_end,
         ).order_by('created_at', 'id').values_list('created_at', flat=True)
         days = {}
         for created_at in rows.iterator(chunk_size=2000):
@@ -314,6 +337,10 @@ class Statement(models.Model):
             year=year,
             month=month,
             days=[dict(date=day, statement_count=count) for day, count in days.items()],
+            range=dict(
+                earliest_date=timezone.localtime(bounds['earliest'], base_tz).date().isoformat() if bounds['earliest'] else None,
+                latest_date=timezone.localtime(bounds['latest'], base_tz).date().isoformat() if bounds['latest'] else None,
+            ),
         )
 
     @classmethod

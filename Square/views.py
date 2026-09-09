@@ -51,7 +51,10 @@ class StatementLocationView(View):
 
 class StatementView(View):
     @auth.require_user
-    @analyse.query(SquareParams.before, SquareParams.limit, SquareParams.scope, SquareParams.user_id, SquareParams.feed_date)
+    @analyse.query(
+        SquareParams.before, SquareParams.limit, SquareParams.scope, SquareParams.user_id,
+        SquareParams.feed_date, SquareParams.feed_keyword,
+    )
     def get(self, request: Request):
         request.user.space.require_square_enabled(scope=request.query.scope)
         return Statement.feed(
@@ -62,6 +65,7 @@ class StatementView(View):
             scope=request.query.scope,
             user_id=request.query.user_id,
             feed_date=request.query.feed_date,
+            keyword=request.query.feed_keyword,
         )
 
     @auth.require_user

@@ -70,10 +70,23 @@ def validate_mute_reason(value):
 
 
 def validate_feed_date(value):
+    normalized = str(value or '').strip()
     try:
-        return datetime.date.fromisoformat(str(value))
+        if len(normalized) == 4:
+            datetime.date(int(normalized), 1, 1)
+        elif len(normalized) == 7:
+            datetime.date.fromisoformat(f'{normalized}-01')
+        elif len(normalized) == 10:
+            datetime.date.fromisoformat(normalized)
+        else:
+            raise ValueError
     except (TypeError, ValueError):
         raise SquareErrors.DATE_INVALID
+    return normalized
+
+
+def validate_feed_keyword(value):
+    return str(value or '').strip()[:100]
 
 
 class SquareParams(metaclass=Params):
@@ -84,6 +97,7 @@ class SquareParams(metaclass=Params):
     pin = Validator('pin').to(int).bool(lambda value: value in (0, 1)).default(0)
     before = Validator('before').to(int).null().default(None)
     feed_date = Validator('date', final_name='feed_date').to(validate_feed_date).null().default(None)
+    feed_keyword = Validator('keyword', final_name='feed_keyword').to(validate_feed_keyword).null().default(None)
     offset = Validator('offset').to(int).bool(lambda value: 0 <= value <= 5000).default(0)
     scope = Validator('scope').to(str).bool(lambda value: value in ('all', 'friends', 'mine')).default('all')
     user_id = Validator('user_id').to(int).null().default(None)

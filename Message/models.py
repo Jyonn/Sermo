@@ -15,7 +15,7 @@ from urllib.parse import urljoin, urlparse, urlunparse
 
 import requests
 from django.db import IntegrityError, close_old_connections, transaction
-from django.db.models import Q
+from django.db.models import Max, Min, Q
 from django.http import HttpRequest
 from django.urls import reverse
 from django.utils import timezone
@@ -1443,15 +1443,15 @@ class Message(models.Model):
     def calendar_days(cls, chat: Chat, user: User, year: int, month: int):
         base_tz = ZoneInfo('Asia/Shanghai')
         month_start = datetime.datetime(year, month, 1, tzinfo=base_tz)
-        if month == 12:
-            month_end = datetime.datetime(year + 1, 1, 1, tzinfo=base_tz)
-        else:
-            month_end = datetime.datetime(year, month + 1, 1, tzinfo=base_tz)
-        rows = cls.visible_for_user(chat, user).exclude(
+        queryset = cls.visible_for_user(chat, user).exclude(
             type__in=(MessageTypeChoice.STICKER, MessageTypeChoice.SYSTEM),
-        ).filter(
+        )
+        bounds = queryset.aggregate(earliest=Min('created_at'), latest=Max('created_at'))
+        leading_blanks = (month_start.weekday() + 1) % 7
+        calendar_end = month_start + datetime.timedelta(days=42 - leading_blanks)
+        rows = queryset.filter(
             created_at__gte=month_start,
-            created_at__lt=month_end,
+            created_at__lt=calendar_end,
         ).order_by('created_at', 'id').values_list('id', 'created_at')
         days = {}
         for message_id, created_at in rows.iterator():
@@ -1461,6 +1461,10 @@ class Message(models.Model):
             year=year,
             month=month,
             days=[dict(date=day, first_message_id=message_id) for day, message_id in days.items()],
+            range=dict(
+                earliest_date=timezone.localtime(bounds['earliest'], base_tz).date().isoformat() if bounds['earliest'] else None,
+                latest_date=timezone.localtime(bounds['latest'], base_tz).date().isoformat() if bounds['latest'] else None,
+            ),
         )
 
     def remove(self):

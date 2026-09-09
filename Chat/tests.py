@@ -623,6 +623,7 @@ class GroupMessageVisibilityBoundaryTests(TestCase):
 
     def test_search_calendar_returns_first_visible_message_for_shanghai_day(self):
         later = Message.create(self.chat, self.owner, MessageTypeChoice.TEXT, 'later that day')
+        next_month = Message.create(self.chat, self.owner, MessageTypeChoice.TEXT, 'next month')
         first_time = datetime(2026, 8, 12, 16, 30, tzinfo=datetime_timezone.utc)
         later_time = datetime(2026, 8, 13, 3, 0, tzinfo=datetime_timezone.utc)
         ChatMember.objects.filter(id=self.membership.id).update(
@@ -633,6 +634,9 @@ class GroupMessageVisibilityBoundaryTests(TestCase):
         )
         Message.objects.filter(id=self.new_message.id).update(created_at=first_time)
         Message.objects.filter(id=later.id).update(created_at=later_time)
+        Message.objects.filter(id=next_month.id).update(
+            created_at=datetime(2026, 8, 31, 16, 30, tzinfo=datetime_timezone.utc),
+        )
 
         response = self.client.get(
             f'/messages/search/calendar?chat_id={self.chat.id}&year=2026&month=8',
@@ -640,7 +644,12 @@ class GroupMessageVisibilityBoundaryTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 200, response.content)
-        self.assertEqual(response.json()['body']['days'], [{
-            'date': '2026-08-13',
-            'first_message_id': self.new_message.id,
-        }])
+        body = response.json()['body']
+        self.assertEqual(body['days'], [
+            {'date': '2026-08-13', 'first_message_id': self.new_message.id},
+            {'date': '2026-09-01', 'first_message_id': next_month.id},
+        ])
+        self.assertEqual(body['range'], {
+            'earliest_date': '2026-08-13',
+            'latest_date': '2026-09-01',
+        })

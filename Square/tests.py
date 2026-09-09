@@ -344,11 +344,17 @@ class StatementApiTests(TestCase):
             space=self.space, user=self.author, text='一月二日匿名',
             visibility=StatementVisibilityChoice.PUBLIC, is_anonymous=True,
         )
+        next_month = Statement.objects.create(
+            space=self.space, user=self.author, text='二月一日早', visibility=StatementVisibilityChoice.PUBLIC,
+        )
         Statement.objects.filter(id=late_day_one.id).update(
             created_at=datetime.datetime(2026, 1, 1, 15, 30, tzinfo=datetime.timezone.utc),
         )
         Statement.objects.filter(id__in=[early_day_two.id, friends_day_two.id, anonymous_day_two.id]).update(
             created_at=datetime.datetime(2026, 1, 1, 16, 30, tzinfo=datetime.timezone.utc),
+        )
+        Statement.objects.filter(id=next_month.id).update(
+            created_at=datetime.datetime(2026, 1, 31, 16, 30, tzinfo=datetime.timezone.utc),
         )
 
         calendar = self.client.get(
@@ -364,11 +370,26 @@ class StatementApiTests(TestCase):
         self.assertEqual(calendar.json()['body']['days'], [
             {'date': '2026-01-01', 'statement_count': 1},
             {'date': '2026-01-02', 'statement_count': 2},
+            {'date': '2026-02-01', 'statement_count': 1},
         ])
+        self.assertEqual(calendar.json()['body']['range'], {
+            'earliest_date': '2026-01-01',
+            'latest_date': '2026-02-01',
+        })
         self.assertEqual(feed.status_code, 200, feed.content)
         self.assertCountEqual(
             [item['statement_id'] for item in feed.json()['body']],
             [early_day_two.id, friends_day_two.id],
+        )
+
+        combined = self.client.get(
+            '/square/statements?scope=friends&date=2026-01&keyword=好友&limit=20',
+            **self.authorization(self.friend),
+        )
+        self.assertEqual(combined.status_code, 200, combined.content)
+        self.assertEqual(
+            [item['statement_id'] for item in combined.json()['body']],
+            [friends_day_two.id],
         )
 
     def test_date_feed_rejects_invalid_date(self):
