@@ -2,6 +2,7 @@ from unittest.mock import patch
 from types import SimpleNamespace
 
 from django.test import TestCase
+from django.core.management import call_command
 from django.utils import timezone
 
 from Chat.models import Chat
@@ -165,6 +166,10 @@ class StickerPaginationTests(TestCase):
                 client_message_id='sticker-usage-idempotent',
             )
 
+        usage = UserStickerUsage.objects.get(user=self.user, asset=asset)
+        self.assertEqual(usage.use_count, 1)
+        UserStickerUsage.objects.all().delete()
+        call_command('backfill_sticker_usage', verbosity=0)
         usage = UserStickerUsage.objects.get(user=self.user, asset=asset)
         self.assertEqual(usage.use_count, 1)
         response = self.client.get('/stickers/explore?offset=0&limit=30', **self.authorization())
