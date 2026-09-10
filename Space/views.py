@@ -361,7 +361,7 @@ class SpaceAdminPhoneCodeView(View):
                 code.phone,
                 code.code,
                 SpacePhoneVerificationCode.EXPIRE_SECONDS // 60,
-                'Sermo 空间管理员认证',
+                'FRIENDEN 空间管理员认证',
                 language='zh-CN',
             )
         except NotificatorAPIError as error:

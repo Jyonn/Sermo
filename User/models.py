@@ -2829,7 +2829,7 @@ class NotificationEvent(models.Model):
             return str(title), str(body)
         if kind == 'friend_statement':
             title = _('{name} posted a statement').format(name=actor_name or _('A friend'))
-            return str(title), str(_('Open Sermo to view it.'))
+            return str(title), str(_('Open FRIENDEN to view it.'))
         if kind == 'peer_online':
             title = _('Friend online')
             body = _('{name} is online now.').format(name=actor_name or _('Your friend'))
@@ -3608,7 +3608,7 @@ class NotificationDelivery(models.Model):
 
         if omitted > 0:
             lines.append(f'_{_("And {count} more messages.").format(count=omitted)}_')
-        lines.append(str(_('Return to Sermo Yanlang when you are ready to reply.')))
+        lines.append(str(_('Return to FRIENDEN when you are ready to reply.')))
         body = '\n'.join(lines).strip()
         if len(body) <= cls.EMAIL_BATCH_BODY_LIMIT:
             return body

@@ -86,10 +86,10 @@ def verification_title(kind, language=None):
     locale = notificator_locale(language)
     with translation.override(django_language(locale)):
         if kind == 'password_recovery':
-            return str(_('Sermo password recovery'))
+            return str(_('FRIENDEN password recovery'))
         if kind == 'space':
-            return str(_('Sermo space verification code'))
-        return str(_('Sermo verification code'))
+            return str(_('FRIENDEN space verification code'))
+        return str(_('FRIENDEN verification code'))
 
 
 def verification_message_text(code, time, language=None):
@@ -133,7 +133,7 @@ def send_verification_sms(target, code, time, title, language=None):
 def send_space_capacity_mail(space, count, limit):
     admin_email = Config.get_value_by_key(CI.ADMIN_EMAIL, default='')
     identity_tier = space.verification_tier == 'identity'
-    contact_note = f' 请联系 Sermo 管理员 {admin_email} 手动调整空间规模。' if identity_tier and admin_email else ''
+    contact_note = f' 请联系 FRIENDEN 管理员 {admin_email} 手动调整空间规模。' if identity_tier and admin_email else ''
     return send_reviewable_mail(
         space.email,
         format='markdown',
@@ -154,7 +154,7 @@ def send_space_identity_review_mail(space):
         title=f'空间实名认证待审：{space.name}',
         body=f'空间 `{space.slug}` 已提交 PDF 身份凭证，请登录后续管理后台审阅。\n\n凭证 Key：`{space.identity_document_key}`',
         locale='zh-CN',
-        recipient_name='Sermo 管理员',
+        recipient_name='FRIENDEN 管理员',
     )
 
 

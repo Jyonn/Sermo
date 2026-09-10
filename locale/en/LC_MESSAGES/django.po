@@ -1,7 +1,7 @@
-# English translations for Sermo backend.
+# English translations for FRIENDEN backend.
 msgid ""
 msgstr ""
-"Project-Id-Version: Sermo Backend\n"
+"Project-Id-Version: FRIENDEN Backend\n"
 "Report-Msgid-Bugs-To: \n"
 "POT-Creation-Date: 2026-07-29 00:26+0000\n"
 "PO-Revision-Date: 2026-03-16 00:25+0800\n"
@@ -407,17 +407,17 @@ msgstr "{name} ({count} messages)"
 msgid "And {count} more messages."
 msgstr "And {count} more messages."
 
-msgid "Open Sermo Yanlang to reply."
-msgstr "Open Sermo Yanlang to reply."
+msgid "Open FRIENDEN to reply."
+msgstr "Open FRIENDEN to reply."
 
-msgid "Sermo password recovery"
-msgstr "Sermo password recovery"
+msgid "FRIENDEN password recovery"
+msgstr "FRIENDEN password recovery"
 
-msgid "Sermo verification code"
-msgstr "Sermo verification code"
+msgid "FRIENDEN verification code"
+msgstr "FRIENDEN verification code"
 
-msgid "Sermo space verification code"
-msgstr "Sermo space verification code"
+msgid "FRIENDEN space verification code"
+msgstr "FRIENDEN space verification code"
 
 msgid "Space administrator"
 msgstr "Space administrator"
@@ -434,8 +434,8 @@ msgstr "{count} unread messages"
 msgid "{count} messages"
 msgstr "{count} messages"
 
-msgid "Return to Sermo Yanlang when you are ready to reply."
-msgstr "Return to Sermo Yanlang when you are ready to reply."
+msgid "Return to FRIENDEN when you are ready to reply."
+msgstr "Return to FRIENDEN when you are ready to reply."
 
 msgid "You can adjust email reminders in Notification settings."
 msgstr "You can adjust email reminders in Notification settings."

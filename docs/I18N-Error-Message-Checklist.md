@@ -1,6 +1,6 @@
 # Error Message i18n 落地清单
 
-适用范围：`Sermo Backend` 的 API 错误返回（`message` / `user_message`）。
+适用范围：`FRIENDEN Backend` 的 API 错误返回（`message` / `user_message`）。
 
 ## 1. 代码层规范
 
@@ -57,4 +57,3 @@
 1. 使用 `gettext` 而不是 `gettext_lazy`，导致文案在进程启动时固定语言。
 2. lazy 文案直接 `.format(...)`，导致提前求值或格式异常。
 3. 前端把 `message` 当业务分支键，切语言后逻辑失效。
-

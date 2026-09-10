@@ -1,4 +1,4 @@
-# Sermo 言浪 API Documentation
+# FRIENDEN 友间 API Documentation
 
 This documentation covers the API endpoints, their functionality (views), the data models, and the response format for a Django-based chat system. All API responses are returned in JSON format for consistency.
 

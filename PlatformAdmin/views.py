@@ -129,7 +129,7 @@ class EmailCodeView(View):
                 code=code,
                 expires_at=now + datetime.timedelta(minutes=10),
             )
-        send_verification_mail(email, code, 10, 'Sermo 超级管理员登录', language='zh-CN', recipient_name='Sermo 管理员')
+        send_verification_mail(email, code, 10, 'FRIENDEN 超级管理员登录', language='zh-CN', recipient_name='FRIENDEN 管理员')
         _audit(request, 'auth.code_sent', summary='平台管理员验证码已发送')
         return dict(expires_in=600, masked_email=_mask_email(email), mfa_required=False)
 
@@ -523,7 +523,7 @@ class MfaSetupView(View):
         secret = PlatformAdminSecurity.new_secret()
         Config.update_value(CI.PLATFORM_ADMIN_MFA_PENDING_SECRET, secret)
         email = _admin_email()
-        uri = f'otpauth://totp/{quote("Sermo:" + email)}?secret={secret}&issuer=Sermo&algorithm=SHA1&digits=6&period=30'
+        uri = f'otpauth://totp/{quote("FRIENDEN:" + email)}?secret={secret}&issuer=FRIENDEN&algorithm=SHA1&digits=6&period=30'
         _audit(request, 'mfa.setup_started', summary='开始配置 MFA')
         return dict(secret=secret, otpauth_uri=uri)
 

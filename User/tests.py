@@ -420,7 +420,7 @@ class NotificatorIntegrationTests(SimpleTestCase):
             'reader@example.com',
             code='223806',
             time=10,
-            title='Sermo 言浪验证码',
+            title='FRIENDEN 友间验证码',
             language='zh-CN',
             recipient_name='读者',
         )
@@ -428,7 +428,7 @@ class NotificatorIntegrationTests(SimpleTestCase):
         client.mail.assert_called_once_with(
             'reader@example.com',
             format='verification',
-            title='Sermo 言浪验证码',
+            title='FRIENDEN 友间验证码',
             locale='zh-CN',
             body={'code': '223806', 'time': 10},
             recipient_name='读者',

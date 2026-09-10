@@ -1,7 +1,7 @@
-# Simplified Chinese translations for Sermo backend.
+# Simplified Chinese translations for FRIENDEN backend.
 msgid ""
 msgstr ""
-"Project-Id-Version: Sermo Backend\n"
+"Project-Id-Version: FRIENDEN Backend\n"
 "Report-Msgid-Bugs-To: \n"
 "POT-Creation-Date: 2026-07-29 00:26+0000\n"
 "PO-Revision-Date: 2026-03-16 00:25+0800\n"
@@ -408,17 +408,17 @@ msgstr "{name}（{count} 条）"
 msgid "And {count} more messages."
 msgstr "还有 {count} 条消息。"
 
-msgid "Open Sermo Yanlang to reply."
-msgstr "打开 Sermo 言浪回复。"
+msgid "Open FRIENDEN to reply."
+msgstr "打开 FRIENDEN 友间回复。"
 
-msgid "Sermo password recovery"
-msgstr "Sermo 言浪密码找回"
+msgid "FRIENDEN password recovery"
+msgstr "FRIENDEN 友间密码找回"
 
-msgid "Sermo verification code"
-msgstr "Sermo 言浪验证码"
+msgid "FRIENDEN verification code"
+msgstr "FRIENDEN 友间验证码"
 
-msgid "Sermo space verification code"
-msgstr "Sermo 言浪空间验证码"
+msgid "FRIENDEN space verification code"
+msgstr "FRIENDEN 友间空间验证码"
 
 msgid "Space administrator"
 msgstr "空间管理员"
@@ -435,8 +435,8 @@ msgstr "{count} 条未读消息"
 msgid "{count} messages"
 msgstr "{count} 条消息"
 
-msgid "Return to Sermo Yanlang when you are ready to reply."
-msgstr "准备好回复时，再回到 Sermo 言浪。"
+msgid "Return to FRIENDEN when you are ready to reply."
+msgstr "准备好回复时，再回到 FRIENDEN 友间。"
 
 msgid "You can adjust email reminders in Notification settings."
 msgstr "你可以在“通知与提醒”中调整邮件提醒。"

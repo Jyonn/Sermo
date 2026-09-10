@@ -1,4 +1,4 @@
-# Sermo 言浪页面设计语言指南（Design Language Guide v1）
+# FRIENDEN 友间页面设计语言指南（Design Language Guide v1）
 
 - 版本：`v1.0`
 - 日期：`2026-03-13`

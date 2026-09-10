@@ -87,12 +87,12 @@ def claim_qq_identity(user, qq, verified_at=None):
     qq = normalize_qq(qq)
     target = User.objects.select_for_update().get(id=user.id)
     if target.is_deleted or target.account_kind != UserAccountKindChoice.MEMBER:
-        raise ValidationError('Only an active Sermo member can bind a QQ identity.')
+        raise ValidationError('Only an active FRIENDEN member can bind a QQ identity.')
     target.space.require_qq_binding_enabled()
 
     existing_for_user = QQIdentity.objects.select_for_update().filter(user=target).first()
     if existing_for_user is not None and existing_for_user.qq != qq:
-        raise ValidationError('This Sermo user has already bound another QQ identity.')
+        raise ValidationError('This FRIENDEN user has already bound another QQ identity.')
 
     identity = QQIdentity.objects.select_for_update().filter(space=target.space, qq=qq).select_related('user').first()
     claimed_at = verified_at or timezone.now()
@@ -111,7 +111,7 @@ def claim_qq_identity(user, qq, verified_at=None):
 
     placeholder = User.objects.select_for_update().get(id=identity.user_id)
     if not placeholder.is_imported_placeholder or placeholder.merged_into_id is not None:
-        raise ValidationError('This QQ identity has already been bound by another Sermo user.')
+        raise ValidationError('This QQ identity has already been bound by another FRIENDEN user.')
 
     from Square.models import Statement, StatementComment, StatementCommentMention
 
