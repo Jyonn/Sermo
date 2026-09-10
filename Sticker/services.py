@@ -1,6 +1,6 @@
 from Message.models import Message, MessageTypeChoice
 from Sticker.models import UserSticker
-from utils.qiniu import delete_sticker_file
+from utils.qiniu import delete_sticker_file, validate_message_media_key
 
 
 def delete_unreferenced_sticker_asset(asset):
@@ -15,7 +15,11 @@ def delete_unreferenced_sticker_asset(asset):
         return False
 
     storage_key = asset.storage_key
-    asset.delete()
-    if storage_key.startswith('sermo/messages/sticker/'):
+    try:
+        managed_storage_key = validate_message_media_key('sticker', storage_key)
+    except Exception:
+        managed_storage_key = None
+    if managed_storage_key is not None:
         delete_sticker_file(storage_key)
+    asset.delete()
     return True

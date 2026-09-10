@@ -402,7 +402,12 @@ def validate_message_media_key(kind: str, key: str):
         raise MessageErrors.PAYLOAD_INVALID
 
     key_name = normalized_key[len(prefix):]
-    if not re.fullmatch(r'[a-f0-9]{32}(?:\.[A-Za-z0-9][A-Za-z0-9._+-]{0,31})?', key_name):
+    digest_pattern = r'(?:[a-f0-9]{32}|[a-f0-9]{64})' \
+        if normalized_kind == 'sticker' else r'[a-f0-9]{32}'
+    if not re.fullmatch(
+        rf'{digest_pattern}(?:\.[A-Za-z0-9][A-Za-z0-9._+-]{{0,31}})?',
+        key_name,
+    ):
         raise MessageErrors.PAYLOAD_INVALID
 
     extension = os.path.splitext(key_name)[1].lower()

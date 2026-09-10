@@ -17,6 +17,7 @@ class Command(BaseCommand):
         last_id = 0
         scanned = 0
         deleted = 0
+        failed = 0
 
         while True:
             assets = list(
@@ -50,11 +51,18 @@ class Command(BaseCommand):
                 deleted += len(candidates)
             else:
                 for asset in candidates:
-                    deleted += int(delete_unreferenced_sticker_asset(asset))
+                    try:
+                        deleted += int(delete_unreferenced_sticker_asset(asset))
+                    except Exception as error:
+                        failed += 1
+                        self.stderr.write(self.style.ERROR(
+                            f'Failed to delete sticker asset {asset.id}: {error}'
+                        ))
 
             self.stdout.write(
                 f'Processed {scanned} sticker assets; '
-                f'{"would delete" if options["dry_run"] else "deleted"} {deleted}.',
+                f'{"would delete" if options["dry_run"] else "deleted"} {deleted}; '
+                f'failed {failed}.',
                 ending='\r',
             )
 
@@ -64,5 +72,5 @@ class Command(BaseCommand):
             summary += f'would delete {deleted} orphaned assets.'
             self.stdout.write(self.style.WARNING(f'Dry run: {summary}'))
         else:
-            summary += f'deleted {deleted} orphaned assets.'
+            summary += f'deleted {deleted} orphaned assets; failed {failed}.'
             self.stdout.write(self.style.SUCCESS(summary))

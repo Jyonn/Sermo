@@ -12,6 +12,7 @@ from Space.models import Space
 from Sticker.models import StickerAsset, UserSticker, UserStickerUsage
 from User.models import User
 from utils import auth
+from utils.qiniu import validate_message_media_key
 
 
 class StickerAssetDimensionTests(TestCase):
@@ -106,8 +107,13 @@ class StickerPaginationTests(TestCase):
     def create_asset(self, index):
         return StickerAsset.objects.create(
             content_hash=f'{index:064x}',
-            storage_key=f'sermo/messages/sticker/{index}.png',
+            storage_key=f'sermo/messages/sticker/{index:064x}.png',
         )
+
+    def test_sticker_storage_key_accepts_sha256_file_names(self):
+        key = f'sermo/messages/sticker/{"a" * 64}.webp'
+
+        self.assertEqual(validate_message_media_key('sticker', key), key)
 
     def create_direct_chat(self):
         user_low, user_high = sorted((self.user, self.other), key=lambda user: user.id)
@@ -215,6 +221,14 @@ class StickerPaginationTests(TestCase):
         self.assertFalse(StickerAsset.objects.filter(id=orphan.id).exists())
         self.assertTrue(StickerAsset.objects.filter(id=retained.id).exists())
         delete_file.assert_called_once_with(orphan.storage_key)
+
+    @patch('Sticker.services.delete_sticker_file', side_effect=RuntimeError('qiniu unavailable'))
+    def test_cleanup_command_keeps_failed_cloud_assets_for_retry(self, _delete_file):
+        orphan = self.create_asset(24)
+
+        call_command('cleanup_orphaned_stickers', batch_size=1, verbosity=0)
+
+        self.assertTrue(StickerAsset.objects.filter(id=orphan.id).exists())
 
     def test_explore_returns_recently_frequent_stickers_without_double_counting_retries(self):
         asset = self.create_asset(30)
