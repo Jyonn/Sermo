@@ -1,4 +1,5 @@
 import hashlib
+import math
 import threading
 from urllib.parse import urlparse
 
@@ -164,3 +165,49 @@ class UserSticker(models.Model):
         payload = self.asset.jsonl(request=request)
         payload.update(sticker_id=self.id, created_at=self.created_at.timestamp())
         return payload
+
+
+class UserStickerUsage(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='sticker_usages')
+    asset = models.ForeignKey(StickerAsset, on_delete=models.CASCADE, related_name='user_usages')
+    use_count = models.PositiveIntegerField(default=0)
+    last_used_at = models.DateTimeField(default=timezone.now, db_index=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['user', 'asset'], name='sticker_unique_user_asset_usage'),
+        ]
+
+    @classmethod
+    def record_asset(cls, user, asset):
+        now = timezone.now()
+        updated = cls.objects.filter(user=user, asset=asset).update(
+            use_count=models.F('use_count') + 1,
+            last_used_at=now,
+        )
+        if updated:
+            return
+        try:
+            cls.objects.create(user=user, asset=asset, use_count=1, last_used_at=now)
+        except IntegrityError:
+            cls.objects.filter(user=user, asset=asset).update(
+                use_count=models.F('use_count') + 1,
+                last_used_at=now,
+            )
+
+    @classmethod
+    def top_asset_ids_for_user(cls, user, limit=5):
+        owned_asset_ids = UserSticker.objects.filter(user=user).values('asset_id')
+        now = timezone.now()
+        rows = list(
+            cls.objects.filter(user=user)
+            .exclude(asset_id__in=owned_asset_ids)
+            .order_by('-last_used_at')[:200]
+        )
+        rows.sort(
+            key=lambda row: math.log1p(row.use_count) * math.exp(
+                -max(0, (now - row.last_used_at).total_seconds()) / (30 * 86400)
+            ),
+            reverse=True,
+        )
+        return [row.asset_id for row in rows[:limit]]

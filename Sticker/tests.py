@@ -4,8 +4,11 @@ from types import SimpleNamespace
 from django.test import TestCase
 from django.utils import timezone
 
+from Chat.models import Chat
+from Friendship.models import Friendship, FriendshipStatusChoice
+from Message.models import Message, MessageTypeChoice
 from Space.models import Space
-from Sticker.models import StickerAsset, UserSticker
+from Sticker.models import StickerAsset, UserSticker, UserStickerUsage
 from User.models import User
 from utils import auth
 
@@ -139,3 +142,31 @@ class StickerPaginationTests(TestCase):
         self.assertTrue(set(item['sticker_asset_id'] for item in first['items']).isdisjoint(
             item['sticker_asset_id'] for item in second['items']
         ))
+
+    def test_explore_returns_recently_frequent_stickers_without_double_counting_retries(self):
+        asset = self.create_asset(30)
+        UserSticker.objects.create(user=self.other, asset=asset)
+        user_low, user_high = sorted((self.user, self.other), key=lambda user: user.id)
+        Friendship.objects.create(
+            space=self.space,
+            user_low=user_low,
+            user_high=user_high,
+            requested_by=self.user,
+            status=FriendshipStatusChoice.ACCEPTED,
+        )
+        chat = Chat.get_or_create_direct(self.user, self.other)
+
+        for _index in range(2):
+            Message.create(
+                chat=chat,
+                user=self.user,
+                message_type=MessageTypeChoice.STICKER,
+                content=f'{{"asset_id":{asset.id}}}',
+                client_message_id='sticker-usage-idempotent',
+            )
+
+        usage = UserStickerUsage.objects.get(user=self.user, asset=asset)
+        self.assertEqual(usage.use_count, 1)
+        response = self.client.get('/stickers/explore?offset=0&limit=30', **self.authorization())
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json()['body']['frequent_items'][0]['sticker_asset_id'], asset.id)

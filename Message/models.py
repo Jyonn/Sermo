@@ -712,6 +712,9 @@ class Message(models.Model):
                 UserEmojiUsage.record_text(user, message.content)
                 if link_preview is not None:
                     user.award_growth('explore:link')
+            elif message.type == MessageTypeChoice.STICKER:
+                from Sticker.models import UserStickerUsage
+                UserStickerUsage.record_asset(user, asset)
             exploration_event = {
                 MessageTypeChoice.IMAGE: 'explore:image',
                 MessageTypeChoice.AUDIO: 'explore:audio',

@@ -4,7 +4,7 @@ from django.views import View
 from smartdjango import OK, analyse
 
 from Message.models import Message, MessageTypeChoice
-from Sticker.models import StickerAsset, UserSticker
+from Sticker.models import StickerAsset, UserSticker, UserStickerUsage
 from User.models import User
 from Sticker.params import StickerParams
 from Sticker.validators import StickerErrors
@@ -79,19 +79,29 @@ class StickerExploreView(View):
         source_user_id = UserSticker.objects.filter(asset_id=OuterRef('pk')).order_by(
             'created_at', 'id',
         ).values('user_id')[:1]
-        page = list(StickerAsset.objects.exclude(id__in=owned_asset_ids).annotate(
+        asset_queryset = StickerAsset.objects.exclude(id__in=owned_asset_ids).annotate(
             source_user_id=Subquery(source_user_id),
-        ).order_by('-created_at', '-id')[offset:offset + limit + 1])
+        )
+        page = list(asset_queryset.order_by('-created_at', '-id')[offset:offset + limit + 1])
         assets = page[:limit]
-        source_users = User.objects.in_bulk({asset.source_user_id for asset in assets if asset.source_user_id})
+        frequent_ids = UserStickerUsage.top_asset_ids_for_user(request.user, limit=5) if offset == 0 else []
+        frequent_by_id = {
+            asset.id: asset
+            for asset in asset_queryset.filter(id__in=frequent_ids)
+        }
+        frequent_assets = [frequent_by_id[asset_id] for asset_id in frequent_ids if asset_id in frequent_by_id]
+        source_users = User.objects.in_bulk({
+            asset.source_user_id
+            for asset in [*assets, *frequent_assets]
+            if asset.source_user_id
+        })
+        serialize = lambda asset: asset.jsonl(
+            request=request,
+            source_user=source_users.get(asset.source_user_id),
+        )
         return dict(
-            items=[
-                asset.jsonl(
-                    request=request,
-                    source_user=source_users.get(asset.source_user_id),
-                )
-                for asset in assets
-            ],
+            items=[serialize(asset) for asset in assets],
+            frequent_items=[serialize(asset) for asset in frequent_assets],
             has_more=len(page) > limit,
             next_offset=offset + len(assets),
         )
