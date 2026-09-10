@@ -10,7 +10,8 @@ from Sticker.params import StickerParams
 from Sticker.validators import StickerErrors
 from utils import auth
 from utils.auth import Request
-from utils.qiniu import build_sticker_display_uri, delete_sticker_file, issue_sticker_upload
+from Sticker.services import delete_unreferenced_sticker_asset
+from utils.qiniu import build_sticker_display_uri, issue_sticker_upload
 
 
 class StickerView(View):
@@ -57,15 +58,7 @@ class StickerView(View):
             raise StickerErrors.NOT_ACCESSIBLE
         asset = sticker.asset
         sticker.delete()
-        owner_references = UserSticker.objects.filter(asset=asset).exists()
-        message_reference = Message.objects.filter(
-            type=MessageTypeChoice.STICKER,
-            content=f'{{"kind":"sticker","asset_id":{asset.id}}}',
-        ).exists()
-        if not owner_references and not message_reference:
-            if asset.storage_key.startswith('sermo/messages/sticker/'):
-                delete_sticker_file(asset.storage_key)
-            asset.delete()
+        delete_unreferenced_sticker_asset(asset)
         return OK
 
 

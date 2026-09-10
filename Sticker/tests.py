@@ -1,8 +1,8 @@
 from unittest.mock import patch
 from types import SimpleNamespace
 
-from django.test import TestCase
 from django.core.management import call_command
+from django.test import TestCase
 from django.utils import timezone
 
 from Chat.models import Chat
@@ -109,6 +109,19 @@ class StickerPaginationTests(TestCase):
             storage_key=f'sermo/messages/sticker/{index}.png',
         )
 
+    def create_direct_chat(self):
+        user_low, user_high = sorted((self.user, self.other), key=lambda user: user.id)
+        Friendship.objects.get_or_create(
+            space=self.space,
+            user_low=user_low,
+            user_high=user_high,
+            defaults=dict(
+                requested_by=self.user,
+                status=FriendshipStatusChoice.ACCEPTED,
+            ),
+        )
+        return Chat.get_or_create_direct(self.user, self.other)
+
     def test_my_stickers_return_stable_pages(self):
         for index in range(5):
             UserSticker.objects.create(user=self.user, asset=self.create_asset(index + 1))
@@ -144,18 +157,69 @@ class StickerPaginationTests(TestCase):
             item['sticker_asset_id'] for item in second['items']
         ))
 
+    @patch('Sticker.services.delete_sticker_file')
+    def test_removing_last_collection_deletes_asset_referenced_only_by_deleted_messages(self, delete_file):
+        asset = self.create_asset(20)
+        sticker = UserSticker.objects.create(user=self.user, asset=asset)
+        chat = self.create_direct_chat()
+        message = Message.create(
+            chat=chat,
+            user=self.user,
+            message_type=MessageTypeChoice.STICKER,
+            content=f'{{"asset_id":{asset.id}}}',
+        )
+        message.is_deleted = True
+        message.save(update_fields=['is_deleted'])
+
+        response = self.client.delete(
+            f'/stickers/?sticker_id={sticker.id}',
+            **self.authorization(),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertFalse(StickerAsset.objects.filter(id=asset.id).exists())
+        delete_file.assert_called_once_with(asset.storage_key)
+
+    @patch('Sticker.services.delete_sticker_file')
+    def test_removing_last_collection_keeps_asset_with_active_message(self, delete_file):
+        asset = self.create_asset(21)
+        sticker = UserSticker.objects.create(user=self.user, asset=asset)
+        chat = self.create_direct_chat()
+        Message.create(
+            chat=chat,
+            user=self.user,
+            message_type=MessageTypeChoice.STICKER,
+            content=f'{{"asset_id":{asset.id}}}',
+        )
+
+        response = self.client.delete(
+            f'/stickers/?sticker_id={sticker.id}',
+            **self.authorization(),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertTrue(StickerAsset.objects.filter(id=asset.id).exists())
+        delete_file.assert_not_called()
+
+    @patch('Sticker.services.delete_sticker_file')
+    def test_cleanup_command_backfills_orphaned_assets(self, delete_file):
+        orphan = self.create_asset(22)
+        retained = self.create_asset(23)
+        UserSticker.objects.create(user=self.other, asset=retained)
+
+        call_command('cleanup_orphaned_stickers', dry_run=True, verbosity=0)
+        self.assertTrue(StickerAsset.objects.filter(id=orphan.id).exists())
+
+        call_command('cleanup_orphaned_stickers', batch_size=1, verbosity=0)
+
+        self.assertFalse(StickerAsset.objects.filter(id=orphan.id).exists())
+        self.assertTrue(StickerAsset.objects.filter(id=retained.id).exists())
+        delete_file.assert_called_once_with(orphan.storage_key)
+
     def test_explore_returns_recently_frequent_stickers_without_double_counting_retries(self):
         asset = self.create_asset(30)
         UserSticker.objects.create(user=self.other, asset=asset)
-        user_low, user_high = sorted((self.user, self.other), key=lambda user: user.id)
-        Friendship.objects.create(
-            space=self.space,
-            user_low=user_low,
-            user_high=user_high,
-            requested_by=self.user,
-            status=FriendshipStatusChoice.ACCEPTED,
-        )
-        chat = Chat.get_or_create_direct(self.user, self.other)
+        chat = self.create_direct_chat()
 
         for _index in range(2):
             Message.create(
