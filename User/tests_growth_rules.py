@@ -79,7 +79,7 @@ class GrowthRuleTests(SimpleTestCase):
         self.assertEqual(rewards, {
             'default', 'paper', 'mint', 'comic', 'bauhaus', 'dragon',
             'zen', 'mosaic', 'newsprint', 'aurora-sky', 'hologram',
-            'spaceport', 'noir-film',
+            'frienden-night', 'frienden-garden', 'noir-film',
         })
 
     def test_every_reward_has_structured_display_metadata(self):

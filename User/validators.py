@@ -140,7 +140,7 @@ class UserValidator:
     AVATAR_PRESET_MAX_ID = 36
     CHAT_BACKGROUND_THEMES = {
         'default', 'paper', 'mint', 'comic', 'bauhaus', 'dragon', 'zen', 'mosaic', 'newsprint',
-        'aurora-sky', 'hologram', 'spaceport', 'noir-film', 'custom',
+        'aurora-sky', 'hologram', 'frienden-night', 'frienden-garden', 'noir-film', 'custom',
     }
     PERSONALIZATION_OPTIONS = {
         'chat_bubble_style': {

@@ -116,7 +116,7 @@ CHAT_BACKGROUND_LEVELS = {
     'default': 1, 'paper': 2, 'mint': 3, 'comic': 5,
     'zen': 6, 'dragon': 8, 'bauhaus': 8, 'mosaic': 9,
     'aurora-sky': 14, 'newsprint': 15, 'hologram': 15,
-    'spaceport': 17, 'noir-film': 18,
+    'frienden-night': 17, 'frienden-garden': 17, 'noir-film': 18,
     'custom': 8,
 }
 
@@ -206,7 +206,7 @@ LEVEL_REWARDS = {
     14: [_reward('background.aurora_sky', 14, 'background', '极光天幕背景', 'epic', 'aurora-sky')],
     15: [_reward('background.newsprint', 15, 'background', '报刊背景', 'rare', 'newsprint'), _reward('background.hologram', 15, 'background', '幻彩膜背景', 'epic', 'hologram')],
     16: [_reward('bubble.niko', 16, 'bubble', 'Niko 气泡', 'legendary', 'niko'), _reward('frame.niko', 16, 'frame', 'Niko Run 头像框', 'legendary', 'niko-run'), _reward('growth.report', 16, 'identity', '成长报告', 'epic', status='planned')],
-    17: [_reward('background.spaceport', 17, 'background', '太空港背景', 'epic', 'spaceport'), _reward('bubble.fufu', 17, 'bubble', 'Fufu 气泡', 'legendary', 'fufu'), _reward('frame.fufu', 17, 'frame', 'Fufu Wave 头像框', 'legendary', 'fufu-wave'), _reward('frame.collection', 17, 'identity', '头像框收藏入口', 'epic', status='planned')],
+    17: [_reward('background.frienden_night', 17, 'background', '夜航友间背景', 'epic', 'frienden-night'), _reward('background.frienden_garden', 17, 'background', '午后花房背景', 'epic', 'frienden-garden'), _reward('bubble.fufu', 17, 'bubble', 'Fufu 气泡', 'legendary', 'fufu'), _reward('frame.fufu', 17, 'frame', 'Fufu Wave 头像框', 'legendary', 'fufu-wave'), _reward('frame.collection', 17, 'identity', '头像框收藏入口', 'epic', status='planned')],
     18: [_reward('background.noir', 18, 'background', '黑色电影背景', 'legendary', 'noir-film'), _reward('identity.final_badge', 18, 'identity', '“尽兴”永久成长徽记', 'legendary', status='planned'), _reward('profile.final_slot', 18, 'identity', '满级个人名片展示位', 'legendary', status='planned')],
 }
 
