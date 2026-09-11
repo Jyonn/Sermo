@@ -5,6 +5,8 @@ from django.test import TestCase
 from django.utils import timezone
 
 from Activity.models import ActivityAwakening, ActivityCampaign, ActivityEvent, ActivityMilestone, ActivityService, SpaceActivity, SpaceActivityReward, UserActivityReward
+from Chat.models import Chat, ChatPurposeChoice, ChatTypeChoice
+from Message.models import Message, MessageTypeChoice
 from Space.models import Space
 from User.models import User, UserResourceInventory
 
@@ -250,3 +252,77 @@ class ActivityServiceTests(TestCase):
             payload = ActivityService.payload(campaign, self.user)
         self.assertEqual(payload['starry_night']['streak_days'], 5)
         self.assertTrue(payload['starry_night']['reward_owned'])
+
+    def test_starry_night_claim_backfills_previous_five_evenings(self):
+        campaign = ActivityCampaign.objects.create(
+            key='starry-night-backfill-test',
+            title='Five Nights Backfill',
+            assignment_mode=ActivityCampaign.AssignmentMode.MANUAL,
+            duration_seconds=15 * 24 * 60 * 60,
+            event_key='chat.message.send',
+            config={
+                'theme': 'starry-night',
+                'mode': ActivityService.STARRY_NIGHT_MODE,
+                'streak_days': 5,
+                'reward': {
+                    'resource_type': 'background',
+                    'reward_id': 'activity.background.starry-night',
+                    'resource_key': 'starry-night',
+                },
+            },
+        )
+        chat = Chat.objects.create(
+            space=self.space,
+            chat_type=ChatTypeChoice.DIRECT,
+            created_by=self.user,
+        )
+        claimed_at = datetime(2026, 9, 6, 13, 0, tzinfo=datetime_timezone.utc)
+        for offset in range(5):
+            message = Message.objects.create(
+                chat=chat,
+                user=self.user,
+                type=MessageTypeChoice.TEXT,
+                content=f'night-{offset}',
+            )
+            Message.objects.filter(id=message.id).update(created_at=claimed_at - timedelta(days=4 - offset, minutes=15))
+
+        run = ActivityService.claim_for_space(campaign, self.space, claimed_at=claimed_at)
+        progress = campaign.user_progress.get(user=self.user)
+
+        self.assertEqual(progress.events.count(), 5)
+        self.assertEqual(progress.earned_points, 5)
+        self.assertEqual(ActivityService.payload(campaign, self.user, run)['starry_night']['streak_days'], 5)
+        self.assertTrue(UserResourceInventory.objects.filter(
+            user=self.user,
+            reward_id='activity.background.starry-night',
+        ).exists())
+
+    def test_starry_night_backfill_ignores_submission_and_preserves_yesterday_streak(self):
+        campaign = ActivityCampaign.objects.create(
+            key='starry-night-backfill-boundaries',
+            title='Five Nights Boundaries',
+            assignment_mode=ActivityCampaign.AssignmentMode.MANUAL,
+            event_key='chat.message.send',
+            config={'theme': 'starry-night', 'mode': ActivityService.STARRY_NIGHT_MODE, 'streak_days': 5},
+        )
+        ordinary = Chat.objects.create(space=self.space, chat_type=ChatTypeChoice.DIRECT, created_by=self.user)
+        submission = Chat.objects.create(
+            space=self.space,
+            chat_type=ChatTypeChoice.DIRECT,
+            purpose=ChatPurposeChoice.SUBMISSION,
+            created_by=self.user,
+        )
+        claimed_at = datetime(2026, 9, 6, 11, 0, tzinfo=datetime_timezone.utc)
+        for offset in range(2):
+            message = Message.objects.create(chat=ordinary, user=self.user, type=MessageTypeChoice.TEXT, content='ordinary')
+            Message.objects.filter(id=message.id).update(created_at=claimed_at - timedelta(days=2 - offset) + timedelta(hours=2))
+        ignored = Message.objects.create(chat=submission, user=self.user, type=MessageTypeChoice.TEXT, content='submission')
+        Message.objects.filter(id=ignored.id).update(created_at=claimed_at - timedelta(hours=22))
+
+        run = ActivityService.claim_for_space(campaign, self.space, claimed_at=claimed_at)
+        progress = campaign.user_progress.get(user=self.user)
+
+        self.assertEqual(progress.events.count(), 2)
+        self.assertEqual(ActivityService._starry_streak(progress, claimed_at.astimezone(ActivityService.BEIJING_TIMEZONE)), 2)
+        with patch('Activity.models.timezone.now', return_value=claimed_at):
+            self.assertEqual(ActivityService.payload(campaign, self.user, run)['starry_night']['streak_days'], 2)

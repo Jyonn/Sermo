@@ -1,5 +1,6 @@
 import random
-from datetime import timedelta
+from datetime import datetime, time, timedelta
+from zoneinfo import ZoneInfo
 
 from django.db import models, transaction
 from django.utils import timezone
@@ -136,6 +137,7 @@ class ActivityService:
     AWAKENING_COUNT = 8
     FRIENDLY_NEIGHBOR_MODE = 'friendly_neighbor'
     STARRY_NIGHT_MODE = 'starry_night_streak'
+    BEIJING_TIMEZONE = ZoneInfo('Asia/Shanghai')
 
     @staticmethod
     def claim_for_space(campaign, space, claimed_at=None):
@@ -144,12 +146,61 @@ class ActivityService:
             claimed_at + timedelta(seconds=campaign.duration_seconds)
             if campaign.duration_seconds else None
         )
-        space_activity, _ = SpaceActivity.objects.get_or_create(
+        space_activity, created = SpaceActivity.objects.get_or_create(
             campaign=campaign,
             space=space,
             defaults={'claimed_at': claimed_at, 'ends_at': ends_at},
         )
+        if created and campaign.config.get('mode') == ActivityService.STARRY_NIGHT_MODE:
+            ActivityService.backfill_starry_night_progress(space_activity, claimed_at)
         return space_activity
+
+    @classmethod
+    def backfill_starry_night_progress(cls, space_activity, claimed_at=None):
+        """Seed the starry streak from ordinary chats in the five local dates before claim."""
+        from Chat.models import ChatPurposeChoice
+        from Message.models import Message
+        from User.models import UserAccountLevelChoice
+
+        claimed_at = claimed_at or space_activity.claimed_at
+        local_claimed_at = claimed_at.astimezone(cls.BEIJING_TIMEZONE)
+        first_date = local_claimed_at.date() - timedelta(days=4)
+        range_start = datetime.combine(first_date, time(20), tzinfo=cls.BEIJING_TIMEZONE)
+        messages = Message.objects.filter(
+            user__space=space_activity.space,
+            user__account_level=UserAccountLevelChoice.VERIFIED,
+            user__is_deleted=False,
+            chat__purpose=ChatPurposeChoice.NORMAL,
+            is_deleted=False,
+            created_at__gte=range_start,
+            created_at__lte=claimed_at,
+        ).select_related('user').order_by('user_id', 'created_at')
+        qualifying = {}
+        for message in messages.iterator():
+            local_created_at = message.created_at.astimezone(cls.BEIJING_TIMEZONE)
+            if local_created_at.hour >= 20:
+                qualifying.setdefault((message.user_id, local_created_at.date()), message)
+        progress_by_user = {}
+        with transaction.atomic():
+            for (user_id, event_date), message in qualifying.items():
+                progress = progress_by_user.get(user_id)
+                if progress is None:
+                    _, progress = cls._progress(space_activity.campaign, message.user, space_activity)
+                    progress_by_user[user_id] = progress
+                ActivityEvent.objects.get_or_create(
+                    campaign=space_activity.campaign,
+                    progress=progress,
+                    event_key=space_activity.campaign.event_key,
+                    event_date=event_date,
+                    event_reference='',
+                    defaults={'points': 1, 'claimed_at': message.created_at},
+                )
+            for progress in progress_by_user.values():
+                streak = cls._starry_streak(progress, local_claimed_at)
+                if progress.earned_points != streak:
+                    progress.earned_points = streak
+                    progress.save(update_fields=['earned_points', 'updated_at'])
+                cls._grant_starry_night_reward(space_activity.campaign, progress.user, streak)
 
     @classmethod
     def ensure_automatic_for_space(cls, space):
@@ -318,25 +369,37 @@ class ActivityService:
                     event_reference='',
                     defaults={'points': 1, 'claimed_at': occurred_at},
                 )
-                streak = cls._consecutive_streak(progress, local_time.date())
+                streak = cls._starry_streak(progress, local_time)
                 if progress.earned_points != streak:
                     progress.earned_points = streak
                     progress.save(update_fields=['earned_points', 'updated_at'])
-                target = int(campaign.config.get('streak_days', 5))
-                reward = campaign.config.get('reward') or {}
-                if streak >= target and reward:
-                    from User.models import UserResourceInventory
-                    _, created = UserResourceInventory.grant_activity_resource(
-                        user,
-                        reward.get('resource_type', 'background'),
-                        reward['reward_id'],
-                        reward['resource_key'],
-                        campaign.key,
-                        metadata={'kind': 'consecutive_evening_chat', 'streak_days': target},
-                    )
-                    if created:
-                        unlocked.append(campaign.key)
+                if cls._grant_starry_night_reward(campaign, user, streak):
+                    unlocked.append(campaign.key)
         return unlocked
+
+    @classmethod
+    def _starry_streak(cls, progress, local_now):
+        end_date = local_now.date()
+        if not progress.events.filter(event_date=end_date).exists():
+            end_date -= timedelta(days=1)
+        return cls._consecutive_streak(progress, end_date)
+
+    @classmethod
+    def _grant_starry_night_reward(cls, campaign, user, streak):
+        target = int(campaign.config.get('streak_days', 5))
+        reward = campaign.config.get('reward') or {}
+        if streak < target or not reward:
+            return False
+        from User.models import UserResourceInventory
+        _, created = UserResourceInventory.grant_activity_resource(
+            user,
+            reward.get('resource_type', 'background'),
+            reward['reward_id'],
+            reward['resource_key'],
+            campaign.key,
+            metadata={'kind': 'consecutive_evening_chat', 'streak_days': target},
+        )
+        return created
 
     @staticmethod
     def _consecutive_streak(progress, end_date):
@@ -632,7 +695,7 @@ class ActivityService:
             target = int(campaign.config.get('streak_days', 5))
             owned = bool(reward and user.resource_inventory.filter(reward_id=reward.get('reward_id', '')).exists())
             payload['starry_night'] = dict(
-                streak_days=min(target, cls._consecutive_streak(progress, timezone.localdate())),
+                streak_days=target if owned else min(target, cls._starry_streak(progress, timezone.localtime())),
                 target_days=target,
                 window_start=campaign.config.get('window_start', '20:00'),
                 window_end=campaign.config.get('window_end', '24:00'),
