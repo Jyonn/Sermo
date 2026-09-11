@@ -40,6 +40,10 @@ class UserErrors:
     WECHAT_MINIPROGRAM_NOT_CONFIGURED = Error(
         message=_('WeChat Mini Program login is not configured'), code=Code.InternalServerError,
     )
+    WECHAT_WEB_LOGIN_PASSWORD_REQUIRED = Error(
+        message=_('Set a password in the WeChat Mini Program before signing in on the web'),
+        code=Code.Forbidden,
+    )
     WELCOME_MESSAGE_EMPTY = Error(message=_('Welcome message cannot be empty'), code=Code.BadRequest)
     WELCOME_MESSAGE_TOO_LONG = Error(message=_('Welcome message is too long'), code=Code.BadRequest)
     WELCOME_MESSAGES_INVALID = Error(message=_('Invalid welcome message template'), code=Code.BadRequest)

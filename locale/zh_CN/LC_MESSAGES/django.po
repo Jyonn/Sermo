@@ -564,6 +564,9 @@ msgstr "名称不能包含空格"
 msgid "Nickname is already taken, password required"
 msgstr "昵称已被占用，需要提供密码"
 
+msgid "Set a password in the WeChat Mini Program before signing in on the web"
+msgstr "请先在微信小程序中设置密码，再登录网页版"
+
 #| msgid "Password recovery is unavailable for this account"
 msgid "Password is required to delete account"
 msgstr "注销账户前需要验证密码"

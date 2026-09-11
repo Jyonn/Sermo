@@ -468,6 +468,8 @@ class User(models.Model):
 
         if user.is_deleted:
             raise UserErrors.USER_DELETED
+        if not user.password and user.wechat_miniprogram_identities.exists():
+            raise UserErrors.WECHAT_WEB_LOGIN_PASSWORD_REQUIRED
         if user.password:
             if not password:
                 raise UserErrors.PASSWORD_REQUIRED

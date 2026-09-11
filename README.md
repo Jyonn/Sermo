@@ -89,7 +89,7 @@ Below are details of each API view (endpoint), including functionality, required
 
 - Within the same host, guest names are unique (case-insensitive).
 - If a nickname already exists and has a password, the password is required to log in.
-- If a nickname exists without a password, login is allowed without a password; providing a password will set it for future logins.
+- If a nickname exists without a password, login is allowed without a password; providing a password will set it for future logins. Passwordless accounts bound to WeChat Mini Program are excluded: they must set a password from an authenticated Mini Program session before using nickname login on the web.
 
 **Response:** Returns a JWT token and the guest user’s details. The format is the same as for host login, with guest flag set to `true`.
 

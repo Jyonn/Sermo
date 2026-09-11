@@ -563,6 +563,9 @@ msgstr "Name cannot contain spaces"
 msgid "Nickname is already taken, password required"
 msgstr "Nickname is already taken, password required"
 
+msgid "Set a password in the WeChat Mini Program before signing in on the web"
+msgstr "Set a password in the WeChat Mini Program before signing in on the web"
+
 msgid "Password is required to delete account"
 msgstr "Password is required to delete account"
 

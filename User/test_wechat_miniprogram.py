@@ -73,3 +73,56 @@ class WeChatMiniProgramLoginTests(TestCase):
         self.assertEqual(response.status_code, 200)
         user.refresh_from_db()
         self.assertEqual(user.name, '新名')
+
+    def test_passwordless_wechat_user_cannot_login_through_web(self):
+        user = User.create(space=self.space, name='微信用户', language='zh-CN')
+        WeChatMiniProgramIdentity.objects.create(
+            user=user,
+            space=self.space,
+            app_id='wx-test',
+            open_id='openid-web-login',
+        )
+
+        for password in (None, 'new-password'):
+            response = self.client.post(
+                '/spaces/join',
+                data={
+                    'slug': self.space.slug,
+                    'name': user.name,
+                    'password': password,
+                    'language': 'zh-CN',
+                },
+                content_type='application/json',
+            )
+
+            self.assertEqual(response.status_code, 403)
+            payload = response.json()
+            self.assertEqual(payload['identifier'], 'USER@WECHAT_WEB_LOGIN_PASSWORD_REQUIRED')
+            self.assertNotIn('auth', payload.get('body') or {})
+
+        user.refresh_from_db()
+        self.assertFalse(user.has_password)
+
+    def test_wechat_user_can_login_through_web_after_setting_password(self):
+        user = User.create(space=self.space, name='微信用户', language='zh-CN')
+        WeChatMiniProgramIdentity.objects.create(
+            user=user,
+            space=self.space,
+            app_id='wx-test',
+            open_id='openid-password-set',
+        )
+        user.set_password('saved-password')
+
+        response = self.client.post(
+            '/spaces/join',
+            data={
+                'slug': self.space.slug,
+                'name': user.name,
+                'password': 'saved-password',
+                'language': 'zh-CN',
+            },
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('auth', response.json()['body'])
