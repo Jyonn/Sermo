@@ -31,6 +31,7 @@ class ChatParams(metaclass=Params):
         lambda value: value in ('revision', 'terminate', 'ready'),
         message=_('Invalid submission action'),
     )
+    background_theme = Validator('background_theme').to(str).to(User.validators.chat_background_theme)
 
 
 class ChatMemberParams(metaclass=Params):
@@ -86,3 +87,7 @@ class ChatPreferenceParams(metaclass=Params):
         .to(int) \
         .null().default(None) \
         .bool(lambda x: x is None or x in (0, 1), message=_('unread_badge_muted should be 0 or 1'))
+    use_personal_background = Validator('use_personal_background') \
+        .to(int) \
+        .null().default(None) \
+        .bool(lambda x: x is None or x in (0, 1), message=_('use_personal_background should be 0 or 1'))

@@ -456,6 +456,50 @@ class ChatNotificationPreferenceTests(TestCase):
         self.assertTrue(any(event.user_id == self.recipient.id for event in events))
         self.assertFalse(ChatUserPreference.ensure(self.chat, self.recipient).notifications_muted)
 
+    def test_owner_sets_system_group_background_and_member_can_override_it(self):
+        with patch('User.models.User.require_capability', return_value=None):
+            background_response = self.client.post(
+                f'/chats/group/background?chat_id={self.chat.id}',
+                data=json.dumps({'background_theme': 'paper'}),
+                content_type='application/json',
+                **self.authorization(self.sender),
+            )
+        self.assertEqual(background_response.status_code, 200, background_response.content)
+        self.assertEqual(background_response.json()['body']['group_background_theme'], 'paper')
+
+        preference_response = self.client.post(
+            f'/chats/preference?chat_id={self.chat.id}',
+            data=json.dumps({'use_personal_background': 1}),
+            content_type='application/json',
+            **self.authorization(self.recipient),
+        )
+        self.assertEqual(preference_response.status_code, 200, preference_response.content)
+        self.assertTrue(preference_response.json()['body']['use_personal_background'])
+
+        chat_list = self.client.get('/chats/', **self.authorization(self.recipient)).json()['body']
+        payload = next(item for item in chat_list if item['chat_id'] == self.chat.id)
+        self.assertEqual(payload['group_background_theme'], 'paper')
+        self.assertTrue(payload['use_personal_background'])
+
+    def test_group_background_rejects_custom_images_and_non_owner_updates(self):
+        custom = self.client.post(
+            f'/chats/group/background?chat_id={self.chat.id}',
+            data=json.dumps({'background_theme': 'custom'}),
+            content_type='application/json',
+            **self.authorization(self.sender),
+        )
+        self.assertIsNone(custom.json()['body'])
+
+        non_owner = self.client.post(
+            f'/chats/group/background?chat_id={self.chat.id}',
+            data=json.dumps({'background_theme': 'paper'}),
+            content_type='application/json',
+            **self.authorization(self.recipient),
+        )
+        self.assertIsNone(non_owner.json()['body'])
+        self.chat.refresh_from_db()
+        self.assertEqual(self.chat.group_background_theme, 'default')
+
     def test_owner_can_mute_and_unmute_group_member_with_system_messages(self):
         muted = self.client.post(
             f'/chats/group/mutes?chat_id={self.chat.id}',

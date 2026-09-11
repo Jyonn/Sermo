@@ -38,6 +38,7 @@ class ChatListView(View):
         data['statement_reminder_enabled'] = bool(preference and preference.statement_reminder_enabled)
         data['notifications_muted'] = bool(preference and preference.notifications_muted)
         data['unread_badge_muted'] = bool(preference and preference.unread_badge_muted)
+        data['use_personal_background'] = bool(preference and preference.use_personal_background)
         data['send_restriction'] = chat.send_restriction_for(user)
         return data
 
@@ -275,6 +276,17 @@ class GroupChatNameView(View):
         return chat.json()
 
 
+class GroupChatBackgroundView(View):
+    @auth.require_user
+    @analyse.query(ChatParams.chat_id)
+    @analyse.json(ChatParams.background_theme)
+    @auth.require_chat_owner()
+    def post(self, request):
+        chat: Chat = request.query.chat
+        chat.set_group_background(request.user, request.json.background_theme)
+        return ChatListView.build_chat_payload(chat, request.user, request)
+
+
 class GroupChatMemberView(View):
     @auth.require_user
     @analyse.query(ChatMemberParams.chat_id)
@@ -377,6 +389,7 @@ class ChatPreferenceView(View):
         ChatPreferenceParams.statement_reminder_enabled,
         ChatPreferenceParams.notifications_muted,
         ChatPreferenceParams.unread_badge_muted,
+        ChatPreferenceParams.use_personal_background,
     )
     @auth.require_chat_member()
     def post(self, request):
@@ -390,5 +403,6 @@ class ChatPreferenceView(View):
             statement_reminder_enabled=request.json.statement_reminder_enabled,
             notifications_muted=request.json.notifications_muted,
             unread_badge_muted=request.json.unread_badge_muted,
+            use_personal_background=request.json.use_personal_background,
         )
         return preference.json()

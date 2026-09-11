@@ -63,6 +63,7 @@ class Chat(models.Model):
     chat_type = models.IntegerField(choices=ChatTypeChoice.to_choices(), db_index=True)
     purpose = models.IntegerField(choices=ChatPurposeChoice.to_choices(), default=ChatPurposeChoice.NORMAL, db_index=True)
     title = models.CharField(max_length=vldt.TITLE_MAX_LENGTH, null=True, blank=True)
+    group_background_theme = models.CharField(max_length=16, default='default')
     created_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='created_chats')
 
     created_at = models.DateTimeField(auto_now_add=True)
@@ -134,6 +135,7 @@ class Chat(models.Model):
             'chat_type',
             'purpose',
             'title',
+            'group_background_theme',
             'owner',
             'members',
             'group',
@@ -141,6 +143,21 @@ class Chat(models.Model):
             'last_chat_at',
             'last_message',
         )
+
+    def set_group_background(self, operator: User, theme: str):
+        if not self.group or self.submission:
+            raise ChatErrors.NOT_GROUP_CHAT(chat=self.id)
+        if not self.is_owner(operator):
+            raise ChatErrors.FORBIDDEN
+        normalized_theme = operator.validators.chat_background_theme(theme)
+        if normalized_theme == 'custom':
+            raise ChatErrors.FORBIDDEN
+        if normalized_theme != self.group_background_theme:
+            operator.require_capability(f'menu.personalization.background.use.{normalized_theme}')
+            self.group_background_theme = normalized_theme
+            self.save(update_fields=['group_background_theme'])
+            self._emit_state_changed()
+        return self
 
     def jsonl(self):
         return self.json()
@@ -1276,6 +1293,7 @@ class ChatUserPreference(models.Model):
     statement_reminder_enabled = models.BooleanField(default=False)
     notifications_muted = models.BooleanField(default=False)
     unread_badge_muted = models.BooleanField(default=False)
+    use_personal_background = models.BooleanField(default=False)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
@@ -1287,7 +1305,7 @@ class ChatUserPreference(models.Model):
         return preference
 
     @classmethod
-    def update(cls, chat: Chat, user: User, pinned=None, online_reminder_enabled=None, statement_reminder_enabled=None, notifications_muted=None, unread_badge_muted=None):
+    def update(cls, chat: Chat, user: User, pinned=None, online_reminder_enabled=None, statement_reminder_enabled=None, notifications_muted=None, unread_badge_muted=None, use_personal_background=None):
         preference = cls.ensure(chat, user)
         updates = []
         if pinned is not None:
@@ -1319,12 +1337,17 @@ class ChatUserPreference(models.Model):
         if notifications_muted is not None and not bool(notifications_muted) and preference.unread_badge_muted:
             preference.unread_badge_muted = False
             updates.append('unread_badge_muted')
+        if use_personal_background is not None:
+            if not chat.group or chat.submission:
+                raise ChatErrors.NOT_GROUP_CHAT(chat=chat.id)
+            preference.use_personal_background = bool(use_personal_background)
+            updates.append('use_personal_background')
         if updates:
             preference.save(update_fields=[*dict.fromkeys(updates), 'updated_at'])
         return preference
 
     def json(self):
-        return self.dictify('pinned', 'online_reminder_enabled', 'statement_reminder_enabled', 'notifications_muted', 'unread_badge_muted')
+        return self.dictify('pinned', 'online_reminder_enabled', 'statement_reminder_enabled', 'notifications_muted', 'unread_badge_muted', 'use_personal_background')
 
     @classmethod
     def emit_peer_statement_events(cls, statement):
