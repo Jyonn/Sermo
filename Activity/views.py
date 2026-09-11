@@ -23,6 +23,15 @@ class ActivityDetailView(View):
         return ActivityService.payload(campaign, request.user, space_activity)
 
 
+class ActivitySeenView(View):
+    @auth.require_user
+    def post(self, request: Request, key: str):
+        campaign = ActivityCampaign.objects.get(key=key, enabled=True)
+        space_activity = ActivityService.space_activity_for(campaign, request.user.space)
+        ActivityService.mark_seen(space_activity, request.user)
+        return ActivityService.payload(campaign, request.user, space_activity)
+
+
 class ActivityContributionView(View):
     @auth.require_user
     def post(self, request: Request, key: str):

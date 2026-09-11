@@ -64,6 +64,26 @@ class ActivityServiceTests(TestCase):
         after = self.client.get('/activities/active', **self.authorization())
         self.assertIn(campaign.key, [item['key'] for item in after.json()['body']])
 
+    def test_newly_claimed_activity_attention_is_per_user(self):
+        campaign = ActivityCampaign.objects.create(
+            key='new-activity-attention',
+            title='New Activity',
+            assignment_mode=ActivityCampaign.AssignmentMode.MANUAL,
+            duration_seconds=3600,
+        )
+        peer = User.create(self.space, 'Peer', email='peer@example.com', verified=True)
+        run = ActivityService.claim_for_space(campaign, self.space)
+
+        self.assertTrue(ActivityService.payload(campaign, self.user, run)['newly_claimed'])
+        self.assertTrue(ActivityService.payload(campaign, peer, run)['newly_claimed'])
+        ActivityService.mark_seen(run, self.user)
+        self.assertFalse(ActivityService.payload(campaign, self.user, run)['newly_claimed'])
+        self.assertTrue(ActivityService.payload(campaign, peer, run)['newly_claimed'])
+
+        legacy = ActivityCampaign.objects.create(key='legacy-activity-attention', title='Legacy Activity')
+        legacy_run = SpaceActivity.objects.create(campaign=legacy, space=self.space)
+        self.assertFalse(ActivityService.payload(legacy, self.user, legacy_run)['newly_claimed'])
+
     def test_unclaimed_manual_campaign_does_not_record_events(self):
         campaign = ActivityCampaign.objects.create(
             key='unclaimed-campaign',

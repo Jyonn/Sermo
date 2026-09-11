@@ -50,6 +50,7 @@ class SpaceActivity(models.Model):
     claimed_at = models.DateTimeField(default=timezone.now, db_index=True)
     ends_at = models.DateTimeField(null=True, blank=True, db_index=True)
     history_backfilled_at = models.DateTimeField(null=True, blank=True)
+    attention_started_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -61,6 +62,17 @@ class SpaceActivity(models.Model):
     def is_active(self, now=None):
         now = now or timezone.now()
         return self.claimed_at <= now and (self.ends_at is None or self.ends_at > now)
+
+
+class UserActivityView(models.Model):
+    space_activity = models.ForeignKey(SpaceActivity, on_delete=models.CASCADE, related_name='user_views')
+    user = models.ForeignKey('User.User', on_delete=models.CASCADE, related_name='activity_views')
+    seen_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['space_activity', 'user'], name='activity_space_user_view_unique'),
+        ]
 
 
 class UserActivityProgress(models.Model):
@@ -150,7 +162,11 @@ class ActivityService:
         space_activity, created = SpaceActivity.objects.get_or_create(
             campaign=campaign,
             space=space,
-            defaults={'claimed_at': claimed_at, 'ends_at': ends_at},
+            defaults={
+                'claimed_at': claimed_at,
+                'ends_at': ends_at,
+                'attention_started_at': claimed_at,
+            },
         )
         if created and campaign.config.get('mode') == ActivityService.STARRY_NIGHT_MODE:
             ActivityService.backfill_starry_night_progress(space_activity, claimed_at)
@@ -245,6 +261,16 @@ class ActivityService:
     def space_activity_for(cls, campaign, space, active_only=False):
         queryset = cls.space_activities(space, active_only=active_only)
         return queryset.get(campaign=campaign)
+
+    @staticmethod
+    def mark_seen(space_activity, user):
+        if user.space_id != space_activity.space_id:
+            raise ValueError('activity does not belong to this space')
+        UserActivityView.objects.update_or_create(
+            space_activity=space_activity,
+            user=user,
+            defaults={'seen_at': timezone.now()},
+        )
 
     @classmethod
     def admin_payloads(cls, space):
@@ -664,6 +690,10 @@ class ActivityService:
             assignment_mode=campaign.assignment_mode,
             duration_seconds=campaign.duration_seconds,
             theme=campaign.config.get('theme', ''),
+            newly_claimed=bool(
+                space_activity.attention_started_at
+                and not space_activity.user_views.filter(user=user).exists()
+            ),
             verified=bool(user.verified),
             today_earned=progress.events.filter(event_date=timezone.localdate()).exists(),
             claimable_points=claimable_points,
