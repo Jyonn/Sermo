@@ -1,6 +1,8 @@
 from datetime import datetime, timedelta, timezone as datetime_timezone
+from io import StringIO
 from unittest.mock import patch
 
+from django.core.management import call_command
 from django.test import TestCase
 from django.utils import timezone
 
@@ -287,8 +289,10 @@ class ActivityServiceTests(TestCase):
             Message.objects.filter(id=message.id).update(created_at=claimed_at - timedelta(days=4 - offset, minutes=15))
 
         run = ActivityService.claim_for_space(campaign, self.space, claimed_at=claimed_at)
+        run.refresh_from_db()
         progress = campaign.user_progress.get(user=self.user)
 
+        self.assertIsNotNone(run.history_backfilled_at)
         self.assertEqual(progress.events.count(), 5)
         self.assertEqual(progress.earned_points, 5)
         self.assertEqual(ActivityService.payload(campaign, self.user, run)['starry_night']['streak_days'], 5)
@@ -296,6 +300,14 @@ class ActivityServiceTests(TestCase):
             user=self.user,
             reward_id='activity.background.starry-night',
         ).exists())
+        output = StringIO()
+        call_command('backfill_starry_night_progress', campaign_key=campaign.key, stdout=output)
+        self.assertEqual(progress.events.count(), 5)
+        self.assertEqual(UserResourceInventory.objects.filter(
+            user=self.user,
+            reward_id='activity.background.starry-night',
+        ).count(), 1)
+        self.assertIn('events=0, rewards=0', output.getvalue())
 
     def test_starry_night_backfill_ignores_submission_and_preserves_yesterday_streak(self):
         campaign = ActivityCampaign.objects.create(
@@ -326,3 +338,25 @@ class ActivityServiceTests(TestCase):
         self.assertEqual(ActivityService._starry_streak(progress, claimed_at.astimezone(ActivityService.BEIJING_TIMEZONE)), 2)
         with patch('Activity.models.timezone.now', return_value=claimed_at):
             self.assertEqual(ActivityService.payload(campaign, self.user, run)['starry_night']['streak_days'], 2)
+
+    def test_starry_night_payload_backfills_an_existing_claim_once(self):
+        campaign = ActivityCampaign.objects.create(
+            key='starry-night-existing-claim',
+            title='Existing Starry Claim',
+            assignment_mode=ActivityCampaign.AssignmentMode.MANUAL,
+            event_key='chat.message.send',
+            config={'theme': 'starry-night', 'mode': ActivityService.STARRY_NIGHT_MODE, 'streak_days': 5},
+        )
+        chat = Chat.objects.create(space=self.space, chat_type=ChatTypeChoice.DIRECT, created_by=self.user)
+        claimed_at = datetime(2026, 9, 6, 13, 0, tzinfo=datetime_timezone.utc)
+        message = Message.objects.create(chat=chat, user=self.user, type=MessageTypeChoice.TEXT, content='before claim')
+        Message.objects.filter(id=message.id).update(created_at=claimed_at - timedelta(minutes=15))
+        run = SpaceActivity.objects.create(campaign=campaign, space=self.space, claimed_at=claimed_at)
+
+        with patch('Activity.models.timezone.now', return_value=claimed_at):
+            ActivityService.payload(campaign, self.user, run)
+        run.refresh_from_db()
+        ActivityService.payload(campaign, self.user, run)
+
+        self.assertIsNotNone(run.history_backfilled_at)
+        self.assertEqual(campaign.events.filter(progress__user=self.user).count(), 1)

@@ -49,6 +49,7 @@ class SpaceActivity(models.Model):
     total_points = models.PositiveIntegerField(default=0)
     claimed_at = models.DateTimeField(default=timezone.now, db_index=True)
     ends_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    history_backfilled_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -181,13 +182,15 @@ class ActivityService:
             if local_created_at.hour >= 20:
                 qualifying.setdefault((message.user_id, local_created_at.date()), message)
         progress_by_user = {}
+        events_created = 0
+        rewards_created = 0
         with transaction.atomic():
             for (user_id, event_date), message in qualifying.items():
                 progress = progress_by_user.get(user_id)
                 if progress is None:
                     _, progress = cls._progress(space_activity.campaign, message.user, space_activity)
                     progress_by_user[user_id] = progress
-                ActivityEvent.objects.get_or_create(
+                _, created = ActivityEvent.objects.get_or_create(
                     campaign=space_activity.campaign,
                     progress=progress,
                     event_key=space_activity.campaign.event_key,
@@ -195,12 +198,22 @@ class ActivityService:
                     event_reference='',
                     defaults={'points': 1, 'claimed_at': message.created_at},
                 )
+                events_created += int(created)
             for progress in progress_by_user.values():
                 streak = cls._starry_streak(progress, local_claimed_at)
                 if progress.earned_points != streak:
                     progress.earned_points = streak
                     progress.save(update_fields=['earned_points', 'updated_at'])
-                cls._grant_starry_night_reward(space_activity.campaign, progress.user, streak)
+                rewards_created += int(cls._grant_starry_night_reward(
+                    space_activity.campaign, progress.user, streak,
+                ))
+            SpaceActivity.objects.filter(id=space_activity.id).update(history_backfilled_at=timezone.now())
+            space_activity.history_backfilled_at = timezone.now()
+        return {
+            'eligible_users': len(progress_by_user),
+            'events_created': events_created,
+            'rewards_created': rewards_created,
+        }
 
     @classmethod
     def ensure_automatic_for_space(cls, space):
@@ -610,6 +623,13 @@ class ActivityService:
 
     @classmethod
     def payload(cls, campaign, user, space_activity=None):
+        if space_activity is None:
+            space_activity = SpaceActivity.objects.get(campaign=campaign, space=user.space)
+        if (
+            campaign.config.get('mode') == cls.STARRY_NIGHT_MODE
+            and space_activity.history_backfilled_at is None
+        ):
+            cls.backfill_starry_night_progress(space_activity, space_activity.claimed_at)
         space_activity, progress = cls._progress(campaign, user, space_activity)
         personal_reward = cls._ensure_personal_reward(progress)
         cls._ensure_legacy_awakenings(space_activity)
