@@ -244,7 +244,7 @@ class ActivityServiceTests(TestCase):
             ActivityService.record_starry_night_chat(
                 self.user, f'finish-{offset}', beijing_evening + timedelta(days=offset))
 
-        self.assertTrue(UserResourceInventory.objects.filter(
+        self.assertFalse(UserResourceInventory.objects.filter(
             user=self.user,
             reward_id='activity.background.starry-night',
             resource_key='starry-night',
@@ -252,8 +252,12 @@ class ActivityServiceTests(TestCase):
         final_evening = beijing_evening + timedelta(days=8)
         with patch('Activity.models.timezone.now', return_value=final_evening):
             payload = ActivityService.payload(campaign, self.user)
+            self.assertTrue(payload['starry_night']['reward_claimable'])
+            ActivityService.claim_starry_night_reward(campaign, self.user)
+            payload = ActivityService.payload(campaign, self.user)
         self.assertEqual(payload['starry_night']['streak_days'], 5)
         self.assertTrue(payload['starry_night']['reward_owned'])
+        self.assertFalse(payload['starry_night']['reward_claimable'])
 
     def test_starry_night_claim_backfills_previous_five_evenings(self):
         campaign = ActivityCampaign.objects.create(
@@ -296,7 +300,7 @@ class ActivityServiceTests(TestCase):
         self.assertEqual(progress.events.count(), 5)
         self.assertEqual(progress.earned_points, 5)
         self.assertEqual(ActivityService.payload(campaign, self.user, run)['starry_night']['streak_days'], 5)
-        self.assertTrue(UserResourceInventory.objects.filter(
+        self.assertFalse(UserResourceInventory.objects.filter(
             user=self.user,
             reward_id='activity.background.starry-night',
         ).exists())
@@ -306,8 +310,15 @@ class ActivityServiceTests(TestCase):
         self.assertEqual(UserResourceInventory.objects.filter(
             user=self.user,
             reward_id='activity.background.starry-night',
-        ).count(), 1)
+        ).count(), 0)
         self.assertIn('events=0, rewards=0', output.getvalue())
+        with patch('Activity.models.timezone.now', return_value=claimed_at):
+            ActivityService.claim_starry_night_reward(campaign, self.user)
+            ActivityService.claim_starry_night_reward(campaign, self.user)
+        self.assertEqual(UserResourceInventory.objects.filter(
+            user=self.user,
+            reward_id='activity.background.starry-night',
+        ).count(), 1)
 
     def test_starry_night_backfill_ignores_submission_and_preserves_yesterday_streak(self):
         campaign = ActivityCampaign.objects.create(

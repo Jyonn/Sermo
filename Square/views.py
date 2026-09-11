@@ -318,6 +318,8 @@ class SquareQuotaView(View):
 class SquareStatusView(View):
     @staticmethod
     def _activity_needs_attention(activity):
+        if activity.get('starry_night', {}).get('reward_claimable'):
+            return True
         if activity['personal_reward_claimable'] or activity['space_reward_claimable']:
             return True
         has_locked_space_reward = any(not milestone['unlocked'] for milestone in activity['milestones'])

@@ -201,12 +201,10 @@ class ActivityService:
                 events_created += int(created)
             for progress in progress_by_user.values():
                 streak = cls._starry_streak(progress, local_claimed_at)
-                if progress.earned_points != streak:
+                target = int(space_activity.campaign.config.get('streak_days', 5))
+                if progress.earned_points < target and progress.earned_points != streak:
                     progress.earned_points = streak
                     progress.save(update_fields=['earned_points', 'updated_at'])
-                rewards_created += int(cls._grant_starry_night_reward(
-                    space_activity.campaign, progress.user, streak,
-                ))
             SpaceActivity.objects.filter(id=space_activity.id).update(history_backfilled_at=timezone.now())
             space_activity.history_backfilled_at = timezone.now()
         return {
@@ -358,7 +356,7 @@ class ActivityService:
 
     @classmethod
     def record_starry_night_chat(cls, user, event_reference, occurred_at=None):
-        """Record one Beijing-evening chat day and unlock the reward at a five-day streak."""
+        """Record one Beijing-evening chat day; completed rewards remain manually claimable."""
         if not user.verified or user.is_deleted:
             return []
         occurred_at = occurred_at or timezone.now()
@@ -383,11 +381,10 @@ class ActivityService:
                     defaults={'points': 1, 'claimed_at': occurred_at},
                 )
                 streak = cls._starry_streak(progress, local_time)
-                if progress.earned_points != streak:
+                target = int(campaign.config.get('streak_days', 5))
+                if progress.earned_points < target and progress.earned_points != streak:
                     progress.earned_points = streak
                     progress.save(update_fields=['earned_points', 'updated_at'])
-                if cls._grant_starry_night_reward(campaign, user, streak):
-                    unlocked.append(campaign.key)
         return unlocked
 
     @classmethod
@@ -398,13 +395,19 @@ class ActivityService:
         return cls._consecutive_streak(progress, end_date)
 
     @classmethod
-    def _grant_starry_night_reward(cls, campaign, user, streak):
+    def claim_starry_night_reward(cls, campaign, user):
+        if campaign.config.get('mode') != cls.STARRY_NIGHT_MODE:
+            raise ValueError('activity reward does not exist')
+        space_activity, progress = cls._progress(campaign, user)
+        if not space_activity.is_active():
+            raise ValueError('activity is not active')
         target = int(campaign.config.get('streak_days', 5))
         reward = campaign.config.get('reward') or {}
+        streak = max(progress.earned_points, cls._starry_streak(progress, timezone.localtime()))
         if streak < target or not reward:
-            return False
+            raise ValueError('activity reward is not ready')
         from User.models import UserResourceInventory
-        _, created = UserResourceInventory.grant_activity_resource(
+        item, _ = UserResourceInventory.grant_activity_resource(
             user,
             reward.get('resource_type', 'background'),
             reward['reward_id'],
@@ -412,7 +415,7 @@ class ActivityService:
             campaign.key,
             metadata={'kind': 'consecutive_evening_chat', 'streak_days': target},
         )
-        return created
+        return item
 
     @staticmethod
     def _consecutive_streak(progress, end_date):
@@ -714,12 +717,14 @@ class ActivityService:
             reward = campaign.config.get('reward') or {}
             target = int(campaign.config.get('streak_days', 5))
             owned = bool(reward and user.resource_inventory.filter(reward_id=reward.get('reward_id', '')).exists())
+            achieved = progress.earned_points >= target
             payload['starry_night'] = dict(
-                streak_days=target if owned else min(target, cls._starry_streak(progress, timezone.localtime())),
+                streak_days=target if owned or achieved else min(target, cls._starry_streak(progress, timezone.localtime())),
                 target_days=target,
                 window_start=campaign.config.get('window_start', '20:00'),
                 window_end=campaign.config.get('window_end', '24:00'),
                 reward_key=reward.get('resource_key', ''),
                 reward_owned=owned,
+                reward_claimable=not owned and achieved,
             )
         return payload

@@ -59,6 +59,15 @@ class ActivityMilestoneRewardClaimView(View):
         return ActivityService.payload(campaign, request.user)
 
 
+class ActivityStarryNightRewardClaimView(View):
+    @auth.require_user
+    def post(self, request: Request, key: str):
+        campaign = ActivityCampaign.objects.get(key=key, enabled=True)
+        ActivityService.space_activity_for(campaign, request.user.space, active_only=True)
+        ActivityService.claim_starry_night_reward(campaign, request.user)
+        return ActivityService.payload(campaign, request.user)
+
+
 class ActivitySpaceRewardClaimView(View):
     @auth.require_user
     def post(self, request: Request, key: str):

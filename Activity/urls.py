@@ -1,6 +1,6 @@
 from django.urls import path
 
-from Activity.views import AdminActivityClaimView, AdminActivityListView, ActiveActivityView, ActivityClaimView, ActivityContributionView, ActivityDetailView, ActivityMilestoneRewardClaimView, ActivityPersonalRewardClaimView, ActivitySpaceRewardClaimView
+from Activity.views import AdminActivityClaimView, AdminActivityListView, ActiveActivityView, ActivityClaimView, ActivityContributionView, ActivityDetailView, ActivityMilestoneRewardClaimView, ActivityPersonalRewardClaimView, ActivitySpaceRewardClaimView, ActivityStarryNightRewardClaimView
 
 
 urlpatterns = [
@@ -11,6 +11,7 @@ urlpatterns = [
     path('<slug:key>/claim', ActivityClaimView.as_view(), name='activity claim'),
     path('<slug:key>/personal-reward/claim', ActivityPersonalRewardClaimView.as_view(), name='activity personal reward claim'),
     path('<slug:key>/rewards/<slug:reward_key>/claim', ActivityMilestoneRewardClaimView.as_view(), name='activity milestone reward claim'),
+    path('<slug:key>/starry-reward/claim', ActivityStarryNightRewardClaimView.as_view(), name='activity starry night reward claim'),
     path('<slug:key>/space-reward/claim', ActivitySpaceRewardClaimView.as_view(), name='activity space reward claim'),
     path('<slug:key>/contribute', ActivityContributionView.as_view(), name='activity contribution'),
 ]
