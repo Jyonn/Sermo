@@ -201,3 +201,52 @@ class ActivityServiceTests(TestCase):
         )
         self.assertEqual(self.user.avatar_frame_style, 'spider-web')
         self.assertEqual(self.user.profile_card_theme, 'spider-city')
+
+    def test_starry_night_requires_claim_evening_window_and_consecutive_days(self):
+        campaign = ActivityCampaign.objects.create(
+            key='starry-night-test',
+            title='Five Nights',
+            assignment_mode=ActivityCampaign.AssignmentMode.MANUAL,
+            duration_seconds=15 * 24 * 60 * 60,
+            event_key='chat.message.send',
+            config={
+                'theme': 'starry-night',
+                'mode': ActivityService.STARRY_NIGHT_MODE,
+                'streak_days': 5,
+                'reward': {
+                    'resource_type': 'background',
+                    'reward_id': 'activity.background.starry-night',
+                    'resource_key': 'starry-night',
+                },
+            },
+        )
+        beijing_evening = datetime(2026, 9, 1, 12, 30, tzinfo=datetime_timezone.utc)
+
+        self.assertEqual(ActivityService.record_starry_night_chat(self.user, 'before-claim', beijing_evening), [])
+        self.assertFalse(campaign.events.exists())
+        ActivityService.claim_for_space(campaign, self.space, claimed_at=beijing_evening - timedelta(hours=1))
+        self.assertEqual(ActivityService.record_starry_night_chat(
+            self.user, 'too-early', beijing_evening - timedelta(hours=1)), [])
+
+        for offset in range(3):
+            ActivityService.record_starry_night_chat(
+                self.user, f'first-{offset}', beijing_evening + timedelta(days=offset))
+        gap_day = beijing_evening + timedelta(days=4)
+        ActivityService.record_starry_night_chat(self.user, 'after-gap', gap_day)
+        progress = campaign.user_progress.get(user=self.user)
+        self.assertEqual(ActivityService._consecutive_streak(progress, timezone.localtime(gap_day).date()), 1)
+
+        for offset in range(5, 9):
+            ActivityService.record_starry_night_chat(
+                self.user, f'finish-{offset}', beijing_evening + timedelta(days=offset))
+
+        self.assertTrue(UserResourceInventory.objects.filter(
+            user=self.user,
+            reward_id='activity.background.starry-night',
+            resource_key='starry-night',
+        ).exists())
+        final_evening = beijing_evening + timedelta(days=8)
+        with patch('Activity.models.timezone.now', return_value=final_evening):
+            payload = ActivityService.payload(campaign, self.user)
+        self.assertEqual(payload['starry_night']['streak_days'], 5)
+        self.assertTrue(payload['starry_night']['reward_owned'])

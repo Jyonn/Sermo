@@ -109,6 +109,12 @@ for background in CHAT_BACKGROUND_LEVELS:
         'menu.personalization.background', 'wallpaper', asset_key=background,
     )
 
+for background in ACTIVITY_PERSONALIZATION.get('chat_background_theme', set()):
+    register(
+        f'menu.personalization.background.use.{background}', background, background,
+        'menu.personalization.background', 'celebration', asset_key=background,
+    )
+
 for style in PERSONALIZATION_LEVELS['chat_bubble_style']:
     register(
         f'menu.personalization.bubble.use.{style}', style, style,

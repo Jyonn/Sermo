@@ -688,6 +688,9 @@ class Message(models.Model):
             if message.type == MessageTypeChoice.MAP_ACCESS and map_access_viewer is not None:
                 from TravelMap.models import MapAccessGrant
                 MapAccessGrant.grant(user, map_access_viewer)
+            if not chat.submission:
+                from Activity.models import ActivityService
+                ActivityService.record_starry_night_chat(user, message.id, occurred_at=message.created_at)
             if message.type in cls.MEDIA_KIND_BY_TYPE and message.media_resource_id is None:
                 payload = cls._parse_payload(message.content)
                 asset = MediaAsset.queue(

@@ -580,6 +580,9 @@ class User(models.Model):
         normalized_theme = self.validators.chat_background_theme(theme)
         if normalized_theme != self.chat_background_theme:
             self.require_capability(f'menu.personalization.background.use.{normalized_theme}')
+            if normalized_theme in ACTIVITY_PERSONALIZATION.get('chat_background_theme', set()) and not UserResourceInventory.owns(
+                    self, 'background', normalized_theme):
+                raise UserErrors.PERSONALIZATION_NOT_OWNED
         normalized_uri = (uri or '').strip() if normalized_theme == 'custom' else ''
         previous_uri = self.chat_background_uri
         self.chat_background_theme = normalized_theme

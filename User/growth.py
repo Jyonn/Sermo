@@ -134,6 +134,7 @@ PERSONALIZATION_LEVELS = {
 }
 
 ACTIVITY_PERSONALIZATION = {
+    'chat_background_theme': {'starry-night'},
     'chat_bubble_style': {'baxian-lv', 'baxian-zhongli', 'baxian-he'},
     'avatar_frame_style': {'spider-web'},
 }

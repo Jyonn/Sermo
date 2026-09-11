@@ -135,6 +135,7 @@ class UserActivityReward(models.Model):
 class ActivityService:
     AWAKENING_COUNT = 8
     FRIENDLY_NEIGHBOR_MODE = 'friendly_neighbor'
+    STARRY_NIGHT_MODE = 'starry_night_streak'
 
     @staticmethod
     def claim_for_space(campaign, space, claimed_at=None):
@@ -290,6 +291,62 @@ class ActivityService:
                     progress.save(update_fields=['earned_points', 'updated_at'])
                     awarded += event.points
         return awarded
+
+    @classmethod
+    def record_starry_night_chat(cls, user, event_reference, occurred_at=None):
+        """Record one Beijing-evening chat day and unlock the reward at a five-day streak."""
+        if not user.verified or user.is_deleted:
+            return []
+        occurred_at = occurred_at or timezone.now()
+        local_time = timezone.localtime(occurred_at)
+        if local_time.hour < 20:
+            return []
+        unlocked = []
+        for space_activity in cls.space_activities(user.space, active_only=True).filter(
+                campaign__event_key='chat.message.send'):
+            campaign = space_activity.campaign
+            if campaign.config.get('mode') != cls.STARRY_NIGHT_MODE:
+                continue
+            with transaction.atomic():
+                _, progress = cls._progress(campaign, user, space_activity)
+                progress = UserActivityProgress.objects.select_for_update().get(id=progress.id)
+                ActivityEvent.objects.get_or_create(
+                    campaign=campaign,
+                    progress=progress,
+                    event_key=campaign.event_key,
+                    event_date=local_time.date(),
+                    event_reference='',
+                    defaults={'points': 1, 'claimed_at': occurred_at},
+                )
+                streak = cls._consecutive_streak(progress, local_time.date())
+                if progress.earned_points != streak:
+                    progress.earned_points = streak
+                    progress.save(update_fields=['earned_points', 'updated_at'])
+                target = int(campaign.config.get('streak_days', 5))
+                reward = campaign.config.get('reward') or {}
+                if streak >= target and reward:
+                    from User.models import UserResourceInventory
+                    _, created = UserResourceInventory.grant_activity_resource(
+                        user,
+                        reward.get('resource_type', 'background'),
+                        reward['reward_id'],
+                        reward['resource_key'],
+                        campaign.key,
+                        metadata={'kind': 'consecutive_evening_chat', 'streak_days': target},
+                    )
+                    if created:
+                        unlocked.append(campaign.key)
+        return unlocked
+
+    @staticmethod
+    def _consecutive_streak(progress, end_date):
+        dates = set(progress.events.filter(event_date__lte=end_date).values_list('event_date', flat=True))
+        streak = 0
+        cursor = end_date
+        while cursor in dates:
+            streak += 1
+            cursor -= timedelta(days=1)
+        return streak
 
     @classmethod
     def claim_milestone_reward(cls, campaign, user, reward_key):
@@ -569,5 +626,17 @@ class ActivityService:
                     claimed=item['reward_id'] in owned,
                     claimable=progress.earned_points >= int(item['threshold']) and item['reward_id'] not in owned,
                 ) for item in campaign.config.get('user_rewards', [])],
+            )
+        if campaign.config.get('mode') == cls.STARRY_NIGHT_MODE:
+            reward = campaign.config.get('reward') or {}
+            target = int(campaign.config.get('streak_days', 5))
+            owned = bool(reward and user.resource_inventory.filter(reward_id=reward.get('reward_id', '')).exists())
+            payload['starry_night'] = dict(
+                streak_days=min(target, cls._consecutive_streak(progress, timezone.localdate())),
+                target_days=target,
+                window_start=campaign.config.get('window_start', '20:00'),
+                window_end=campaign.config.get('window_end', '24:00'),
+                reward_key=reward.get('resource_key', ''),
+                reward_owned=owned,
             )
         return payload
