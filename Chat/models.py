@@ -149,11 +149,12 @@ class Chat(models.Model):
             raise ChatErrors.NOT_GROUP_CHAT(chat=self.id)
         if not self.is_owner(operator):
             raise ChatErrors.FORBIDDEN
-        normalized_theme = operator.validators.chat_background_theme(theme)
+        normalized_theme = operator.validators.chat_background_theme(theme) if theme else ''
         if normalized_theme == 'custom':
             raise ChatErrors.FORBIDDEN
         if normalized_theme != self.group_background_theme:
-            operator.require_capability(f'menu.personalization.background.use.{normalized_theme}')
+            if normalized_theme:
+                operator.require_capability(f'menu.personalization.background.use.{normalized_theme}')
             self.group_background_theme = normalized_theme
             self.save(update_fields=['group_background_theme'])
             self._emit_state_changed()

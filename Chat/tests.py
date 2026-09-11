@@ -507,6 +507,22 @@ class ChatNotificationPreferenceTests(TestCase):
         payload = next(item for item in chat_list if item['chat_id'] == self.chat.id)
         self.assertEqual(payload['group_background_theme'], '')
 
+    def test_owner_can_unset_group_background(self):
+        self.chat.group_background_theme = 'paper'
+        self.chat.save(update_fields=['group_background_theme'])
+
+        response = self.client.post(
+            f'/chats/group/background?chat_id={self.chat.id}',
+            data=json.dumps({'background_theme': ''}),
+            content_type='application/json',
+            **self.authorization(self.sender),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json()['body']['group_background_theme'], '')
+        self.chat.refresh_from_db()
+        self.assertEqual(self.chat.group_background_theme, '')
+
     def test_owner_can_mute_and_unmute_group_member_with_system_messages(self):
         muted = self.client.post(
             f'/chats/group/mutes?chat_id={self.chat.id}',

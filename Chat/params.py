@@ -31,7 +31,9 @@ class ChatParams(metaclass=Params):
         lambda value: value in ('revision', 'terminate', 'ready'),
         message=_('Invalid submission action'),
     )
-    background_theme = Validator('background_theme').to(str).to(User.validators.chat_background_theme)
+    background_theme = Validator('background_theme').to(str).to(
+        lambda value: User.validators.chat_background_theme(value) if value.strip() else ''
+    )
 
 
 class ChatMemberParams(metaclass=Params):
