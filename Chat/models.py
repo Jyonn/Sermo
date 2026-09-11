@@ -63,7 +63,7 @@ class Chat(models.Model):
     chat_type = models.IntegerField(choices=ChatTypeChoice.to_choices(), db_index=True)
     purpose = models.IntegerField(choices=ChatPurposeChoice.to_choices(), default=ChatPurposeChoice.NORMAL, db_index=True)
     title = models.CharField(max_length=vldt.TITLE_MAX_LENGTH, null=True, blank=True)
-    group_background_theme = models.CharField(max_length=16, default='default')
+    group_background_theme = models.CharField(max_length=16, blank=True, default='')
     created_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='created_chats')
 
     created_at = models.DateTimeField(auto_now_add=True)

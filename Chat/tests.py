@@ -498,7 +498,14 @@ class ChatNotificationPreferenceTests(TestCase):
         )
         self.assertIsNone(non_owner.json()['body'])
         self.chat.refresh_from_db()
-        self.assertEqual(self.chat.group_background_theme, 'default')
+        self.assertEqual(self.chat.group_background_theme, '')
+
+    def test_group_background_is_unset_by_default(self):
+        self.chat.refresh_from_db()
+        self.assertEqual(self.chat.group_background_theme, '')
+        chat_list = self.client.get('/chats/', **self.authorization(self.recipient)).json()['body']
+        payload = next(item for item in chat_list if item['chat_id'] == self.chat.id)
+        self.assertEqual(payload['group_background_theme'], '')
 
     def test_owner_can_mute_and_unmute_group_member_with_system_messages(self):
         muted = self.client.post(
