@@ -784,6 +784,28 @@ class StatementApiTests(TestCase):
 
         self.assertEqual(response.status_code, 400, response.content)
 
+    @patch('Message.image_metadata.search_nearby_places')
+    def test_nearby_location_search_returns_distance_sorted_places(self, search):
+        search.return_value = [{
+            'id': 'B001', 'name': '西湖文化广场', 'address': '杭州市拱墅区',
+            'latitude': 30.28, 'longitude': 120.165, 'distance': 286,
+            'type': '公园广场', 'business_area': '武林商圈',
+        }]
+        response = self.client.post(
+            '/square/location/nearby',
+            data=json.dumps({
+                'location': {'latitude': 30.27, 'longitude': 120.16},
+                'keyword': '西湖', 'radius': 3000,
+            }),
+            content_type='application/json',
+            **self.authorization(self.author),
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        body = response.json()['body']
+        self.assertEqual(body['sort'], 'distance')
+        self.assertEqual(body['places'][0]['distance'], 286)
+        search.assert_called_once_with(30.27, 120.16, keyword='西湖', radius=3000)
+
     def test_statements_can_share_media_asset(self):
         asset = MediaAsset.objects.create(
             source_key='sermo/messages/image/reused.jpg',

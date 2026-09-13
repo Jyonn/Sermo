@@ -141,6 +141,47 @@ def _reverse_geocode_amap(latitude: float, longitude: float):
     return address[:500]
 
 
+def search_nearby_places(latitude: float, longitude: float, keyword='', radius=5000):
+    if not Globals.AMAP_WEBSERVICE_KEY:
+        raise RuntimeError('Amap Web Service key is not configured')
+    params = {
+        'key': Globals.AMAP_WEBSERVICE_KEY,
+        'location': f'{longitude},{latitude}',
+        'radius': max(100, min(50000, int(radius))),
+        'sortrule': 'distance',
+        'page_size': 20,
+        'page_num': 1,
+        'show_fields': 'business',
+    }
+    if str(keyword or '').strip():
+        params['keywords'] = str(keyword).strip()[:80]
+    response = requests.get(Globals.AMAP_PLACE_AROUND_URL, params=params, timeout=8)
+    response.raise_for_status()
+    payload = response.json()
+    if str(payload.get('status')) != '1':
+        raise ValueError(payload.get('info') or 'Amap nearby search failed')
+    places = []
+    for poi in payload.get('pois') or []:
+        try:
+            poi_longitude, poi_latitude = (float(value) for value in str(poi.get('location') or '').split(',', 1))
+        except (TypeError, ValueError):
+            continue
+        business = poi.get('business') if isinstance(poi.get('business'), dict) else {}
+        address_parts = [poi.get('pname'), poi.get('cityname'), poi.get('adname'), poi.get('address')]
+        address = ''.join(str(value) for value in address_parts if isinstance(value, str) and value)
+        places.append({
+            'id': str(poi.get('id') or ''),
+            'name': str(poi.get('name') or '').strip()[:120],
+            'address': address[:255],
+            'latitude': poi_latitude,
+            'longitude': poi_longitude,
+            'distance': max(0, int(float(poi.get('distance') or 0))),
+            'type': str(poi.get('type') or '').split(';')[0][:80],
+            'business_area': str(business.get('business_area') or '')[:80],
+        })
+    return places
+
+
 def _reverse_geocode_opencage(latitude: float, longitude: float):
     global _last_opencage_at
     with _opencage_lock:

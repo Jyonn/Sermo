@@ -4,7 +4,7 @@ from unittest.mock import Mock, patch
 
 from django.test import SimpleTestCase, TestCase
 
-from Message.image_metadata import _reverse_geocode_opencage, parse_image_info, reverse_geocode
+from Message.image_metadata import _reverse_geocode_opencage, parse_image_info, reverse_geocode, search_nearby_places
 from Message.video_metadata import parse_avinfo
 from Message.models import MediaAsset, Message, MessageTypeChoice, random_point_within_radius
 from utils.qiniu import build_message_media_key, validate_message_media_key
@@ -37,6 +37,27 @@ class ImageMetadataTests(SimpleTestCase):
                 'pixel_height': 427,
             },
         )
+
+    @patch('Message.image_metadata.requests.get')
+    def test_nearby_places_use_distance_sorting_and_normalize_coordinates(self, get):
+        response = Mock()
+        response.raise_for_status.return_value = None
+        response.json.return_value = {'status': '1', 'pois': [{
+            'id': 'B001', 'name': '西湖文化广场', 'location': '120.165000,30.280000',
+            'distance': '286', 'type': '风景名胜;公园广场', 'pname': '浙江省',
+            'cityname': '杭州市', 'adname': '拱墅区', 'address': '环城北路',
+            'business': {'business_area': '武林商圈'},
+        }]}
+        get.return_value = response
+        with (
+            patch.object(Globals, 'AMAP_WEBSERVICE_KEY', 'test-key', create=True),
+            patch.object(Globals, 'AMAP_PLACE_AROUND_URL', 'https://restapi.amap.com/v5/place/around', create=True),
+        ):
+            places = search_nearby_places(30.27, 120.16, keyword='西湖', radius=3000)
+        self.assertEqual(places[0]['name'], '西湖文化广场')
+        self.assertEqual(places[0]['latitude'], 30.28)
+        self.assertEqual(get.call_args.kwargs['params']['sortrule'], 'distance')
+        self.assertEqual(get.call_args.kwargs['params']['keywords'], '西湖')
 
     @patch('Message.image_metadata.requests.get')
     def test_reverse_geocode_prefers_amap(self, get):

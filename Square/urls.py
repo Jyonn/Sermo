@@ -1,6 +1,6 @@
 from django.urls import path
 
-from Square.views import AdminSquareMuteView, AdminStatementView, PinnedStatementView, SquareChatRecordStatementView, SquareQuotaView, SquareStatusView, StatementAuthorMuteView, StatementCalendarView, StatementCommentDetailView, StatementCommentLikeView, StatementCommentView, StatementDetailView, StatementEmoticonView, StatementLikeView, StatementLocationView, StatementMediaThumbnailView, StatementMediaView, StatementPinView, StatementUploadView, StatementView
+from Square.views import AdminSquareMuteView, AdminStatementView, PinnedStatementView, SquareChatRecordStatementView, SquareQuotaView, SquareStatusView, StatementAuthorMuteView, StatementCalendarView, StatementCommentDetailView, StatementCommentLikeView, StatementCommentView, StatementDetailView, StatementEmoticonView, StatementLikeView, StatementLocationView, StatementMediaThumbnailView, StatementMediaView, StatementNearbyLocationView, StatementPinView, StatementUploadView, StatementView
 
 
 urlpatterns = [
@@ -11,6 +11,7 @@ urlpatterns = [
     path('emoticons/<slug:blob_slug>', StatementEmoticonView.as_view(), name='square emoticon'),
     path('upload', StatementUploadView.as_view(), name='square upload'),
     path('location', StatementLocationView.as_view(), name='square location'),
+    path('location/nearby', StatementNearbyLocationView.as_view(), name='square nearby locations'),
     path('statements', StatementView.as_view(), name='square statements'),
     path('statements/calendar', StatementCalendarView.as_view(), name='square statement calendar'),
     path('statements/chat-record', SquareChatRecordStatementView.as_view(), name='square chat record statement'),

@@ -14,6 +14,7 @@ class SquareErrors:
     AUDIO_DURATION_INVALID = Error(message=_('Voice recording cannot exceed 60 seconds'), code=Code.BadRequest)
     VISIBILITY_INVALID = Error(message=_('Invalid statement visibility'), code=Code.BadRequest)
     LOCATION_INVALID = Error(message=_('Invalid statement location'), code=Code.BadRequest)
+    LOCATION_SEARCH_UNAVAILABLE = Error(message=_('Nearby places are temporarily unavailable'), code=Code.ServiceUnavailable)
     DATE_INVALID = Error(message=_('Invalid statement date'), code=Code.BadRequest)
     COMMENT_REQUIRED = Error(message=_('Comment cannot be empty'), code=Code.BadRequest)
     COMMENT_TOO_LONG = Error(message=_('A comment can contain at most 140 characters'), code=Code.BadRequest)

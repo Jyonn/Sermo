@@ -49,6 +49,25 @@ class StatementLocationView(View):
         }
 
 
+class StatementNearbyLocationView(View):
+    @auth.require_user
+    @analyse.json(SquareParams.location, SquareParams.location_keyword, SquareParams.location_radius)
+    def post(self, request: Request):
+        location = raw(request.json.location)
+        if location is None:
+            raise SquareErrors.LOCATION_INVALID
+        try:
+            from Message.image_metadata import search_nearby_places
+            places = search_nearby_places(
+                location['latitude'], location['longitude'],
+                keyword=request.json.location_keyword,
+                radius=request.json.location_radius,
+            )
+        except Exception:
+            raise SquareErrors.LOCATION_SEARCH_UNAVAILABLE
+        return {'places': places, 'sort': 'distance', 'radius': request.json.location_radius}
+
+
 class StatementView(View):
     @auth.require_user
     @analyse.query(
