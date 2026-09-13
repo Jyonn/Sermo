@@ -6,6 +6,7 @@ from django.db import transaction
 from Config.models import Config, CI
 from Space.models import Space
 from User.models import User, WeChatMiniProgramIdentity
+from User.models import UserAccountKindChoice
 from User.validators import UserErrors
 from utils import function
 
@@ -125,6 +126,7 @@ def complete_wechat_onboarding(ticket, mode, nickname=None, password=None, langu
         if mode == 'existing':
             user = User.objects.select_for_update().filter(
                 space=space, lower_name=(nickname or '').strip().lower(), is_deleted=False,
+                account_kind=UserAccountKindChoice.MEMBER,
             ).first()
             if user is None:
                 raise UserErrors.NOT_EXISTS(attr='name', value=nickname or '')
