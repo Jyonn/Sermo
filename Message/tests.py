@@ -1,12 +1,11 @@
 import json
-import math
 from unittest.mock import Mock, patch
 
 from django.test import SimpleTestCase, TestCase
 
 from Message.image_metadata import _reverse_geocode_opencage, parse_image_info, reverse_geocode, search_nearby_places
 from Message.video_metadata import parse_avinfo
-from Message.models import MediaAsset, Message, MessageTypeChoice, random_point_within_radius
+from Message.models import MediaAsset, Message, MessageTypeChoice
 from utils.qiniu import build_message_media_key, validate_message_media_key
 from utils.global_settings import Globals
 
@@ -275,55 +274,13 @@ class LocationMessageTests(SimpleTestCase):
         )
         geocode.assert_called_once_with(1.283401, 103.860712)
 
-    @patch('Message.models.random_point_within_radius', return_value=(1.4, 103.9))
-    @patch('Message.image_metadata.reverse_geocode', return_value=('模糊位置', 'opencage'))
-    def test_normalize_obscured_location_uses_randomized_coordinates(self, geocode, randomize):
-        normalized = Message.normalize_content(
-            MessageTypeChoice.LOCATION,
-            json.dumps({
-                'latitude': 1.2834012,
-                'longitude': 103.8607123,
-                'obscure': True,
-            }),
-        )
-
-        self.assertEqual(
-            json.loads(normalized),
-            {
-                'kind': 'location',
-                'latitude': 1.4,
-                'longitude': 103.9,
-                'address': '模糊位置',
-                'geocoding_provider': 'opencage',
-                'obscured': True,
-                'obscure_radius_km': 50,
-            },
-        )
-        randomize.assert_called_once_with(1.283401, 103.860712)
-        geocode.assert_called_once_with(1.4, 103.9)
-
-    def test_randomized_location_stays_within_fifty_kilometers(self):
-        class FixedRandom:
-            values = iter((1.0, 0.25))
-
-            def random(self):
-                return next(self.values)
-
-        latitude, longitude = random_point_within_radius(
-            30.2741,
-            120.1551,
-            rng=FixedRandom(),
-        )
-
-        latitude_delta = math.radians(latitude - 30.2741)
-        longitude_delta = math.radians(longitude - 120.1551)
-        original_latitude = math.radians(30.2741)
-        randomized_latitude = math.radians(latitude)
-        haversine = (
-            math.sin(latitude_delta / 2) ** 2
-            + math.cos(original_latitude)
-            * math.cos(randomized_latitude)
-            * math.sin(longitude_delta / 2) ** 2
-        )
-        distance = 2 * 6371.0088 * math.asin(math.sqrt(haversine))
-        self.assertLessEqual(distance, 50.001)
+    @patch('Message.image_metadata.reverse_geocode')
+    def test_selected_place_address_is_preserved(self, geocode):
+        normalized = Message.normalize_content(MessageTypeChoice.LOCATION, json.dumps({
+            'latitude': 30.28, 'longitude': 120.165,
+            'address': '西湖文化广场', 'geocoding_provider': 'amap',
+            'obscure': True,
+        }))
+        self.assertEqual(json.loads(normalized)['address'], '西湖文化广场')
+        self.assertNotIn('obscured', json.loads(normalized))
+        geocode.assert_not_called()

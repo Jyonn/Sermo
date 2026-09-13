@@ -2,10 +2,8 @@ import datetime
 import hashlib
 import json
 import ipaddress
-import math
 import os
 import re
-import secrets
 import socket
 import threading
 import uuid
@@ -31,32 +29,8 @@ from utils import function
 from utils.qiniu import sign_private_download_url, avatar_uri_for_key, build_message_image_thumbnail_uri, build_message_video_thumbnail_uri, validate_message_media_key
 
 
-EARTH_RADIUS_KM = 6371.0088
-LOCATION_OBSCURE_RADIUS_KM = 50
-
-
 def generate_media_blob_slug():
     return uuid.uuid4().hex
-
-
-def random_point_within_radius(latitude, longitude, radius_km=LOCATION_OBSCURE_RADIUS_KM, rng=None):
-    random_source = rng or secrets.SystemRandom()
-    distance_km = radius_km * math.sqrt(random_source.random())
-    bearing = 2 * math.pi * random_source.random()
-    angular_distance = distance_km / EARTH_RADIUS_KM
-    latitude_radians = math.radians(latitude)
-    longitude_radians = math.radians(longitude)
-
-    randomized_latitude = math.asin(
-        math.sin(latitude_radians) * math.cos(angular_distance)
-        + math.cos(latitude_radians) * math.sin(angular_distance) * math.cos(bearing)
-    )
-    randomized_longitude = longitude_radians + math.atan2(
-        math.sin(bearing) * math.sin(angular_distance) * math.cos(latitude_radians),
-        math.cos(angular_distance) - math.sin(latitude_radians) * math.sin(randomized_latitude),
-    )
-    normalized_longitude = (math.degrees(randomized_longitude) + 540) % 360 - 180
-    return round(math.degrees(randomized_latitude), 6), round(normalized_longitude, 6)
 
 
 class MessageTypeChoice(Choice):
@@ -1106,17 +1080,14 @@ class Message(models.Model):
                 raise MessageErrors.PAYLOAD_INVALID
             if not -90 <= latitude <= 90 or not -180 <= longitude <= 180:
                 raise MessageErrors.PAYLOAD_INVALID
-            obscure = payload.get('obscure') is True or payload.get('obscure') == 1
-            if obscure:
-                latitude, longitude = random_point_within_radius(latitude, longitude)
-
-            address = ''
-            geocoding_provider = ''
-            try:
-                from Message.image_metadata import reverse_geocode
-                address, geocoding_provider = reverse_geocode(latitude, longitude)
-            except Exception:
-                pass
+            address = str(payload.get('address') or '').strip()[:500]
+            geocoding_provider = str(payload.get('geocoding_provider') or '').strip()[:32]
+            if not address:
+                try:
+                    from Message.image_metadata import reverse_geocode
+                    address, geocoding_provider = reverse_geocode(latitude, longitude)
+                except Exception:
+                    pass
             normalized_payload = dict(
                 kind='location',
                 latitude=latitude,
@@ -1124,11 +1095,6 @@ class Message(models.Model):
                 address=address,
                 geocoding_provider=geocoding_provider,
             )
-            if obscure:
-                normalized_payload.update(
-                    obscured=True,
-                    obscure_radius_km=LOCATION_OBSCURE_RADIUS_KM,
-                )
             normalized = json.dumps(
                 normalized_payload,
                 separators=(',', ':'),
