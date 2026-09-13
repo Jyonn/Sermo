@@ -71,7 +71,7 @@ class StatementView(View):
     @auth.require_user
     @analyse.json(SquareParams.text, SquareParams.visibility, SquareParams.media, SquareParams.location, SquareParams.pin, SquareParams.anonymous)
     def post(self, request: Request):
-        request.user.space.require_square_enabled()
+        request.user.space.require_square_free_post_enabled()
         with transaction.atomic():
             statement = Statement.create_statement(
                 user=request.user,
@@ -135,6 +135,8 @@ class SquareChatRecordStatementView(View):
             raise MessageErrors.FORWARD_TARGET_INVALID
         source_chat = messages[0].chat
         source_submission = source_chat.submission_record if source_chat.submission else None
+        if source_submission is None:
+            request.user.space.require_square_free_post_enabled()
         if source_submission is not None:
             from Chat.models import SubmissionStatusChoice
             if (

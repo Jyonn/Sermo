@@ -418,6 +418,39 @@ class SpaceAdminApiTests(TestCase):
         self.assertFalse(self.space.square_explore_enabled)
         self.assertEqual(self.space.unverified_group_policy, 1)
 
+    def test_enabled_square_requires_at_least_one_publishing_mode(self):
+        payload = {
+            'name': self.space.name,
+            'group_square_enabled': 1,
+            'chat_enabled': 1,
+            'square_free_post_enabled': 0,
+            'submission_enabled': 0,
+            'square_explore_enabled': 1,
+            'unverified_group_policy': 2,
+            'member_limit': 100,
+            'level_names': self.space.level_names,
+        }
+
+        denied = self.client.post(
+            '/spaces/admin/settings',
+            data=json.dumps(payload),
+            content_type='application/json',
+            **self.authorization(),
+        )
+        self.assertEqual(denied.status_code, 400, denied.content)
+        self.assertEqual(denied.json()['identifier'], 'SPACE@SQUARE_MODES_REQUIRED')
+
+        payload['submission_enabled'] = 1
+        enabled = self.client.post(
+            '/spaces/admin/settings',
+            data=json.dumps(payload),
+            content_type='application/json',
+            **self.authorization(),
+        )
+        self.assertEqual(enabled.status_code, 200, enabled.content)
+        self.assertFalse(enabled.json()['body']['square_free_post_enabled'])
+        self.assertTrue(enabled.json()['body']['submission_enabled'])
+
     def test_admin_can_enable_qq_binding_only_after_platform_grant(self):
         payload = {
             'name': self.space.name,

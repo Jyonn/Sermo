@@ -7,7 +7,7 @@ from django.test import TestCase
 from django.utils import timezone
 
 from Friendship.models import Friendship
-from Chat.models import Chat
+from Chat.models import Chat, SubmissionStatusChoice
 from Space.models import Space, SpaceOperator
 from Message.models import ForwardBundleItem, MediaAsset, Message, MessageTypeChoice
 from Square.models import SquareMute, Statement, StatementComment, StatementCommentLike, StatementLike, StatementMedia, StatementVisibilityChoice
@@ -53,6 +53,40 @@ class StatementApiTests(TestCase):
             content_type='application/json',
             **self.authorization(user),
         )
+
+    def test_free_posting_switch_blocks_direct_statement_creation(self):
+        self.space.square_free_post_enabled = False
+        self.space.submission_enabled = True
+        self.space.save(update_fields=['square_free_post_enabled', 'submission_enabled'])
+
+        response = self.post_statement(
+            self.author,
+            {'text': '不应绕过空间设置', 'visibility': 'public', 'media': []},
+        )
+
+        self.assertEqual(response.status_code, 403, response.content)
+        self.assertEqual(response.json()['identifier'], 'SPACE@SQUARE_FREE_POST_DISABLED')
+
+    def test_ready_submission_can_publish_when_free_posting_is_disabled(self):
+        SpaceOperator.objects.create(space=self.space, user=self.friend)
+        self.space.square_free_post_enabled = False
+        self.space.submission_enabled = True
+        self.space.save(update_fields=['square_free_post_enabled', 'submission_enabled'])
+        chat, _ = Chat.create_submission(self.author, self.friend, '待发布投稿', 'square-mode-test')
+        message = Message.create(chat, self.author, MessageTypeChoice.TEXT, '投稿正文')
+        chat.submission_record.submit(self.author)
+        chat.submission_record.review(self.friend, 'ready')
+
+        response = self.client.post(
+            '/square/statements/chat-record',
+            data=json.dumps({'message_ids': [message.id], 'visibility': 'public'}),
+            content_type='application/json',
+            **self.authorization(self.friend),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        chat.submission_record.refresh_from_db()
+        self.assertEqual(chat.submission_record.status, SubmissionStatusChoice.PUBLISHED)
 
     def test_official_account_can_mute_statement_author_and_mute_blocks_square_writes(self):
         official = self.space.ensure_official_user()

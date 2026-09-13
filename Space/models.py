@@ -68,6 +68,7 @@ class Space(models.Model):
     )
     group_square_enabled = models.BooleanField(default=False)
     chat_enabled = models.BooleanField(default=True)
+    square_free_post_enabled = models.BooleanField(default=True)
     submission_enabled = models.BooleanField(default=False)
     square_explore_enabled = models.BooleanField(default=True)
     qq_binding_enabled = models.BooleanField(default=False)
@@ -259,7 +260,7 @@ class Space(models.Model):
     def set_admin_settings(
             self, name, group_square_enabled, chat_enabled, square_explore_enabled,
             unverified_group_policy, member_limit, level_names=None, submission_enabled=None,
-            qq_binding_enabled=None):
+            square_free_post_enabled=None, qq_binding_enabled=None):
         normalized_name = self.vldt.name(name)
         normalized_member_limit = self.vldt.member_limit(member_limit)
         normalized_level_names = self.vldt.level_names(level_names or self.level_names)
@@ -274,12 +275,22 @@ class Space(models.Model):
             raise SpaceErrors.TIER_FEATURE_RESTRICTED
         if not normalized_chat_enabled and not normalized_square_enabled:
             raise SpaceErrors.MODULES_REQUIRED
+        normalized_submission_enabled = (
+            self.submission_enabled if submission_enabled is None else bool(submission_enabled)
+        ) and normalized_chat_enabled
+        normalized_free_post_enabled = (
+            self.square_free_post_enabled
+            if square_free_post_enabled is None
+            else bool(square_free_post_enabled)
+        )
+        if normalized_square_enabled and not (normalized_free_post_enabled or normalized_submission_enabled):
+            raise SpaceErrors.SQUARE_MODES_REQUIRED
 
         self.name = normalized_name
         self.group_square_enabled = normalized_square_enabled
         self.chat_enabled = normalized_chat_enabled
-        if submission_enabled is not None:
-            self.submission_enabled = bool(submission_enabled) and normalized_chat_enabled
+        self.square_free_post_enabled = normalized_free_post_enabled
+        self.submission_enabled = normalized_submission_enabled
         if qq_binding_enabled is not None:
             requested_qq_binding = bool(qq_binding_enabled)
             if requested_qq_binding and not self.is_feature_granted(SpaceFeatureKeyChoice.QQ_IDENTITY_BINDING):
@@ -290,7 +301,8 @@ class Space(models.Model):
         self.member_limit = normalized_member_limit
         self.level_names = normalized_level_names
         self.save(update_fields=[
-            'name', 'group_square_enabled', 'chat_enabled', 'submission_enabled', 'square_explore_enabled',
+            'name', 'group_square_enabled', 'chat_enabled', 'square_free_post_enabled',
+            'submission_enabled', 'square_explore_enabled',
             'unverified_group_policy', 'member_limit', 'level_names', 'qq_binding_enabled',
         ])
         return self
@@ -333,6 +345,11 @@ class Space(models.Model):
         if scope == 'all' and not self.square_explore_enabled:
             raise SpaceErrors.SQUARE_EXPLORE_DISABLED
 
+    def require_square_free_post_enabled(self):
+        self.require_square_enabled()
+        if not self.square_free_post_enabled:
+            raise SpaceErrors.SQUARE_FREE_POST_DISABLED
+
     def require_group_join_allowed(self, user):
         user.require_capability('chat.group.join')
 
@@ -350,6 +367,7 @@ class Space(models.Model):
             'official_user',
             'group_square_enabled',
             'chat_enabled',
+            'square_free_post_enabled',
             'submission_enabled',
             'square_explore_enabled',
             'qq_binding_available',
@@ -371,6 +389,7 @@ class Space(models.Model):
             'official_user',
             'group_square_enabled',
             'chat_enabled',
+            'square_free_post_enabled',
             'submission_enabled',
             'square_explore_enabled',
             'qq_binding_enabled',
