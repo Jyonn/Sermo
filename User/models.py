@@ -865,6 +865,15 @@ class User(models.Model):
     def can_operate_square(self):
         return self.is_official or self.is_space_operator
 
+    def can_moderate_member(self, target):
+        if self.space_id != target.space_id or self.id == target.id or target.is_official:
+            return False
+        if self.is_official:
+            return True
+        if self.is_space_operator:
+            return not target.is_space_operator
+        return False
+
     @property
     def has_password(self):
         return bool((self.password or '').strip())

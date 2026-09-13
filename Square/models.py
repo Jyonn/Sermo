@@ -1,5 +1,6 @@
 import datetime
 from datetime import timedelta
+from math import ceil
 import re
 from zoneinfo import ZoneInfo
 
@@ -76,12 +77,26 @@ class SquareMute(models.Model):
 
     @classmethod
     def require_can_participate(cls, user):
-        if cls.active_for(user) is not None:
-            raise SquareErrors.MUTED
+        mute = cls.active_for(user)
+        if mute is None:
+            return
+        if mute.muted_until is None:
+            raise SquareErrors.MUTED_PERMANENT
+        remaining_minutes = max(1, ceil((mute.muted_until - timezone.now()).total_seconds() / 60))
+        days, remaining_minutes = divmod(remaining_minutes, 24 * 60)
+        hours, minutes = divmod(remaining_minutes, 60)
+        parts = []
+        if days:
+            parts.append(f'{days}d')
+        if hours:
+            parts.append(f'{hours}h')
+        if minutes and not days:
+            parts.append(f'{minutes}m')
+        raise SquareErrors.MUTED(remaining=' '.join(parts))
 
     @classmethod
     def set_for(cls, space, user, actor, duration, reason):
-        if user.space_id != space.id or user.is_official or user.id == actor.id:
+        if not actor.can_moderate_member(user):
             raise SquareErrors.MUTE_TARGET_INVALID
         days = {'1d': 1, '3d': 3, '7d': 7, '30d': 30}
         muted_until = None if duration == 'permanent' else timezone.now() + timedelta(days=days[duration])
@@ -507,7 +522,7 @@ class Statement(models.Model):
             liked=bool(getattr(self, 'viewer_liked', viewer and self.likes.filter(user=viewer).exists())),
             can_delete=bool(viewer and (viewer.id == self.user_id or viewer.is_official and viewer.space_id == self.space_id)),
             can_pin=bool(viewer and viewer.id == self.user_id and viewer.is_official),
-            can_mute=bool(viewer and viewer.can_operate_square and viewer.space_id == self.space_id and not self.user.is_official),
+            can_mute=bool(viewer and viewer.can_moderate_member(self.user)),
             is_pinned=bool(self.user.is_official and self.user.pinned_square_statement_id == self.id),
             created_at=self.created_at.timestamp(),
         )

@@ -235,9 +235,11 @@ class Chat(models.Model):
 
         if not self.group or self.submission:
             raise ChatErrors.NOT_GROUP_CHAT(chat=self.id)
-        if not (self.is_owner(operator) or operator.is_space_operator):
+        if not (self.is_owner(operator) or operator.can_operate_square):
             raise ChatErrors.FORBIDDEN
-        if target.id == operator.id or target.is_official or target.is_space_operator:
+        if target.is_space_operator and not operator.is_official:
+            raise ChatErrors.FORBIDDEN
+        if target.id == operator.id or target.is_official:
             raise ChatErrors.FORBIDDEN
         member = ChatMember.objects.filter(
             chat=self,

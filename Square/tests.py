@@ -191,6 +191,42 @@ class StatementApiTests(TestCase):
         self.assertEqual(notice.user_id, self.space.official_user_id)
         self.assertEqual(notice._parse_payload(notice.content)['actor_user_id'], self.friend.id)
 
+    def test_operator_cannot_mute_operator_but_official_can(self):
+        self.friend.phone = '+8613800000002'
+        self.friend.phone_verified_at = timezone.now()
+        self.friend.save(update_fields=['phone', 'phone_verified_at'])
+        SpaceOperator.objects.create(space=self.space, user=self.friend)
+        target = User.create(self.space, 'Target Operator', verified=True)
+        SpaceOperator.objects.create(space=self.space, user=target)
+        statement = Statement.create_statement(target, '运营发言', 'public', [])
+
+        denied = self.client.post(
+            f'/square/statements/{statement.id}/mute-author',
+            data=json.dumps({'duration': '1d', 'reason': '越权处理'}),
+            content_type='application/json',
+            **self.authorization(self.friend),
+        )
+        self.assertEqual(denied.json()['identifier'], 'SQUARE@MUTE_TARGET_INVALID')
+
+        official = self.space.ensure_official_user()
+        allowed = self.client.post(
+            f'/square/statements/{statement.id}/mute-author',
+            data=json.dumps({'duration': '1d', 'reason': '官方处理'}),
+            content_type='application/json',
+            **self.authorization(official),
+        )
+        self.assertEqual(allowed.status_code, 200, allowed.content)
+
+        comment = self.client.post(
+            f'/square/statements/{statement.id}/comments',
+            data=json.dumps({'text': '禁言后评论'}),
+            content_type='application/json',
+            **self.authorization(target),
+        )
+        self.assertEqual(comment.status_code, 403, comment.content)
+        self.assertEqual(comment.json()['identifier'], 'SQUARE@MUTED')
+        self.assertIn('1d', comment.json()['message'])
+
     def test_operator_can_publish_selected_chat_as_statement_but_cannot_pin(self):
         self.friend.phone = '+8613800000003'
         self.friend.phone_verified_at = timezone.now()

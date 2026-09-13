@@ -37,4 +37,5 @@ class SquareErrors:
     MUTE_TARGET_INVALID = Error(message=_('This member cannot be muted'), code=Code.BadRequest)
     MUTE_REASON_REQUIRED = Error(message=_('A mute reason is required'), code=Code.BadRequest)
     MUTE_DURATION_INVALID = Error(message=_('Invalid mute duration'), code=Code.BadRequest)
-    MUTED = Error(message=_('You are currently muted from publishing or commenting in Square'), code=Code.Forbidden)
+    MUTED = Error(message=_('Square actions are unavailable while muted. Try again in {remaining}.'), code=Code.Forbidden)
+    MUTED_PERMANENT = Error(message=_('Square actions are unavailable because your account is permanently muted.'), code=Code.Forbidden)

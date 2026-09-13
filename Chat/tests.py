@@ -607,6 +607,35 @@ class ChatNotificationPreferenceTests(TestCase):
         )
         self.assertEqual(protected_owner.json()['identifier'], 'CHAT@FORBIDDEN')
 
+    def test_operator_cannot_mute_operator_but_official_can(self):
+        first_operator = User.create(self.space, 'First Operator', verified=True)
+        second_operator = User.create(self.space, 'Second Operator', verified=True)
+        official = self.space.ensure_official_user()
+        SpaceOperator.objects.create(space=self.space, user=first_operator)
+        SpaceOperator.objects.create(space=self.space, user=second_operator)
+        for user in (first_operator, second_operator, official):
+            ChatMember.objects.create(
+                chat=self.chat, user=user, status=ChatMemberStatusChoice.ACTIVE,
+                joined_at=timezone.now(),
+            )
+
+        denied = self.client.post(
+            f'/chats/group/mutes?chat_id={self.chat.id}',
+            data=json.dumps({'user_id': second_operator.id, 'duration': '10m'}),
+            content_type='application/json',
+            **self.authorization(first_operator),
+        )
+        self.assertEqual(denied.json()['identifier'], 'CHAT@FORBIDDEN')
+
+        allowed = self.client.post(
+            f'/chats/group/mutes?chat_id={self.chat.id}',
+            data=json.dumps({'user_id': second_operator.id, 'duration': '10m'}),
+            content_type='application/json',
+            **self.authorization(official),
+        )
+        self.assertEqual(allowed.status_code, 200, allowed.content)
+        self.assertTrue(ChatMember.objects.get(chat=self.chat, user=second_operator).mute_payload()['active'])
+
     def test_removed_member_and_remaining_members_receive_chat_state_event(self):
         UserStateEvent.objects.all().delete()
 

@@ -1022,3 +1022,8 @@ msgstr "空间管理员已解除你的全局聊天禁言，现在可以重新发
 #, python-format
 msgid "Submission “%(title)s” is ready for review"
 msgstr "投稿“%(title)s”已提交，等待审批"
+msgid "Square actions are unavailable while muted. Try again in {remaining}."
+msgstr "你已被广场禁言，暂时无法发言、评论或回复，剩余 {remaining} 后解锁。"
+
+msgid "Square actions are unavailable because your account is permanently muted."
+msgstr "你已被广场永久禁言，暂时无法发言、评论或回复。"
