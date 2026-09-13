@@ -5,12 +5,47 @@ from django.test import TestCase
 from Space.models import Space
 from User.models import User, WeChatMiniProgramIdentity
 from utils import auth
-from User.wechat_miniprogram import login_with_wechat_code
+from User.wechat_miniprogram import begin_wechat_login, complete_wechat_onboarding, login_with_wechat_code
 
 
 class WeChatMiniProgramLoginTests(TestCase):
     def setUp(self):
         self.space = Space.objects.create(name='JZDXQ', slug='jzdxq', email='admin@example.com')
+
+    @patch('User.wechat_miniprogram.exchange_code')
+    def test_first_login_waits_for_explicit_account_choice(self, exchange):
+        exchange.return_value = dict(app_id='wx-test', open_id='openid-choice', union_id='')
+
+        user, ticket, space = begin_wechat_login('code', space_slug=self.space.slug)
+
+        self.assertIsNone(user)
+        self.assertTrue(ticket)
+        self.assertEqual(space, self.space)
+        self.assertFalse(WeChatMiniProgramIdentity.objects.filter(open_id='openid-choice').exists())
+
+    @patch('User.wechat_miniprogram.exchange_code')
+    def test_existing_password_account_can_be_linked(self, exchange):
+        existing = User.create(space=self.space, name='已有用户', password='secret123', language='zh-CN')
+        exchange.return_value = dict(app_id='wx-test', open_id='openid-existing', union_id='')
+        _, ticket, _ = begin_wechat_login('code', space_slug=self.space.slug)
+
+        user, created = complete_wechat_onboarding(ticket, 'existing', nickname='已有用户', password='secret123')
+
+        self.assertFalse(created)
+        self.assertEqual(user, existing)
+        self.assertTrue(WeChatMiniProgramIdentity.objects.filter(user=existing, open_id='openid-existing').exists())
+
+    @patch('User.wechat_miniprogram.exchange_code')
+    def test_passwordless_existing_account_cannot_be_linked(self, exchange):
+        User.create(space=self.space, name='无密码用户', language='zh-CN')
+        exchange.return_value = dict(app_id='wx-test', open_id='openid-no-password', union_id='')
+        _, ticket, _ = begin_wechat_login('code', space_slug=self.space.slug)
+
+        with self.assertRaises(Exception) as raised:
+            complete_wechat_onboarding(ticket, 'existing', nickname='无密码用户', password='secret123')
+
+        self.assertIn('Existing account must have a password', str(raised.exception))
+        self.assertFalse(WeChatMiniProgramIdentity.objects.filter(open_id='openid-no-password').exists())
 
     @patch('User.wechat_miniprogram.exchange_code')
     def test_first_login_creates_bound_passwordless_user(self, exchange):

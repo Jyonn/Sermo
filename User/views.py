@@ -65,6 +65,7 @@ from User.params import (
     QQIdentityParams,
     UserPasswordRecoveryParams,
     WeChatMiniProgramAuthParams,
+    WeChatMiniProgramOnboardingParams,
 )
 from User.validators import UserErrors
 from Space.models import Space
@@ -90,21 +91,48 @@ class WeChatMiniProgramLoginView(View):
         WeChatMiniProgramAuthParams.space_slug,
     )
     def post(self, request: Request):
-        from User.wechat_miniprogram import login_with_wechat_code
+        from User.wechat_miniprogram import begin_wechat_login
 
-        user, created = login_with_wechat_code(
+        user, onboarding_ticket, space = begin_wechat_login(
             code=request.json.code,
-            nickname=request.json.nickname,
             language=request.json.language,
             space_slug=request.json.space_slug,
         )
+        if user is None:
+            return dict(
+                requires_account_choice=True,
+                onboarding_ticket=onboarding_ticket,
+                space=space.json(),
+            )
         user.log_login()
         return dict(
-            created=created,
+            created=False,
             user=user.json_me(),
             space=user.space.json(),
             auth=auth.get_login_token(user),
         )
+
+
+class WeChatMiniProgramOnboardingView(View):
+    @analyse.json(
+        WeChatMiniProgramOnboardingParams.ticket,
+        WeChatMiniProgramOnboardingParams.mode,
+        WeChatMiniProgramOnboardingParams.nickname,
+        WeChatMiniProgramOnboardingParams.password,
+        WeChatMiniProgramOnboardingParams.language,
+    )
+    def post(self, request: Request):
+        from User.wechat_miniprogram import complete_wechat_onboarding
+
+        user, created = complete_wechat_onboarding(
+            request.json.ticket,
+            request.json.mode,
+            nickname=request.json.nickname,
+            password=request.json.password,
+            language=request.json.language,
+        )
+        user.log_login()
+        return dict(created=created, user=user.json_me(), space=user.space.json(), auth=auth.get_login_token(user))
 
 
 class HeartbeatView(View):

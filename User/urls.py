@@ -46,10 +46,12 @@ from User.views import (
     UserPersonalizationView,
     UserLanguagePreferenceView,
     WeChatMiniProgramLoginView,
+    WeChatMiniProgramOnboardingView,
 )
 
 urlpatterns = [
     path('wechat-miniprogram/login', WeChatMiniProgramLoginView.as_view(), name='wechat miniprogram login'),
+    path('wechat-miniprogram/onboarding', WeChatMiniProgramOnboardingView.as_view(), name='wechat miniprogram onboarding'),
     path('heartbeat', HeartbeatView.as_view(), name='heartbeat'),
     path('me', UserMeView.as_view(), name='user me'),
     path('me/emoji-usage', UserEmojiUsageView.as_view(), name='user emoji usage'),

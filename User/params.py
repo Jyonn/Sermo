@@ -97,6 +97,22 @@ class WeChatMiniProgramAuthParams(metaclass=Params):
     )
 
 
+class WeChatMiniProgramOnboardingParams(metaclass=Params):
+    ticket = Validator('ticket').to(str).to(lambda value: value.strip()).bool(
+        lambda value: bool(value), message=_('Empty WeChat onboarding ticket'),
+    )
+    mode = Validator('mode').to(str).to(lambda value: value.strip().lower()).bool(
+        lambda value: value in ('new', 'existing'), message=_('Invalid WeChat onboarding mode'),
+    )
+    nickname = Validator('nickname').to(str).null().default(None).to(
+        lambda value: value.strip() if value else None,
+    )
+    password = Validator('password').to(str).null().default(None)
+    language = Validator('language').to(str).null().default('zh-CN').to(User.normalizers.language).exception(
+        User.validators.language,
+    )
+
+
 class UserPrivateAccountParams(metaclass=Params):
     enabled = Validator('enabled').to(int).bool(lambda x: x in (0, 1), message=_('enabled should be 0 or 1'))
 
