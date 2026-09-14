@@ -40,6 +40,7 @@ class UserErrors:
     WECHAT_ONBOARDING_TICKET_INVALID = Error(message=_('Invalid WeChat onboarding ticket'), code=Code.BadRequest)
     WECHAT_ONBOARDING_TICKET_EXPIRED = Error(message=_('WeChat onboarding ticket expired'), code=Code.BadRequest)
     WECHAT_EXISTING_ACCOUNT_PASSWORD_REQUIRED = Error(message=_('Existing account must have a password before WeChat can be linked'), code=Code.Forbidden)
+    WECHAT_ACCOUNT_ALREADY_LINKED = Error(message=_('This account is already linked to another WeChat account'), code=Code.BadRequest)
     WECHAT_MINIPROGRAM_NOT_CONFIGURED = Error(
         message=_('WeChat Mini Program login is not configured'), code=Code.InternalServerError,
     )

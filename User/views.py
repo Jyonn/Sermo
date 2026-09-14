@@ -135,6 +135,26 @@ class WeChatMiniProgramOnboardingView(View):
         return dict(created=created, user=user.json_me(), space=user.space.json(), auth=auth.get_login_token(user))
 
 
+class WeChatMiniProgramBindingView(View):
+    @auth.require_user
+    def get(self, request: Request):
+        return dict(bound=WeChatMiniProgramIdentity.objects.filter(
+            user=request.user, space=request.user.space,
+        ).exists())
+
+    @auth.require_user
+    @analyse.json(UserDeleteParams.password)
+    def delete(self, request: Request):
+        user = request.user
+        _require_password_enabled(user)
+        if not request.json.password or not function.verify_password(
+            request.json.password, user.salt, user.password,
+        ):
+            raise UserErrors.PASSWORD_ERROR
+        WeChatMiniProgramIdentity.objects.filter(user=user, space=user.space).delete()
+        return dict(bound=False)
+
+
 class HeartbeatView(View):
     @auth.require_user
     def get(self, request: Request):

@@ -134,6 +134,8 @@ def complete_wechat_onboarding(ticket, mode, nickname=None, password=None, langu
                 raise UserErrors.WECHAT_EXISTING_ACCOUNT_PASSWORD_REQUIRED
             if not password or not function.verify_password(password, user.salt, user.password):
                 raise UserErrors.PASSWORD_ERROR
+            if WeChatMiniProgramIdentity.objects.filter(user=user, space=space).exists():
+                raise UserErrors.WECHAT_ACCOUNT_ALREADY_LINKED
             user.set_language(language)
             WeChatMiniProgramIdentity.objects.create(user=user, space=space, **{
                 key: session.get(key, '') for key in ('app_id', 'open_id', 'union_id')

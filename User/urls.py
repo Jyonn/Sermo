@@ -47,11 +47,13 @@ from User.views import (
     UserLanguagePreferenceView,
     WeChatMiniProgramLoginView,
     WeChatMiniProgramOnboardingView,
+    WeChatMiniProgramBindingView,
 )
 
 urlpatterns = [
     path('wechat-miniprogram/login', WeChatMiniProgramLoginView.as_view(), name='wechat miniprogram login'),
     path('wechat-miniprogram/onboarding', WeChatMiniProgramOnboardingView.as_view(), name='wechat miniprogram onboarding'),
+    path('me/wechat-miniprogram', WeChatMiniProgramBindingView.as_view(), name='wechat miniprogram binding'),
     path('heartbeat', HeartbeatView.as_view(), name='heartbeat'),
     path('me', UserMeView.as_view(), name='user me'),
     path('me/emoji-usage', UserEmojiUsageView.as_view(), name='user emoji usage'),

@@ -36,6 +36,55 @@ class WeChatMiniProgramLoginTests(TestCase):
         self.assertTrue(WeChatMiniProgramIdentity.objects.filter(user=existing, open_id='openid-existing').exists())
 
     @patch('User.wechat_miniprogram.exchange_code')
+    def test_existing_account_cannot_be_linked_to_second_wechat(self, exchange):
+        existing = User.create(space=self.space, name='已有用户', password='secret123', language='zh-CN')
+        WeChatMiniProgramIdentity.objects.create(
+            user=existing, space=self.space, app_id='wx-test', open_id='openid-first',
+        )
+        exchange.return_value = dict(app_id='wx-test', open_id='openid-second', union_id='')
+        _, ticket, _ = begin_wechat_login('code', space_slug=self.space.slug)
+
+        with self.assertRaises(Exception) as raised:
+            complete_wechat_onboarding(ticket, 'existing', nickname='已有用户', password='secret123')
+
+        self.assertIn('already linked', str(raised.exception))
+        self.assertFalse(WeChatMiniProgramIdentity.objects.filter(open_id='openid-second').exists())
+
+    def test_bound_wechat_can_be_unlinked_with_password(self):
+        user = User.create(space=self.space, name='微信用户', password='secret123', language='zh-CN')
+        WeChatMiniProgramIdentity.objects.create(
+            user=user, space=self.space, app_id='wx-test', open_id='openid-unbind',
+        )
+        token = auth.get_login_token(user)['auth']
+
+        status = self.client.get('/users/me/wechat-miniprogram', HTTP_AUTHORIZATION=f'Bearer {token}')
+        response = self.client.delete(
+            '/users/me/wechat-miniprogram', data={'password': 'secret123'},
+            content_type='application/json', HTTP_AUTHORIZATION=f'Bearer {token}',
+        )
+
+        self.assertEqual(status.status_code, 200)
+        self.assertTrue(status.json()['body']['bound'])
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.json()['body']['bound'])
+        self.assertFalse(WeChatMiniProgramIdentity.objects.filter(user=user).exists())
+
+    def test_wechat_unlink_rejects_wrong_password(self):
+        user = User.create(space=self.space, name='微信用户', password='secret123', language='zh-CN')
+        WeChatMiniProgramIdentity.objects.create(
+            user=user, space=self.space, app_id='wx-test', open_id='openid-wrong-password',
+        )
+        token = auth.get_login_token(user)['auth']
+
+        response = self.client.delete(
+            '/users/me/wechat-miniprogram', data={'password': 'wrong-password'},
+            content_type='application/json', HTTP_AUTHORIZATION=f'Bearer {token}',
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertTrue(WeChatMiniProgramIdentity.objects.filter(user=user).exists())
+
+    @patch('User.wechat_miniprogram.exchange_code')
     def test_passwordless_existing_account_cannot_be_linked(self, exchange):
         User.create(space=self.space, name='无密码用户', language='zh-CN')
         exchange.return_value = dict(app_id='wx-test', open_id='openid-no-password', union_id='')
