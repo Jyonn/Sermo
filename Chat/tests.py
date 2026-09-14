@@ -229,14 +229,16 @@ class SubmissionChatTests(TestCase):
 
         Chat.ensure_direct_friendship(self.author, coauthor)
         author_invite, _card = chat.invite_submission_member(self.author, coauthor, SubmissionMemberRoleChoice.AUTHOR)
-        with self.assertRaises(Exception):
-            chat.invite_submission_member(self.operator, second_reviewer, SubmissionMemberRoleChoice.REVIEWER)
+        reviewer_invite, _ = chat.invite_submission_member(
+            self.operator, second_reviewer, SubmissionMemberRoleChoice.REVIEWER,
+        )
         with self.assertRaises(Exception):
             chat.invite_submission_member(self.operator, coauthor, SubmissionMemberRoleChoice.AUTHOR)
         with self.assertRaises(Exception):
             chat.invite_submission_member(self.author, second_reviewer, SubmissionMemberRoleChoice.REVIEWER)
 
         author_invite.accept(coauthor)
+        reviewer_invite.accept(second_reviewer)
         author_invite.refresh_from_db()
         self.assertEqual(author_invite.role, SubmissionMemberRoleChoice.AUTHOR)
 
@@ -249,9 +251,28 @@ class SubmissionChatTests(TestCase):
 
         payload = chat.submission_record.jsonl()
         self.assertEqual({user['user_id'] for user in payload['authors']}, {self.author.id, coauthor.id})
-        self.assertEqual({user['user_id'] for user in payload['reviewers']}, {self.operator.id})
+        self.assertEqual({user['user_id'] for user in payload['reviewers']}, {self.operator.id, second_reviewer.id})
         author_rows = Chat.get_user_chats(coauthor, purpose=ChatPurposeChoice.SUBMISSION, submission_role='author')
         self.assertIn(chat, author_rows)
+
+    def test_only_original_author_can_permanently_delete_submission(self):
+        chat, _ = Chat.create_submission(self.author, self.operator, 'Delete me', 'delete-draft')
+        Message.create(chat, self.author, MessageTypeChoice.TEXT, 'Private draft')
+
+        denied = self.client.delete(
+            f'/chats/submissions/delete?chat_id={chat.id}',
+            **self.authorization(self.operator),
+        )
+        self.assertEqual(denied.json()['identifier'], 'CHAT@FORBIDDEN')
+        self.assertTrue(Chat.objects.filter(id=chat.id).exists())
+
+        deleted = self.client.delete(
+            f'/chats/submissions/delete?chat_id={chat.id}',
+            **self.authorization(self.author),
+        )
+        self.assertEqual(deleted.status_code, 200, deleted.content)
+        self.assertFalse(Chat.objects.filter(id=chat.id).exists())
+        self.assertFalse(Message.objects.filter(chat_id=chat.id).exists())
 
     def test_invited_author_can_send_but_cannot_manage_submission(self):
         chat, _ = Chat.create_submission(self.author, self.operator, 'Limited coauthor', 'limited-coauthor-draft')

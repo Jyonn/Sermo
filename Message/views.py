@@ -7,6 +7,7 @@ from django.views import View
 from smartdjango import analyse, OK
 
 from Chat.models import Chat, SubmissionStatusChoice
+from Chat.validators import ChatErrors
 from Message.models import AudioTranscript, AudioTranscriptStatusChoice, ForwardBundle, LinkPreview, MediaAsset, MediaResource, Message, MessageEvent, MessageHistoryRecovery, MessageTypeChoice, PinnedMessage
 from Message.params import MessageParams
 from Message.validators import MessageErrors
@@ -232,6 +233,8 @@ class MessageClearView(View):
     @analyse.json(MessageParams.chat_id)
     @auth.require_chat_member()
     def delete(self, request: Request):
+        if request.json.chat.submission:
+            raise ChatErrors.FORBIDDEN
         with transaction.atomic():
             deleted_count = Message.clear_for_user(request.json.chat, request.user)
             from Chat.models import ChatReadState

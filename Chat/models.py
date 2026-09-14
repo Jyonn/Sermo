@@ -602,7 +602,11 @@ class Chat(models.Model):
             raise ChatErrors.FORBIDDEN
         submission = self.submission_record
         inviter_role = submission.role_for(inviter)
-        if inviter_role != 'author' or inviter.id != submission.author_id:
+        allowed_role = {
+            'author': SubmissionMemberRoleChoice.AUTHOR,
+            'reviewer': SubmissionMemberRoleChoice.REVIEWER,
+        }.get(inviter_role)
+        if allowed_role is None or submission_role != allowed_role:
             raise ChatErrors.SUBMISSION_INVITE_FORBIDDEN
         if user.space_id != self.space_id:
             raise ChatErrors.UNALIGNED_SPACE
@@ -610,7 +614,7 @@ class Chat(models.Model):
             raise ChatErrors.USER_DELETED(user=user.name)
         if submission_role not in (SubmissionMemberRoleChoice.AUTHOR, SubmissionMemberRoleChoice.REVIEWER):
             raise ChatErrors.SUBMISSION_ROLE_INVALID
-        if submission_role != SubmissionMemberRoleChoice.AUTHOR:
+        if submission_role == SubmissionMemberRoleChoice.AUTHOR and inviter.id != submission.author_id:
             raise ChatErrors.SUBMISSION_INVITE_FORBIDDEN
         if submission_role == SubmissionMemberRoleChoice.AUTHOR:
             self._require_friend_of(inviter, user)

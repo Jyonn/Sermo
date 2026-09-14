@@ -205,6 +205,24 @@ class SubmissionWithdrawView(View):
         return ChatListView.build_chat_payload(chat, request.user, request)
 
 
+class SubmissionDeleteView(View):
+    @auth.require_user
+    @analyse.query(ChatParams.chat_id)
+    @auth.require_submission_participant()
+    def delete(self, request):
+        chat = request.query.chat
+        if not chat.submission:
+            raise ChatErrors.FORBIDDEN
+        with transaction.atomic():
+            submission = Submission.objects.select_for_update().get(chat=chat)
+            if submission.author_id != request.user.id:
+                raise ChatErrors.FORBIDDEN
+            if submission.published_statement_id:
+                submission.published_statement.delete()
+            chat.delete()
+        return OK
+
+
 class SubmissionInviteView(View):
     @auth.require_user
     @analyse.query(ChatMemberParams.chat_id)
