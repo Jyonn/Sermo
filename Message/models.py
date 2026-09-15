@@ -890,6 +890,11 @@ class Message(models.Model):
                 return _('You are now a space operator. You can manage Square mutes and publish merged chat records as posts.')
             if event == 'operator_removed':
                 return _('Your space operator role has been removed. Operator permissions are no longer available.')
+            if event == 'space_group_member_joined':
+                return _('Welcome %(member)s to %(space)s') % dict(
+                    member=str(payload.get('member_name') or '').strip(),
+                    space=str(payload.get('space_name') or '').strip(),
+                )
             if event == 'square_muted':
                 duration = {
                     '1d': _('1 day'),

@@ -916,3 +916,5 @@ msgstr "Square actions are unavailable while muted. Try again in {remaining}."
 
 msgid "Square actions are unavailable because your account is permanently muted."
 msgstr "Square actions are unavailable because your account is permanently muted."
+msgid "Welcome %(member)s to %(space)s"
+msgstr "Welcome %(member)s to %(space)s"

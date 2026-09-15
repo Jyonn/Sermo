@@ -98,9 +98,15 @@ class SpaceAdminApiTests(TestCase):
         chat = Chat.objects.get(space=self.space, is_space_group=True)
         self.assertTrue(chat.has_active_member(self.official))
         self.assertTrue(chat.has_active_member(self.member))
+        notice = Message.objects.get(chat=chat, user=self.official, type=MessageTypeChoice.SYSTEM)
+        self.assertEqual(json.loads(notice.content)['event'], 'space_group_member_joined')
+        self.assertEqual(json.loads(notice.content)['member_name'], self.member.name)
 
         newcomer = User.create(self.space, 'Newcomer', verified=True)
         self.assertTrue(chat.has_active_member(newcomer))
+        notice_count = Message.objects.filter(chat=chat, type=MessageTypeChoice.SYSTEM).count()
+        Chat.sync_space_group(self.space)
+        self.assertEqual(Message.objects.filter(chat=chat, type=MessageTypeChoice.SYSTEM).count(), notice_count)
 
     def test_space_group_respects_manual_leave_and_keeps_official_member(self):
         self.space.space_group_enabled = True

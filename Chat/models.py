@@ -335,9 +335,12 @@ class Chat(models.Model):
                     created_by=space.official_user,
                 ),
             )
-            users = User.objects.filter(space=space, is_deleted=False).filter(
-                Q(left_space_group_manually=False) | Q(id=space.official_user_id)
-            )
+            cls.ensure_space_group_member(space.official_user, chat=chat)
+            users = User.objects.filter(
+                space=space,
+                is_deleted=False,
+                left_space_group_manually=False,
+            ).exclude(id=space.official_user_id)
             for user in users:
                 cls.ensure_space_group_member(user, chat=chat)
             return chat
@@ -368,6 +371,15 @@ class Chat(models.Model):
             member.joined_at = timezone.now()
             member.left_at = None
             member.save(update_fields=['status', 'role', 'joined_at', 'left_at', 'updated_at'])
+        if created and not user.is_official:
+            from Message.models import Message
+            Message.create_system(
+                chat=chat,
+                user=user.space.official_user,
+                event='space_group_member_joined',
+                member_name=user.name,
+                space_name=user.space.name,
+            )
         return member
 
     @classmethod
