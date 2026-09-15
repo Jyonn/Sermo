@@ -13,6 +13,7 @@ from Message.models import ForwardBundle, MediaAsset, Message, MessageTypeChoice
 from QZone.models import QZoneEmoticon
 from Message.params import MessageParams
 from Square.params import SquareParams
+from utils.content_safety import ContentSafetyScene, check_user_text
 from Square.quota import quota_for_user
 from Square.validators import SquareErrors
 from User.models import NotificationEvent, NotificationEventTypeChoice, PermanentVipCampaign, User
@@ -91,6 +92,7 @@ class StatementView(View):
     @analyse.json(SquareParams.text, SquareParams.visibility, SquareParams.media, SquareParams.location, SquareParams.pin, SquareParams.anonymous)
     def post(self, request: Request):
         request.user.space.require_square_free_post_enabled()
+        check_user_text(request, request.json.text, ContentSafetyScene.SOCIAL)
         with transaction.atomic():
             statement = Statement.create_statement(
                 user=request.user,
@@ -136,6 +138,7 @@ class SquareChatRecordStatementView(View):
     def post(self, request: Request):
         request.user.space.require_square_enabled()
         request.user.space.require_chat_enabled()
+        check_user_text(request, request.json.text, ContentSafetyScene.SOCIAL)
         if not request.user.can_operate_square:
             raise SquareErrors.CHAT_RECORD_FORBIDDEN
         if request.json.pin and not request.user.is_official:
@@ -552,6 +555,7 @@ class StatementCommentView(View):
     )
     def post(self, request: Request, statement_id: int):
         request.user.space.require_square_enabled()
+        check_user_text(request, request.json.text, ContentSafetyScene.COMMENT)
         comment = StatementComment.create_comment(
             request.user,
             statement_id,

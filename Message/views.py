@@ -10,6 +10,7 @@ from Chat.models import Chat, SubmissionStatusChoice
 from Chat.validators import ChatErrors
 from Message.models import AudioTranscript, AudioTranscriptStatusChoice, ForwardBundle, LinkPreview, MediaAsset, MediaResource, Message, MessageEvent, MessageHistoryRecovery, MessageTypeChoice, PinnedMessage
 from Message.params import MessageParams
+from utils.content_safety import ContentSafetyScene, check_user_text
 from Message.validators import MessageErrors
 from utils.qiniu import ShortAudioTranscriptionError, issue_message_upload, build_message_image_thumbnail_uri, build_message_video_thumbnail_uri, sign_private_download_url, avatar_uri_for_key, transcribe_short_audio, validate_message_media_key
 from utils import auth
@@ -56,6 +57,9 @@ class MessageView(View):
             raise MessageErrors.SYSTEM_MESSAGE_FORBIDDEN
         if request.query.chat.group:
             request.user.space.require_group_send_allowed(request.user)
+        if request.json.type == MessageTypeChoice.TEXT:
+            scene = ContentSafetyScene.FORUM if request.query.chat.submission else ContentSafetyScene.COMMENT
+            check_user_text(request, request.json.content, scene)
         with transaction.atomic():
             media_resource = MediaResource.objects.select_related('asset').filter(id=request.json.resource_id).first() if request.json.resource_id else None
             if request.json.resource_id and media_resource is None:

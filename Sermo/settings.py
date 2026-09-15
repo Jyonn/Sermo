@@ -86,6 +86,7 @@ CORS_ALLOW_HEADERS = [
     'user-agent',
     'x-csrftoken',
     'x-requested-with',
+    'x-sermo-client',
 ]
 
 ROOT_URLCONF = 'Sermo.urls'

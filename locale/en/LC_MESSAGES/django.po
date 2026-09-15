@@ -923,3 +923,9 @@ msgid "%(actor)s successfully created “%(title)s”"
 msgstr "%(actor)s successfully created “%(title)s”"
 msgid "Only text messages can reply to another message"
 msgstr "Only text messages can reply to another message"
+
+msgid "The content may not comply with the rules. Please revise it and try again."
+msgstr "The content may not comply with the rules. Please revise it and try again."
+
+msgid "Content review is temporarily unavailable. Please try again later."
+msgstr "Content review is temporarily unavailable. Please try again later."

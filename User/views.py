@@ -5,6 +5,7 @@ from notificator import NotificatorAPIError
 from smartdjango import analyse, OK
 
 from utils import auth, function
+from utils.content_safety import ContentSafetyScene, check_user_text, is_miniprogram_request
 from utils.auth import Request
 from utils.qiniu import (
     issue_avatar_upload,
@@ -130,6 +131,7 @@ class WeChatMiniProgramOnboardingView(View):
             nickname=request.json.nickname,
             password=request.json.password,
             language=request.json.language,
+            check_content=is_miniprogram_request(request),
         )
         user.log_login()
         return dict(created=created, user=user.json_me(), space=user.space.json(), auth=auth.get_login_token(user))
@@ -939,7 +941,14 @@ class WelcomeMessageView(View):
         _require_password_enabled(request.user)
         from Message.models import WelcomeMessageTemplate
 
-        WelcomeMessageTemplate.replace_for(request.user, request.json().get('messages'))
+        messages = request.json().get('messages')
+        text = '\n'.join(
+            str(item.get('content') or '').strip()
+            for item in (messages or [])
+            if isinstance(item, dict) and item.get('type') == 0
+        )
+        check_user_text(request, text, ContentSafetyScene.COMMENT)
+        WelcomeMessageTemplate.replace_for(request.user, messages)
         return WelcomeMessageTemplate.payload_for(request.user, request=request)
 
 
@@ -948,6 +957,7 @@ class UserNameView(View):
     @analyse.json(UserParams.name)
     def post(self, request: Request):
         _require_profile_edit_enabled(request.user)
+        check_user_text(request, request.json.name, ContentSafetyScene.PROFILE, nickname=request.json.name)
         request.user.set_name(request.json.name)
         return request.user.json_me()
 

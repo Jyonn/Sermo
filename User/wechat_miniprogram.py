@@ -110,9 +110,12 @@ def _load_onboarding_ticket(ticket):
     return payload
 
 
-def complete_wechat_onboarding(ticket, mode, nickname=None, password=None, language='zh-CN'):
+def complete_wechat_onboarding(ticket, mode, nickname=None, password=None, language='zh-CN', check_content=False):
     session = _load_onboarding_ticket(ticket)
     space = Space.objects.get(id=session['space_id'])
+    if check_content and mode == 'new':
+        from utils.content_safety import ContentSafetyScene, check_text
+        check_text(nickname, session['open_id'], ContentSafetyScene.PROFILE, nickname=nickname)
     with transaction.atomic():
         identity = WeChatMiniProgramIdentity.objects.select_for_update().select_related('user').filter(
             app_id=session['app_id'], open_id=session['open_id'], space=space,

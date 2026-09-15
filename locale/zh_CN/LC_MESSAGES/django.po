@@ -1034,3 +1034,9 @@ msgid "%(actor)s successfully created “%(title)s”"
 msgstr "%(actor)s 已经成功创建“%(title)s”"
 msgid "Only text messages can reply to another message"
 msgstr "只有文字消息可以回复引用"
+
+msgid "The content may not comply with the rules. Please revise it and try again."
+msgstr "内容可能不符合规范，请修改后重试。"
+
+msgid "Content review is temporarily unavailable. Please try again later."
+msgstr "内容审核暂时不可用，请稍后重试。"

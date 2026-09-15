@@ -12,6 +12,7 @@ from Message.validators import MessageErrors
 from Friendship.models import Friendship, FriendshipStatusChoice
 from Space.models import SpaceOperator
 from utils import auth
+from utils.content_safety import ContentSafetyScene, check_user_text
 
 
 class ChatListView(View):
@@ -71,6 +72,7 @@ class GroupChatView(View):
     @analyse.json(ChatParams.users, ChatParams.title.copy().null().default(None))
     def post(self, request):
         request.user.space.require_chat_enabled()
+        check_user_text(request, request.json.title, ContentSafetyScene.PROFILE)
         chat = Chat.create_group(request.user, request.json.users, request.json.title)
         return chat.json()
 
@@ -135,6 +137,14 @@ class SubmissionStartView(View):
         request.user.space.require_submission_enabled()
         if request.json.type in (MessageTypeChoice.SYSTEM, MessageTypeChoice.FORWARD_BUNDLE, MessageTypeChoice.OFFICIAL_NOTICE, MessageTypeChoice.SUBMISSION_INVITE):
             raise MessageErrors.SYSTEM_MESSAGE_FORBIDDEN
+        check_user_text(
+            request,
+            request.json.title,
+            ContentSafetyScene.FORUM,
+            title=request.json.title,
+        )
+        if request.json.type == MessageTypeChoice.TEXT:
+            check_user_text(request, request.json.content, ContentSafetyScene.FORUM, title=request.json.title)
         with transaction.atomic():
             chat, created = Chat.create_submission(
                 request.user,
@@ -290,6 +300,7 @@ class GroupChatNameView(View):
     @auth.require_chat_member()
     def post(self, request):
         chat: Chat = request.query.chat
+        check_user_text(request, request.json.title, ContentSafetyScene.PROFILE)
         chat.rename(request.user, request.json.title)
         return chat.json()
 
