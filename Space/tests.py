@@ -86,7 +86,8 @@ class SpaceAdminApiTests(TestCase):
 
     def test_space_group_is_off_by_default_and_syncs_members_when_enabled(self):
         self.assertFalse(self.space.space_group_enabled)
-        second_member = User.create(self.space, 'Second member', verified=True)
+        self.member.set_password('member-password')
+        second_member = User.create(self.space, 'Second member', password='second-password', verified=True)
         self.space.set_admin_settings(
             name=self.space.name,
             group_square_enabled=False,
@@ -111,7 +112,7 @@ class SpaceAdminApiTests(TestCase):
         self.assertEqual(json.loads(notices[-1].content)['event'], 'space_group_created')
         self.assertEqual(json.loads(notices[-1].content)['group_title'], chat.title)
 
-        newcomer = User.create(self.space, 'Newcomer', verified=True)
+        newcomer = User.create(self.space, 'Newcomer', password='newcomer-password', verified=True)
         self.assertTrue(chat.has_active_member(newcomer))
         notice_count = Message.objects.filter(chat=chat, type=MessageTypeChoice.SYSTEM).count()
         Chat.sync_space_group(self.space)
@@ -127,6 +128,7 @@ class SpaceAdminApiTests(TestCase):
         )
 
     def test_space_group_respects_manual_leave_and_keeps_official_member(self):
+        self.member.set_password('member-password')
         self.space.space_group_enabled = True
         self.space.save(update_fields=['space_group_enabled'])
         chat = Chat.sync_space_group(self.space)
@@ -140,7 +142,7 @@ class SpaceAdminApiTests(TestCase):
             chat.leave(self.official)
 
     def test_space_operator_can_leave_space_group(self):
-        operator = User.create(self.space, 'Operator', verified=True)
+        operator = User.create(self.space, 'Operator', password='operator-password', verified=True)
         SpaceOperator.objects.create(space=self.space, user=operator)
         self.space.space_group_enabled = True
         self.space.save(update_fields=['space_group_enabled'])
@@ -152,6 +154,7 @@ class SpaceAdminApiTests(TestCase):
         self.assertFalse(chat.has_active_member(operator))
 
     def test_disabling_dissolves_space_group_and_reenabling_creates_another(self):
+        self.member.set_password('member-password')
         self.space.space_group_enabled = True
         self.space.save(update_fields=['space_group_enabled'])
         original = Chat.sync_space_group(self.space)
@@ -188,6 +191,17 @@ class SpaceAdminApiTests(TestCase):
             ).order_by('id').last().content)['event'],
             'space_group_created',
         )
+
+    def test_password_is_required_and_first_password_setup_joins_space_group(self):
+        self.space.space_group_enabled = True
+        self.space.save(update_fields=['space_group_enabled'])
+        chat = Chat.sync_space_group(self.space)
+        self.assertFalse(chat.has_active_member(self.member))
+
+        self.member.set_password('member-password')
+        self.assertTrue(chat.has_active_member(self.member))
+        welcome = Message.objects.filter(chat=chat, type=MessageTypeChoice.SYSTEM).order_by('id').last()
+        self.assertEqual(json.loads(welcome.content)['event'], 'space_group_member_joined')
 
     @patch('Space.models.threading.Thread')
     def test_capacity_email_is_claimed_once_for_stale_space_instances(self, thread):

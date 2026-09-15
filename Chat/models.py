@@ -316,6 +316,7 @@ class Chat(models.Model):
         return [
             chat for chat in chats
             if chat.has_active_member(user)
+            and (not chat.is_space_group or user.is_official or user.has_password)
             and (not chat.is_space_group or user.space.space_group_enabled)
             and (chat.submission or not chat.group or user.has_capability('chat.group.join'))
         ]
@@ -339,11 +340,31 @@ class Chat(models.Model):
                 ),
             )
             cls.ensure_space_group_member(space.official_user, chat=chat)
+            ChatMember.objects.filter(
+                chat=chat,
+                status=ChatMemberStatusChoice.ACTIVE,
+                user__is_deleted=False,
+                user__password__isnull=True,
+            ).exclude(user_id=space.official_user_id).update(
+                status=ChatMemberStatusChoice.KICKED,
+                left_at=timezone.now(),
+            )
+            ChatMember.objects.filter(
+                chat=chat,
+                status=ChatMemberStatusChoice.ACTIVE,
+                user__is_deleted=False,
+                user__password='',
+            ).exclude(user_id=space.official_user_id).update(
+                status=ChatMemberStatusChoice.KICKED,
+                left_at=timezone.now(),
+            )
             users = User.objects.filter(
                 space=space,
                 is_deleted=False,
                 left_space_group_manually=False,
-            ).exclude(id=space.official_user_id).order_by('created_at', 'id')
+            ).exclude(
+                Q(id=space.official_user_id) | Q(password__isnull=True) | Q(password='')
+            ).order_by('created_at', 'id')
             for user in users:
                 cls.ensure_space_group_member(user, chat=chat)
             if _created:
@@ -374,6 +395,8 @@ class Chat(models.Model):
     @classmethod
     def ensure_space_group_member(cls, user, chat=None):
         if not user.space.space_group_enabled or user.is_deleted:
+            return None
+        if not user.is_official and not user.has_password:
             return None
         if user.left_space_group_manually and not user.is_official:
             return None

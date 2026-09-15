@@ -508,10 +508,14 @@ class User(models.Model):
     def set_password(self, password, save=True):
         if not password:
             return self
+        had_password = self.has_password
         self.password = function.hash_password(password, self.salt)
         if save:
             self.save(update_fields=['password'])
             self.award_growth('security:password')
+            if not had_password and self.space.space_group_enabled:
+                from Chat.models import Chat
+                Chat.ensure_space_group_member(self)
         return self
 
     def set_language(self, language, save=True):
