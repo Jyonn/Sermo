@@ -559,8 +559,10 @@ class Message(models.Model):
             chat.require_user_message_allowed(user)
             if chat.submission:
                 chat.submission_record.require_send_allowed(user)
+            if reply_to is not None and message_type != MessageTypeChoice.TEXT:
+                raise MessageErrors.REPLY_TEXT_ONLY
             if message_type == MessageTypeChoice.TEXT:
-                statement_reference = cls.statement_reference_from_text(content, user)
+                statement_reference = cls.statement_reference_from_text(content, user) if reply_to is None else None
                 if statement_reference is not None:
                     message_type = MessageTypeChoice.STATEMENT
                     content = json.dumps(statement_reference, separators=(',', ':'), ensure_ascii=False)

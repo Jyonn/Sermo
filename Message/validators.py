@@ -18,6 +18,7 @@ class MessageErrors:
     MEDIA_KIND_INVALID = Error(message=_('Invalid media kind'), code=Code.BadRequest)
     AUDIO_DURATION_INVALID = Error(message=_('Audio message cannot exceed 60 seconds'), code=Code.BadRequest)
     REPLY_TARGET_INVALID = Error(message=_('The replied message is not in this chat'), code=Code.BadRequest)
+    REPLY_TEXT_ONLY = Error(message=_('Only text messages can reply to another message'), code=Code.BadRequest)
     PIN_FORBIDDEN = Error(message=_('You cannot manage locked messages in this chat'), code=Code.Forbidden)
     PIN_LIMIT_REACHED = Error(message=_('This chat has reached the locked message limit'), code=Code.BadRequest)
     MAP_ACCESS_DIRECT_ONLY = Error(message=_('Map access can only be shared in a direct chat'), code=Code.BadRequest)

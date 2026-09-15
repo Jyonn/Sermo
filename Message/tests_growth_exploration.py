@@ -53,3 +53,11 @@ class MessageGrowthExplorationTests(TestCase):
         self.assertTrue(self.user.growth_events.filter(event_key='explore:file').exists())
         self.assertTrue(self.user.growth_events.filter(event_key='explore:message_reply').exists())
         self.assertEqual(self.user.growth_events.filter(event_key='explore:pin_message').count(), 1)
+
+    def test_only_text_messages_can_carry_replies(self):
+        original = Message.create(self.chat, self.peer, MessageTypeChoice.TEXT, '原消息')
+        reply = Message.create(self.chat, self.user, MessageTypeChoice.TEXT, '收到🙂', reply_to=original)
+        self.assertEqual(reply.reply_to, original)
+
+        with self.assertRaises(Exception):
+            Message.create(self.chat, self.user, MessageTypeChoice.LOCATION, '{}', reply_to=original)

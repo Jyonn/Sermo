@@ -1032,3 +1032,5 @@ msgstr "欢迎 %(member)s 进入 %(space)s 空间"
 
 msgid "%(actor)s successfully created “%(title)s”"
 msgstr "%(actor)s 已经成功创建“%(title)s”"
+msgid "Only text messages can reply to another message"
+msgstr "只有文字消息可以回复引用"
