@@ -108,6 +108,15 @@ class SpaceAdminApiTests(TestCase):
         Chat.sync_space_group(self.space)
         self.assertEqual(Message.objects.filter(chat=chat, type=MessageTypeChoice.SYSTEM).count(), notice_count)
 
+        newcomer_membership = ChatMember.objects.get(chat=chat, user=newcomer)
+        newcomer_membership.status = ChatMemberStatusChoice.LEFT
+        newcomer_membership.save(update_fields=['status', 'updated_at'])
+        Chat.ensure_space_group_member(newcomer, chat=chat)
+        self.assertEqual(
+            Message.objects.filter(chat=chat, type=MessageTypeChoice.SYSTEM).count(),
+            notice_count + 1,
+        )
+
     def test_space_group_respects_manual_leave_and_keeps_official_member(self):
         self.space.space_group_enabled = True
         self.space.save(update_fields=['space_group_enabled'])

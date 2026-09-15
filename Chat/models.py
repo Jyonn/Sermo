@@ -365,13 +365,14 @@ class Chat(models.Model):
                 left_at=None,
             ),
         )
-        if not created and member.status != ChatMemberStatusChoice.ACTIVE:
+        joined = created or member.status != ChatMemberStatusChoice.ACTIVE
+        if not created and joined:
             member.status = ChatMemberStatusChoice.ACTIVE
             member.role = ChatMemberRoleChoice.OWNER if user.is_official else ChatMemberRoleChoice.MEMBER
             member.joined_at = timezone.now()
             member.left_at = None
             member.save(update_fields=['status', 'role', 'joined_at', 'left_at', 'updated_at'])
-        if created and not user.is_official:
+        if joined and not user.is_official:
             from Message.models import Message
             Message.create_system(
                 chat=chat,
