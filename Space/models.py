@@ -262,6 +262,7 @@ class Space(models.Model):
             self, name, group_square_enabled, chat_enabled, square_explore_enabled,
             unverified_group_policy, member_limit, level_names=None, submission_enabled=None,
             square_free_post_enabled=None, qq_binding_enabled=None, space_group_enabled=None):
+        was_space_group_enabled = self.space_group_enabled
         normalized_name = self.vldt.name(name)
         normalized_member_limit = self.vldt.member_limit(member_limit)
         normalized_level_names = self.vldt.level_names(level_names or self.level_names)
@@ -309,9 +310,11 @@ class Space(models.Model):
             'submission_enabled', 'square_explore_enabled', 'space_group_enabled',
             'unverified_group_policy', 'member_limit', 'level_names', 'qq_binding_enabled',
         ])
+        from Chat.models import Chat
         if self.space_group_enabled:
-            from Chat.models import Chat
             Chat.sync_space_group(self)
+        elif was_space_group_enabled:
+            Chat.dissolve_space_group(self)
         return self
 
     def is_feature_granted(self, feature_key):

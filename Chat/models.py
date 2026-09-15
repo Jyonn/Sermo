@@ -184,6 +184,8 @@ class Chat(models.Model):
     def remove(self):
         if self.submission:
             raise ChatErrors.FORBIDDEN
+        if self.is_space_group:
+            raise ChatErrors.FORBIDDEN
         user_ids = self._active_user_ids()
         self.is_deleted = True
         self.save(update_fields=['is_deleted'])
@@ -328,6 +330,7 @@ class Chat(models.Model):
             chat, _created = cls.objects.get_or_create(
                 space=space,
                 is_space_group=True,
+                is_deleted=False,
                 defaults=dict(
                     chat_type=ChatTypeChoice.GROUP,
                     purpose=ChatPurposeChoice.NORMAL,
@@ -352,6 +355,21 @@ class Chat(models.Model):
                     group_title=chat.title,
                 )
             return chat
+
+    @classmethod
+    def dissolve_space_group(cls, space):
+        chat = cls.objects.filter(
+            space=space,
+            is_space_group=True,
+            is_deleted=False,
+        ).first()
+        if chat is None:
+            return None
+        user_ids = chat._active_user_ids()
+        chat.is_deleted = True
+        chat.save(update_fields=['is_deleted'])
+        chat._emit_state_changed(user_ids)
+        return chat
 
     @classmethod
     def ensure_space_group_member(cls, user, chat=None):
@@ -756,7 +774,7 @@ class Chat(models.Model):
             return members
 
     def transfer_ownership(self, operator: User, target: User):
-        if self.submission:
+        if self.submission or self.is_space_group:
             raise ChatErrors.FORBIDDEN
         if not self.group:
             raise ChatErrors.NOT_GROUP_CHAT(chat=self.id)

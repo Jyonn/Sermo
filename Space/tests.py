@@ -151,6 +151,44 @@ class SpaceAdminApiTests(TestCase):
         self.assertTrue(operator.left_space_group_manually)
         self.assertFalse(chat.has_active_member(operator))
 
+    def test_disabling_dissolves_space_group_and_reenabling_creates_another(self):
+        self.space.space_group_enabled = True
+        self.space.save(update_fields=['space_group_enabled'])
+        original = Chat.sync_space_group(self.space)
+
+        self.space.set_admin_settings(
+            name=self.space.name,
+            group_square_enabled=False,
+            chat_enabled=True,
+            square_explore_enabled=False,
+            unverified_group_policy=2,
+            member_limit=None,
+            space_group_enabled=False,
+        )
+        original.refresh_from_db()
+        self.assertTrue(original.is_deleted)
+        with self.assertRaises(Exception):
+            original.remove()
+
+        self.space.set_admin_settings(
+            name=self.space.name,
+            group_square_enabled=False,
+            chat_enabled=True,
+            square_explore_enabled=False,
+            unverified_group_policy=2,
+            member_limit=None,
+            space_group_enabled=True,
+        )
+        replacement = Chat.objects.get(space=self.space, is_space_group=True, is_deleted=False)
+        self.assertNotEqual(replacement.id, original.id)
+        self.assertEqual(
+            json.loads(Message.objects.filter(
+                chat=replacement,
+                type=MessageTypeChoice.SYSTEM,
+            ).order_by('id').last().content)['event'],
+            'space_group_created',
+        )
+
     @patch('Space.models.threading.Thread')
     def test_capacity_email_is_claimed_once_for_stale_space_instances(self, thread):
         trial = Space.objects.create(name='Capacity', slug='capacity-space', email='capacity@example.com')
