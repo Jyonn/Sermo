@@ -69,6 +69,7 @@ class Chat(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     last_chat_at = models.DateTimeField(auto_now=True)
     is_deleted = models.BooleanField(default=False, db_index=True)
+    is_space_group = models.BooleanField(default=False, db_index=True)
 
     @classmethod
     def index(cls, chat_id):
@@ -136,6 +137,7 @@ class Chat(models.Model):
             'purpose',
             'title',
             'group_background_theme',
+            'is_space_group',
             'owner',
             'members',
             'group',
@@ -312,8 +314,61 @@ class Chat(models.Model):
         return [
             chat for chat in chats
             if chat.has_active_member(user)
+            and (not chat.is_space_group or user.space.space_group_enabled)
             and (chat.submission or not chat.group or user.has_capability('chat.group.join'))
         ]
+
+    @classmethod
+    def sync_space_group(cls, space):
+        if not space.space_group_enabled or not space.official_user_id:
+            return None
+        with transaction.atomic():
+            from Space.models import Space
+            Space.objects.select_for_update().get(id=space.id)
+            chat, _created = cls.objects.get_or_create(
+                space=space,
+                is_space_group=True,
+                defaults=dict(
+                    chat_type=ChatTypeChoice.GROUP,
+                    purpose=ChatPurposeChoice.NORMAL,
+                    title=f'{space.name} · 大家',
+                    created_by=space.official_user,
+                ),
+            )
+            users = User.objects.filter(space=space, is_deleted=False).filter(
+                Q(left_space_group_manually=False) | Q(id=space.official_user_id)
+            )
+            for user in users:
+                cls.ensure_space_group_member(user, chat=chat)
+            return chat
+
+    @classmethod
+    def ensure_space_group_member(cls, user, chat=None):
+        if not user.space.space_group_enabled or user.is_deleted:
+            return None
+        if user.left_space_group_manually and not user.is_official:
+            return None
+        chat = chat or cls.sync_space_group(user.space)
+        if chat is None:
+            return None
+        member, created = ChatMember.objects.get_or_create(
+            chat=chat,
+            user=user,
+            defaults=dict(
+                role=ChatMemberRoleChoice.OWNER if user.is_official else ChatMemberRoleChoice.MEMBER,
+                status=ChatMemberStatusChoice.ACTIVE,
+                invited_by=user.space.official_user,
+                joined_at=timezone.now(),
+                left_at=None,
+            ),
+        )
+        if not created and member.status != ChatMemberStatusChoice.ACTIVE:
+            member.status = ChatMemberStatusChoice.ACTIVE
+            member.role = ChatMemberRoleChoice.OWNER if user.is_official else ChatMemberRoleChoice.MEMBER
+            member.joined_at = timezone.now()
+            member.left_at = None
+            member.save(update_fields=['status', 'role', 'joined_at', 'left_at', 'updated_at'])
+        return member
 
     @classmethod
     def _pair(cls, self_user: User, peer_user: User):
@@ -739,6 +794,9 @@ class Chat(models.Model):
             member.status = ChatMemberStatusChoice.LEFT
             member.left_at = timezone.now()
             member.save(update_fields=['status', 'left_at', 'updated_at'])
+            if self.is_space_group:
+                user.left_space_group_manually = True
+                user.save(update_fields=['left_space_group_manually'])
             self._emit_state_changed([user.id])
         return member
 

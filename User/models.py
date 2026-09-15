@@ -297,6 +297,7 @@ class User(models.Model):
     salt = models.CharField(max_length=vldt.SALT_MAX_LENGTH)
 
     is_deleted = models.BooleanField(default=False)
+    left_space_group_manually = models.BooleanField(default=False)
 
     class Meta:
         unique_together = ('space', 'lower_name')
@@ -433,6 +434,9 @@ class User(models.Model):
         if password:
             user.set_password(password)
         cls._ensure_official_friendship(user)
+        if space.space_group_enabled:
+            from Chat.models import Chat
+            Chat.ensure_space_group_member(user)
         return user
 
     @classmethod

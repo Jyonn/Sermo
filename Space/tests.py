@@ -84,6 +84,49 @@ class SpaceAdminApiTests(TestCase):
         with self.assertRaises(Exception):
             trial.set_admin_settings('Trial', True, True, True, 2, None)
 
+    def test_space_group_is_off_by_default_and_syncs_members_when_enabled(self):
+        self.assertFalse(self.space.space_group_enabled)
+        self.space.set_admin_settings(
+            name=self.space.name,
+            group_square_enabled=False,
+            chat_enabled=True,
+            square_explore_enabled=False,
+            unverified_group_policy=2,
+            member_limit=None,
+            space_group_enabled=True,
+        )
+        chat = Chat.objects.get(space=self.space, is_space_group=True)
+        self.assertTrue(chat.has_active_member(self.official))
+        self.assertTrue(chat.has_active_member(self.member))
+
+        newcomer = User.create(self.space, 'Newcomer', verified=True)
+        self.assertTrue(chat.has_active_member(newcomer))
+
+    def test_space_group_respects_manual_leave_and_keeps_official_member(self):
+        self.space.space_group_enabled = True
+        self.space.save(update_fields=['space_group_enabled'])
+        chat = Chat.sync_space_group(self.space)
+        chat.leave(self.member)
+        self.member.refresh_from_db()
+        self.assertTrue(self.member.left_space_group_manually)
+
+        Chat.sync_space_group(self.space)
+        self.assertFalse(chat.has_active_member(self.member))
+        with self.assertRaises(Exception):
+            chat.leave(self.official)
+
+    def test_space_operator_can_leave_space_group(self):
+        operator = User.create(self.space, 'Operator', verified=True)
+        SpaceOperator.objects.create(space=self.space, user=operator)
+        self.space.space_group_enabled = True
+        self.space.save(update_fields=['space_group_enabled'])
+        chat = Chat.sync_space_group(self.space)
+
+        chat.leave(operator)
+        operator.refresh_from_db()
+        self.assertTrue(operator.left_space_group_manually)
+        self.assertFalse(chat.has_active_member(operator))
+
     @patch('Space.models.threading.Thread')
     def test_capacity_email_is_claimed_once_for_stale_space_instances(self, thread):
         trial = Space.objects.create(name='Capacity', slug='capacity-space', email='capacity@example.com')
