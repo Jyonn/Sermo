@@ -340,7 +340,7 @@ class Chat(models.Model):
                 space=space,
                 is_deleted=False,
                 left_space_group_manually=False,
-            ).exclude(id=space.official_user_id)
+            ).exclude(id=space.official_user_id).order_by('created_at', 'id')
             for user in users:
                 cls.ensure_space_group_member(user, chat=chat)
             if _created:

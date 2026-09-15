@@ -86,6 +86,7 @@ class SpaceAdminApiTests(TestCase):
 
     def test_space_group_is_off_by_default_and_syncs_members_when_enabled(self):
         self.assertFalse(self.space.space_group_enabled)
+        second_member = User.create(self.space, 'Second member', verified=True)
         self.space.set_admin_settings(
             name=self.space.name,
             group_square_enabled=False,
@@ -98,6 +99,7 @@ class SpaceAdminApiTests(TestCase):
         chat = Chat.objects.get(space=self.space, is_space_group=True)
         self.assertTrue(chat.has_active_member(self.official))
         self.assertTrue(chat.has_active_member(self.member))
+        self.assertTrue(chat.has_active_member(second_member))
         notices = list(Message.objects.filter(
             chat=chat,
             user=self.official,
@@ -105,6 +107,7 @@ class SpaceAdminApiTests(TestCase):
         ).order_by('id'))
         self.assertEqual(json.loads(notices[0].content)['event'], 'space_group_member_joined')
         self.assertEqual(json.loads(notices[0].content)['member_name'], self.member.name)
+        self.assertEqual(json.loads(notices[1].content)['member_name'], second_member.name)
         self.assertEqual(json.loads(notices[-1].content)['event'], 'space_group_created')
         self.assertEqual(json.loads(notices[-1].content)['group_title'], chat.title)
 
