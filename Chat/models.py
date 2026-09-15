@@ -679,6 +679,8 @@ class Chat(models.Model):
     def rename(self, operator: User, title: str):
         if not self.group:
             raise ChatErrors.NOT_GROUP_CHAT(chat=self.id)
+        if self.is_space_group and not operator.is_official:
+            raise ChatErrors.FORBIDDEN
         operator.require_capability('chat.group.rename')
         next_title = (title or '').strip() or self.title
         if next_title == self.title:

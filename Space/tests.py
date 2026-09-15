@@ -203,6 +203,18 @@ class SpaceAdminApiTests(TestCase):
         welcome = Message.objects.filter(chat=chat, type=MessageTypeChoice.SYSTEM).order_by('id').last()
         self.assertEqual(json.loads(welcome.content)['event'], 'space_group_member_joined')
 
+    def test_only_official_account_can_rename_space_group(self):
+        self.member.set_password('member-password')
+        self.space.space_group_enabled = True
+        self.space.save(update_fields=['space_group_enabled'])
+        chat = Chat.sync_space_group(self.space)
+
+        with self.assertRaises(Exception):
+            chat.rename(self.member, '普通成员改名')
+        chat.rename(self.official, '官方群聊新名称')
+        chat.refresh_from_db()
+        self.assertEqual(chat.title, '官方群聊新名称')
+
     @patch('Space.models.threading.Thread')
     def test_capacity_email_is_claimed_once_for_stale_space_instances(self, thread):
         trial = Space.objects.create(name='Capacity', slug='capacity-space', email='capacity@example.com')
