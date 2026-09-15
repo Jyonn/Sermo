@@ -895,6 +895,11 @@ class Message(models.Model):
                     member=str(payload.get('member_name') or '').strip(),
                     space=str(payload.get('space_name') or '').strip(),
                 )
+            if event == 'space_group_created':
+                return _('%(actor)s successfully created “%(title)s”') % dict(
+                    actor=actor,
+                    title=str(payload.get('group_title') or '').strip(),
+                )
             if event == 'square_muted':
                 duration = {
                     '1d': _('1 day'),

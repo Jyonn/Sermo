@@ -1029,3 +1029,6 @@ msgid "Square actions are unavailable because your account is permanently muted.
 msgstr "你已被广场永久禁言，暂时无法发言、评论或回复。"
 msgid "Welcome %(member)s to %(space)s"
 msgstr "欢迎 %(member)s 进入 %(space)s 空间"
+
+msgid "%(actor)s successfully created “%(title)s”"
+msgstr "%(actor)s 已经成功创建“%(title)s”"

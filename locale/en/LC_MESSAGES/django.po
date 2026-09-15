@@ -918,3 +918,6 @@ msgid "Square actions are unavailable because your account is permanently muted.
 msgstr "Square actions are unavailable because your account is permanently muted."
 msgid "Welcome %(member)s to %(space)s"
 msgstr "Welcome %(member)s to %(space)s"
+
+msgid "%(actor)s successfully created “%(title)s”"
+msgstr "%(actor)s successfully created “%(title)s”"

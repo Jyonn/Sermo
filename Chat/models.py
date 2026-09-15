@@ -343,6 +343,14 @@ class Chat(models.Model):
             ).exclude(id=space.official_user_id)
             for user in users:
                 cls.ensure_space_group_member(user, chat=chat)
+            if _created:
+                from Message.models import Message
+                Message.create_system(
+                    chat=chat,
+                    user=space.official_user,
+                    event='space_group_created',
+                    group_title=chat.title,
+                )
             return chat
 
     @classmethod
