@@ -18,6 +18,13 @@ from utils.auth import Request
 from User.models import NotificationEvent, User
 
 
+def _require_message_feature(chat, user):
+    if chat.submission:
+        user.space.require_submission_enabled()
+    else:
+        user.space.require_chat_enabled()
+
+
 class MessageView(View):
     @auth.require_user
     @analyse.query(
@@ -28,7 +35,7 @@ class MessageView(View):
     )
     @auth.require_chat_member()
     def get(self, request: Request):
-        request.user.space.require_chat_enabled()
+        _require_message_feature(request.query.chat, request.user)
         if request.query.chat.group:
             request.user.space.require_group_join_allowed(request.user)
         before = request.query.before
@@ -52,7 +59,7 @@ class MessageView(View):
         MessageParams.resource_id,
     )
     def post(self, request: Request):
-        request.user.space.require_chat_enabled()
+        _require_message_feature(request.query.chat, request.user)
         if request.json.type in (MessageTypeChoice.SYSTEM, MessageTypeChoice.FORWARD_BUNDLE, MessageTypeChoice.OFFICIAL_NOTICE, MessageTypeChoice.SUBMISSION_INVITE):
             raise MessageErrors.SYSTEM_MESSAGE_FORBIDDEN
         if request.query.chat.group:
@@ -316,7 +323,7 @@ class MessageUploadView(View):
         MessageParams.content_hash,
     )
     def post(self, request: Request):
-        request.user.space.require_chat_enabled()
+        request.user.space.require_message_composer_enabled()
         capability = {
             'image': 'chat.message.send.image',
             'audio': 'chat.message.send.audio',

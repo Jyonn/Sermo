@@ -279,7 +279,7 @@ class Space(models.Model):
             raise SpaceErrors.MODULES_REQUIRED
         normalized_submission_enabled = (
             self.submission_enabled if submission_enabled is None else bool(submission_enabled)
-        ) and normalized_chat_enabled
+        ) and normalized_square_enabled
         normalized_free_post_enabled = (
             self.square_free_post_enabled
             if square_free_post_enabled is None
@@ -345,9 +345,14 @@ class Space(models.Model):
             raise SpaceErrors.CHAT_DISABLED
 
     def require_submission_enabled(self):
-        self.require_chat_enabled()
+        self.require_square_enabled()
         if not self.submission_enabled:
             raise SpaceErrors.SUBMISSION_DISABLED
+
+    def require_message_composer_enabled(self):
+        if self.chat_enabled:
+            return
+        self.require_submission_enabled()
 
     def require_square_enabled(self, scope=None):
         if self.verification_tier == 'email' or not self.group_square_enabled:

@@ -582,6 +582,46 @@ class SpaceAdminApiTests(TestCase):
         self.assertFalse(enabled.json()['body']['square_free_post_enabled'])
         self.assertTrue(enabled.json()['body']['submission_enabled'])
 
+    def test_disabling_chat_keeps_square_submissions_enabled(self):
+        response = self.client.post(
+            '/spaces/admin/settings',
+            data=json.dumps({
+                'name': self.space.name,
+                'group_square_enabled': 1,
+                'chat_enabled': 0,
+                'square_free_post_enabled': 0,
+                'submission_enabled': 1,
+                'square_explore_enabled': 1,
+                'unverified_group_policy': 2,
+                'member_limit': 100,
+                'level_names': self.space.level_names,
+            }),
+            content_type='application/json',
+            **self.authorization(),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertFalse(response.json()['body']['chat_enabled'])
+        self.assertTrue(response.json()['body']['submission_enabled'])
+
+    def test_disabling_square_also_disables_submissions(self):
+        self.space.submission_enabled = True
+        self.space.save(update_fields=['submission_enabled'])
+
+        self.space.set_admin_settings(
+            name=self.space.name,
+            group_square_enabled=False,
+            chat_enabled=True,
+            square_free_post_enabled=True,
+            submission_enabled=True,
+            square_explore_enabled=False,
+            unverified_group_policy=2,
+            member_limit=100,
+            level_names=self.space.level_names,
+        )
+
+        self.assertFalse(self.space.submission_enabled)
+
     def test_admin_can_enable_qq_binding_only_after_platform_grant(self):
         payload = {
             'name': self.space.name,

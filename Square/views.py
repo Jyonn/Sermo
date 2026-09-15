@@ -137,7 +137,6 @@ class SquareChatRecordStatementView(View):
     )
     def post(self, request: Request):
         request.user.space.require_square_enabled()
-        request.user.space.require_chat_enabled()
         check_user_text(request, request.json.text, ContentSafetyScene.SOCIAL)
         if not request.user.can_operate_square:
             raise SquareErrors.CHAT_RECORD_FORBIDDEN
@@ -158,6 +157,7 @@ class SquareChatRecordStatementView(View):
         source_chat = messages[0].chat
         source_submission = source_chat.submission_record if source_chat.submission else None
         if source_submission is None:
+            request.user.space.require_chat_enabled()
             request.user.space.require_square_free_post_enabled()
         if source_submission is not None:
             from Chat.models import SubmissionStatusChoice

@@ -19,7 +19,10 @@ class SubmissionChatTests(TestCase):
             name='Submission Space',
             slug='submissions',
             email='admin@example.com',
+            group_square_enabled=True,
             submission_enabled=True,
+            admin_phone='+8613800000000',
+            admin_phone_verified_at=timezone.now(),
         )
         self.official = self.space.ensure_official_user()
         self.author = User.create(self.space, 'Author', verified=True)
@@ -67,6 +70,42 @@ class SubmissionChatTests(TestCase):
         reviewer_rows = self.client.get('/chats/?purpose=submission&role=reviewer', **self.authorization(self.operator)).json()['body']
         self.assertIn(chat.id, [item['chat_id'] for item in reviewer_rows])
         self.assertEqual(reviewer_rows[0]['submission']['status'], 'review')
+
+    def test_submission_list_and_messages_work_when_regular_chat_is_disabled(self):
+        chat, _created = Chat.create_submission(
+            self.author,
+            self.operator,
+            'Submission without chat',
+            'submission-without-chat',
+        )
+        self.space.chat_enabled = False
+        self.space.save(update_fields=['chat_enabled'])
+
+        listed = self.client.get(
+            '/chats/?purpose=submission&role=author',
+            **self.authorization(self.author),
+        )
+        sent = self.client.post(
+            f'/messages/?chat_id={chat.id}',
+            data=json.dumps({
+                'type': MessageTypeChoice.TEXT,
+                'content': 'Submission remains available.',
+                'client_message_id': 'submission-chat-disabled-message',
+                'mention_user_ids': [],
+                'resource_id': None,
+                'reply_to_message_id': None,
+            }),
+            content_type='application/json',
+            **self.authorization(self.author),
+        )
+
+        self.assertEqual(listed.status_code, 200, listed.content)
+        self.assertIn(chat.id, [item['chat_id'] for item in listed.json()['body']])
+        self.assertEqual(sent.status_code, 200, sent.content)
+
+        ordinary = self.client.get('/chats/', **self.authorization(self.author))
+        self.assertEqual(ordinary.status_code, 403, ordinary.content)
+        self.assertEqual(ordinary.json()['identifier'], 'SPACE@CHAT_DISABLED')
 
     def test_operator_can_review_submission_authored_by_space_official(self):
         chat, _ = Chat.create_submission(

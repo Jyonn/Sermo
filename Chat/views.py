@@ -45,10 +45,11 @@ class ChatListView(View):
 
     @auth.require_user
     def get(self, request):
-        request.user.space.require_chat_enabled()
         purpose = ChatPurposeChoice.SUBMISSION if request.GET.get('purpose') == 'submission' else ChatPurposeChoice.NORMAL
         if purpose == ChatPurposeChoice.SUBMISSION:
             request.user.space.require_submission_enabled()
+        else:
+            request.user.space.require_chat_enabled()
         submission_role = request.GET.get('role') if purpose == ChatPurposeChoice.SUBMISSION else None
         if submission_role not in (None, 'author', 'reviewer'):
             raise ChatErrors.FORBIDDEN
