@@ -59,16 +59,17 @@ class APIPacker:
         response = self.get_response(request, *args, **kwargs)
         if isinstance(response, HttpResponse):
             return response
-        return self.pack(response)
+        return self.pack(response, getattr(request, 'wechat_content_safety', None))
 
     @classmethod
-    def process_exception(cls, _, error):
+    def process_exception(cls, request, error):
         if isinstance(error, Error):
-            return cls.pack(error)
+            debug = getattr(error, 'wechat_content_safety', None) or getattr(request, 'wechat_content_safety', None)
+            return cls.pack(error, debug)
         return None
 
     @staticmethod
-    def pack(response):
+    def pack(response, wechat_content_safety=None):
         if isinstance(response, Error):
             body, error = None, response
         else:
@@ -76,6 +77,8 @@ class APIPacker:
 
         payload = error.json()
         payload['body'] = body
+        if wechat_content_safety:
+            payload['wechat_content_safety'] = wechat_content_safety
         payload = _to_jsonable(payload)
         serialized = json.dumps(payload, ensure_ascii=False, default=str)
 

@@ -1,3 +1,4 @@
+import json
 import logging
 
 import requests
@@ -79,7 +80,7 @@ def _access_token(force_refresh=False):
 def check_text(content, open_id, scene, *, title=None, nickname=None):
     normalized = str(content or '').strip()
     if not normalized:
-        return
+        return None
     if not open_id:
         raise ContentSafetyErrors.UNAVAILABLE
     body = {
@@ -102,14 +103,33 @@ def check_text(content, open_id, scene, *, title=None, nickname=None):
             'WeChat content review failed: errcode=%s trace_id=%s',
             payload.get('errcode'), payload.get('trace_id'),
         )
-        raise ContentSafetyErrors.UNAVAILABLE
+        _raise_review_error(ContentSafetyErrors.UNAVAILABLE, _review_debug(payload, scene))
     result = payload.get('result') or {}
+    debug = _review_debug(payload, scene)
     if result.get('suggest') != 'pass':
         logger.info(
             'WeChat content rejected: suggest=%s label=%s trace_id=%s',
             result.get('suggest'), result.get('label'), payload.get('trace_id'),
         )
-        raise ContentSafetyErrors.REJECTED
+        _raise_review_error(ContentSafetyErrors.REJECTED, debug)
+    return debug
+
+
+def _review_debug(payload, scene):
+    return {
+        'scene': scene,
+        'errcode': payload.get('errcode'),
+        'errmsg': payload.get('errmsg'),
+        'trace_id': payload.get('trace_id'),
+        'result': payload.get('result'),
+        'detail': payload.get('detail'),
+    }
+
+
+def _raise_review_error(error_template, debug):
+    error = error_template(details=json.dumps(debug, ensure_ascii=False, default=str))
+    error.wechat_content_safety = debug
+    raise error
 
 
 def _perform_check(body, token):
@@ -139,4 +159,12 @@ def check_user_text(request, content, scene, *, title=None, nickname=None):
     ).only('open_id').first()
     if identity is None:
         raise ContentSafetyErrors.UNAVAILABLE
-    check_text(content, identity.open_id, scene, title=title, nickname=nickname)
+    try:
+        debug = check_text(content, identity.open_id, scene, title=title, nickname=nickname)
+    except Error as error:
+        if getattr(error, 'wechat_content_safety', None):
+            request.wechat_content_safety = error.wechat_content_safety
+        raise
+    if debug:
+        request.wechat_content_safety = debug
+    return debug
