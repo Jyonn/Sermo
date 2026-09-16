@@ -17,7 +17,7 @@ from Message.validators import MessageErrors
 from User.validators import UserErrors
 
 
-QINIU_UPLOAD_URL = 'https://upload.qiniup.com'
+QINIU_UPLOAD_URL = 'https://up-z0.qiniup.com'
 QINIU_RS_HOST = 'rs.qiniuapi.com'
 QINIU_RS_BATCH_URL = f'https://{QINIU_RS_HOST}/batch'
 QINIU_SHORT_AUDIO_ASR_URL = os.getenv(

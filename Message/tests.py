@@ -6,11 +6,14 @@ from django.test import SimpleTestCase, TestCase
 from Message.image_metadata import _reverse_geocode_opencage, parse_image_info, reverse_geocode, search_nearby_places
 from Message.video_metadata import parse_avinfo
 from Message.models import MediaAsset, Message, MessageTypeChoice
-from utils.qiniu import build_message_media_key, validate_message_media_key
+from utils.qiniu import QINIU_UPLOAD_URL, build_message_media_key, validate_message_media_key
 from utils.global_settings import Globals
 
 
 class MessageFileUploadTests(SimpleTestCase):
+    def test_uploads_use_the_east_china_bucket_endpoint(self):
+        self.assertEqual(QINIU_UPLOAD_URL, 'https://up-z0.qiniup.com')
+
     def test_arbitrary_file_extension_is_preserved(self):
         key = build_message_media_key('file', 'scene.blend1', 'application/octet-stream')
 
