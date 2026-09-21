@@ -9,7 +9,7 @@ import threading
 import uuid
 from zoneinfo import ZoneInfo
 from html.parser import HTMLParser
-from urllib.parse import urljoin, urlparse, urlunparse
+from urllib.parse import parse_qs, urljoin, urlparse, urlunparse
 
 import requests
 from django.db import IntegrityError, close_old_connections, transaction
@@ -130,6 +130,8 @@ class LinkPreview(models.Model):
     TRAILING_PUNCTUATION = '.,;:!?)]}，。！？、；：）】》'
     MOJIBAKE_MARKERS = ('ï¼', 'ï½', 'ã€', 'Ã', 'Â')
     RETRYABLE_ERROR_MARKERS = ('already consumed',)
+    NETEASE_HOSTS = frozenset(('163cn.tv', 'music.163.com', 'y.music.163.com'))
+    NETEASE_REDUX_MARKER = 'window.REDUX_STATE = '
     USER_AGENT = (
         'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) '
         'AppleWebKit/537.36 (KHTML, like Gecko) '
@@ -168,6 +170,7 @@ class LinkPreview(models.Model):
     image_url = models.URLField(max_length=2048, blank=True, default='')
     site_name = models.CharField(max_length=120, blank=True, default='')
     favicon_url = models.URLField(max_length=2048, blank=True, default='')
+    provider_data = models.JSONField(default=dict, blank=True)
     error = models.CharField(max_length=255, blank=True, default='')
     fetched_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -195,9 +198,89 @@ class LinkPreview(models.Model):
         hostname = parsed.hostname
         if not hostname:
             return None
+        song_id = cls._netease_song_id_from_url(url)
+        if hostname.lower() in cls.NETEASE_HOSTS and song_id:
+            parsed = urlparse(f'https://y.music.163.com/m/song?id={song_id}')
+            hostname = parsed.hostname
         cls._require_public_host(hostname)
         normalized = parsed._replace(fragment='')
         return urlunparse(normalized)
+
+    @classmethod
+    def _netease_song_id_from_url(cls, url: str):
+        parsed = urlparse((url or '').strip())
+        hostname = (parsed.hostname or '').lower()
+        if hostname not in cls.NETEASE_HOSTS:
+            return None
+        candidates = []
+        if re.fullmatch(r'/(?:m/)?song/?', parsed.path):
+            candidates.append(parse_qs(parsed.query).get('id', [''])[0])
+        if parsed.fragment:
+            fragment = urlparse(parsed.fragment)
+            if re.fullmatch(r'/(?:m/)?song/?', fragment.path):
+                candidates.append(parse_qs(fragment.query).get('id', [''])[0])
+        return next((value for value in candidates if str(value).isdigit()), None)
+
+    @classmethod
+    def _netease_music_data(cls, current_url: str, html: str):
+        song_id = cls._netease_song_id_from_url(current_url)
+        if not song_id or cls.NETEASE_REDUX_MARKER not in html:
+            return {}
+        payload = html.split(cls.NETEASE_REDUX_MARKER, 1)[1].lstrip()
+        try:
+            redux_state, _ = json.JSONDecoder().raw_decode(payload)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return {}
+        song = redux_state.get('Song') if isinstance(redux_state, dict) else None
+        if not isinstance(song, dict) or str(song.get('id') or '') != song_id:
+            return {}
+
+        artists = [
+            cls._clean_text(artist.get('name') or '', 120)
+            for artist in song.get('ar') or []
+            if isinstance(artist, dict) and artist.get('name')
+        ]
+        album = song.get('al') if isinstance(song.get('al'), dict) else {}
+        cover_url = str(album.get('picUrl') or '').replace('http://', 'https://', 1)
+        canonical_url = f'https://music.163.com/#/song?id={song_id}'
+        music = {
+            'provider': 'netease_music',
+            'song_id': int(song_id),
+            'title': cls._clean_text(song.get('name') or '', 255),
+            'artists': artists,
+            'album': cls._clean_text(album.get('name') or '', 255),
+            'cover_url': cover_url,
+            'duration_ms': max(0, int(song.get('dt') or 0)),
+            'audio_url': f'https://music.163.com/song/media/outer/url?id={song_id}.mp3',
+            'canonical_url': canonical_url,
+            'lyrics': {},
+        }
+
+        lyrics_url = f'https://music.163.com/api/song/lyric?id={song_id}&lv=-1&kv=-1&tv=-1'
+        try:
+            cls.normalize_public_url(lyrics_url)
+            response = requests.get(
+                lyrics_url,
+                headers={**cls.BROWSER_HEADERS, 'Accept': 'application/json,text/plain,*/*'},
+                timeout=(3, 5),
+            )
+            if response.status_code < 400:
+                lyric_data = response.json()
+                if not isinstance(lyric_data, dict):
+                    return music
+                for source, target in (
+                    ('lrc', 'original'),
+                    ('tlyric', 'translation'),
+                    ('romalrc', 'romanization'),
+                    ('klyric', 'word'),
+                    ('yrc', 'yrc'),
+                ):
+                    value = lyric_data.get(source)
+                    if isinstance(value, dict) and isinstance(value.get('lyric'), str):
+                        music['lyrics'][target] = value['lyric'][:100_000]
+        except (requests.RequestException, ValueError, TypeError, json.JSONDecodeError):
+            pass
+        return music
 
     @staticmethod
     def _require_public_host(hostname: str):
@@ -333,6 +416,13 @@ class LinkPreview(models.Model):
         favicon_url = parser.best_icon
         parsed = urlparse(current_url)
         site_name = parser.meta.get('og:site_name') or parsed.hostname or ''
+        provider_data = cls._netease_music_data(current_url, html)
+        if provider_data:
+            title = provider_data['title'] or title
+            description = ' / '.join(provider_data['artists']) or description
+            image_url = provider_data['cover_url'] or image_url
+            site_name = '网易云音乐'
+            current_url = provider_data['canonical_url']
 
         return dict(
             url=current_url,
@@ -341,6 +431,7 @@ class LinkPreview(models.Model):
             image_url=cls._safe_absolute_url(current_url, image_url),
             site_name=cls._clean_text(site_name, 120),
             favicon_url=cls._safe_absolute_url(current_url, favicon_url),
+            provider_data=provider_data,
         )
 
     @classmethod
@@ -357,6 +448,15 @@ class LinkPreview(models.Model):
             defaults={'url': url, 'status': LinkPreviewStatusChoice.PENDING},
         )
         force_refresh = cls._is_expired(preview)
+        preview_hostname = (urlparse(preview.url).hostname or '').lower()
+        if (
+            preview.status == LinkPreviewStatusChoice.READY
+            and preview_hostname in cls.NETEASE_HOSTS
+            and not preview.provider_data
+        ):
+            preview.status = LinkPreviewStatusChoice.PENDING
+            preview.error = ''
+            preview.save(update_fields=['status', 'error', 'updated_at'])
         if preview.status == LinkPreviewStatusChoice.READY and cls._looks_mojibake(preview.title, preview.description, preview.site_name):
             preview.status = LinkPreviewStatusChoice.PENDING
             preview.title = ''
@@ -398,6 +498,7 @@ class LinkPreview(models.Model):
             preview.image_url = data['image_url']
             preview.site_name = data['site_name']
             preview.favicon_url = data['favicon_url']
+            preview.provider_data = data.get('provider_data') or {}
             preview.error = ''
             preview.status = LinkPreviewStatusChoice.READY
             preview.fetched_at = timezone.now()
@@ -407,6 +508,7 @@ class LinkPreview(models.Model):
                 'image_url',
                 'site_name',
                 'favicon_url',
+                'provider_data',
                 'error',
                 'status',
                 'fetched_at',
@@ -437,6 +539,7 @@ class LinkPreview(models.Model):
             image_url=self.image_url,
             site_name=self.site_name,
             favicon_url=self.favicon_url,
+            provider_data=self.provider_data,
         )
 
 

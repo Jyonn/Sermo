@@ -1,3 +1,4 @@
+import json
 from unittest.mock import Mock, call, patch
 
 from django.test import SimpleTestCase
@@ -15,6 +16,13 @@ class LinkPreviewFetchTests(SimpleTestCase):
             response.headers['Location'] = location
         response.encoding = 'utf-8'
         response.iter_content.return_value = [html]
+        return response
+
+    @staticmethod
+    def json_response(data, status_code=200):
+        response = Mock()
+        response.status_code = status_code
+        response.json.return_value = data
         return response
 
     @patch.object(LinkPreview, '_require_public_host')
@@ -95,3 +103,45 @@ class LinkPreviewFetchTests(SimpleTestCase):
 
         self.assertEqual(result['image_url'], 'https://example.com/cover.jpg')
         self.assertEqual(result['favicon_url'], 'https://example.com/touch.png')
+
+    @patch.object(LinkPreview, '_require_public_host')
+    @patch('Message.models.requests.get')
+    def test_netease_song_preview_includes_music_and_lyrics(self, get, _require_public_host):
+        redirect = self.response(302, location='https://y.music.163.com/m/song?id=287726')
+        redux_state = {
+            'Song': {
+                'id': 287726,
+                'name': '累赘',
+                'ar': [{'id': 9272, 'name': '孙燕姿'}],
+                'al': {'name': '我要的幸福', 'picUrl': 'http://p1.music.126.net/cover.jpg'},
+                'dt': 194093,
+            },
+        }
+        html = (
+            '<html><head><meta property="og:title" content="累赘"></head><body>'
+            f'<script>window.REDUX_STATE = {json.dumps(redux_state, ensure_ascii=False)};</script>'
+            '</body></html>'
+        ).encode()
+        song_page = self.response(200, html=html)
+        lyrics = self.json_response({'lrc': {'lyric': '[00:00.00]累赘'}, 'tlyric': {'lyric': ''}})
+        get.side_effect = [redirect, song_page, lyrics]
+
+        result = LinkPreview.fetch_preview_data('https://163cn.tv/example')
+
+        self.assertEqual(result['url'], 'https://music.163.com/#/song?id=287726')
+        self.assertEqual(result['title'], '累赘')
+        self.assertEqual(result['description'], '孙燕姿')
+        self.assertEqual(result['image_url'], 'https://p1.music.126.net/cover.jpg')
+        self.assertEqual(result['site_name'], '网易云音乐')
+        self.assertEqual(result['provider_data']['audio_url'], 'https://music.163.com/song/media/outer/url?id=287726.mp3')
+        self.assertEqual(result['provider_data']['lyrics']['original'], '[00:00.00]累赘')
+
+    @patch.object(LinkPreview, '_require_public_host')
+    def test_normalizes_netease_hash_song_url(self, _require_public_host):
+        result = LinkPreview.normalize_public_url('https://music.163.com/#/song?id=287726')
+
+        self.assertEqual(result, 'https://y.music.163.com/m/song?id=287726')
+
+    def test_playlist_id_is_not_a_song(self):
+        self.assertIsNone(LinkPreview._netease_song_id_from_url('https://music.163.com/#/playlist?id=287726'))
+        self.assertIsNone(LinkPreview._netease_song_id_from_url('https://music.163.com/mv?id=287726'))
