@@ -9,7 +9,7 @@ import threading
 import uuid
 from zoneinfo import ZoneInfo
 from html.parser import HTMLParser
-from urllib.parse import parse_qs, urljoin, urlparse, urlunparse
+from urllib.parse import parse_qs, unquote, urljoin, urlparse, urlunparse
 
 import requests
 from django.db import IntegrityError, close_old_connections, transaction
@@ -77,11 +77,17 @@ class LinkPreviewHTMLParser(HTMLParser):
         self.title_parts = []
         self.meta = {}
         self.icons = []
+        self.script_type = ''
+        self.script_id = ''
+        self.video_payloads = []
 
     def handle_starttag(self, tag, attrs):
         attr_map = {key.lower(): value for key, value in attrs if key and value}
         if tag.lower() == 'title':
             self.in_title = True
+        if tag.lower() == 'script':
+            self.script_type = (attr_map.get('type') or '').lower()
+            self.script_id = (attr_map.get('id') or '').lower()
         if tag.lower() == 'meta':
             key = (attr_map.get('property') or attr_map.get('name') or '').strip().lower()
             content = (attr_map.get('content') or '').strip()
@@ -100,10 +106,15 @@ class LinkPreviewHTMLParser(HTMLParser):
     def handle_endtag(self, tag):
         if tag.lower() == 'title':
             self.in_title = False
+        if tag.lower() == 'script':
+            self.script_type = ''
+            self.script_id = ''
 
     def handle_data(self, data):
         if self.in_title:
             self.title_parts.append(data)
+        if self.script_type == 'application/ld+json' or self.script_id == 'render_data':
+            self.video_payloads.append((self.script_id, data))
 
     @property
     def title(self):
@@ -142,6 +153,7 @@ class LinkPreview(models.Model):
     RETRYABLE_ERROR_MARKERS = ('already consumed',)
     NETEASE_HOSTS = frozenset(('163cn.tv', 'music.163.com', 'y.music.163.com'))
     DOUYIN_HOSTS = frozenset(('douyin.com', 'www.douyin.com', 'v.douyin.com', 'iesdouyin.com'))
+    DOUYIN_MEDIA_HOSTS = ('douyinvod.com', 'douyincdn.com', 'bytecdn.cn', 'douyin.com')
     NETEASE_REDUX_MARKER = 'window.REDUX_STATE = '
     USER_AGENT = (
         'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) '
@@ -330,13 +342,53 @@ class LinkPreview(models.Model):
                 'provider': 'douyin_video',
                 'video_id': video_id,
                 'title': cls._clean_text(data.get('video_title') or '', 255),
-                'embed_url': embed_url.geturl(),
                 'canonical_url': f'https://www.douyin.com/video/{video_id}',
                 'width': max(0, int(data.get('video_width') or 0)),
                 'height': max(0, int(data.get('video_height') or 0)),
             }
         except (requests.RequestException, ValueError, TypeError, json.JSONDecodeError):
             return {}
+
+    @classmethod
+    def _douyin_media_url(cls, parser):
+        def valid(value):
+            if not isinstance(value, str):
+                return ''
+            parsed = urlparse(value.strip())
+            host = (parsed.hostname or '').lower()
+            if parsed.scheme != 'https' or parsed.username or parsed.password or parsed.port not in (None, 443):
+                return ''
+            return value.strip() if any(host == domain or host.endswith('.' + domain) for domain in cls.DOUYIN_MEDIA_HOSTS) else ''
+
+        def walk(value, depth=0):
+            if depth > 16:
+                return ''
+            if isinstance(value, list):
+                return next((result for item in value if (result := walk(item, depth + 1))), '')
+            if not isinstance(value, dict):
+                return ''
+            for key in ('contentUrl', 'contentURL'):
+                if result := valid(value.get(key)):
+                    return result
+            for key in ('play_addr', 'playAddr', 'play_addr_h264'):
+                address = value.get(key)
+                if isinstance(address, dict):
+                    for candidate in address.get('url_list', address.get('urlList', [])):
+                        if result := valid(candidate):
+                            return result
+            return next((result for item in value.values() if (result := walk(item, depth + 1))), '')
+
+        for key in ('og:video:secure_url', 'og:video:url', 'og:video', 'twitter:player:stream'):
+            if result := valid(parser.meta.get(key)):
+                return result
+        for script_id, content in parser.video_payloads:
+            try:
+                payload = json.loads(unquote(content) if script_id == 'render_data' else content)
+            except (ValueError, TypeError):
+                continue
+            if result := walk(payload):
+                return result
+        return ''
 
     @staticmethod
     def _require_public_host(hostname: str):
@@ -487,6 +539,7 @@ class LinkPreview(models.Model):
         site_name = parser.meta.get('og:site_name') or parsed.hostname or ''
         provider_data = douyin_data or cls._netease_music_data(current_url, html)
         if provider_data.get('provider') == 'douyin_video':
+            provider_data['video_url'] = cls._douyin_media_url(parser)
             title = provider_data['title'] or title
             site_name = '抖音'
             current_url = provider_data['canonical_url']

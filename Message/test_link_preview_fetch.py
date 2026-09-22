@@ -170,6 +170,7 @@ class LinkPreviewFetchTests(SimpleTestCase):
         self.assertEqual(result['provider_data']['provider'], 'douyin_video')
         self.assertEqual(result['provider_data']['title'], '一段视频')
         self.assertEqual(result['provider_data']['width'], 720)
+        self.assertNotIn('video_url', result['provider_data'])
         self.assertEqual(get.call_args.kwargs['params'], {'video_id': video_id})
 
     @patch.object(LinkPreview, '_require_public_host')
@@ -206,3 +207,26 @@ class LinkPreviewFetchTests(SimpleTestCase):
         self.assertEqual(result['title'], 'Video title')
         self.assertEqual(result['image_url'], 'https://www.douyin.com/cover.jpg')
         self.assertEqual(result['provider_data']['video_id'], video_id)
+
+    @patch.object(LinkPreview, '_require_public_host')
+    @patch('Message.models.requests.get')
+    def test_douyin_public_page_exposes_video_file_for_native_playback(self, get, _require_public_host):
+        video_id = '7146408143612000000'
+        media_url = 'https://v3-web.douyinvod.com/video/abc.mp4?token=public'
+        html = f'<script id="RENDER_DATA" type="application/json">{{"video":{{"play_addr":{{"url_list":["{media_url}"]}}}}}}</script>'
+        get.side_effect = [
+            self.response(200, html=html.encode()),
+            self.json_response({'err_no': 0, 'data': {
+                'iframe_code': f'<iframe src="https://open.douyin.com/player/video?vid={video_id}"></iframe>',
+                'video_title': 'Public video',
+            }}),
+        ]
+        result = LinkPreview.fetch_preview_data(f'https://www.douyin.com/video/{video_id}')
+        self.assertEqual(result['provider_data']['video_url'], media_url)
+
+    def test_douyin_rejects_untrusted_media_url(self):
+        from Message.models import LinkPreviewHTMLParser
+
+        parser = LinkPreviewHTMLParser()
+        parser.feed('<meta property="og:video" content="https://evil.example/video.mp4">')
+        self.assertEqual(LinkPreview._douyin_media_url(parser), '')
