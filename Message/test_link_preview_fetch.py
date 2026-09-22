@@ -145,3 +145,64 @@ class LinkPreviewFetchTests(SimpleTestCase):
     def test_playlist_id_is_not_a_song(self):
         self.assertIsNone(LinkPreview._netease_song_id_from_url('https://music.163.com/#/playlist?id=287726'))
         self.assertIsNone(LinkPreview._netease_song_id_from_url('https://music.163.com/mv?id=287726'))
+
+    @patch.object(LinkPreview, '_require_public_host')
+    @patch('Message.models.requests.get')
+    def test_douyin_short_link_uses_official_embed_when_page_is_blocked(self, get, _require_public_host):
+        video_id = '7146408143612000000'
+        get.side_effect = [
+            self.response(302, location=f'https://www.douyin.com/video/{video_id}'),
+            self.response(403),
+            self.json_response({
+                'err_no': 0,
+                'data': {
+                    'iframe_code': f'<iframe src="https://open.douyin.com/player/video?vid={video_id}&autoplay=0"></iframe>',
+                    'video_title': '一段视频',
+                    'video_width': 720,
+                    'video_height': 1280,
+                },
+            }),
+        ]
+
+        result = LinkPreview.fetch_preview_data('https://v.douyin.com/AbCdEf/')
+
+        self.assertEqual(result['url'], f'https://www.douyin.com/video/{video_id}')
+        self.assertEqual(result['provider_data']['provider'], 'douyin_video')
+        self.assertEqual(result['provider_data']['title'], '一段视频')
+        self.assertEqual(result['provider_data']['width'], 720)
+        self.assertEqual(get.call_args.kwargs['params'], {'video_id': video_id})
+
+    @patch.object(LinkPreview, '_require_public_host')
+    @patch('Message.models.requests.get')
+    def test_douyin_rejects_untrusted_iframe(self, get, _require_public_host):
+        get.return_value = self.json_response({
+            'err_no': 0,
+            'data': {'iframe_code': '<iframe src="https://evil.example/player/video?vid=7146408143612000000"></iframe>'},
+        })
+
+        self.assertEqual(LinkPreview._douyin_video_data('https://www.douyin.com/video/7146408143612000000'), {})
+
+    @patch.object(LinkPreview, '_require_public_host')
+    @patch('Message.models.requests.get')
+    def test_douyin_private_video_has_no_embed(self, get, _require_public_host):
+        get.return_value = self.json_response({'err_no': 28003004, 'err_msg': '非公开视频'})
+
+        self.assertEqual(LinkPreview._douyin_video_data('https://www.douyin.com/video/7146408143612000000'), {})
+
+    @patch.object(LinkPreview, '_require_public_host')
+    @patch('Message.models.requests.get')
+    def test_douyin_page_metadata_is_kept_with_official_player(self, get, _require_public_host):
+        video_id = '7146408143612000000'
+        get.side_effect = [
+            self.response(200, html=b'<meta property="og:image" content="https://www.douyin.com/cover.jpg">'),
+            self.json_response({'err_no': 0, 'data': {
+                'iframe_code': f'<iframe src="https://open.douyin.com/player/video?vid={video_id}"></iframe>',
+                'video_title': 'Video title',
+            }}),
+        ]
+
+        result = LinkPreview.fetch_preview_data(f'https://www.douyin.com/video/{video_id}')
+
+        self.assertEqual(result['title'], 'Video title')
+        self.assertEqual(result['image_url'], 'https://www.douyin.com/cover.jpg')
+        self.assertEqual(result['provider_data']['video_id'], video_id)
