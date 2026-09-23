@@ -213,7 +213,7 @@ class LinkPreviewFetchTests(SimpleTestCase):
     def test_douyin_public_page_exposes_video_file_for_native_playback(self, get, _require_public_host):
         video_id = '7146408143612000000'
         media_url = 'https://v3-web.douyinvod.com/video/abc.mp4?token=public'
-        html = f'<script id="RENDER_DATA" type="application/json">{{"video":{{"play_addr":{{"url_list":["{media_url}"]}}}}}}</script>'
+        html = f'<script id="RENDER_DATA" type="application/json">{{"awemeId":"{video_id}","video":{{"play_addr":{{"url_list":["{media_url}"]}}}}}}</script>'
         get.side_effect = [
             self.response(200, html=html.encode()),
             self.json_response({'err_no': 0, 'data': {
@@ -229,4 +229,26 @@ class LinkPreviewFetchTests(SimpleTestCase):
 
         parser = LinkPreviewHTMLParser()
         parser.feed('<meta property="og:video" content="https://evil.example/video.mp4">')
+        self.assertEqual(LinkPreview._douyin_media_url(parser), '')
+
+    def test_douyin_pace_chunk_array_play_addr(self):
+        import json
+        from urllib.parse import quote
+        from Message.models import LinkPreviewHTMLParser
+
+        video_id = '7146408143612000000'
+        media_url = 'https://v26-web.douyinvod.com/video/abc.mp4?token=short-lived'
+        payload = json.dumps({'videoDetail': {'awemeId': video_id, 'video': {'playAddr': [{'src': media_url}]}}})
+        chunk = json.dumps([1, f'5:{quote(payload)}'])
+        parser = LinkPreviewHTMLParser()
+        parser.feed(f'<script>self.__pace_f.push({chunk})</script>')
+
+        self.assertEqual(LinkPreview._douyin_media_url(parser, video_id), media_url)
+        self.assertEqual(LinkPreview._douyin_media_url(parser, '9999999999999999999'), '')
+
+    def test_douyin_page_url_is_not_a_video_file(self):
+        from Message.models import LinkPreviewHTMLParser
+
+        parser = LinkPreviewHTMLParser()
+        parser.feed('<meta property="og:video" content="https://www.douyin.com/video/7146408143612000000">')
         self.assertEqual(LinkPreview._douyin_media_url(parser), '')

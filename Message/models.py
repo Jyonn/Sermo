@@ -80,14 +80,18 @@ class LinkPreviewHTMLParser(HTMLParser):
         self.script_type = ''
         self.script_id = ''
         self.video_payloads = []
+        self.script_parts = []
+        self.in_script = False
 
     def handle_starttag(self, tag, attrs):
         attr_map = {key.lower(): value for key, value in attrs if key and value}
         if tag.lower() == 'title':
             self.in_title = True
         if tag.lower() == 'script':
+            self.in_script = True
             self.script_type = (attr_map.get('type') or '').lower()
             self.script_id = (attr_map.get('id') or '').lower()
+            self.script_parts = []
         if tag.lower() == 'meta':
             key = (attr_map.get('property') or attr_map.get('name') or '').strip().lower()
             content = (attr_map.get('content') or '').strip()
@@ -107,14 +111,18 @@ class LinkPreviewHTMLParser(HTMLParser):
         if tag.lower() == 'title':
             self.in_title = False
         if tag.lower() == 'script':
+            if self.script_type == 'application/ld+json' or self.script_id == 'render_data' or any('__pace_f.push' in part for part in self.script_parts):
+                self.video_payloads.append((self.script_id or 'script', ''.join(self.script_parts)))
             self.script_type = ''
             self.script_id = ''
+            self.script_parts = []
+            self.in_script = False
 
     def handle_data(self, data):
         if self.in_title:
             self.title_parts.append(data)
-        if self.script_type == 'application/ld+json' or self.script_id == 'render_data':
-            self.video_payloads.append((self.script_id, data))
+        if self.in_script:
+            self.script_parts.append(data)
 
     @property
     def title(self):
@@ -350,13 +358,15 @@ class LinkPreview(models.Model):
             return {}
 
     @classmethod
-    def _douyin_media_url(cls, parser):
+    def _douyin_media_url(cls, parser, video_id=''):
         def valid(value):
             if not isinstance(value, str):
                 return ''
             parsed = urlparse(value.strip())
             host = (parsed.hostname or '').lower()
             if parsed.scheme != 'https' or parsed.username or parsed.password or parsed.port not in (None, 443):
+                return ''
+            if (host == 'douyin.com' or host.endswith('.douyin.com')) and not parsed.path.startswith('/aweme/v1/play/'):
                 return ''
             return value.strip() if any(host == domain or host.endswith('.' + domain) for domain in cls.DOUYIN_MEDIA_HOSTS) else ''
 
@@ -376,18 +386,43 @@ class LinkPreview(models.Model):
                     for candidate in address.get('url_list', address.get('urlList', [])):
                         if result := valid(candidate):
                             return result
+                if isinstance(address, list):
+                    for candidate in address:
+                        if isinstance(candidate, dict) and (result := valid(candidate.get('src'))):
+                            return result
             return next((result for item in value.values() if (result := walk(item, depth + 1))), '')
 
         for key in ('og:video:secure_url', 'og:video:url', 'og:video', 'twitter:player:stream'):
             if result := valid(parser.meta.get(key)):
                 return result
+        def payloads(content):
+            if '__pace_f.push' not in content:
+                yield content
+                return
+            decoder = json.JSONDecoder()
+            for match in re.finditer(r'(?:self\.)?__pace_f\.push\s*\(', content):
+                try:
+                    chunk, _ = decoder.raw_decode(content, match.end())
+                except ValueError:
+                    continue
+                if isinstance(chunk, list) and len(chunk) > 1 and isinstance(chunk[1], str):
+                    yield unquote(chunk[1])
+
         for script_id, content in parser.video_payloads:
-            try:
-                payload = json.loads(unquote(content) if script_id == 'render_data' else content)
-            except (ValueError, TypeError):
-                continue
-            if result := walk(payload):
-                return result
+            for fragment in payloads(content):
+                if video_id and video_id not in fragment:
+                    continue
+                decoded = unquote(fragment) if script_id == 'render_data' else fragment
+                candidates = [decoded]
+                if script_id == 'script':
+                    candidates.extend(decoded[match.start():] for match in re.finditer(r'\{', decoded))
+                for candidate in candidates:
+                    try:
+                        payload, _ = json.JSONDecoder().raw_decode(candidate)
+                    except (ValueError, TypeError):
+                        continue
+                    if result := walk(payload):
+                        return result
         return ''
 
     @staticmethod
@@ -465,7 +500,8 @@ class LinkPreview(models.Model):
     @classmethod
     def _is_expired(cls, preview, now=None):
         if preview.status == LinkPreviewStatusChoice.READY:
-            ttl = cls.READY_TTL
+            provider_data = preview.provider_data or {}
+            ttl = datetime.timedelta(minutes=5 if not provider_data.get('video_url') else 15) if provider_data.get('provider') == 'douyin_video' else cls.READY_TTL
         elif preview.status == LinkPreviewStatusChoice.FAILED:
             ttl = cls.FAILED_TTL
         else:
@@ -539,7 +575,7 @@ class LinkPreview(models.Model):
         site_name = parser.meta.get('og:site_name') or parsed.hostname or ''
         provider_data = douyin_data or cls._netease_music_data(current_url, html)
         if provider_data.get('provider') == 'douyin_video':
-            provider_data['video_url'] = cls._douyin_media_url(parser)
+            provider_data['video_url'] = cls._douyin_media_url(parser, provider_data['video_id'])
             title = provider_data['title'] or title
             site_name = '抖音'
             current_url = provider_data['canonical_url']
