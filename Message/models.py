@@ -9,7 +9,7 @@ import threading
 import uuid
 from zoneinfo import ZoneInfo
 from html.parser import HTMLParser
-from urllib.parse import parse_qs, unquote, urljoin, urlparse, urlunparse
+from urllib.parse import parse_qs, urljoin, urlparse, urlunparse
 
 import requests
 from django.db import IntegrityError, close_old_connections, transaction
@@ -22,6 +22,7 @@ from django.utils.translation import gettext as _, override
 from smartdjango import models, Choice
 
 from Chat.models import Chat, ChatMember, ChatMemberStatusChoice, ChatPurposeChoice, SubmissionMemberRoleChoice, SubmissionStatusChoice
+from Message.providers.douyin import DouyinProvider
 from Message.validators import MessageErrors, MessageValidator
 from User.models import User, UserEmojiUsage
 from User.validators import UserErrors
@@ -77,21 +78,11 @@ class LinkPreviewHTMLParser(HTMLParser):
         self.title_parts = []
         self.meta = {}
         self.icons = []
-        self.script_type = ''
-        self.script_id = ''
-        self.video_payloads = []
-        self.script_parts = []
-        self.in_script = False
 
     def handle_starttag(self, tag, attrs):
         attr_map = {key.lower(): value for key, value in attrs if key and value}
         if tag.lower() == 'title':
             self.in_title = True
-        if tag.lower() == 'script':
-            self.in_script = True
-            self.script_type = (attr_map.get('type') or '').lower()
-            self.script_id = (attr_map.get('id') or '').lower()
-            self.script_parts = []
         if tag.lower() == 'meta':
             key = (attr_map.get('property') or attr_map.get('name') or '').strip().lower()
             content = (attr_map.get('content') or '').strip()
@@ -110,19 +101,10 @@ class LinkPreviewHTMLParser(HTMLParser):
     def handle_endtag(self, tag):
         if tag.lower() == 'title':
             self.in_title = False
-        if tag.lower() == 'script':
-            if self.script_type == 'application/ld+json' or self.script_id == 'render_data' or any('__pace_f.push' in part for part in self.script_parts):
-                self.video_payloads.append((self.script_id or 'script', ''.join(self.script_parts)))
-            self.script_type = ''
-            self.script_id = ''
-            self.script_parts = []
-            self.in_script = False
 
     def handle_data(self, data):
         if self.in_title:
             self.title_parts.append(data)
-        if self.in_script:
-            self.script_parts.append(data)
 
     @property
     def title(self):
@@ -142,16 +124,6 @@ class LinkPreviewHTMLParser(HTMLParser):
         return max(self.icons, key=self._icon_score)['href']
 
 
-class DouyinIframeParser(HTMLParser):
-    def __init__(self):
-        super().__init__()
-        self.src = ''
-
-    def handle_starttag(self, tag, attrs):
-        if tag.lower() == 'iframe' and not self.src:
-            self.src = dict(attrs).get('src') or ''
-
-
 class LinkPreview(models.Model):
     URL_RE = re.compile(r'https?://[^\s<>"\'，。！？、；：）】》]+', re.IGNORECASE)
     HTTP_CHARSET_RE = re.compile(r'charset=["\']?([^;"\']+)', re.IGNORECASE)
@@ -160,8 +132,6 @@ class LinkPreview(models.Model):
     MOJIBAKE_MARKERS = ('ï¼', 'ï½', 'ã€', 'Ã', 'Â')
     RETRYABLE_ERROR_MARKERS = ('already consumed',)
     NETEASE_HOSTS = frozenset(('163cn.tv', 'music.163.com', 'y.music.163.com'))
-    DOUYIN_HOSTS = frozenset(('douyin.com', 'www.douyin.com', 'v.douyin.com', 'iesdouyin.com'))
-    DOUYIN_MEDIA_HOSTS = ('douyinvod.com', 'douyincdn.com', 'bytecdn.cn', 'douyin.com')
     NETEASE_REDUX_MARKER = 'window.REDUX_STATE = '
     USER_AGENT = (
         'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) '
@@ -313,118 +283,6 @@ class LinkPreview(models.Model):
             pass
         return music
 
-    @classmethod
-    def _douyin_video_id_from_url(cls, url: str):
-        parsed = urlparse((url or '').strip())
-        if (parsed.hostname or '').lower() not in cls.DOUYIN_HOSTS:
-            return None
-        match = re.fullmatch(r'/(?:share/)?video/(\d{10,25})/?', parsed.path)
-        if match:
-            return match.group(1)
-        modal_id = parse_qs(parsed.query).get('modal_id', [''])[0]
-        return modal_id if re.fullmatch(r'\d{10,25}', modal_id) else None
-
-    @classmethod
-    def _douyin_video_data(cls, current_url: str):
-        video_id = cls._douyin_video_id_from_url(current_url)
-        if not video_id:
-            return {}
-        api_url = 'https://open.douyin.com/api/douyin/v1/video/get_iframe_by_video'
-        try:
-            cls.normalize_public_url(api_url)
-            response = requests.get(api_url, params={'video_id': video_id}, timeout=(3, 5), allow_redirects=False)
-            if response.status_code >= 400:
-                return {}
-            payload = response.json()
-            if not isinstance(payload, dict) or payload.get('err_no') != 0:
-                return {}
-            data = payload.get('data') or {}
-            parser = DouyinIframeParser()
-            parser.feed(str(data.get('iframe_code') or ''))
-            embed_url = urlparse(parser.src)
-            if embed_url.scheme != 'https' or embed_url.hostname != 'open.douyin.com' or embed_url.path != '/player/video':
-                return {}
-            if parse_qs(embed_url.query).get('vid', [''])[0] != video_id:
-                return {}
-            return {
-                'provider': 'douyin_video',
-                'video_id': video_id,
-                'title': cls._clean_text(data.get('video_title') or '', 255),
-                'canonical_url': f'https://www.douyin.com/video/{video_id}',
-                'width': max(0, int(data.get('video_width') or 0)),
-                'height': max(0, int(data.get('video_height') or 0)),
-            }
-        except (requests.RequestException, ValueError, TypeError, json.JSONDecodeError):
-            return {}
-
-    @classmethod
-    def _douyin_media_url(cls, parser, video_id=''):
-        def valid(value):
-            if not isinstance(value, str):
-                return ''
-            parsed = urlparse(value.strip())
-            host = (parsed.hostname or '').lower()
-            if parsed.scheme != 'https' or parsed.username or parsed.password or parsed.port not in (None, 443):
-                return ''
-            if (host == 'douyin.com' or host.endswith('.douyin.com')) and not parsed.path.startswith('/aweme/v1/play/'):
-                return ''
-            return value.strip() if any(host == domain or host.endswith('.' + domain) for domain in cls.DOUYIN_MEDIA_HOSTS) else ''
-
-        def walk(value, depth=0):
-            if depth > 16:
-                return ''
-            if isinstance(value, list):
-                return next((result for item in value if (result := walk(item, depth + 1))), '')
-            if not isinstance(value, dict):
-                return ''
-            for key in ('contentUrl', 'contentURL'):
-                if result := valid(value.get(key)):
-                    return result
-            for key in ('play_addr', 'playAddr', 'play_addr_h264'):
-                address = value.get(key)
-                if isinstance(address, dict):
-                    for candidate in address.get('url_list', address.get('urlList', [])):
-                        if result := valid(candidate):
-                            return result
-                if isinstance(address, list):
-                    for candidate in address:
-                        if isinstance(candidate, dict) and (result := valid(candidate.get('src'))):
-                            return result
-            return next((result for item in value.values() if (result := walk(item, depth + 1))), '')
-
-        for key in ('og:video:secure_url', 'og:video:url', 'og:video', 'twitter:player:stream'):
-            if result := valid(parser.meta.get(key)):
-                return result
-        def payloads(content):
-            if '__pace_f.push' not in content:
-                yield content
-                return
-            decoder = json.JSONDecoder()
-            for match in re.finditer(r'(?:self\.)?__pace_f\.push\s*\(', content):
-                try:
-                    chunk, _ = decoder.raw_decode(content, match.end())
-                except ValueError:
-                    continue
-                if isinstance(chunk, list) and len(chunk) > 1 and isinstance(chunk[1], str):
-                    yield unquote(chunk[1])
-
-        for script_id, content in parser.video_payloads:
-            for fragment in payloads(content):
-                if video_id and video_id not in fragment:
-                    continue
-                decoded = unquote(fragment) if script_id == 'render_data' else fragment
-                candidates = [decoded]
-                if script_id == 'script':
-                    candidates.extend(decoded[match.start():] for match in re.finditer(r'\{', decoded))
-                for candidate in candidates:
-                    try:
-                        payload, _ = json.JSONDecoder().raw_decode(candidate)
-                    except (ValueError, TypeError):
-                        continue
-                    if result := walk(payload):
-                        return result
-        return ''
-
     @staticmethod
     def _require_public_host(hostname: str):
         normalized = hostname.strip().strip('.').lower()
@@ -532,20 +390,22 @@ class LinkPreview(models.Model):
 
         if response is None:
             raise ValueError('empty response')
-        douyin_data = cls._douyin_video_data(current_url)
-        content_type = (response.headers.get('Content-Type') or '').lower()
-        unsupported_content = content_type and 'text/html' not in content_type and 'application/xhtml+xml' not in content_type
-        if (response.status_code >= 400 or unsupported_content) and douyin_data:
+        if DouyinProvider.supports(current_url):
             response.close()
+            douyin_data = DouyinProvider().parse(current_url)
+            if not douyin_data:
+                raise ValueError('douyin provider could not resolve video')
             return dict(
                 url=douyin_data['canonical_url'],
                 title=douyin_data['title'] or '抖音视频',
                 description='',
-                image_url='',
+                image_url=douyin_data['cover_url'],
                 site_name='抖音',
                 favicon_url='',
                 provider_data=douyin_data,
             )
+        content_type = (response.headers.get('Content-Type') or '').lower()
+        unsupported_content = content_type and 'text/html' not in content_type and 'application/xhtml+xml' not in content_type
         if response.status_code >= 400:
             raise ValueError(f'http {response.status_code}')
 
@@ -573,13 +433,8 @@ class LinkPreview(models.Model):
         favicon_url = parser.best_icon
         parsed = urlparse(current_url)
         site_name = parser.meta.get('og:site_name') or parsed.hostname or ''
-        provider_data = douyin_data or cls._netease_music_data(current_url, html)
-        if provider_data.get('provider') == 'douyin_video':
-            provider_data['video_url'] = cls._douyin_media_url(parser, provider_data['video_id'])
-            title = provider_data['title'] or title
-            site_name = '抖音'
-            current_url = provider_data['canonical_url']
-        elif provider_data:
+        provider_data = cls._netease_music_data(current_url, html)
+        if provider_data:
             title = provider_data['title'] or title
             description = ' / '.join(provider_data['artists']) or description
             image_url = provider_data['cover_url'] or image_url
@@ -613,7 +468,7 @@ class LinkPreview(models.Model):
         preview_hostname = (urlparse(preview.url).hostname or '').lower()
         if (
             preview.status == LinkPreviewStatusChoice.READY
-            and preview_hostname in cls.NETEASE_HOSTS | cls.DOUYIN_HOSTS
+            and preview_hostname in cls.NETEASE_HOSTS | DouyinProvider.HOSTS
             and not preview.provider_data
         ):
             preview.status = LinkPreviewStatusChoice.PENDING

@@ -830,3 +830,14 @@ In each of the endpoint examples above, we included the full JSON structure to i
 ## Conclusion
 
 This documentation covers all current endpoints and data models of the chat system’s API. It provides the necessary information to understand how to interact with the API, what inputs to provide, and what outputs to expect for each operation. Each endpoint’s response structure is consistent with the overall API format, making error handling and data parsing straightforward. Use this as a reference when developing clients or integrating with the chat system.
+# Sermo Backend
+
+## Douyin video provider
+
+Douyin link previews use the provider adapted from
+`DLWangSan/douyin_parse`. Set `DOUYIN_COOKIE` in the backend process
+environment to a current cookie copied from an authenticated `douyin.com`
+browser session. The provider does not use an iframe or a secondary parser.
+
+The cookie expires and must be replaced when Douyin starts rejecting detail
+requests. Do not commit it to the repository or expose it to frontend clients.

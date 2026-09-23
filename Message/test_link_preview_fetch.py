@@ -147,22 +147,20 @@ class LinkPreviewFetchTests(SimpleTestCase):
         self.assertIsNone(LinkPreview._netease_song_id_from_url('https://music.163.com/mv?id=287726'))
 
     @patch.object(LinkPreview, '_require_public_host')
+    @patch('Message.models.DouyinProvider.parse')
     @patch('Message.models.requests.get')
-    def test_douyin_short_link_uses_official_embed_when_page_is_blocked(self, get, _require_public_host):
+    def test_douyin_short_link_uses_provider(self, get, parse, _require_public_host):
         video_id = '7146408143612000000'
         get.side_effect = [
             self.response(302, location=f'https://www.douyin.com/video/{video_id}'),
             self.response(403),
-            self.json_response({
-                'err_no': 0,
-                'data': {
-                    'iframe_code': f'<iframe src="https://open.douyin.com/player/video?vid={video_id}&autoplay=0"></iframe>',
-                    'video_title': '一段视频',
-                    'video_width': 720,
-                    'video_height': 1280,
-                },
-            }),
         ]
+        parse.return_value = {
+            'provider': 'douyin_video', 'video_id': video_id, 'title': '一段视频',
+            'canonical_url': f'https://www.douyin.com/video/{video_id}',
+            'video_url': 'https://v3-web.douyinvod.com/video.mp4',
+            'cover_url': 'https://p3.douyinpic.com/cover.jpg', 'width': 720, 'height': 1280,
+        }
 
         result = LinkPreview.fetch_preview_data('https://v.douyin.com/AbCdEf/')
 
@@ -170,85 +168,13 @@ class LinkPreviewFetchTests(SimpleTestCase):
         self.assertEqual(result['provider_data']['provider'], 'douyin_video')
         self.assertEqual(result['provider_data']['title'], '一段视频')
         self.assertEqual(result['provider_data']['width'], 720)
-        self.assertNotIn('video_url', result['provider_data'])
-        self.assertEqual(get.call_args.kwargs['params'], {'video_id': video_id})
+        self.assertEqual(result['provider_data']['video_url'], 'https://v3-web.douyinvod.com/video.mp4')
+        parse.assert_called_once_with(f'https://www.douyin.com/video/{video_id}')
 
     @patch.object(LinkPreview, '_require_public_host')
+    @patch('Message.models.DouyinProvider.parse', return_value=None)
     @patch('Message.models.requests.get')
-    def test_douyin_rejects_untrusted_iframe(self, get, _require_public_host):
-        get.return_value = self.json_response({
-            'err_no': 0,
-            'data': {'iframe_code': '<iframe src="https://evil.example/player/video?vid=7146408143612000000"></iframe>'},
-        })
-
-        self.assertEqual(LinkPreview._douyin_video_data('https://www.douyin.com/video/7146408143612000000'), {})
-
-    @patch.object(LinkPreview, '_require_public_host')
-    @patch('Message.models.requests.get')
-    def test_douyin_private_video_has_no_embed(self, get, _require_public_host):
-        get.return_value = self.json_response({'err_no': 28003004, 'err_msg': '非公开视频'})
-
-        self.assertEqual(LinkPreview._douyin_video_data('https://www.douyin.com/video/7146408143612000000'), {})
-
-    @patch.object(LinkPreview, '_require_public_host')
-    @patch('Message.models.requests.get')
-    def test_douyin_page_metadata_is_kept_with_official_player(self, get, _require_public_host):
-        video_id = '7146408143612000000'
-        get.side_effect = [
-            self.response(200, html=b'<meta property="og:image" content="https://www.douyin.com/cover.jpg">'),
-            self.json_response({'err_no': 0, 'data': {
-                'iframe_code': f'<iframe src="https://open.douyin.com/player/video?vid={video_id}"></iframe>',
-                'video_title': 'Video title',
-            }}),
-        ]
-
-        result = LinkPreview.fetch_preview_data(f'https://www.douyin.com/video/{video_id}')
-
-        self.assertEqual(result['title'], 'Video title')
-        self.assertEqual(result['image_url'], 'https://www.douyin.com/cover.jpg')
-        self.assertEqual(result['provider_data']['video_id'], video_id)
-
-    @patch.object(LinkPreview, '_require_public_host')
-    @patch('Message.models.requests.get')
-    def test_douyin_public_page_exposes_video_file_for_native_playback(self, get, _require_public_host):
-        video_id = '7146408143612000000'
-        media_url = 'https://v3-web.douyinvod.com/video/abc.mp4?token=public'
-        html = f'<script id="RENDER_DATA" type="application/json">{{"awemeId":"{video_id}","video":{{"play_addr":{{"url_list":["{media_url}"]}}}}}}</script>'
-        get.side_effect = [
-            self.response(200, html=html.encode()),
-            self.json_response({'err_no': 0, 'data': {
-                'iframe_code': f'<iframe src="https://open.douyin.com/player/video?vid={video_id}"></iframe>',
-                'video_title': 'Public video',
-            }}),
-        ]
-        result = LinkPreview.fetch_preview_data(f'https://www.douyin.com/video/{video_id}')
-        self.assertEqual(result['provider_data']['video_url'], media_url)
-
-    def test_douyin_rejects_untrusted_media_url(self):
-        from Message.models import LinkPreviewHTMLParser
-
-        parser = LinkPreviewHTMLParser()
-        parser.feed('<meta property="og:video" content="https://evil.example/video.mp4">')
-        self.assertEqual(LinkPreview._douyin_media_url(parser), '')
-
-    def test_douyin_pace_chunk_array_play_addr(self):
-        import json
-        from urllib.parse import quote
-        from Message.models import LinkPreviewHTMLParser
-
-        video_id = '7146408143612000000'
-        media_url = 'https://v26-web.douyinvod.com/video/abc.mp4?token=short-lived'
-        payload = json.dumps({'videoDetail': {'awemeId': video_id, 'video': {'playAddr': [{'src': media_url}]}}})
-        chunk = json.dumps([1, f'5:{quote(payload)}'])
-        parser = LinkPreviewHTMLParser()
-        parser.feed(f'<script>self.__pace_f.push({chunk})</script>')
-
-        self.assertEqual(LinkPreview._douyin_media_url(parser, video_id), media_url)
-        self.assertEqual(LinkPreview._douyin_media_url(parser, '9999999999999999999'), '')
-
-    def test_douyin_page_url_is_not_a_video_file(self):
-        from Message.models import LinkPreviewHTMLParser
-
-        parser = LinkPreviewHTMLParser()
-        parser.feed('<meta property="og:video" content="https://www.douyin.com/video/7146408143612000000">')
-        self.assertEqual(LinkPreview._douyin_media_url(parser), '')
+    def test_douyin_provider_failure_does_not_fall_back(self, get, _parse, _require_public_host):
+        get.return_value = self.response(200)
+        with self.assertRaisesRegex(ValueError, 'douyin provider could not resolve video'):
+            LinkPreview.fetch_preview_data('https://www.douyin.com/video/7146408143612000000')
