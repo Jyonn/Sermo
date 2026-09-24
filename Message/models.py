@@ -361,7 +361,7 @@ class LinkPreview(models.Model):
         if preview.status == LinkPreviewStatusChoice.READY:
             provider_data = preview.provider_data or {}
             provider = provider_data.get('provider')
-            ttl = datetime.timedelta(minutes=5 if not provider_data.get('video_url') else 15) if provider == 'douyin_video' else datetime.timedelta(minutes=30) if provider in ('qq_music', 'kugou_music') else cls.READY_TTL
+            ttl = datetime.timedelta(minutes=5 if not provider_data.get('video_url') else 15) if provider == 'douyin_video' else datetime.timedelta(minutes=30) if str(provider or '').endswith('_music') else cls.READY_TTL
         elif preview.status == LinkPreviewStatusChoice.FAILED:
             ttl = cls.FAILED_TTL
         else:
@@ -373,6 +373,7 @@ class LinkPreview(models.Model):
         current_url = cls.normalize_public_url(url)
         if not current_url:
             raise ValueError('invalid url')
+        requested_url = current_url
 
         response = None
         for _ in range(cls.MAX_REDIRECTS + 1):
@@ -438,11 +439,16 @@ class LinkPreview(models.Model):
         provider_data = cls._netease_music_data(current_url, html)
         if not provider_data and MusicProvider.supports(current_url):
             provider_data = MusicProvider.parse(current_url, html)
+        if not provider_data and requested_url != current_url and MusicProvider.supports(requested_url):
+            provider_data = MusicProvider.parse(requested_url, html)
         if provider_data:
             title = provider_data['title'] or title
             description = ' / '.join(provider_data['artists']) or description
             image_url = provider_data['cover_url'] or image_url
-            site_name = {'netease_music': '网易云音乐', 'qq_music': 'QQ音乐', 'kugou_music': '酷狗音乐'}.get(provider_data['provider'], site_name)
+            site_name = {
+                'netease_music': '网易云音乐', 'qq_music': 'QQ音乐', 'kugou_music': '酷狗音乐',
+                'qishui_music': '汽水音乐', 'apple_music': 'Apple Music', 'kuwo_music': '酷我音乐',
+            }.get(provider_data['provider'], site_name)
             current_url = provider_data['canonical_url']
 
         return dict(
@@ -472,7 +478,7 @@ class LinkPreview(models.Model):
         preview_hostname = (urlparse(preview.url).hostname or '').lower()
         if (
             preview.status == LinkPreviewStatusChoice.READY
-            and preview_hostname in cls.NETEASE_HOSTS | DouyinProvider.HOSTS
+            and preview_hostname in cls.NETEASE_HOSTS | DouyinProvider.HOSTS | MusicProvider.HOSTS
             and not preview.provider_data
         ):
             preview.status = LinkPreviewStatusChoice.PENDING

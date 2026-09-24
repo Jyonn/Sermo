@@ -70,6 +70,29 @@ class LinkPreviewFetchTests(SimpleTestCase):
         )
 
     @patch.object(LinkPreview, '_require_public_host')
+    @patch('Message.models.MusicProvider.parse')
+    @patch('Message.models.requests.get')
+    def test_music_provider_retries_original_link_when_redirect_drops_song_id(self, get, parse, _require_public_host):
+        get.side_effect = [
+            self.response(302, location='https://music.apple.com/cn/new'),
+            self.response(200, html=b'<html><head><title>Apple Music</title></head></html>'),
+        ]
+        parse.side_effect = [None, {
+            'provider': 'apple_music', 'song_id': '1616728075', 'title': 'Power Of A Woman',
+            'artists': ['Ella Mai'], 'album': 'Heart On My Sleeve', 'cover_url': '',
+            'duration_ms': 0, 'audio_url': '', 'canonical_url': 'https://music.apple.com/us/album/example?i=1616728075',
+            'lyrics': {},
+        }]
+
+        result = LinkPreview.fetch_preview_data(
+            'https://music.apple.com/us/album/power-of-a-woman/1616728060?i=1616728075',
+        )
+
+        self.assertEqual(result['provider_data']['provider'], 'apple_music')
+        self.assertEqual(parse.call_args_list[0].args[0], 'https://music.apple.com/cn/new')
+        self.assertIn('i=1616728075', parse.call_args_list[1].args[0])
+
+    @patch.object(LinkPreview, '_require_public_host')
     @patch('Message.models.requests.get')
     def test_uses_largest_icon_as_image_fallback(self, get, _require_public_host):
         get.return_value = self.response(
