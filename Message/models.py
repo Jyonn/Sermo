@@ -23,6 +23,7 @@ from smartdjango import models, Choice
 
 from Chat.models import Chat, ChatMember, ChatMemberStatusChoice, ChatPurposeChoice, SubmissionMemberRoleChoice, SubmissionStatusChoice
 from Message.providers.douyin import DouyinProvider
+from Message.providers.music import MusicProvider
 from Message.validators import MessageErrors, MessageValidator
 from User.models import User, UserEmojiUsage
 from User.validators import UserErrors
@@ -359,7 +360,8 @@ class LinkPreview(models.Model):
     def _is_expired(cls, preview, now=None):
         if preview.status == LinkPreviewStatusChoice.READY:
             provider_data = preview.provider_data or {}
-            ttl = datetime.timedelta(minutes=5 if not provider_data.get('video_url') else 15) if provider_data.get('provider') == 'douyin_video' else cls.READY_TTL
+            provider = provider_data.get('provider')
+            ttl = datetime.timedelta(minutes=5 if not provider_data.get('video_url') else 15) if provider == 'douyin_video' else datetime.timedelta(minutes=30) if provider in ('qq_music', 'kugou_music') else cls.READY_TTL
         elif preview.status == LinkPreviewStatusChoice.FAILED:
             ttl = cls.FAILED_TTL
         else:
@@ -434,11 +436,13 @@ class LinkPreview(models.Model):
         parsed = urlparse(current_url)
         site_name = parser.meta.get('og:site_name') or parsed.hostname or ''
         provider_data = cls._netease_music_data(current_url, html)
+        if not provider_data and MusicProvider.supports(current_url):
+            provider_data = MusicProvider.parse(current_url, html)
         if provider_data:
             title = provider_data['title'] or title
             description = ' / '.join(provider_data['artists']) or description
             image_url = provider_data['cover_url'] or image_url
-            site_name = '网易云音乐'
+            site_name = {'netease_music': '网易云音乐', 'qq_music': 'QQ音乐', 'kugou_music': '酷狗音乐'}.get(provider_data['provider'], site_name)
             current_url = provider_data['canonical_url']
 
         return dict(
