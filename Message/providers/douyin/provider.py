@@ -1,38 +1,21 @@
-"""Sermo adapter for DLWangSan/douyin_parse.
+"""Douyin video resolver backed by douyinsaver.com."""
 
-The upstream project is intentionally isolated behind this provider because its
-request parameters and signing algorithms are expected to change with Douyin.
-Upstream commit: 0896c74d1e9368af8ad0b85449a8039b1b3010bd
-"""
-
-import os
 import re
-from urllib.parse import parse_qs, quote, urlencode, urlparse
+from urllib.parse import parse_qs, urlparse
 
 import requests
 
-from .abogus import ABogus
-from .xbogus import XBogus
-
 
 class DouyinProvider:
+    API_URL = 'https://api.douyinsaver.com/api/parse'
     HOSTS = frozenset(('douyin.com', 'www.douyin.com', 'v.douyin.com', 'iesdouyin.com'))
-    MEDIA_HOSTS = ('douyinvod.com', 'douyincdn.com', 'bytecdn.cn', 'snssdk.com', 'amemv.com')
-    USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36'
-    BASE_PARAMS = {
-        'device_platform': 'webapp', 'aid': '6383', 'channel': 'channel_pc_web',
-        'pc_client_type': '1', 'version_code': '190500', 'version_name': '19.5.0',
-        'cookie_enabled': 'true', 'browser_language': 'zh-CN', 'browser_platform': 'Win32',
-        'browser_name': 'Edge', 'browser_online': 'true', 'engine_name': 'Blink',
-        'os_name': 'Windows', 'os_version': '10', 'platform': 'PC',
-        'screen_width': '1920', 'screen_height': '1080',
-    }
+    MEDIA_HOSTS = (
+        'douyinvod.com', 'douyincdn.com', 'bytecdn.cn', 'snssdk.com',
+        'amemv.com', 'zjcdn.com',
+    )
 
-    def __init__(self, cookie=None, session=None):
-        self.cookie = cookie if cookie is not None else os.environ.get('DOUYIN_COOKIE', '').strip()
+    def __init__(self, session=None):
         self.session = session or requests.Session()
-        self.abogus = ABogus()
-        self.xbogus = XBogus(self.USER_AGENT)
 
     @classmethod
     def supports(cls, url):
@@ -53,67 +36,86 @@ class DouyinProvider:
                 return value
         return None
 
-    def _headers(self, video_id):
-        headers = {
-            'User-Agent': self.USER_AGENT, 'Accept': 'application/json, text/plain, */*',
-            'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-            'Referer': f'https://www.douyin.com/video/{video_id}',
-            'Origin': 'https://www.douyin.com', 'Sec-Fetch-Site': 'same-site',
-            'Sec-Fetch-Mode': 'cors', 'Sec-Fetch-Dest': 'empty',
-        }
-        if self.cookie:
-            headers['Cookie'] = self.cookie
-        return headers
-
-    def _request_detail(self, video_id):
-        api_url = 'https://www.douyin.com/aweme/v1/web/aweme/detail/'
-        params = {**self.BASE_PARAMS, 'aweme_id': video_id}
-        encoded = urlencode(params)
-        signed = f'{api_url}?{encoded}&a_bogus={quote(self.abogus.get_value(params), safe="")}'
-        response = self.session.get(signed, headers=self._headers(video_id), timeout=(3, 12))
-        if response.status_code == 200 and response.content:
-            payload = response.json()
-            if isinstance(payload, dict) and payload.get('status_code') == 0 and payload.get('aweme_detail'):
-                return payload['aweme_detail']
-        xbogus_params, _signature, _ua = self.xbogus.get_xbogus(encoded)
-        response = self.session.get(f'{api_url}?{xbogus_params}', headers=self._headers(video_id), timeout=(3, 12))
-        if response.status_code != 200 or not response.content:
-            return None
-        payload = response.json()
-        return payload.get('aweme_detail') if isinstance(payload, dict) and payload.get('status_code') == 0 else None
+    @classmethod
+    def _trusted_media_url(cls, value):
+        if not isinstance(value, str):
+            return ''
+        parsed = urlparse(value.strip())
+        host = (parsed.hostname or '').lower()
+        if parsed.scheme != 'https' or not parsed.path or parsed.path == '/':
+            return ''
+        if not any(host == domain or host.endswith('.' + domain) for domain in cls.MEDIA_HOSTS):
+            return ''
+        return value.strip()
 
     @classmethod
-    def _media_url(cls, video):
-        candidates = []
-        for quality in video.get('bit_rate') or []:
-            if isinstance(quality, dict):
-                candidates.extend((quality.get('play_addr') or {}).get('url_list') or [])
-        candidates.extend((video.get('play_addr') or {}).get('url_list') or [])
-        uri = (video.get('play_addr') or {}).get('uri')
-        if uri:
-            candidates.append(f'https://aweme.snssdk.com/aweme/v1/play/?video_id={uri}&ratio=1080p&line=0')
-        for candidate in candidates:
-            parsed = urlparse(candidate) if isinstance(candidate, str) else None
-            host = (parsed.hostname or '').lower() if parsed else ''
-            if parsed and parsed.scheme == 'https' and any(host == domain or host.endswith('.' + domain) for domain in cls.MEDIA_HOSTS):
-                return candidate.replace('playwm', 'play')
-        return ''
+    def _qualities(cls, values):
+        best_by_height = {}
+        for value in values if isinstance(values, list) else []:
+            if not isinstance(value, dict):
+                continue
+            url = cls._trusted_media_url(value.get('url'))
+            if not url:
+                continue
+            try:
+                height = max(0, int(value.get('height') or 0))
+                width = max(0, int(value.get('width') or 0))
+                bitrate = max(0, int(value.get('bitrate') or 0))
+            except (TypeError, ValueError):
+                continue
+            if not height:
+                continue
+            quality = {
+                'label': str(value.get('label') or f'{height}p')[:32],
+                'height': height,
+                'width': width,
+                'bitrate': bitrate,
+                'url': url,
+            }
+            previous = best_by_height.get(height)
+            if previous is None or (bitrate, width) > (previous['bitrate'], previous['width']):
+                best_by_height[height] = quality
+        return sorted(best_by_height.values(), key=lambda item: (item['height'], item['width'], item['bitrate']), reverse=True)
 
     def parse(self, url, video_id=None):
-        video_id = video_id or self.video_id_from_url(url)
-        if not video_id:
+        normalized_url = (url or '').strip()
+        if not self.supports(normalized_url):
             return None
-        detail = self._request_detail(video_id)
-        if not detail:
+        try:
+            response = self.session.post(
+                self.API_URL,
+                json={'url': normalized_url},
+                headers={'Accept': 'application/json', 'Content-Type': 'application/json'},
+                timeout=(3, 20),
+            )
+            response.raise_for_status()
+            payload = response.json()
+        except (requests.RequestException, ValueError):
             return None
-        video = detail.get('video') or {}
-        video_url = self._media_url(video)
-        if not video_url:
+        if not isinstance(payload, dict):
             return None
-        covers = (video.get('cover') or {}).get('url_list') or []
+
+        resolved_id = str(payload.get('aweme_id') or video_id or self.video_id_from_url(normalized_url) or '')
+        if not re.fullmatch(r'\d{10,25}', resolved_id):
+            return None
+        qualities = self._qualities(payload.get('qualities'))
+        if not qualities:
+            return None
+        selected = qualities[0]
+        try:
+            duration_ms = max(0, int(payload.get('duration') or 0))
+        except (TypeError, ValueError):
+            duration_ms = 0
         return {
-            'provider': 'douyin_video', 'video_id': str(detail.get('aweme_id') or video_id),
-            'title': str(detail.get('desc') or '')[:255], 'canonical_url': f'https://www.douyin.com/video/{video_id}',
-            'video_url': video_url, 'cover_url': covers[0] if covers else '',
-            'width': max(0, int(video.get('width') or 0)), 'height': max(0, int(video.get('height') or 0)),
+            'provider': 'douyin_video',
+            'video_id': resolved_id,
+            'title': str(payload.get('title') or '')[:255],
+            'author': str(payload.get('author') or '')[:120],
+            'canonical_url': f'https://www.douyin.com/video/{resolved_id}',
+            'video_url': selected['url'],
+            'cover_url': str(payload.get('cover') or '').strip(),
+            'duration_ms': duration_ms,
+            'width': selected['width'],
+            'height': selected['height'],
+            'qualities': qualities,
         }

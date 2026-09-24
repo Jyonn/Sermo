@@ -834,10 +834,7 @@ This documentation covers all current endpoints and data models of the chat syst
 
 ## Douyin video provider
 
-Douyin link previews use the provider adapted from
-`DLWangSan/douyin_parse`. Set `DOUYIN_COOKIE` in the backend process
-environment to a current cookie copied from an authenticated `douyin.com`
-browser session. The provider does not use an iframe or a secondary parser.
-
-The cookie expires and must be replaced when Douyin starts rejecting detail
-requests. Do not commit it to the repository or expose it to frontend clients.
+Douyin link previews are resolved through the JSON endpoint at
+`https://api.douyinsaver.com/api/parse`. The backend posts the shared Douyin
+URL and selects the highest-bitrate result at the best available resolution.
+The provider does not require a Douyin cookie and does not use an iframe.

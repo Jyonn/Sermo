@@ -398,7 +398,7 @@ class LinkPreview(models.Model):
             return dict(
                 url=douyin_data['canonical_url'],
                 title=douyin_data['title'] or '抖音视频',
-                description='',
+                description=douyin_data.get('author', ''),
                 image_url=douyin_data['cover_url'],
                 site_name='抖音',
                 favicon_url='',
