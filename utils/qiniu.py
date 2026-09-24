@@ -40,6 +40,7 @@ MESSAGE_MEDIA_MAX_FILE_SIZE = {
     'file': 1024 * 1024 * 1024,
     'sticker': 10 * 1024 * 1024,
 }
+MESSAGE_AUDIO_MIN_FILE_SIZE = 1024
 MESSAGE_MEDIA_ALLOWED_EXTENSIONS = {
     'image': {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.svg'},
     'video': {'.mp4', '.mov', '.m4v', '.webm', '.ogv'},
@@ -248,7 +249,12 @@ def validate_chat_background_key(key: str):
     return normalized
 
 
-def build_upload_token(key: str, expire_seconds: int = QINIU_TOKEN_EXPIRE_SECONDS, max_file_size: int = None):
+def build_upload_token(
+    key: str,
+    expire_seconds: int = QINIU_TOKEN_EXPIRE_SECONDS,
+    max_file_size: int = None,
+    min_file_size: int = None,
+):
     access_key = _required_config(CI.QINIU_ACCESS_KEY)
     secret_key = _required_config(CI.QINIU_SECRET_KEY)
     bucket = _required_config(CI.QINIU_BUCKET)
@@ -259,6 +265,8 @@ def build_upload_token(key: str, expire_seconds: int = QINIU_TOKEN_EXPIRE_SECOND
     )
     if max_file_size is not None:
         policy['fsizeLimit'] = int(max_file_size)
+    if min_file_size is not None:
+        policy['fsizeMin'] = int(min_file_size)
     encoded_policy = _urlsafe_base64(json.dumps(policy, separators=(',', ':')).encode())
     digest = hmac.new(secret_key.encode(), encoded_policy.encode(), hashlib.sha1).digest()
     encoded_digest = _urlsafe_base64(digest)
@@ -429,6 +437,7 @@ def issue_message_upload(kind: str, file_name: str, content_type: str = None):
         upload_token=build_upload_token(
             key,
             max_file_size=MESSAGE_MEDIA_MAX_FILE_SIZE[normalized_kind],
+            min_file_size=MESSAGE_AUDIO_MIN_FILE_SIZE if normalized_kind == 'audio' else None,
         ),
         upload_url=QINIU_UPLOAD_URL,
         key=key,
@@ -436,6 +445,22 @@ def issue_message_upload(kind: str, file_name: str, content_type: str = None):
         expires_in=QINIU_TOKEN_EXPIRE_SECONDS,
         max_file_size=MESSAGE_MEDIA_MAX_FILE_SIZE[normalized_kind],
     )
+
+
+def validate_message_media_size(kind: str, file_size):
+    if kind not in MESSAGE_MEDIA_MAX_FILE_SIZE:
+        raise MessageErrors.MEDIA_KIND_INVALID
+    try:
+        normalized_size = int(file_size)
+    except (TypeError, ValueError):
+        raise MessageErrors.MEDIA_ASSET_INVALID
+    if normalized_size < 0:
+        raise MessageErrors.MEDIA_ASSET_INVALID
+    if kind == 'audio' and normalized_size < MESSAGE_AUDIO_MIN_FILE_SIZE:
+        raise MessageErrors.AUDIO_FILE_INVALID
+    if normalized_size > MESSAGE_MEDIA_MAX_FILE_SIZE[kind]:
+        raise MessageErrors.MEDIA_ASSET_INVALID
+    return normalized_size
 
 
 def issue_space_identity_upload(space_id, file_name, content_type=None):

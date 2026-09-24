@@ -12,7 +12,7 @@ from Message.models import AudioTranscript, AudioTranscriptStatusChoice, Forward
 from Message.params import MessageParams
 from utils.content_safety import ContentSafetyScene, check_user_text
 from Message.validators import MessageErrors
-from utils.qiniu import ShortAudioTranscriptionError, issue_message_upload, build_message_image_thumbnail_uri, build_message_video_thumbnail_uri, sign_private_download_url, avatar_uri_for_key, transcribe_short_audio, validate_message_media_key
+from utils.qiniu import ShortAudioTranscriptionError, issue_message_upload, build_message_image_thumbnail_uri, build_message_video_thumbnail_uri, sign_private_download_url, avatar_uri_for_key, transcribe_short_audio, validate_message_media_key, validate_message_media_size
 from utils import auth
 from utils.auth import Request
 from User.models import NotificationEvent, User
@@ -324,6 +324,7 @@ class MessageUploadView(View):
     )
     def post(self, request: Request):
         request.user.space.require_message_composer_enabled()
+        validate_message_media_size(request.json.kind, request.json.file_size)
         capability = {
             'image': 'chat.message.send.image',
             'audio': 'chat.message.send.audio',
@@ -430,22 +431,23 @@ class MessageResourceFinalizeView(View):
         request.user.require_capability(capability)
         kind = MediaAsset.kind_for_name(kind_name)
         key = validate_message_media_key(kind_name, request.json.content)
+        file_size = validate_message_media_size(kind_name, request.json.file_size)
         with transaction.atomic():
             User.objects.select_for_update().get(id=request.user.id)
             if kind_name in {'video', 'file'}:
-                duplicate = MediaAsset.find_duplicate(request.json.content_hash, request.json.file_size)
+                duplicate = MediaAsset.find_duplicate(request.json.content_hash, file_size)
                 if duplicate is not None:
-                    MediaResource.require_capacity(request.user, request.json.file_size, asset=duplicate)
+                    MediaResource.require_capacity(request.user, file_size, asset=duplicate)
                     resource = MediaResource.acquire(request.user, duplicate, kind, request.json.file_name)
                     return dict(resource=resource.resource_jsonl(request=request), instant=True, quota=MediaResource.quota_for(request.user))
-                MediaResource.require_capacity(request.user, request.json.file_size)
+                MediaResource.require_capacity(request.user, file_size)
             asset = MediaAsset.queue(
                 key,
                 avatar_uri_for_key(key),
                 kind,
                 content_hash=request.json.content_hash,
                 mime_type=request.json.content_type,
-                file_size=request.json.file_size,
+                file_size=file_size,
                 duration_seconds=request.json.duration_seconds,
             )
             if kind not in {MediaAsset.KIND_IMAGE, MediaAsset.KIND_VIDEO}:

@@ -1,3 +1,4 @@
+import base64
 import json
 from unittest.mock import Mock, patch
 
@@ -6,7 +7,7 @@ from django.test import SimpleTestCase, TestCase
 from Message.image_metadata import _reverse_geocode_opencage, parse_image_info, reverse_geocode, search_nearby_places
 from Message.video_metadata import parse_avinfo
 from Message.models import MediaAsset, Message, MessageTypeChoice
-from utils.qiniu import QINIU_UPLOAD_URL, build_message_media_key, validate_message_media_key
+from utils.qiniu import QINIU_UPLOAD_URL, build_message_media_key, build_upload_token, validate_message_media_key, validate_message_media_size
 from utils.global_settings import Globals
 
 
@@ -27,6 +28,18 @@ class MessageFileUploadTests(SimpleTestCase):
     def test_file_key_still_rejects_forged_paths(self):
         with self.assertRaises(Exception):
             validate_message_media_key('file', 'sermo/messages/file/../image/unsafe.exe')
+
+    def test_empty_audio_container_is_rejected(self):
+        with self.assertRaises(Exception):
+            validate_message_media_size('audio', 5)
+
+    @patch('utils.qiniu._required_config', side_effect=['access-key', 'secret-key', 'bucket'])
+    def test_audio_upload_policy_has_minimum_size(self, _required_config):
+        token = build_upload_token('sermo/messages/audio/test.webm', min_file_size=1024)
+        encoded_policy = token.rsplit(':', 1)[-1]
+        padding = '=' * (-len(encoded_policy) % 4)
+        policy = json.loads(base64.urlsafe_b64decode(encoded_policy + padding))
+        self.assertEqual(policy['fsizeMin'], 1024)
 
 
 class ImageMetadataTests(SimpleTestCase):

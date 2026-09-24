@@ -17,6 +17,7 @@ class MessageErrors:
     PAYLOAD_INVALID = Error(message=_('Invalid message payload'), code=Code.BadRequest)
     MEDIA_KIND_INVALID = Error(message=_('Invalid media kind'), code=Code.BadRequest)
     AUDIO_DURATION_INVALID = Error(message=_('Audio message cannot exceed 60 seconds'), code=Code.BadRequest)
+    AUDIO_FILE_INVALID = Error(message=_('The audio recording is empty or invalid'), code=Code.BadRequest)
     REPLY_TARGET_INVALID = Error(message=_('The replied message is not in this chat'), code=Code.BadRequest)
     REPLY_TEXT_ONLY = Error(message=_('Only text messages can reply to another message'), code=Code.BadRequest)
     PIN_FORBIDDEN = Error(message=_('You cannot manage locked messages in this chat'), code=Code.Forbidden)
