@@ -9,6 +9,23 @@ from TravelMap.models import MapAccessGrant, MapChatGrant
 
 
 class TravelMapMessageTests(SimpleTestCase):
+    def test_chat_map_access_broadcast_uses_system_copy(self):
+        message = Message(
+            type=MessageTypeChoice.SYSTEM,
+            user_id=1,
+            content=json.dumps({
+                'kind': 'system',
+                'event': 'travel_map_shared',
+                'actor_name': 'Fly',
+            }),
+        )
+        message._state.fields_cache['user'] = SimpleNamespace(name='Fly')
+
+        self.assertEqual(
+            message._payload_for_type()['text'],
+            'Fly shared their footprint map with this chat',
+        )
+
     def test_map_access_message_is_normalized(self):
         normalized = Message.normalize_content(
             MessageTypeChoice.MAP_ACCESS,

@@ -1032,6 +1032,8 @@ class Message(models.Model):
                     actor=actor,
                     title=str(payload.get('group_title') or '').strip(),
                 )
+            if event == 'travel_map_shared':
+                return _('%(actor)s shared their footprint map with this chat') % dict(actor=actor)
             if event == 'square_muted':
                 duration = {
                     '1d': _('1 day'),
@@ -1406,6 +1408,12 @@ class Message(models.Model):
                 chat_grant=bool(payload.get('chat_grant')),
                 message_key=payload.get('message_key') or '',
             )
+            if response['chat_grant']:
+                language = getattr(viewer, 'language', None)
+                with override(language):
+                    response['text'] = _('%(actor)s shared their footprint map with this chat') % dict(
+                        actor=self.user.name,
+                    )
             if viewer is not None and viewer.space_id == self.user.space_id:
                 response['chat_access'] = MapChatGrant.status(self.chat, viewer) if response['chat_grant'] else None
                 response['access'] = None if response['chat_grant'] else MapAccessGrant.status_between(viewer, self.user)

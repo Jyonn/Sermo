@@ -7,8 +7,7 @@ from TravelMap.models import MapAccessGrant, MapChatGrant, MapCheckIn, TravelMap
 from TravelMap.params import TravelMapParams
 from TravelMap.validators import TravelMapErrors
 from TravelMap.unlocks import unlocked_city_bubble_styles
-from Message.models import Message, MessageTypeChoice
-from User.models import NotificationEvent
+from Message.models import Message
 from utils import auth
 from utils.auth import Request
 
@@ -100,17 +99,11 @@ class ChatMapAccessView(View):
             grant = MapChatGrant.grant(request.query.chat, request.user)
             status = MapChatGrant.status(request.query.chat, request.user)
             if grant._was_activated:
-                message = Message.create(
+                message = Message.create_system(
                     request.query.chat,
                     request.user,
-                    MessageTypeChoice.MAP_ACCESS,
-                    json.dumps({
-                    'kind': 'map_access',
-                    'chat_grant': True,
-                    'message_key': 'travel_map_join',
-                }, ensure_ascii=False),
+                    'travel_map_shared',
                 )
-                NotificationEvent.emit_message_notifications(message, actor=request.user)
                 status['invitation_message'] = message.jsonl(request=request)
         return status
 
