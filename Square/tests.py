@@ -9,7 +9,7 @@ from django.utils import timezone
 from Friendship.models import Friendship
 from Chat.models import Chat, SubmissionStatusChoice
 from Space.models import Space, SpaceOperator
-from Message.models import ForwardBundleItem, MediaAsset, Message, MessageTypeChoice
+from Message.models import ForwardBundleItem, LinkPreview, LinkPreviewStatusChoice, MediaAsset, Message, MessageTypeChoice
 from Square.models import SquareMute, Statement, StatementComment, StatementCommentLike, StatementLike, StatementMedia, StatementVisibilityChoice
 from Sticker.models import StickerAsset
 from Square.views import SquareStatusView
@@ -53,6 +53,63 @@ class StatementApiTests(TestCase):
             content_type='application/json',
             **self.authorization(user),
         )
+
+    def create_music_preview(self):
+        url = 'https://y.music.163.com/m/song?id=287726'
+        return LinkPreview.objects.create(
+            url=url,
+            url_hash=LinkPreview.hash_url(url),
+            status=LinkPreviewStatusChoice.READY,
+            provider_data={
+                'provider': 'netease_music',
+                'song_id': 287726,
+                'title': '累赘',
+                'artists': ['孙燕姿'],
+                'audio_url': 'https://music.163.com/song/media/outer/url?id=287726.mp3',
+                'canonical_url': 'https://music.163.com/#/song?id=287726',
+            },
+            fetched_at=timezone.now(),
+        )
+
+    def test_statement_reuses_ready_external_media_preview(self):
+        preview = self.create_music_preview()
+        response = self.post_statement(self.author, {
+            'text': '分享一首歌',
+            'visibility': 'public',
+            'media': [],
+            'external_media_url': preview.url,
+        })
+
+        self.assertEqual(response.status_code, 200, response.content)
+        statement = Statement.objects.get(id=response.json()['body']['statement_id'])
+        self.assertEqual(statement.link_preview_id, preview.id)
+        self.assertEqual(response.json()['body']['external_media']['provider_data']['song_id'], 287726)
+
+    def test_external_media_resolver_reuses_chat_link_preview_cache(self):
+        preview = self.create_music_preview()
+        response = self.client.post(
+            '/messages/external-media-preview',
+            data=json.dumps({'text': f'分享孙燕姿的单曲《累赘》 {preview.url} 其他文字'}),
+            content_type='application/json',
+            **self.authorization(self.author),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertTrue(response.json()['body']['supported'])
+        self.assertEqual(LinkPreview.objects.count(), 1)
+
+    def test_external_media_cannot_be_combined_with_uploaded_media(self):
+        preview = self.create_music_preview()
+        with patch.object(StatementMedia, 'normalize_payload', return_value=[{'kind': 0}]):
+            response = self.post_statement(self.author, {
+                'text': '',
+                'visibility': 'public',
+                'media': [{'kind': 'image', 'key': 'unused'}],
+                'external_media_url': preview.url,
+            })
+
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertEqual(response.json()['identifier'], 'SQUARE@EXTERNAL_MEDIA_EXCLUSIVE')
 
     def test_free_posting_switch_blocks_direct_statement_creation(self):
         self.space.square_free_post_enabled = False

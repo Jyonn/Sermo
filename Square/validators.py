@@ -34,6 +34,8 @@ class SquareErrors:
     PIN_FORBIDDEN = Error(message=_('Only the official account can pin its own statement'), code=Code.Forbidden)
     CHAT_RECORD_FORBIDDEN = Error(message=_('Only the official account can publish chat records'), code=Code.Forbidden)
     CHAT_RECORD_EXCLUSIVE = Error(message=_('Chat records cannot be combined with other attachments'), code=Code.BadRequest)
+    EXTERNAL_MEDIA_INVALID = Error(message=_('This external media link is unavailable'), code=Code.BadRequest)
+    EXTERNAL_MEDIA_EXCLUSIVE = Error(message=_('External media cannot be combined with other attachments'), code=Code.BadRequest)
     MUTE_FORBIDDEN = Error(message=_('Only the official account can mute Square members'), code=Code.Forbidden)
     MUTE_TARGET_INVALID = Error(message=_('This member cannot be muted'), code=Code.BadRequest)
     MUTE_REASON_REQUIRED = Error(message=_('A mute reason is required'), code=Code.BadRequest)

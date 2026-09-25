@@ -97,6 +97,7 @@ class SquareParams(metaclass=Params):
     text = Validator('text').to(validate_text).null().default('')
     visibility = Validator('visibility').to(validate_visibility).default('public')
     media = Validator('media').to(validate_media).default([])
+    external_media_url = Validator('external_media_url').to(str).bool(lambda value: len(value) <= 2048).null().default(None)
     location = Validator('location').to(validate_location).null().default(None)
     location_keyword = Validator('keyword', final_name='location_keyword').to(validate_location_keyword).default('')
     location_radius = Validator('radius', final_name='location_radius').to(int).bool(lambda value: 100 <= value <= 50000).default(5000)

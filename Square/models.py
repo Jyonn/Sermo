@@ -11,7 +11,7 @@ from django.urls import reverse
 from smartdjango import Choice, models
 
 from Friendship.models import Friendship, FriendshipStatusChoice
-from Message.models import ForwardBundle, ForwardBundleItem, MessageValidator
+from Message.models import ForwardBundle, ForwardBundleItem, LinkPreview, LinkPreviewStatusChoice, MessageValidator
 from Square.validators import SquareErrors
 from Sticker.models import StickerAsset
 from utils.qiniu import avatar_uri_for_key, validate_message_media_key
@@ -235,6 +235,10 @@ class Statement(models.Model):
         'Message.ForwardBundle', on_delete=models.PROTECT, null=True, blank=True,
         related_name='square_statements',
     )
+    link_preview = models.ForeignKey(
+        'Message.LinkPreview', on_delete=models.PROTECT, null=True, blank=True,
+        related_name='square_statements',
+    )
     chat_record_redacted = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
     is_deleted = models.BooleanField(default=False, db_index=True)
@@ -321,7 +325,7 @@ class Statement(models.Model):
         normalized_keyword = (keyword or '').strip()
         if normalized_keyword:
             queryset = queryset.filter(text__icontains=normalized_keyword)
-        queryset = queryset.select_related('user', 'user__qq_identity', 'forward_bundle').prefetch_related(
+        queryset = queryset.select_related('user', 'user__qq_identity', 'forward_bundle', 'link_preview').prefetch_related(
             statement_media_prefetch(), statement_forward_bundle_prefetch(),
             'qzone_source__emoticons__media_asset',
         ).annotate(
@@ -361,7 +365,7 @@ class Statement(models.Model):
     @classmethod
     def admin_feed(cls, space, viewer, before=None, limit=20, request=None):
         queryset = cls.objects.filter(space=space, is_deleted=False).select_related(
-            'user', 'user__qq_identity', 'forward_bundle',
+            'user', 'user__qq_identity', 'forward_bundle', 'link_preview',
         ).prefetch_related(
             statement_media_prefetch(), statement_forward_bundle_prefetch(),
             'qzone_source__emoticons__media_asset',
@@ -377,7 +381,7 @@ class Statement(models.Model):
     def detail(cls, user, statement_id, request=None):
         try:
             statement = cls.visible_for(user).select_related(
-                'user', 'user__qq_identity', 'forward_bundle',
+                'user', 'user__qq_identity', 'forward_bundle', 'link_preview',
             ).prefetch_related(
                 statement_media_prefetch(), statement_forward_bundle_prefetch(),
                 'qzone_source__emoticons__media_asset',
@@ -392,7 +396,7 @@ class Statement(models.Model):
 
     @classmethod
     def create_statement(
-        cls, user, text, visibility, media, location=None, forward_bundle=None,
+        cls, user, text, visibility, media, location=None, forward_bundle=None, external_media_url=None,
         is_anonymous=False, chat_record_redacted=False,
     ):
         user.require_capability('square.statement.publish')
@@ -424,6 +428,20 @@ class Statement(models.Model):
             raise SquareErrors.VISIBILITY_INVALID
 
         normalized_media = StatementMedia.normalize_payload(media)
+        link_preview = LinkPreview.queue_for_text(external_media_url or '') if external_media_url else None
+        provider = (link_preview.provider_data or {}).get('provider') if link_preview else None
+        supported_providers = {
+            'douyin_video', 'netease_music', 'qq_music', 'kugou_music',
+            'qishui_music', 'apple_music', 'kuwo_music',
+        }
+        if external_media_url and (
+            link_preview is None
+            or link_preview.status != LinkPreviewStatusChoice.READY
+            or provider not in supported_providers
+        ):
+            raise SquareErrors.EXTERNAL_MEDIA_INVALID
+        if link_preview and (normalized_media or forward_bundle is not None):
+            raise SquareErrors.EXTERNAL_MEDIA_EXCLUSIVE
         if forward_bundle is not None:
             if not user.can_operate_square or forward_bundle.created_by_id != user.id:
                 raise SquareErrors.CHAT_RECORD_FORBIDDEN
@@ -434,11 +452,11 @@ class Statement(models.Model):
             StatementMediaKindChoice.AUDIO: 'square.statement.publish.audio',
             StatementMediaKindChoice.VIDEO: 'square.statement.publish.video',
         }
-        if not normalized_media and forward_bundle is None:
+        if not normalized_media and forward_bundle is None and link_preview is None:
             user.require_capability('square.statement.publish.text')
         for media_kind in {item['kind'] for item in normalized_media}:
             user.require_capability(media_capabilities[media_kind])
-        if not normalized_text and not normalized_media and forward_bundle is None:
+        if not normalized_text and not normalized_media and forward_bundle is None and link_preview is None:
             raise SquareErrors.CONTENT_REQUIRED
         StatementMedia.attach_assets(normalized_media)
         normalized_location = location or None
@@ -465,6 +483,7 @@ class Statement(models.Model):
             address=normalized_location.get('address', '') if normalized_location else '',
             geocoding_provider=normalized_location.get('geocoding_provider', '') if normalized_location else '',
             forward_bundle=forward_bundle,
+            link_preview=link_preview,
             chat_record_redacted=bool(chat_record_redacted and forward_bundle is not None),
             is_anonymous=is_anonymous,
         )
@@ -490,7 +509,7 @@ class Statement(models.Model):
             transaction.on_commit(lambda: ChatUserPreference.emit_peer_statement_events(statement))
         from Activity.models import ActivityService
         ActivityService.record_event(user, 'square.statement.publish', statement.id)
-        return cls.objects.select_related('user', 'forward_bundle').prefetch_related(
+        return cls.objects.select_related('user', 'forward_bundle', 'link_preview').prefetch_related(
             statement_media_prefetch(), statement_forward_bundle_prefetch(),
         ).get(id=statement.id)
 
@@ -517,6 +536,7 @@ class Statement(models.Model):
                 self.forward_bundle.jsonl(request=request, redact_identity=self.chat_record_redacted)
                 if self.forward_bundle_id else None
             ),
+            external_media=self.link_preview.jsonl() if self.link_preview_id else None,
             comment_count=getattr(self, 'visible_comment_count', self.comments.filter(is_deleted=False).count()),
             like_count=getattr(self, 'visible_like_count', self.likes.count()),
             liked=bool(getattr(self, 'viewer_liked', viewer and self.likes.filter(user=viewer).exists())),

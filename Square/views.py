@@ -89,7 +89,7 @@ class StatementView(View):
         )
 
     @auth.require_user
-    @analyse.json(SquareParams.text, SquareParams.visibility, SquareParams.media, SquareParams.location, SquareParams.pin, SquareParams.anonymous)
+    @analyse.json(SquareParams.text, SquareParams.visibility, SquareParams.media, SquareParams.external_media_url, SquareParams.location, SquareParams.pin, SquareParams.anonymous)
     def post(self, request: Request):
         request.user.space.require_square_free_post_enabled()
         check_user_text(request, request.json.text, ContentSafetyScene.SOCIAL)
@@ -99,6 +99,7 @@ class StatementView(View):
                 text=request.json.text,
                 visibility=request.json.visibility,
                 media=raw(request.json.media),
+                external_media_url=request.json.external_media_url,
                 location=raw(request.json.location),
                 is_anonymous=request.json.anonymous,
             )

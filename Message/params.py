@@ -43,6 +43,7 @@ class MessageParams(metaclass=Params):
     reply_to_message_id = Validator('reply_to_message_id', final_name='reply_to').to(int).to(Message.index).null().default(None)
     client_message_id = Validator('client_message_id').to(str).null().default(None)
     mention_user_ids = ListValidator('mention_user_ids').element(Validator().to(int)).default([])
+    preview_text = Validator('text', final_name='preview_text').to(str).bool(lambda value: len(value) <= 4096)
     chat_id = Validator('chat_id', final_name='chat').to(int).to(Chat.index)
 
     content: Validator

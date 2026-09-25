@@ -490,6 +490,24 @@ class MessageLinkPreviewView(View):
         return link_preview.jsonl()
 
 
+class ExternalMediaPreviewView(View):
+    SUPPORTED_PROVIDERS = {
+        'douyin_video', 'netease_music', 'qq_music', 'kugou_music',
+        'qishui_music', 'apple_music', 'kuwo_music',
+    }
+
+    @auth.require_user
+    @analyse.json(MessageParams.preview_text)
+    def post(self, request: Request):
+        link_preview = LinkPreview.queue_for_text(request.json.preview_text)
+        if link_preview is None:
+            return dict(status='none', supported=False)
+        payload = link_preview.jsonl()
+        provider = (payload.get('provider_data') or {}).get('provider')
+        payload['supported'] = provider in self.SUPPORTED_PROVIDERS
+        return payload
+
+
 class MessageAudioTranscriptView(View):
     @staticmethod
     def _require_audio_message(message, user):
