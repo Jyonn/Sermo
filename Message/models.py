@@ -513,40 +513,47 @@ class LinkPreview(models.Model):
         thread.start()
 
     @classmethod
+    def refresh_now(cls, preview_id: int, force=False):
+        preview = cls.objects.get(id=preview_id)
+        if (
+            preview.status != LinkPreviewStatusChoice.PENDING
+            and not force
+            and not cls._is_expired(preview)
+        ):
+            return preview, False
+        try:
+            data = cls.fetch_preview_data(preview.url)
+            cls.objects.filter(id=preview_id).update(
+                url=data['url'],
+                title=data['title'],
+                description=data['description'],
+                image_url=data['image_url'],
+                site_name=data['site_name'],
+                favicon_url=data['favicon_url'],
+                provider_data=data.get('provider_data') or {},
+                error='',
+                status=LinkPreviewStatusChoice.READY,
+                fetched_at=timezone.now(),
+                updated_at=timezone.now(),
+            )
+            preview.refresh_from_db()
+            return preview, True
+        except Exception as err:
+            updates = {'error': str(err)[:255], 'updated_at': timezone.now()}
+            if preview.status != LinkPreviewStatusChoice.READY:
+                updates.update(status=LinkPreviewStatusChoice.FAILED, fetched_at=timezone.now())
+            cls.objects.filter(id=preview_id).update(**updates)
+            preview.refresh_from_db()
+            return preview, False
+
+    @classmethod
     def fetch_and_update(cls, preview_id: int, force=False):
         close_old_connections()
         try:
             preview = cls.objects.get(id=preview_id)
             if preview.status == LinkPreviewStatusChoice.READY and not force:
                 return
-            data = cls.fetch_preview_data(preview.url)
-            preview.title = data['title']
-            preview.description = data['description']
-            preview.image_url = data['image_url']
-            preview.site_name = data['site_name']
-            preview.favicon_url = data['favicon_url']
-            preview.provider_data = data.get('provider_data') or {}
-            preview.error = ''
-            preview.status = LinkPreviewStatusChoice.READY
-            preview.fetched_at = timezone.now()
-            preview.save(update_fields=[
-                'title',
-                'description',
-                'image_url',
-                'site_name',
-                'favicon_url',
-                'provider_data',
-                'error',
-                'status',
-                'fetched_at',
-                'updated_at',
-            ])
-        except Exception as err:
-            cls.objects.filter(id=preview_id).update(
-                status=LinkPreviewStatusChoice.FAILED,
-                error=str(err)[:255],
-                fetched_at=timezone.now(),
-            )
+            cls.refresh_now(preview_id, force=force)
         finally:
             with cls._FETCHING_LOCK:
                 cls._FETCHING_IDS.discard(preview_id)
@@ -559,6 +566,7 @@ class LinkPreview(models.Model):
             LinkPreviewStatusChoice.FAILED: 'failed',
         }.get(self.status, 'failed')
         return dict(
+            preview_id=self.id,
             url=self.url,
             status=status,
             title=self.title,

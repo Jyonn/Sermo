@@ -1,12 +1,13 @@
 from django.urls import path
 
-from Message.views import ExternalMediaPreviewView, MessageView, MessageAudioTranscriptView, MessageBatchView, MessageClearView, MessageEventSyncBaselineView, MessageEventSyncView, MessageForwardView, MessageHistoryRecoveryView, MessageReconcileView, MessageSearchCalendarView, MessageSearchView, MessageUploadView, MessageBlobView, MessageBlobThumbnailView, MessageMediaMetadataView, MessageLinkPreviewView, MessageResourceFinalizeView, MessageResourceView, PinnedMessageView
+from Message.views import ExternalMediaPreviewRefreshView, ExternalMediaPreviewView, MessageView, MessageAudioTranscriptView, MessageBatchView, MessageClearView, MessageEventSyncBaselineView, MessageEventSyncView, MessageForwardView, MessageHistoryRecoveryView, MessageReconcileView, MessageSearchCalendarView, MessageSearchView, MessageUploadView, MessageBlobView, MessageBlobThumbnailView, MessageMediaMetadataView, MessageLinkPreviewView, MessageResourceFinalizeView, MessageResourceView, PinnedMessageView
 
 urlpatterns = [
     path('blob/<slug:blob_slug>/thumbnail', MessageBlobThumbnailView.as_view(), name='message blob thumbnail'),
     path('blob/<slug:blob_slug>', MessageBlobView.as_view(), name='message blob'),
     path('link-preview', MessageLinkPreviewView.as_view(), name='message link preview'),
     path('external-media-preview', ExternalMediaPreviewView.as_view(), name='external media preview'),
+    path('external-media-preview/refresh', ExternalMediaPreviewRefreshView.as_view(), name='external media preview refresh'),
     path('audio-transcript', MessageAudioTranscriptView.as_view(), name='message audio transcript'),
     path('upload', MessageUploadView.as_view(), name='message upload'),
     path('resources', MessageResourceView.as_view(), name='message resources'),

@@ -44,6 +44,8 @@ class MessageParams(metaclass=Params):
     client_message_id = Validator('client_message_id').to(str).null().default(None)
     mention_user_ids = ListValidator('mention_user_ids').element(Validator().to(int)).default([])
     preview_text = Validator('text', final_name='preview_text').to(str).bool(lambda value: len(value) <= 4096)
+    preview_id = Validator('preview_id').to(int).bool(lambda value: value > 0)
+    force_refresh = Validator('force', final_name='force_refresh').to(bool).default(False)
     chat_id = Validator('chat_id', final_name='chat').to(int).to(Chat.index)
 
     content: Validator

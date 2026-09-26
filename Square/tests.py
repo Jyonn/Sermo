@@ -98,6 +98,88 @@ class StatementApiTests(TestCase):
         self.assertTrue(response.json()['body']['supported'])
         self.assertEqual(LinkPreview.objects.count(), 1)
 
+    @patch.object(LinkPreview, 'fetch_preview_data')
+    def test_expired_douyin_preview_refreshes_in_place_before_playback(self, fetch_preview_data):
+        video_id = '7688192164567824886'
+        preview = LinkPreview.objects.create(
+            url=f'https://www.douyin.com/video/{video_id}',
+            url_hash=LinkPreview.hash_url(f'https://v.douyin.com/example/'),
+            status=LinkPreviewStatusChoice.READY,
+            provider_data={
+                'provider': 'douyin_video',
+                'video_id': video_id,
+                'title': '旧标题',
+                'canonical_url': f'https://www.douyin.com/video/{video_id}',
+                'video_url': 'https://v3-dy-o.zjcdn.com/expired.mp4',
+                'width': 720,
+                'height': 1280,
+            },
+            fetched_at=timezone.now() - timedelta(minutes=16),
+        )
+        fetch_preview_data.return_value = {
+            'url': preview.url,
+            'title': '新标题',
+            'description': '作者',
+            'image_url': 'https://p3.douyinpic.com/new-cover.jpg',
+            'site_name': '抖音',
+            'favicon_url': '',
+            'provider_data': {
+                **preview.provider_data,
+                'title': '新标题',
+                'video_url': 'https://v3-dy-o.zjcdn.com/fresh.mp4',
+            },
+        }
+
+        response = self.client.post(
+            '/messages/external-media-preview/refresh',
+            data=json.dumps({'preview_id': preview.id, 'force': False}),
+            content_type='application/json',
+            **self.authorization(self.author),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertTrue(response.json()['body']['refreshed'])
+        self.assertEqual(response.json()['body']['preview_id'], preview.id)
+        self.assertEqual(
+            response.json()['body']['provider_data']['video_url'],
+            'https://v3-dy-o.zjcdn.com/fresh.mp4',
+        )
+        self.assertEqual(LinkPreview.objects.count(), 1)
+
+    @patch.object(LinkPreview, 'fetch_preview_data', side_effect=ValueError('provider unavailable'))
+    def test_failed_forced_refresh_keeps_last_ready_douyin_preview(self, _fetch_preview_data):
+        video_id = '7688192164567824886'
+        preview = LinkPreview.objects.create(
+            url=f'https://www.douyin.com/video/{video_id}',
+            url_hash=LinkPreview.hash_url(f'https://www.douyin.com/video/{video_id}'),
+            status=LinkPreviewStatusChoice.READY,
+            provider_data={
+                'provider': 'douyin_video',
+                'video_id': video_id,
+                'title': '保留的视频',
+                'canonical_url': f'https://www.douyin.com/video/{video_id}',
+                'video_url': 'https://v3-dy-o.zjcdn.com/last-known.mp4',
+                'width': 720,
+                'height': 1280,
+            },
+            fetched_at=timezone.now(),
+        )
+
+        response = self.client.post(
+            '/messages/external-media-preview/refresh',
+            data=json.dumps({'preview_id': preview.id, 'force': True}),
+            content_type='application/json',
+            **self.authorization(self.author),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertFalse(response.json()['body']['refreshed'])
+        self.assertEqual(response.json()['body']['status'], 'ready')
+        self.assertEqual(
+            response.json()['body']['provider_data']['video_url'],
+            'https://v3-dy-o.zjcdn.com/last-known.mp4',
+        )
+
     def test_external_media_cannot_be_combined_with_uploaded_media(self):
         preview = self.create_music_preview()
         with patch.object(StatementMedia, 'normalize_payload', return_value=[{'kind': 0}]):

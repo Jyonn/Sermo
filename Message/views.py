@@ -508,6 +508,23 @@ class ExternalMediaPreviewView(View):
         return payload
 
 
+class ExternalMediaPreviewRefreshView(View):
+    @auth.require_user
+    @analyse.json(MessageParams.preview_id, MessageParams.force_refresh)
+    def post(self, request: Request):
+        link_preview = LinkPreview.objects.filter(id=request.json.preview_id).first()
+        provider = ((link_preview.provider_data if link_preview else None) or {}).get('provider')
+        if link_preview is None or provider not in ExternalMediaPreviewView.SUPPORTED_PROVIDERS:
+            return dict(status='none', supported=False)
+        link_preview, refreshed = LinkPreview.refresh_now(
+            link_preview.id,
+            force=request.json.force_refresh,
+        )
+        payload = link_preview.jsonl()
+        payload.update(supported=True, refreshed=refreshed)
+        return payload
+
+
 class MessageAudioTranscriptView(View):
     @staticmethod
     def _require_audio_message(message, user):
