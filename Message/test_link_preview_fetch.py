@@ -1,12 +1,23 @@
 import json
+from datetime import timedelta
 from unittest.mock import Mock, call, patch
 
 from django.test import SimpleTestCase
+from django.utils import timezone
 
-from Message.models import LinkPreview
+from Message.models import LinkPreview, LinkPreviewStatusChoice
 
 
 class LinkPreviewFetchTests(SimpleTestCase):
+    def test_failed_douyin_gallery_link_retries_after_one_minute(self):
+        preview = LinkPreview(
+            url='https://v.douyin.com/DpoX9g4EaHU/',
+            status=LinkPreviewStatusChoice.FAILED,
+            error='douyin provider could not resolve media',
+            fetched_at=timezone.now() - timedelta(minutes=2),
+        )
+        self.assertTrue(LinkPreview._is_expired(preview))
+
     @staticmethod
     def response(status_code, *, location='', html=b''):
         response = Mock()
@@ -193,6 +204,26 @@ class LinkPreviewFetchTests(SimpleTestCase):
         self.assertEqual(result['provider_data']['width'], 720)
         self.assertEqual(result['provider_data']['video_url'], 'https://v3-web.douyinvod.com/video.mp4')
         parse.assert_called_once_with(f'https://www.douyin.com/video/{video_id}')
+
+    @patch.object(LinkPreview, '_require_public_host')
+    @patch('Message.models.DouyinProvider.parse')
+    @patch('Message.models.requests.get')
+    def test_douyin_share_note_redirect_uses_gallery(self, get, parse, _require_public_host):
+        note_id = '7690209569083041893'
+        redirected = f'https://www.iesdouyin.com/share/note/{note_id}/'
+        get.side_effect = [self.response(302, location=redirected), self.response(200)]
+        parse.return_value = {
+            'provider': 'douyin_gallery', 'video_id': note_id, 'title': '边境小镇-室韦',
+            'canonical_url': f'https://www.douyin.com/note/{note_id}',
+            'cover_url': 'https://p3-pc-sign.douyinpic.com/one.jpeg',
+            'images': ['https://p3-pc-sign.douyinpic.com/one.jpeg'],
+        }
+
+        result = LinkPreview.fetch_preview_data('https://v.douyin.com/DpoX9g4EaHU/')
+
+        self.assertEqual(result['provider_data']['provider'], 'douyin_gallery')
+        self.assertEqual(result['title'], '边境小镇-室韦')
+        parse.assert_called_once_with(redirected)
 
     @patch.object(LinkPreview, '_require_public_host')
     @patch('Message.models.DouyinProvider.parse', return_value=None)

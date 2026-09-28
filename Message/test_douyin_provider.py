@@ -63,6 +63,32 @@ class DouyinProviderTests(SimpleTestCase):
         self.assertEqual(result['provider'], 'douyin_gallery')
         self.assertEqual(result['images'], ['https://p26-sign.douyinpic.com/one.jpeg'])
 
+    def test_share_note_uses_public_gallery_when_video_parser_has_no_data(self):
+        note_id = '7690209569083041893'
+        api_response = Mock()
+        api_response.raise_for_status.return_value = None
+        api_response.json.return_value = {'detail': 'Could not find video data in page'}
+        self.session.post.return_value = api_response
+        page = Mock()
+        page.raise_for_status.return_value = None
+        page.headers = {'Content-Type': 'text/html; charset=utf-8'}
+        page.iter_content.return_value = [(
+            '<script type="application/ld+json">'
+            '{"@type":"article","headline":"边境小镇-室韦",'
+            '"author":{"name":"你比从前快乐"},'
+            '"image":["https://p3-pc-sign.douyinpic.com/one.jpeg",'
+            '"https://evil.example/two.jpeg"]}'
+            '</script>'
+        ).encode()]
+        self.session.get.return_value = page
+
+        result = self.provider.parse(f'https://www.iesdouyin.com/share/note/{note_id}/')
+
+        self.assertEqual(result['provider'], 'douyin_gallery')
+        self.assertEqual(result['title'], '边境小镇-室韦')
+        self.assertEqual(result['images'], ['https://p3-pc-sign.douyinpic.com/one.jpeg'])
+        self.assertEqual(result['canonical_url'], f'https://www.douyin.com/note/{note_id}')
+
     def test_extracts_video_id_from_modal_url(self):
         url = 'https://www.douyin.com/?modal_id=7146408143612000000'
         self.assertEqual(DouyinProvider.video_id_from_url(url), '7146408143612000000')
