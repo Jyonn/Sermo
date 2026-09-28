@@ -11,7 +11,7 @@ class DouyinProvider:
     HOSTS = frozenset(('douyin.com', 'www.douyin.com', 'v.douyin.com', 'iesdouyin.com'))
     MEDIA_HOSTS = (
         'douyinvod.com', 'douyincdn.com', 'bytecdn.cn', 'snssdk.com',
-        'amemv.com', 'zjcdn.com',
+        'amemv.com', 'zjcdn.com', 'douyinpic.com', 'byteimg.com',
     )
 
     def __init__(self, session=None):
@@ -99,6 +99,24 @@ class DouyinProvider:
         if not re.fullmatch(r'\d{10,25}', resolved_id):
             return None
         qualities = self._qualities(payload.get('qualities'))
+        images = []
+        raw_images = payload.get('images') or payload.get('image_urls') or payload.get('image_list') or []
+        for item in raw_images if isinstance(raw_images, list) else []:
+            candidate = item if isinstance(item, str) else (item.get('url') or item.get('image_url') or '') if isinstance(item, dict) else ''
+            if isinstance(candidate, dict):
+                urls = candidate.get('url_list') or []
+                candidate = urls[0] if isinstance(urls, list) and urls else ''
+            trusted = self._trusted_media_url(candidate)
+            if trusted and trusted not in images:
+                images.append(trusted)
+        if not qualities and images:
+            return {
+                'provider': 'douyin_gallery', 'video_id': resolved_id,
+                'title': str(payload.get('title') or '')[:255],
+                'author': str(payload.get('author') or '')[:120],
+                'canonical_url': f'https://www.douyin.com/note/{resolved_id}',
+                'cover_url': images[0], 'images': images[:30],
+            }
         if not qualities:
             return None
         selected = qualities[0]

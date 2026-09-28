@@ -199,5 +199,5 @@ class LinkPreviewFetchTests(SimpleTestCase):
     @patch('Message.models.requests.get')
     def test_douyin_provider_failure_does_not_fall_back(self, get, _parse, _require_public_host):
         get.return_value = self.response(200)
-        with self.assertRaisesRegex(ValueError, 'douyin provider could not resolve video'):
+        with self.assertRaisesRegex(ValueError, 'douyin provider could not resolve media'):
             LinkPreview.fetch_preview_data('https://www.douyin.com/video/7146408143612000000')

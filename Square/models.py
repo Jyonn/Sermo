@@ -444,7 +444,7 @@ class Statement(models.Model):
                 link_preview = LinkPreview.queue_for_text(external_media_url)
         provider = (link_preview.provider_data or {}).get('provider') if link_preview else None
         supported_providers = {
-            'douyin_video', 'netease_music', 'qq_music', 'kugou_music',
+            'douyin_video', 'douyin_gallery', 'xiaohongshu_video', 'xiaohongshu_gallery', 'netease_music', 'qq_music', 'kugou_music',
             'qishui_music', 'apple_music', 'kuwo_music',
         }
         if external_media_url and (

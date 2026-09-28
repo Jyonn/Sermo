@@ -492,7 +492,7 @@ class MessageLinkPreviewView(View):
 
 class ExternalMediaPreviewView(View):
     SUPPORTED_PROVIDERS = {
-        'douyin_video', 'netease_music', 'qq_music', 'kugou_music',
+        'douyin_video', 'douyin_gallery', 'xiaohongshu_video', 'xiaohongshu_gallery', 'netease_music', 'qq_music', 'kugou_music',
         'qishui_music', 'apple_music', 'kuwo_music',
     }
 

@@ -23,6 +23,7 @@ from smartdjango import models, Choice
 
 from Chat.models import Chat, ChatMember, ChatMemberStatusChoice, ChatPurposeChoice, SubmissionMemberRoleChoice, SubmissionStatusChoice
 from Message.providers.douyin import DouyinProvider
+from Message.providers.xiaohongshu import XiaohongshuProvider
 from Message.providers.music import MusicProvider
 from Message.validators import MessageErrors, MessageValidator
 from User.models import User, UserEmojiUsage
@@ -361,7 +362,7 @@ class LinkPreview(models.Model):
         if preview.status == LinkPreviewStatusChoice.READY:
             provider_data = preview.provider_data or {}
             provider = provider_data.get('provider')
-            ttl = datetime.timedelta(minutes=5 if not provider_data.get('video_url') else 15) if provider == 'douyin_video' else datetime.timedelta(minutes=30) if str(provider or '').endswith('_music') else cls.READY_TTL
+            ttl = datetime.timedelta(minutes=15) if provider in ('douyin_video', 'xiaohongshu_video') else datetime.timedelta(minutes=30) if str(provider or '').endswith('_music') else cls.READY_TTL
         elif preview.status == LinkPreviewStatusChoice.FAILED:
             ttl = cls.FAILED_TTL
         else:
@@ -397,10 +398,10 @@ class LinkPreview(models.Model):
             response.close()
             douyin_data = DouyinProvider().parse(current_url)
             if not douyin_data:
-                raise ValueError('douyin provider could not resolve video')
+                raise ValueError('douyin provider could not resolve media')
             return dict(
                 url=douyin_data['canonical_url'],
-                title=douyin_data['title'] or '抖音视频',
+                title=douyin_data['title'] or ('抖音图文' if douyin_data['provider'] == 'douyin_gallery' else '抖音视频'),
                 description=douyin_data.get('author', ''),
                 image_url=douyin_data['cover_url'],
                 site_name='抖音',
@@ -415,6 +416,7 @@ class LinkPreview(models.Model):
         if unsupported_content:
             raise ValueError('unsupported content type')
 
+        max_html_bytes = 2 * 1024 * 1024 if XiaohongshuProvider.supports(current_url) else cls.MAX_HTML_BYTES
         chunks = []
         total = 0
         for chunk in response.iter_content(chunk_size=8192):
@@ -422,7 +424,7 @@ class LinkPreview(models.Model):
                 continue
             chunks.append(chunk)
             total += len(chunk)
-            if total >= cls.MAX_HTML_BYTES:
+            if total >= max_html_bytes:
                 break
         response.close()
 
@@ -437,17 +439,20 @@ class LinkPreview(models.Model):
         parsed = urlparse(current_url)
         site_name = parser.meta.get('og:site_name') or parsed.hostname or ''
         provider_data = cls._netease_music_data(current_url, html)
+        if not provider_data and XiaohongshuProvider.supports(current_url):
+            provider_data = XiaohongshuProvider.parse(current_url, html)
         if not provider_data and MusicProvider.supports(current_url):
             provider_data = MusicProvider.parse(current_url, html)
         if not provider_data and requested_url != current_url and MusicProvider.supports(requested_url):
             provider_data = MusicProvider.parse(requested_url, html)
         if provider_data:
             title = provider_data['title'] or title
-            description = ' / '.join(provider_data['artists']) or description
+            description = ' / '.join(provider_data.get('artists') or []) or provider_data.get('description') or provider_data.get('author') or description
             image_url = provider_data['cover_url'] or image_url
             site_name = {
                 'netease_music': '网易云音乐', 'qq_music': 'QQ音乐', 'kugou_music': '酷狗音乐',
                 'qishui_music': '汽水音乐', 'apple_music': 'Apple Music', 'kuwo_music': '酷我音乐',
+                'xiaohongshu_gallery': '小红书', 'xiaohongshu_video': '小红书',
             }.get(provider_data['provider'], site_name)
             current_url = provider_data['canonical_url']
 
@@ -478,7 +483,7 @@ class LinkPreview(models.Model):
         preview_hostname = (urlparse(preview.url).hostname or '').lower()
         if (
             preview.status == LinkPreviewStatusChoice.READY
-            and preview_hostname in cls.NETEASE_HOSTS | DouyinProvider.HOSTS | MusicProvider.HOSTS
+            and preview_hostname in cls.NETEASE_HOSTS | DouyinProvider.HOSTS | MusicProvider.HOSTS | XiaohongshuProvider.HOSTS
             and not preview.provider_data
         ):
             preview.status = LinkPreviewStatusChoice.PENDING

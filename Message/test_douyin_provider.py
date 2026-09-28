@@ -51,6 +51,18 @@ class DouyinProviderTests(SimpleTestCase):
         ])
         self.assertEqual(qualities, [])
 
+    def test_parse_gallery_without_video_qualities(self):
+        response = Mock()
+        response.raise_for_status.return_value = None
+        response.json.return_value = {
+            'aweme_id': '7688192164567824886', 'title': '图文',
+            'images': ['https://p26-sign.douyinpic.com/one.jpeg', 'https://evil.example/two.jpeg'],
+        }
+        self.session.post.return_value = response
+        result = self.provider.parse('https://www.douyin.com/note/7688192164567824886')
+        self.assertEqual(result['provider'], 'douyin_gallery')
+        self.assertEqual(result['images'], ['https://p26-sign.douyinpic.com/one.jpeg'])
+
     def test_extracts_video_id_from_modal_url(self):
         url = 'https://www.douyin.com/?modal_id=7146408143612000000'
         self.assertEqual(DouyinProvider.video_id_from_url(url), '7146408143612000000')
