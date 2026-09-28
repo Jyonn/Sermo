@@ -2,13 +2,22 @@ import json
 from datetime import timedelta
 from unittest.mock import Mock, call, patch
 
-from django.test import SimpleTestCase
+from django.test import SimpleTestCase, TestCase
 from django.utils import timezone
 
 from Message.models import LinkPreview, LinkPreviewStatusChoice
 
 
 class LinkPreviewFetchTests(SimpleTestCase):
+    def test_failed_xiaohongshu_login_retries_after_one_minute(self):
+        preview = LinkPreview(
+            url='https://xhslink.cn/o/8YSCxhrTmhu',
+            status=LinkPreviewStatusChoice.FAILED,
+            error='xiaohongshu login redirect',
+            fetched_at=timezone.now() - timedelta(minutes=2),
+        )
+        self.assertTrue(LinkPreview._is_expired(preview))
+
     def test_failed_douyin_gallery_link_retries_after_one_minute(self):
         preview = LinkPreview(
             url='https://v.douyin.com/DpoX9g4EaHU/',
@@ -226,9 +235,59 @@ class LinkPreviewFetchTests(SimpleTestCase):
         parse.assert_called_once_with(redirected)
 
     @patch.object(LinkPreview, '_require_public_host')
+    @patch('Message.models.requests.get')
+    def test_xiaohongshu_short_link_uses_mobile_headers(self, get, _require_public_host):
+        note_id = '68e66fef0000000004023fdb'
+        note_url = f'https://www.xiaohongshu.com/discovery/item/{note_id}'
+        state = {'noteData': {'data': {'noteData': {
+            'noteId': note_id, 'type': 'video', 'title': 'iphone Duo',
+            'video': {'media': {'stream': {'h264': [
+                {'masterUrl': 'http://sns-video-v6.xhscdn.com/clip.mp4'},
+            ]}}},
+        }}}}
+        html = ('<script>window.__INITIAL_STATE__=' + json.dumps(state) + '</script>').encode()
+        get.side_effect = [self.response(302, location=note_url), self.response(200, html=html)]
+
+        result = LinkPreview.fetch_preview_data('https://xhslink.cn/o/8YSCxhrTmhu')
+
+        self.assertEqual(result['provider_data']['provider'], 'xiaohongshu_video')
+        self.assertEqual(result['provider_data']['video_url'], 'https://sns-video-v6.xhscdn.com/clip.mp4')
+        self.assertIn('iPhone', get.call_args_list[0].kwargs['headers']['User-Agent'])
+        self.assertIn('iPhone', get.call_args_list[1].kwargs['headers']['User-Agent'])
+
+    @patch.object(LinkPreview, '_require_public_host')
+    @patch('Message.models.requests.get')
+    def test_xiaohongshu_login_page_is_not_cached_as_ready(self, get, _require_public_host):
+        get.side_effect = [
+            self.response(302, location='https://www.xiaohongshu.com/login?redirectPath=note'),
+            self.response(200, html=b'<title>Login</title>'),
+        ]
+        with self.assertRaisesRegex(ValueError, 'xiaohongshu login redirect'):
+            LinkPreview.fetch_preview_data('https://xhslink.cn/o/8YSCxhrTmhu')
+
+    @patch.object(LinkPreview, '_require_public_host')
     @patch('Message.models.DouyinProvider.parse', return_value=None)
     @patch('Message.models.requests.get')
     def test_douyin_provider_failure_does_not_fall_back(self, get, _parse, _require_public_host):
         get.return_value = self.response(200)
         with self.assertRaisesRegex(ValueError, 'douyin provider could not resolve media'):
             LinkPreview.fetch_preview_data('https://www.douyin.com/video/7146408143612000000')
+
+
+class LinkPreviewCacheRecoveryTests(TestCase):
+    @patch.object(LinkPreview, '_require_public_host')
+    def test_old_xiaohongshu_login_preview_retries_original_short_link(self, _require_public_host):
+        url = 'https://xhslink.cn/o/8YSCxhrTmhu'
+        preview = LinkPreview.objects.create(
+            url='https://www.xiaohongshu.com/login?redirectPath=note',
+            url_hash=LinkPreview.hash_url(url),
+            status=LinkPreviewStatusChoice.READY,
+            provider_data={},
+            fetched_at=timezone.now(),
+        )
+
+        LinkPreview.queue_for_text(f'iphone Duo {url}')
+
+        preview.refresh_from_db()
+        self.assertEqual(preview.url, url)
+        self.assertEqual(preview.status, LinkPreviewStatusChoice.PENDING)

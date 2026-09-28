@@ -29,6 +29,25 @@ class XiaohongshuProviderTests(SimpleTestCase):
         self.assertEqual(result['provider'], 'xiaohongshu_video')
         self.assertEqual(result['video_url'], 'https://sns-video-bd.xhscdn.com/clip.mp4')
 
+    def test_mobile_share_video_with_http_cdn_urls(self):
+        html = '<script>window.__INITIAL_STATE__=' + json.dumps({'noteData': {'data': {'noteData': {
+            'noteId': '68e66fef0000000004023fdb', 'type': 'video', 'title': 'iphone Duo',
+            'user': {'nickName': '遂宁叮当通讯'},
+            'imageList': [{'url': 'http://sns-webpic-qc.xhscdn.com/cover'}],
+            'video': {'media': {'stream': {'h264': [
+                {'masterUrl': 'http://sns-video-v6.xhscdn.com/clip.mp4', 'duration': 23000},
+            ]}}},
+        }}}}) + '</script>'
+        url = 'https://www.xiaohongshu.com/discovery/item/68e66fef0000000004023fdb'
+
+        result = XiaohongshuProvider.parse(url, html)
+
+        self.assertEqual(result['provider'], 'xiaohongshu_video')
+        self.assertEqual(result['author'], '遂宁叮当通讯')
+        self.assertEqual(result['cover_url'], 'https://sns-webpic-qc.xhscdn.com/cover')
+        self.assertEqual(result['video_url'], 'https://sns-video-v6.xhscdn.com/clip.mp4')
+        self.assertTrue(XiaohongshuProvider.supports('https://xhslink.cn/o/8YSCxhrTmhu'))
+
     def test_untrusted_video_falls_back_to_images(self):
         result = XiaohongshuProvider.parse(self.URL, self.html({
             'type': 'video', 'video': {'media': {'stream': {'h264': [{'masterUrl': 'https://evil.example/clip.mp4'}]}}},

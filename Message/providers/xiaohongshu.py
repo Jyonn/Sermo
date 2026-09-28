@@ -6,7 +6,8 @@ from urllib.parse import urlparse
 
 
 class XiaohongshuProvider:
-    HOSTS = frozenset(('xiaohongshu.com', 'www.xiaohongshu.com', 'xhslink.com', 'www.xhslink.com'))
+    HOSTS = frozenset(('xiaohongshu.com', 'www.xiaohongshu.com', 'xhslink.com', 'www.xhslink.com', 'xhslink.cn', 'www.xhslink.cn'))
+    MOBILE_USER_AGENT = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1'
     IMAGE_HOSTS = ('xhscdn.com', 'xhsimg.com')
     VIDEO_HOSTS = ('xhscdn.com',)
 
@@ -21,9 +22,9 @@ class XiaohongshuProvider:
         value = value.replace('\\u0026', '&').strip()
         parsed = urlparse(value)
         host = (parsed.hostname or '').lower()
-        if parsed.scheme != 'https' or not parsed.path or not any(host == domain or host.endswith('.' + domain) for domain in hosts):
+        if parsed.scheme not in ('http', 'https') or not parsed.path or not any(host == domain or host.endswith('.' + domain) for domain in hosts):
             return ''
-        return value
+        return parsed._replace(scheme='https').geturl()
 
     @staticmethod
     def _initial_state(html):
@@ -54,11 +55,16 @@ class XiaohongshuProvider:
         details = ((state.get('note') or {}).get('noteDetailMap') or {}) if isinstance(state.get('note'), dict) else {}
         detail = details.get(note_id) or {}
         note = detail.get('note', detail) if isinstance(detail, dict) else {}
+        if not note:
+            mobile = state.get('noteData') or {}
+            mobile_data = mobile.get('data') or {} if isinstance(mobile, dict) else {}
+            candidate = mobile_data.get('noteData') or {} if isinstance(mobile_data, dict) else {}
+            note = candidate if isinstance(candidate, dict) and candidate.get('noteId') == note_id else {}
         if not isinstance(note, dict):
             return {}
         title = str(note.get('title') or note.get('desc') or '')[:255]
         user = note.get('user') or {}
-        author = str(user.get('nickname') or '')[:120] if isinstance(user, dict) else ''
+        author = str(user.get('nickname') or user.get('nickName') or '')[:120] if isinstance(user, dict) else ''
         images = []
         for image in note.get('imageList') or []:
             if not isinstance(image, dict):

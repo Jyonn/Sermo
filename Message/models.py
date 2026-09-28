@@ -364,7 +364,12 @@ class LinkPreview(models.Model):
             provider = provider_data.get('provider')
             ttl = datetime.timedelta(minutes=15) if provider in ('douyin_video', 'xiaohongshu_video') else datetime.timedelta(hours=1) if provider == 'douyin_gallery' else datetime.timedelta(minutes=30) if str(provider or '').endswith('_music') else cls.READY_TTL
         elif preview.status == LinkPreviewStatusChoice.FAILED:
-            ttl = datetime.timedelta(minutes=1) if DouyinProvider.supports(preview.url) and 'douyin provider could not resolve' in (preview.error or '') else cls.FAILED_TTL
+            retry_social = (
+                DouyinProvider.supports(preview.url) and 'douyin provider could not resolve' in (preview.error or '')
+            ) or (
+                XiaohongshuProvider.supports(preview.url) and 'xiaohongshu login redirect' in (preview.error or '')
+            )
+            ttl = datetime.timedelta(minutes=1) if retry_social else cls.FAILED_TTL
         else:
             return False
         return preview.fetched_at is None or preview.fetched_at <= (now or timezone.now()) - ttl
@@ -379,9 +384,14 @@ class LinkPreview(models.Model):
         response = None
         for _ in range(cls.MAX_REDIRECTS + 1):
             cls.normalize_public_url(current_url)
+            headers = dict(cls.BROWSER_HEADERS)
+            if XiaohongshuProvider.supports(current_url):
+                headers['User-Agent'] = XiaohongshuProvider.MOBILE_USER_AGENT
+                headers['Sec-CH-UA-Mobile'] = '?1'
+                headers.pop('Sec-CH-UA-Platform', None)
             response = requests.get(
                 current_url,
-                headers=cls.BROWSER_HEADERS,
+                headers=headers,
                 timeout=(3, 5),
                 allow_redirects=False,
                 stream=True,
@@ -394,6 +404,9 @@ class LinkPreview(models.Model):
 
         if response is None:
             raise ValueError('empty response')
+        if XiaohongshuProvider.supports(requested_url) and urlparse(current_url).path == '/login':
+            response.close()
+            raise ValueError('xiaohongshu login redirect')
         if DouyinProvider.supports(current_url):
             response.close()
             douyin_data = DouyinProvider().parse(current_url)
@@ -479,6 +492,17 @@ class LinkPreview(models.Model):
             url_hash=cls.hash_url(url),
             defaults={'url': url, 'status': LinkPreviewStatusChoice.PENDING},
         )
+        if (
+            XiaohongshuProvider.supports(url)
+            and urlparse(url).path != '/login'
+            and urlparse(preview.url).path == '/login'
+            and preview.url != url
+        ):
+            preview.url = url
+            preview.status = LinkPreviewStatusChoice.PENDING
+            preview.provider_data = {}
+            preview.error = ''
+            preview.save(update_fields=['url', 'status', 'provider_data', 'error', 'updated_at'])
         force_refresh = cls._is_expired(preview)
         preview_hostname = (urlparse(preview.url).hostname or '').lower()
         if (
