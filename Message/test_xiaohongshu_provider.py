@@ -48,6 +48,22 @@ class XiaohongshuProviderTests(SimpleTestCase):
         self.assertEqual(result['video_url'], 'https://sns-video-v6.xhscdn.com/clip.mp4')
         self.assertTrue(XiaohongshuProvider.supports('https://xhslink.cn/o/8YSCxhrTmhu'))
 
+    def test_mobile_share_gallery_preserves_all_images(self):
+        note_id = '6aba6cdf0000000014032ea4'
+        images = [f'http://sns-webpic-qc.xhscdn.com/photo-{index}.jpg' for index in range(13)]
+        html = '<script>window.__INITIAL_STATE__=' + json.dumps({'noteData': {'data': {'noteData': {
+            'noteId': note_id, 'type': 'normal',
+            'title': '大兴安岭追秋day4，额尔古纳→根河→满归',
+            'user': {'nickName': 'Ocean'},
+            'imageList': [{'url': image} for image in images],
+        }}}}) + '</script>'
+
+        result = XiaohongshuProvider.parse(f'https://www.xiaohongshu.com/discovery/item/{note_id}', html)
+
+        self.assertEqual(result['provider'], 'xiaohongshu_gallery')
+        self.assertEqual(result['author'], 'Ocean')
+        self.assertEqual(result['images'], [image.replace('http:', 'https:', 1) for image in images])
+
     def test_untrusted_video_falls_back_to_images(self):
         result = XiaohongshuProvider.parse(self.URL, self.html({
             'type': 'video', 'video': {'media': {'stream': {'h264': [{'masterUrl': 'https://evil.example/clip.mp4'}]}}},
