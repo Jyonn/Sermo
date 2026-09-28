@@ -428,7 +428,20 @@ class Statement(models.Model):
             raise SquareErrors.VISIBILITY_INVALID
 
         normalized_media = StatementMedia.normalize_payload(media)
-        link_preview = LinkPreview.queue_for_text(external_media_url or '') if external_media_url else None
+        link_preview = None
+        if external_media_url:
+            # A short share link keeps its original cache key after resolving to a canonical URL.
+            link_preview = LinkPreview.objects.filter(
+                status=LinkPreviewStatusChoice.READY,
+                provider_data__canonical_url=external_media_url.strip(),
+            ).first()
+            if link_preview is None:
+                link_preview = LinkPreview.objects.filter(
+                    status=LinkPreviewStatusChoice.READY,
+                    url=external_media_url.strip(),
+                ).first()
+            if link_preview is None:
+                link_preview = LinkPreview.queue_for_text(external_media_url)
         provider = (link_preview.provider_data or {}).get('provider') if link_preview else None
         supported_providers = {
             'douyin_video', 'netease_music', 'qq_music', 'kugou_music',

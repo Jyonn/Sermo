@@ -73,6 +73,7 @@ class StatementApiTests(TestCase):
 
     def test_statement_reuses_ready_external_media_preview(self):
         preview = self.create_music_preview()
+        self.assertTrue(LinkPreview.objects.filter(provider_data__canonical_url=preview.provider_data['canonical_url']).exists())
         response = self.post_statement(self.author, {
             'text': '分享一首歌',
             'visibility': 'public',
@@ -84,6 +85,37 @@ class StatementApiTests(TestCase):
         statement = Statement.objects.get(id=response.json()['body']['statement_id'])
         self.assertEqual(statement.link_preview_id, preview.id)
         self.assertEqual(response.json()['body']['external_media']['provider_data']['song_id'], 287726)
+
+    def test_statement_reuses_short_link_preview_by_canonical_url(self):
+        preview = self.create_music_preview()
+        preview.url = 'https://163cn.tv/example'
+        preview.url_hash = LinkPreview.hash_url(preview.url)
+        preview.save(update_fields=['url', 'url_hash'])
+
+        with patch.object(LinkPreview, '_require_public_host'):
+            resolved = self.client.post(
+                '/messages/external-media-preview',
+                data=json.dumps({'text': preview.url}),
+                content_type='application/json',
+                **self.authorization(self.author),
+            )
+        self.assertEqual(resolved.status_code, 200, resolved.content)
+        self.assertTrue(resolved.json()['body']['supported'], resolved.content)
+        self.assertEqual(resolved.json()['body']['url'], preview.url)
+        preview.url = preview.provider_data['canonical_url']
+        preview.save(update_fields=['url'])
+
+        response = self.post_statement(self.author, {
+            'text': '分享一首歌',
+            'visibility': 'public',
+            'media': [],
+            'external_media_url': preview.url,
+        })
+
+        self.assertEqual(response.status_code, 200, response.content)
+        statement = Statement.objects.get(id=response.json()['body']['statement_id'])
+        self.assertEqual(statement.link_preview_id, preview.id)
+        self.assertEqual(LinkPreview.objects.count(), 1)
 
     def test_external_media_resolver_reuses_chat_link_preview_cache(self):
         preview = self.create_music_preview()
