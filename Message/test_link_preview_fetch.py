@@ -27,6 +27,15 @@ class LinkPreviewFetchTests(SimpleTestCase):
         )
         self.assertTrue(LinkPreview._is_expired(preview))
 
+    def test_other_failed_douyin_link_retries_after_five_minutes(self):
+        preview = LinkPreview(
+            url='https://v.douyin.com/Ruk0ENzuOGE/',
+            status=LinkPreviewStatusChoice.FAILED,
+            error='connection timeout',
+            fetched_at=timezone.now() - timedelta(minutes=6),
+        )
+        self.assertTrue(LinkPreview._is_expired(preview))
+
     @staticmethod
     def response(status_code, *, location='', html=b''):
         response = Mock()

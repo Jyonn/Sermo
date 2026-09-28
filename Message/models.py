@@ -369,7 +369,7 @@ class LinkPreview(models.Model):
             ) or (
                 XiaohongshuProvider.supports(preview.url) and 'xiaohongshu login redirect' in (preview.error or '')
             )
-            ttl = datetime.timedelta(minutes=1) if retry_social else cls.FAILED_TTL
+            ttl = datetime.timedelta(minutes=1) if retry_social else datetime.timedelta(minutes=5) if DouyinProvider.supports(preview.url) else cls.FAILED_TTL
         else:
             return False
         return preview.fetched_at is None or preview.fetched_at <= (now or timezone.now()) - ttl

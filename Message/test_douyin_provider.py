@@ -1,3 +1,4 @@
+import json
 from unittest.mock import Mock
 
 from django.test import SimpleTestCase
@@ -72,13 +73,13 @@ class DouyinProviderTests(SimpleTestCase):
         page = Mock()
         page.raise_for_status.return_value = None
         page.headers = {'Content-Type': 'text/html; charset=utf-8'}
+        images = [f'https://p3-pc-sign.douyinpic.com/{index}.jpeg' for index in range(100)]
         page.iter_content.return_value = [(
-            '<script type="application/ld+json">'
-            '{"@type":"article","headline":"边境小镇-室韦",'
-            '"author":{"name":"你比从前快乐"},'
-            '"image":["https://p3-pc-sign.douyinpic.com/one.jpeg",'
-            '"https://evil.example/two.jpeg"]}'
-            '</script>'
+            '<script type="application/ld+json">' + json.dumps({
+                '@type': 'article', 'headline': '边境小镇-室韦',
+                'author': {'name': '你比从前快乐'},
+                'image': images + ['https://evil.example/other.jpeg'],
+            }) + '</script>'
         ).encode()]
         self.session.get.return_value = page
 
@@ -86,12 +87,18 @@ class DouyinProviderTests(SimpleTestCase):
 
         self.assertEqual(result['provider'], 'douyin_gallery')
         self.assertEqual(result['title'], '边境小镇-室韦')
-        self.assertEqual(result['images'], ['https://p3-pc-sign.douyinpic.com/one.jpeg'])
+        self.assertEqual(result['images'], images)
         self.assertEqual(result['canonical_url'], f'https://www.douyin.com/note/{note_id}')
 
     def test_extracts_video_id_from_modal_url(self):
         url = 'https://www.douyin.com/?modal_id=7146408143612000000'
         self.assertEqual(DouyinProvider.video_id_from_url(url), '7146408143612000000')
+
+    def test_extracts_gallery_id_from_share_slides_url(self):
+        self.assertEqual(
+            DouyinProvider.video_id_from_url('https://www.iesdouyin.com/share/slides/7674182055039082484/'),
+            '7674182055039082484',
+        )
 
     def test_api_failure_returns_none(self):
         self.session.post.side_effect = ValueError('invalid json')

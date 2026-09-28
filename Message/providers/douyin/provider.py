@@ -9,6 +9,7 @@ import requests
 
 class DouyinProvider:
     API_URL = 'https://api.douyinsaver.com/api/parse'
+    MAX_GALLERY_IMAGES = 100
     HOSTS = frozenset(('douyin.com', 'www.douyin.com', 'v.douyin.com', 'iesdouyin.com', 'www.iesdouyin.com'))
     MEDIA_HOSTS = (
         'douyinvod.com', 'douyincdn.com', 'bytecdn.cn', 'snssdk.com',
@@ -27,7 +28,7 @@ class DouyinProvider:
         parsed = urlparse((url or '').strip())
         if (parsed.hostname or '').lower() not in cls.HOSTS:
             return None
-        match = re.search(r'/(?:aweme/detail/|(?:share/)?video/|(?:share/)?note/)(\d{10,25})', parsed.path)
+        match = re.search(r'/(?:aweme/detail/|(?:share/)?video/|(?:share/)?(?:note|slides)/)(\d{10,25})', parsed.path)
         if match:
             return match.group(1)
         query = parse_qs(parsed.query)
@@ -123,7 +124,7 @@ class DouyinProvider:
                 'title': str(data.get('headline') or '')[:255],
                 'author': str(author.get('name') or '')[:120] if isinstance(author, dict) else '',
                 'description': str(data.get('description') or '')[:1000],
-                'canonical_url': canonical_url, 'cover_url': images[0], 'images': images[:30],
+                'canonical_url': canonical_url, 'cover_url': images[0], 'images': images[:self.MAX_GALLERY_IMAGES],
             }
         return None
 
@@ -131,7 +132,8 @@ class DouyinProvider:
         normalized_url = (url or '').strip()
         if not self.supports(normalized_url):
             return None
-        note_id = self.video_id_from_url(normalized_url) if '/note/' in urlparse(normalized_url).path else None
+        note_path = urlparse(normalized_url).path
+        note_id = self.video_id_from_url(normalized_url) if '/note/' in note_path or '/slides/' in note_path else None
         try:
             response = self.session.post(
                 self.API_URL,
@@ -166,7 +168,7 @@ class DouyinProvider:
                 'title': str(payload.get('title') or '')[:255],
                 'author': str(payload.get('author') or '')[:120],
                 'canonical_url': f'https://www.douyin.com/note/{resolved_id}',
-                'cover_url': images[0], 'images': images[:30],
+                'cover_url': images[0], 'images': images[:self.MAX_GALLERY_IMAGES],
             }
         if not qualities:
             return self._public_gallery(note_id) if note_id else None
