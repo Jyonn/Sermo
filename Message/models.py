@@ -374,12 +374,29 @@ class LinkPreview(models.Model):
             return False
         return preview.fetched_at is None or preview.fetched_at <= (now or timezone.now()) - ttl
 
+    @staticmethod
+    def _douyin_preview_data(data):
+        return dict(
+            url=data['canonical_url'],
+            title=data['title'] or ('抖音图文' if data['provider'] == 'douyin_gallery' else '抖音视频'),
+            description=data.get('author', ''),
+            image_url=data['cover_url'],
+            site_name='抖音',
+            favicon_url='',
+            provider_data=data,
+        )
+
     @classmethod
     def fetch_preview_data(cls, url: str):
         current_url = cls.normalize_public_url(url)
         if not current_url:
             raise ValueError('invalid url')
         requested_url = current_url
+
+        if DouyinProvider.supports(current_url):
+            douyin_data = DouyinProvider().parse(current_url)
+            if douyin_data:
+                return cls._douyin_preview_data(douyin_data)
 
         response = None
         for _ in range(cls.MAX_REDIRECTS + 1):
@@ -412,15 +429,7 @@ class LinkPreview(models.Model):
             douyin_data = DouyinProvider().parse(current_url)
             if not douyin_data:
                 raise ValueError('douyin provider could not resolve media')
-            return dict(
-                url=douyin_data['canonical_url'],
-                title=douyin_data['title'] or ('抖音图文' if douyin_data['provider'] == 'douyin_gallery' else '抖音视频'),
-                description=douyin_data.get('author', ''),
-                image_url=douyin_data['cover_url'],
-                site_name='抖音',
-                favicon_url='',
-                provider_data=douyin_data,
-            )
+            return cls._douyin_preview_data(douyin_data)
         content_type = (response.headers.get('Content-Type') or '').lower()
         unsupported_content = content_type and 'text/html' not in content_type and 'application/xhtml+xml' not in content_type
         if response.status_code >= 400:

@@ -203,10 +203,7 @@ class LinkPreviewFetchTests(SimpleTestCase):
     @patch('Message.models.requests.get')
     def test_douyin_short_link_uses_provider(self, get, parse, _require_public_host):
         video_id = '7146408143612000000'
-        get.side_effect = [
-            self.response(302, location=f'https://www.douyin.com/video/{video_id}'),
-            self.response(403),
-        ]
+        get.side_effect = AssertionError('Douyin page should not be fetched when the provider resolves the short link')
         parse.return_value = {
             'provider': 'douyin_video', 'video_id': video_id, 'title': '一段视频',
             'canonical_url': f'https://www.douyin.com/video/{video_id}',
@@ -221,7 +218,8 @@ class LinkPreviewFetchTests(SimpleTestCase):
         self.assertEqual(result['provider_data']['title'], '一段视频')
         self.assertEqual(result['provider_data']['width'], 720)
         self.assertEqual(result['provider_data']['video_url'], 'https://v3-web.douyinvod.com/video.mp4')
-        parse.assert_called_once_with(f'https://www.douyin.com/video/{video_id}')
+        parse.assert_called_once_with('https://v.douyin.com/AbCdEf/')
+        get.assert_not_called()
 
     @patch.object(LinkPreview, '_require_public_host')
     @patch('Message.models.DouyinProvider.parse')
@@ -230,18 +228,18 @@ class LinkPreviewFetchTests(SimpleTestCase):
         note_id = '7690209569083041893'
         redirected = f'https://www.iesdouyin.com/share/note/{note_id}/'
         get.side_effect = [self.response(302, location=redirected), self.response(200)]
-        parse.return_value = {
+        parse.side_effect = [None, {
             'provider': 'douyin_gallery', 'video_id': note_id, 'title': '边境小镇-室韦',
             'canonical_url': f'https://www.douyin.com/note/{note_id}',
             'cover_url': 'https://p3-pc-sign.douyinpic.com/one.jpeg',
             'images': ['https://p3-pc-sign.douyinpic.com/one.jpeg'],
-        }
+        }]
 
         result = LinkPreview.fetch_preview_data('https://v.douyin.com/DpoX9g4EaHU/')
 
         self.assertEqual(result['provider_data']['provider'], 'douyin_gallery')
         self.assertEqual(result['title'], '边境小镇-室韦')
-        parse.assert_called_once_with(redirected)
+        self.assertEqual(parse.call_args_list, [call('https://v.douyin.com/DpoX9g4EaHU/'), call(redirected)])
 
     @patch.object(LinkPreview, '_require_public_host')
     @patch('Message.models.requests.get')
