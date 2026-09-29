@@ -7,99 +7,102 @@ from Message.providers.douyin import DouyinProvider
 
 
 class DouyinProviderTests(SimpleTestCase):
+    VIDEO_ID = '7689675824143879462'
+    NOTE_ID = '7674182055039082484'
+
     def setUp(self):
         self.session = Mock()
         self.provider = DouyinProvider(session=self.session)
 
-    def test_parse_selects_highest_bitrate_for_each_resolution(self):
-        video_id = '7688192164567824886'
-        response = Mock()
-        response.raise_for_status.return_value = None
-        response.json.return_value = {
-            'aweme_id': video_id,
-            'title': '千亿美元目标，阿里要提前交卷',
-            'author': '口罩哥研报60秒',
-            'cover': 'https://p26-sign.douyinpic.com/cover.jpeg',
-            'duration': 106434,
-            'qualities': [
-                {'label': '720p', 'height': 720, 'width': 1280, 'bitrate': 500000, 'url': 'https://v3-dy-o.zjcdn.com/low-720.mp4'},
-                {'label': '480p', 'height': 480, 'width': 854, 'bitrate': 300000, 'url': 'https://v3-dy-o.zjcdn.com/high-480.mp4'},
-                {'label': '720p', 'height': 720, 'width': 1282, 'bitrate': 755406, 'url': 'https://v3-dy-o.zjcdn.com/high-720.mp4'},
-                {'label': '480p', 'height': 480, 'width': 854, 'bitrate': 200000, 'url': 'https://v3-dy-o.zjcdn.com/low-480.mp4'},
-            ],
-        }
-        self.session.post.return_value = response
+    @staticmethod
+    def response(*, payload=None, html=None, status=200, location=None):
+        response = Mock(status_code=status)
+        response.headers = {'Content-Type': 'text/html' if html is not None else 'application/json'}
+        if location:
+            response.headers['Location'] = location
+        response.json.return_value = payload
+        response.iter_content.return_value = [html.encode()] if html is not None else []
+        return response
 
-        result = self.provider.parse(f'https://www.douyin.com/video/{video_id}')
+    def test_short_video_uses_douyin_feed_and_selects_exact_h264_work(self):
+        short = self.response(status=302, location=f'https://www.iesdouyin.com/share/video/{self.VIDEO_ID}/')
+        feed = self.response(payload={'aweme_list': [
+            {'aweme_id': '7690407742012304996', 'video': {'play_addr_h264': {
+                'url_list': ['https://v5.douyinvod.com/wrong.mp4']}}},
+            {'aweme_id': self.VIDEO_ID, 'desc': 'AI怎么让NS方程爆炸',
+             'author': {'nickname': '漫士沉思录'}, 'video': {
+                 'duration': 2459254, 'width': 1280, 'height': 720,
+                 'cover': {'url_list': ['https://p26-sign.douyinpic.com/cover.jpeg']},
+                 'play_addr_h264': {'width': 1024, 'height': 576, 'url_list': [
+                     'https://v5-coldb.douyinvod.com/h264.mp4']},
+                 'play_addr_265': {'url_list': ['https://v5-coldb.douyinvod.com/h265.mp4']},
+             }},
+        ]})
+        self.session.get.side_effect = [short, feed]
 
-        self.assertEqual(result['video_url'], 'https://v3-dy-o.zjcdn.com/high-720.mp4')
-        self.assertEqual(result['width'], 1282)
-        self.assertEqual(result['height'], 720)
-        self.assertEqual(result['duration_ms'], 106434)
-        self.assertEqual(result['author'], '口罩哥研报60秒')
-        self.assertEqual(len(result['qualities']), 2)
-        self.assertEqual(result['qualities'][1]['url'], 'https://v3-dy-o.zjcdn.com/high-480.mp4')
-        self.session.post.assert_called_once_with(
-            DouyinProvider.API_URL,
-            json={'url': f'https://www.douyin.com/video/{video_id}'},
-            headers={'Accept': 'application/json', 'Content-Type': 'application/json'},
-            timeout=(3, 20),
-        )
+        result = self.provider.parse('https://v.douyin.com/cIDUOEui3qA/')
 
-    def test_untrusted_media_hosts_are_rejected(self):
-        qualities = DouyinProvider._qualities([
-            {'label': '720p', 'height': 720, 'width': 1280, 'bitrate': 800000, 'url': 'https://evil.example/video.mp4'},
-        ])
-        self.assertEqual(qualities, [])
+        self.assertEqual(result['provider'], 'douyin_video')
+        self.assertEqual(result['video_id'], self.VIDEO_ID)
+        self.assertEqual(result['video_url'], 'https://v5-coldb.douyinvod.com/h264.mp4')
+        self.assertEqual(result['duration_ms'], 2459254)
+        self.assertEqual(result['height'], 576)
+        self.assertEqual(result['author'], '漫士沉思录')
+        self.assertEqual(self.session.get.call_args_list[1].args[0], DouyinProvider.FEED_URL)
+        self.session.post.assert_not_called()
 
-    def test_parse_gallery_without_video_qualities(self):
-        response = Mock()
-        response.raise_for_status.return_value = None
-        response.json.return_value = {
-            'aweme_id': '7688192164567824886', 'title': '图文',
-            'images': ['https://p26-sign.douyinpic.com/one.jpeg', 'https://evil.example/two.jpeg'],
-        }
-        self.session.post.return_value = response
-        result = self.provider.parse('https://www.douyin.com/note/7688192164567824886')
-        self.assertEqual(result['provider'], 'douyin_gallery')
-        self.assertEqual(result['images'], ['https://p26-sign.douyinpic.com/one.jpeg'])
+    def test_gallery_reads_public_note_json_ld_and_filters_media_hosts(self):
+        images = [f'https://p3-pc-sign.douyinpic.com/{index}.jpeg' for index in range(105)]
+        html = '<script data-rh="true" type="application/ld+json">' + json.dumps({
+            '@type': 'article', 'headline': '用100张胶片图打开内蒙古的秋天',
+            'author': {'name': '一屋桉园'}, 'image': images + ['https://evil.example/other.jpeg'],
+        }) + '</script>'
+        self.session.get.return_value = self.response(html=html)
 
-    def test_share_note_uses_public_gallery_when_video_parser_has_no_data(self):
-        note_id = '7690209569083041893'
-        api_response = Mock()
-        api_response.raise_for_status.return_value = None
-        api_response.json.return_value = {'detail': 'Could not find video data in page'}
-        self.session.post.return_value = api_response
-        page = Mock()
-        page.raise_for_status.return_value = None
-        page.headers = {'Content-Type': 'text/html; charset=utf-8'}
-        images = [f'https://p3-pc-sign.douyinpic.com/{index}.jpeg' for index in range(100)]
-        page.iter_content.return_value = [(
-            '<script type="application/ld+json">' + json.dumps({
-                '@type': 'article', 'headline': '边境小镇-室韦',
-                'author': {'name': '你比从前快乐'},
-                'image': images + ['https://evil.example/other.jpeg'],
-            }) + '</script>'
-        ).encode()]
-        self.session.get.return_value = page
-
-        result = self.provider.parse(f'https://www.iesdouyin.com/share/note/{note_id}/')
+        result = self.provider.parse(f'https://www.douyin.com/note/{self.NOTE_ID}')
 
         self.assertEqual(result['provider'], 'douyin_gallery')
-        self.assertEqual(result['title'], '边境小镇-室韦')
-        self.assertEqual(result['images'], images)
-        self.assertEqual(result['canonical_url'], f'https://www.douyin.com/note/{note_id}')
+        self.assertEqual(result['author'], '一屋桉园')
+        self.assertEqual(result['images'], images[:100])
+        self.assertEqual(result['canonical_url'], f'https://www.douyin.com/note/{self.NOTE_ID}')
+        self.session.post.assert_not_called()
 
-    def test_extracts_video_id_from_modal_url(self):
-        url = 'https://www.douyin.com/?modal_id=7146408143612000000'
-        self.assertEqual(DouyinProvider.video_id_from_url(url), '7146408143612000000')
+    def test_short_gallery_redirects_to_public_note(self):
+        short = self.response(status=302, location=f'https://www.iesdouyin.com/share/note/{self.NOTE_ID}/')
+        note = self.response(html='<script type="application/ld+json">' + json.dumps({
+            '@type': 'article', 'headline': '图文',
+            'image': ['https://p3-pc-sign.douyinpic.com/one.jpeg'],
+        }) + '</script>')
+        self.session.get.side_effect = [short, note]
 
-    def test_extracts_gallery_id_from_share_slides_url(self):
-        self.assertEqual(
-            DouyinProvider.video_id_from_url('https://www.iesdouyin.com/share/slides/7674182055039082484/'),
-            '7674182055039082484',
-        )
+        result = self.provider.parse('https://v.douyin.com/Ruk0ENzuOGE/')
 
-    def test_api_failure_returns_none(self):
-        self.session.post.side_effect = ValueError('invalid json')
-        self.assertIsNone(self.provider.parse('https://v.douyin.com/AbCdEf/'))
+        self.assertEqual(result['provider'], 'douyin_gallery')
+        self.assertEqual(self.session.get.call_args_list[1].args[0], f'https://www.douyin.com/note/{self.NOTE_ID}')
+
+    def test_rejects_untrusted_short_link_redirect(self):
+        self.session.get.return_value = self.response(status=302, location='https://evil.example/video/7689675824143879462')
+        self.assertIsNone(self.provider.parse('https://v.douyin.com/cIDUOEui3qA/'))
+        self.assertEqual(self.session.get.call_count, 1)
+
+    def test_does_not_return_recommended_video_when_target_missing(self):
+        self.session.get.side_effect = [
+            self.response(payload={'aweme_list': [{'aweme_id': '7690407742012304996'}]}),
+            self.response(html='<html></html>'),
+        ]
+        self.assertIsNone(self.provider.parse(f'https://www.douyin.com/video/{self.VIDEO_ID}'))
+
+    def test_does_not_select_h265_stream_for_browser_playback(self):
+        self.session.get.side_effect = [
+            self.response(payload={'aweme_list': [{'aweme_id': self.VIDEO_ID, 'video': {
+                'is_h265': 1, 'play_addr': {'url_list': ['https://v5.douyinvod.com/h265.mp4']},
+            }}]}),
+            self.response(html='<html></html>'),
+        ]
+        self.assertIsNone(self.provider.parse(f'https://www.douyin.com/video/{self.VIDEO_ID}'))
+
+    def test_extracts_id_from_modal_and_slides_urls(self):
+        self.assertEqual(DouyinProvider.video_id_from_url(
+            f'https://www.douyin.com/?modal_id={self.VIDEO_ID}'), self.VIDEO_ID)
+        self.assertEqual(DouyinProvider.video_id_from_url(
+            f'https://www.iesdouyin.com/share/slides/{self.NOTE_ID}/'), self.NOTE_ID)

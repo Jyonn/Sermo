@@ -832,9 +832,10 @@ In each of the endpoint examples above, we included the full JSON structure to i
 This documentation covers all current endpoints and data models of the chat system’s API. It provides the necessary information to understand how to interact with the API, what inputs to provide, and what outputs to expect for each operation. Each endpoint’s response structure is consistent with the overall API format, making error handling and data parsing straightforward. Use this as a reference when developing clients or integrating with the chat system.
 # Sermo Backend
 
-## Douyin video provider
+## Douyin media previews
 
-Douyin link previews are resolved through the JSON endpoint at
-`https://api.douyinsaver.com/api/parse`. The backend posts the shared Douyin
-URL and selects the highest-bitrate result at the best available resolution.
-The provider does not require a Douyin cookie and does not use an iframe.
+Douyin short links are resolved to their public video or note URL. Videos use
+Douyin's own mobile feed data and select an H.264 playback URL for browser
+compatibility. Photo notes use the public note page's JSON-LD image list.
+Only media URLs from trusted Douyin domains are accepted. No third-party
+parsing service, login cookie, or iframe is required.

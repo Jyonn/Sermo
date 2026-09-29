@@ -224,22 +224,21 @@ class LinkPreviewFetchTests(SimpleTestCase):
     @patch.object(LinkPreview, '_require_public_host')
     @patch('Message.models.DouyinProvider.parse')
     @patch('Message.models.requests.get')
-    def test_douyin_share_note_redirect_uses_gallery(self, get, parse, _require_public_host):
+    def test_douyin_share_note_uses_provider_gallery(self, get, parse, _require_public_host):
         note_id = '7690209569083041893'
-        redirected = f'https://www.iesdouyin.com/share/note/{note_id}/'
-        get.side_effect = [self.response(302, location=redirected), self.response(200)]
-        parse.side_effect = [None, {
+        parse.return_value = {
             'provider': 'douyin_gallery', 'video_id': note_id, 'title': '边境小镇-室韦',
             'canonical_url': f'https://www.douyin.com/note/{note_id}',
             'cover_url': 'https://p3-pc-sign.douyinpic.com/one.jpeg',
             'images': ['https://p3-pc-sign.douyinpic.com/one.jpeg'],
-        }]
+        }
 
         result = LinkPreview.fetch_preview_data('https://v.douyin.com/DpoX9g4EaHU/')
 
         self.assertEqual(result['provider_data']['provider'], 'douyin_gallery')
         self.assertEqual(result['title'], '边境小镇-室韦')
-        self.assertEqual(parse.call_args_list, [call('https://v.douyin.com/DpoX9g4EaHU/'), call(redirected)])
+        parse.assert_called_once_with('https://v.douyin.com/DpoX9g4EaHU/')
+        get.assert_not_called()
 
     @patch.object(LinkPreview, '_require_public_host')
     @patch('Message.models.requests.get')
@@ -276,9 +275,9 @@ class LinkPreviewFetchTests(SimpleTestCase):
     @patch('Message.models.DouyinProvider.parse', return_value=None)
     @patch('Message.models.requests.get')
     def test_douyin_provider_failure_does_not_fall_back(self, get, _parse, _require_public_host):
-        get.return_value = self.response(200)
         with self.assertRaisesRegex(ValueError, 'douyin provider could not resolve media'):
             LinkPreview.fetch_preview_data('https://www.douyin.com/video/7146408143612000000')
+        get.assert_not_called()
 
 
 class LinkPreviewCacheRecoveryTests(TestCase):

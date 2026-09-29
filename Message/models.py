@@ -395,8 +395,9 @@ class LinkPreview(models.Model):
 
         if DouyinProvider.supports(current_url):
             douyin_data = DouyinProvider().parse(current_url)
-            if douyin_data:
-                return cls._douyin_preview_data(douyin_data)
+            if not douyin_data:
+                raise ValueError('douyin provider could not resolve media')
+            return cls._douyin_preview_data(douyin_data)
 
         response = None
         for _ in range(cls.MAX_REDIRECTS + 1):
@@ -424,12 +425,6 @@ class LinkPreview(models.Model):
         if XiaohongshuProvider.supports(requested_url) and urlparse(current_url).path == '/login':
             response.close()
             raise ValueError('xiaohongshu login redirect')
-        if DouyinProvider.supports(current_url):
-            response.close()
-            douyin_data = DouyinProvider().parse(current_url)
-            if not douyin_data:
-                raise ValueError('douyin provider could not resolve media')
-            return cls._douyin_preview_data(douyin_data)
         content_type = (response.headers.get('Content-Type') or '').lower()
         unsupported_content = content_type and 'text/html' not in content_type and 'application/xhtml+xml' not in content_type
         if response.status_code >= 400:
