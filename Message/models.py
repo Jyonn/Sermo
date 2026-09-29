@@ -25,6 +25,7 @@ from Chat.models import Chat, ChatMember, ChatMemberStatusChoice, ChatPurposeCho
 from Message.providers.douyin import DouyinProvider
 from Message.providers.xiaohongshu import XiaohongshuProvider
 from Message.providers.music import MusicProvider
+from Message.preview_queue import platform_slot, submit_preview
 from Message.validators import MessageErrors, MessageValidator
 from User.models import User, UserEmojiUsage
 from User.validators import UserErrors
@@ -542,8 +543,17 @@ class LinkPreview(models.Model):
             if preview_id in cls._FETCHING_IDS:
                 return
             cls._FETCHING_IDS.add(preview_id)
-        thread = threading.Thread(target=cls.fetch_and_update, args=(preview_id, force), daemon=True)
-        thread.start()
+        try:
+            url = cls.objects.filter(id=preview_id).values_list('url', flat=True).first()
+            if url is None:
+                with cls._FETCHING_LOCK:
+                    cls._FETCHING_IDS.discard(preview_id)
+                return
+            submit_preview(url, cls.fetch_and_update, preview_id, force)
+        except Exception:
+            with cls._FETCHING_LOCK:
+                cls._FETCHING_IDS.discard(preview_id)
+            raise
 
     @classmethod
     def refresh_now(cls, preview_id: int, force=False):
@@ -554,8 +564,22 @@ class LinkPreview(models.Model):
             and not cls._is_expired(preview)
         ):
             return preview, False
-        try:
-            data = cls.fetch_preview_data(preview.url)
+        previous_fetched_at = preview.fetched_at
+        with platform_slot(preview.url):
+            preview.refresh_from_db()
+            if preview.status != LinkPreviewStatusChoice.PENDING and preview.fetched_at != previous_fetched_at:
+                return preview, False
+            if preview.status != LinkPreviewStatusChoice.PENDING and not force and not cls._is_expired(preview):
+                return preview, False
+            try:
+                data = cls.fetch_preview_data(preview.url)
+            except Exception as err:
+                updates = {'error': str(err)[:255], 'updated_at': timezone.now()}
+                if preview.status != LinkPreviewStatusChoice.READY:
+                    updates.update(status=LinkPreviewStatusChoice.FAILED, fetched_at=timezone.now())
+                cls.objects.filter(id=preview_id).update(**updates)
+                preview.refresh_from_db()
+                return preview, False
             cls.objects.filter(id=preview_id).update(
                 url=data['url'],
                 title=data['title'],
@@ -571,13 +595,6 @@ class LinkPreview(models.Model):
             )
             preview.refresh_from_db()
             return preview, True
-        except Exception as err:
-            updates = {'error': str(err)[:255], 'updated_at': timezone.now()}
-            if preview.status != LinkPreviewStatusChoice.READY:
-                updates.update(status=LinkPreviewStatusChoice.FAILED, fetched_at=timezone.now())
-            cls.objects.filter(id=preview_id).update(**updates)
-            preview.refresh_from_db()
-            return preview, False
 
     @classmethod
     def fetch_and_update(cls, preview_id: int, force=False):

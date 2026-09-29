@@ -839,3 +839,10 @@ Douyin's own mobile feed data and select an H.264 playback URL for browser
 compatibility. Photo notes use the public note page's JSON-LD image list.
 Only media URLs from trusted Douyin domains are accepted. No third-party
 parsing service, login cookie, or iframe is required.
+
+## Link preview parsing queues
+
+Douyin, Xiaohongshu, NetEase, QQ, Kugou, Qishui, Apple Music, and Kuwo each
+have a single-worker parsing queue. Other web previews have a four-worker
+pool. Manual refreshes share the same per-platform slot. MySQL named locks
+keep the per-platform limit effective across web processes on one database.
