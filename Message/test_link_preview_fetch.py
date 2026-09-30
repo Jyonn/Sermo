@@ -9,6 +9,15 @@ from Message.models import LinkPreview, LinkPreviewStatusChoice
 
 
 class LinkPreviewFetchTests(SimpleTestCase):
+    def test_preview_exposes_minimum_client_version_for_future_media(self):
+        preview = LinkPreview(
+            url='https://example.com/media',
+            status=LinkPreviewStatusChoice.READY,
+            title='Example media',
+            provider_data={'provider': 'future_media', 'min_client_version': '2026.10.01.1'},
+        )
+        self.assertEqual(preview.jsonl()['min_client_version'], '2026.10.01.1')
+
     def test_failed_xiaohongshu_login_retries_after_one_minute(self):
         preview = LinkPreview(
             url='https://xhslink.cn/o/8YSCxhrTmhu',

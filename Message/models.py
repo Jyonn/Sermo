@@ -625,6 +625,7 @@ class LinkPreview(models.Model):
             site_name=self.site_name,
             favicon_url=self.favicon_url,
             provider_data=self.provider_data,
+            min_client_version=self.provider_data.get('min_client_version') if isinstance(self.provider_data, dict) else None,
         )
 
 
@@ -632,6 +633,7 @@ class Message(models.Model):
     MENTION_TOKEN_RE = re.compile(r'<@(\d+)>')
     validators = MessageValidator
     vldt = MessageValidator
+    MIN_CLIENT_VERSION_BY_TYPE = {}
     MEDIA_KIND_BY_TYPE = {
         MessageTypeChoice.IMAGE: 'image',
         MessageTypeChoice.FILE: 'file',
@@ -1626,6 +1628,7 @@ class Message(models.Model):
             created_at=self.created_at.timestamp(),
             submission_round=self.submission_round,
             submission_visible=bool(self.submission_visible_at or self.submission_round is None),
+            min_client_version=self.MIN_CLIENT_VERSION_BY_TYPE.get(self.type),
         )
         if include_deleted:
             payload['is_deleted'] = self.is_deleted
