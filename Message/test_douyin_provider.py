@@ -106,3 +106,21 @@ class DouyinProviderTests(SimpleTestCase):
             f'https://www.douyin.com/?modal_id={self.VIDEO_ID}'), self.VIDEO_ID)
         self.assertEqual(DouyinProvider.video_id_from_url(
             f'https://www.iesdouyin.com/share/slides/{self.NOTE_ID}/'), self.NOTE_ID)
+
+    def test_all_douyin_requests_use_browser_identity(self):
+        short = self.response(status=302, location=f'https://www.iesdouyin.com/share/slides/{self.NOTE_ID}/')
+        note = self.response(html='<html></html>')
+        self.session.get.side_effect = [short, note]
+
+        self.provider.parse('https://v.douyin.com/Ruk0ENzuOGE/')
+
+        for call in self.session.get.call_args_list:
+            headers = call.kwargs['headers']
+            self.assertIn('Mozilla/5.0', headers['User-Agent'])
+            self.assertIn('Chrome/', headers['User-Agent'])
+            self.assertNotIn('bot', headers['User-Agent'].lower())
+
+        self.session.get.reset_mock()
+        self.session.get.side_effect = [self.response(payload={'aweme_list': []}), note]
+        self.provider.parse(f'https://www.douyin.com/video/{self.VIDEO_ID}')
+        self.assertIn('Chrome/', self.session.get.call_args_list[0].kwargs['headers']['User-Agent'])

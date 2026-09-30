@@ -9,7 +9,14 @@ import requests
 
 class DouyinProvider:
     FEED_URL = 'https://api5-normal-c-hl.amemv.com/aweme/v1/feed/'
-    MOBILE_USER_AGENT = 'com.ss.android.ugc.aweme/112801 (Linux; U; Android 13; zh_CN)'
+    BROWSER_HEADERS = {
+        'User-Agent': (
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) '
+            'AppleWebKit/537.36 (KHTML, like Gecko) '
+            'Chrome/138.0.0.0 Safari/537.36'
+        ),
+        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+    }
     MAX_GALLERY_IMAGES = 100
     HOSTS = frozenset(('douyin.com', 'www.douyin.com', 'v.douyin.com', 'iesdouyin.com', 'www.iesdouyin.com'))
     VIDEO_HOSTS = ('douyinvod.com', 'douyincdn.com', 'bytecdn.cn', 'snssdk.com', 'amemv.com', 'zjcdn.com')
@@ -63,7 +70,7 @@ class DouyinProvider:
                 return url
             try:
                 response = self.session.get(
-                    url, headers={'User-Agent': self.MOBILE_USER_AGENT},
+                    url, headers={**self.BROWSER_HEADERS, 'Accept': 'text/html,application/xhtml+xml,*/*;q=0.8'},
                     timeout=(3, 5), allow_redirects=False, stream=True,
                 )
                 try:
@@ -83,7 +90,7 @@ class DouyinProvider:
         try:
             response = self.session.get(
                 self.FEED_URL, params={'aweme_id': video_id, 'aid': '1128'},
-                headers={'User-Agent': self.MOBILE_USER_AGENT, 'Accept': 'application/json'},
+                headers={**self.BROWSER_HEADERS, 'Accept': 'application/json'},
                 timeout=(3, 10),
             )
             try:
@@ -137,7 +144,7 @@ class DouyinProvider:
         canonical_url = f'https://www.douyin.com/note/{video_id}'
         try:
             response = self.session.get(
-                canonical_url, headers={'User-Agent': 'Googlebot', 'Accept': 'text/html'},
+                canonical_url, headers={**self.BROWSER_HEADERS, 'Accept': 'text/html,application/xhtml+xml,*/*;q=0.8'},
                 timeout=(3, 10), allow_redirects=False, stream=True,
             )
             try:
