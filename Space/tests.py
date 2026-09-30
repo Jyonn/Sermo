@@ -20,6 +20,7 @@ from Space.models import (
 from Space.validators import SpaceErrors
 from Square.models import Statement, StatementComment, StatementCommentLike, StatementLike
 from User.models import GrowthEvent, NotificationPreference, User, UserEmojiUsage, UserNotificationChoice
+from User.validators import UserErrors
 from User.growth import GROWTH_THRESHOLDS
 from utils import auth
 
@@ -35,6 +36,31 @@ class SpaceSlugValidationTests(SimpleTestCase):
 
     def test_regular_space_slug_is_available(self):
         self.assertFalse(Space.vldt.reserved_slug('yuanmeng'))
+
+
+class SpaceJoinNicknameConfirmationTests(TestCase):
+    def setUp(self):
+        self.space = Space.objects.create(name='Test Space', slug='join-confirmation', email='join@example.com')
+
+    def test_new_nickname_requires_confirmation_without_creating_user(self):
+        with self.assertRaises(UserErrors.NEW_USER_CONFIRMATION_REQUIRED.__class__):
+            User.login(self.space, 'New', None, language='zh-CN', new_user_intent='check')
+        self.assertFalse(User.objects.filter(space=self.space, lower_name='new').exists())
+
+    def test_existing_account_continues_to_log_in_without_confirmation(self):
+        existing = User.create(self.space, 'Existing')
+        self.assertEqual(User.login(self.space, 'Existing', None, language='zh-CN', new_user_intent='check'), existing)
+
+    def test_confirmed_creation_refuses_a_name_taken_in_the_meantime(self):
+        User.create(self.space, 'Taken')
+        with self.assertRaises(UserErrors.NEW_USER_NAME_TAKEN.__class__):
+            User.login(self.space, 'Taken', None, language='zh-CN', new_user_intent='create')
+        self.assertEqual(User.objects.filter(space=self.space, lower_name='taken').count(), 1)
+
+    def test_confirmed_creation_creates_one_account(self):
+        user = User.login(self.space, 'Ready', None, language='zh-CN', new_user_intent='create')
+        self.assertEqual(User.objects.filter(space=self.space, lower_name='ready').count(), 1)
+        self.assertEqual(user.name, 'Ready')
 
 
 class SpaceAdminApiTests(TestCase):

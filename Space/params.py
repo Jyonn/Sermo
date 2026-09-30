@@ -19,6 +19,9 @@ class SpaceParams(metaclass=Params):
     level_names = Validator('level_names').null().default(None)
     password = UserParams.password.copy().null().default(None)
     language = UserParams.language.copy()
+    new_user_intent = Validator('new_user_intent').null().default(None).bool(
+        lambda value: value is None or value in ('check', 'create'),
+        message=_('new_user_intent should be check or create'))
     group_square_enabled = Validator('group_square_enabled') \
         .to(int) \
         .null().default(None) \

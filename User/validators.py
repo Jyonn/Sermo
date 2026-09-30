@@ -23,6 +23,8 @@ class UserErrors:
     SPACE_SLUG_TOO_SHORT = Error(message=_('Space slug should be at least {min_length} characters long'), code=Code.BadRequest)
     SPACE_SLUG_INVALID = Error(message=_('Space slug can only contain lowercase letters, numbers and hyphens'), code=Code.BadRequest)
     PASSWORD_REQUIRED = Error(message=_('Nickname is already taken, password required'), code=Code.BadRequest)
+    NEW_USER_CONFIRMATION_REQUIRED = Error(message=_('Confirm the nickname before creating a new account'), code=Code.BadRequest)
+    NEW_USER_NAME_TAKEN = Error(message=_('This nickname is now taken; sign in or choose another'), code=Code.BadRequest)
     ACCOUNT_DELETE_PASSWORD_REQUIRED = Error(message=_('Password is required to delete account'), code=Code.BadRequest)
     ACCOUNT_DELETE_NAME_CONFIRMATION_REQUIRED = Error(message=_('Name confirmation is required to delete account'), code=Code.BadRequest)
     ACCOUNT_DELETE_NAME_CONFIRMATION_MISMATCH = Error(message=_('Name confirmation does not match'), code=Code.BadRequest)

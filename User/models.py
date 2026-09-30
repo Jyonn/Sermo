@@ -440,7 +440,7 @@ class User(models.Model):
         return user
 
     @classmethod
-    def login(cls, space, name, password, language=None):
+    def login(cls, space, name, password, language=None, new_user_intent=None):
         name = (name or '').strip()
         lower_name = name.lower()
         normalized_language = cls.vldt.language(language)
@@ -452,6 +452,9 @@ class User(models.Model):
         ).first()
         if user is None:
             cls.vldt.nickname(name)
+            space.ensure_member_limit_available()
+            if new_user_intent == 'check':
+                raise UserErrors.NEW_USER_CONFIRMATION_REQUIRED
             deleted_user = cls.objects.filter(
                 space=space,
                 lower_name=lower_name,
@@ -460,7 +463,6 @@ class User(models.Model):
             ).first()
             if deleted_user is not None:
                 deleted_user.release_deleted_identity()
-            space.ensure_member_limit_available()
             user = cls.create(
                 space=space,
                 name=name,
@@ -470,6 +472,8 @@ class User(models.Model):
             transaction.on_commit(space.notify_capacity_if_needed)
             return user
 
+        if new_user_intent == 'create':
+            raise UserErrors.NEW_USER_NAME_TAKEN
         if user.is_deleted:
             raise UserErrors.USER_DELETED
         if not user.password and user.wechat_miniprogram_identities.exists():

@@ -215,6 +215,7 @@ class SpaceJoinView(View):
         SpaceParams.name,
         SpaceParams.password,
         SpaceParams.language,
+        SpaceParams.new_user_intent,
     )
     def post(self, request: Request):
         space = Space.get_by_slug(request.json.slug)
@@ -223,6 +224,7 @@ class SpaceJoinView(View):
             name=request.json.name,
             password=request.json.password,
             language=request.json.language,
+            new_user_intent=request.json.new_user_intent,
         )
         user.log_login(ip=_extract_client_ip(request))
         return dict(
