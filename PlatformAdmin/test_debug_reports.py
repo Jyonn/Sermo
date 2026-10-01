@@ -49,6 +49,25 @@ class DebugReportTests(TestCase):
             self.upload(payload)
         self.assertFalse(ClientDebugReport.objects.exists())
 
+    def test_accepts_focus_and_virtual_list_diagnostics(self):
+        payload = {
+            **self.report,
+            'entries': [
+                {'at': 1790856000000, 'elapsed': 100, 'event': 'focusIn', 'metrics': {'focusKind': 1, 'inputTop': 280}},
+                {'at': 1790856000032, 'elapsed': 132, 'event': 'layout', 'metrics': {
+                    'scrollerOnScreen': False, 'screenVisibleRows': 0,
+                    'firstRenderedIndex': 4, 'paddingBefore': 640,
+                }},
+                {'at': 1790856000064, 'elapsed': 164, 'event': 'anomaly', 'metrics': {'kind': 1}},
+            ],
+        }
+        self.upload(payload)
+        self.assertEqual(ClientDebugReport.objects.get().report, payload)
+
+        payload['entries'][1]['metrics']['messageText'] = 42
+        with self.assertRaises(PlatformAdminErrors.DEBUG_REPORT_INVALID.__class__):
+            self.upload(payload)
+
     def test_retains_only_five_recent_reports_and_admin_can_delete(self):
         old = ClientDebugReport.objects.create(user=self.user, report=self.report)
         ClientDebugReport.objects.filter(pk=old.pk).update(created_at=timezone.now() - datetime.timedelta(hours=7))

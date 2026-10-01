@@ -14,13 +14,21 @@ from utils import auth
 
 
 REPORT_LIFETIME = datetime.timedelta(hours=6)
-ALLOWED_EVENTS = {'viewport', 'layout', 'keyboard', 'windowScroll', 'scrollCorrection'}
+ALLOWED_EVENTS = {
+    'viewport', 'layout', 'keyboard', 'windowScroll', 'scrollCorrection',
+    'focusIn', 'focusOut', 'action', 'anomaly', 'listScroll',
+}
 ALLOWED_METRICS = {
     'viewportHeight', 'viewportOffsetTop', 'viewportPageTop', 'windowScrollY',
     'bodyTop', 'rootTop', 'bodyHeight', 'scrollerHeight', 'scrollerTop',
     'scrollTop', 'scrollHeight', 'renderedRows', 'visibleRows', 'inputTop',
     'inputBottom', 'composerHeight', 'height', 'width', 'offsetTop', 'pageTop',
     'keyboardOpen', 'open',
+    'trigger', 'kind', 'focusKind', 'scrollerBottom',
+    'scrollerOnScreen', 'screenVisibleRows', 'firstRenderedIndex',
+    'lastRenderedIndex', 'firstVisibleIndex', 'lastVisibleIndex',
+    'spacerHeight', 'spacerTop', 'paddingBefore', 'paddingAfter',
+    'duration',
 }
 
 
@@ -29,7 +37,7 @@ def prune_expired():
 
 
 def safe_report(request):
-    if len(request.body) > 100_000:
+    if len(request.body) > 250_000:
         raise PlatformAdminErrors.DEBUG_REPORT_INVALID
     try:
         report = json.loads(request.body)
