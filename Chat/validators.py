@@ -25,6 +25,12 @@ class ChatErrors:
     SUBMISSION_SEND_FORBIDDEN = Error(_('Messages cannot be sent in the current submission state'))
     SUBMISSION_TRANSITION_FORBIDDEN = Error(_('This submission action is not available'))
     SUBMISSION_EMPTY = Error(_('A submission must contain at least one message'))
+    BLOCKED_WORD_INVALID = Error(_('Blocked words must contain 2 to 20 characters'))
+    BLOCKED_WORD_DUPLICATE = Error(_('This blocked word already exists or is awaiting review'))
+    BLOCKED_WORD_LIMIT = Error(_('This chat has reached its blocked-word limit'))
+    BLOCKED_WORD_PENDING_LIMIT = Error(_('You already have three pending blocked-word requests in this chat'))
+    BLOCKED_WORD_NOT_FOUND = Error(_('This blocked-word rule or request is no longer available'))
+    BLOCKED_WORD_MATCHED = Error(_('This message contains a blocked word in this chat and was not sent'))
 
 
 @Error.register

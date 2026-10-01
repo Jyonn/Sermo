@@ -1548,3 +1548,29 @@ class ChatMessageMention(models.Model):
             cls(chat=message.chat, message=message, user_id=user_id)
             for user_id in active_user_ids
         ], ignore_conflicts=True)
+
+
+class ChatBlockedWord(models.Model):
+    chat = models.ForeignKey(Chat, on_delete=models.CASCADE, related_name='blocked_words')
+    # NULL means a group-wide rule; direct-chat rules belong to one participant.
+    owner = models.ForeignKey(User, on_delete=models.CASCADE, null=True, blank=True, related_name='direct_chat_blocked_words')
+    word = models.CharField(max_length=80)
+    normalized = models.CharField(max_length=80)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [models.Index(fields=['chat', 'owner'])]
+
+
+class ChatBlockedWordRequest(models.Model):
+    chat = models.ForeignKey(Chat, on_delete=models.CASCADE, related_name='blocked_word_requests')
+    applicant = models.ForeignKey(User, on_delete=models.CASCADE, related_name='blocked_word_requests')
+    word = models.CharField(max_length=80)
+    normalized = models.CharField(max_length=80)
+    status = models.CharField(max_length=12, default='pending')
+    message = models.OneToOneField('Message.Message', on_delete=models.SET_NULL, null=True, blank=True, related_name='blocked_word_request')
+    created_at = models.DateTimeField(auto_now_add=True)
+    resolved_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        indexes = [models.Index(fields=['chat', 'status'])]

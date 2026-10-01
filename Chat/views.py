@@ -1,3 +1,5 @@
+import json
+
 from django.db import transaction
 from django.utils import timezone
 from django.views import View
@@ -6,6 +8,7 @@ from smartdjango import analyse, OK
 from Chat.models import Chat, ChatMember, ChatMemberStatusChoice, ChatPurposeChoice, ChatReadState, ChatUserPreference, Submission, SubmissionInvite, SubmissionInviteStatusChoice, SubmissionMemberRoleChoice
 from Chat.params import ChatParams, ChatMemberParams, ChatPreferenceParams
 from Chat.validators import ChatErrors
+from Chat.blocked_words import change_rules, rules_for
 from Message.models import MediaResource, Message, MessageTypeChoice
 from Message.params import MessageParams
 from Message.validators import MessageErrors
@@ -436,3 +439,27 @@ class ChatPreferenceView(View):
             use_personal_background=request.json.use_personal_background,
         )
         return preference.json()
+
+
+class ChatBlockedWordsView(View):
+    @auth.require_user
+    @analyse.query(ChatParams.chat_id)
+    @auth.require_chat_member()
+    def get(self, request):
+        return rules_for(request.query.chat, request.user)
+
+    @auth.require_user
+    @analyse.query(ChatParams.chat_id)
+    @auth.require_chat_member()
+    def post(self, request):
+        try:
+            payload = json.loads(request.body)
+        except (ValueError, TypeError):
+            raise ChatErrors.BLOCKED_WORD_INVALID
+        if not isinstance(payload, dict):
+            raise ChatErrors.BLOCKED_WORD_INVALID
+        try:
+            item_id = int(payload['id']) if 'id' in payload else None
+        except (TypeError, ValueError):
+            raise ChatErrors.BLOCKED_WORD_INVALID
+        return change_rules(request.query.chat, request.user, payload.get('action'), payload.get('word'), item_id)

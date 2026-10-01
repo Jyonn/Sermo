@@ -795,6 +795,9 @@ class Message(models.Model):
                 normalized_content = ''
             else:
                 normalized_content = cls.normalize_content(message_type, content)
+            if message_type == MessageTypeChoice.TEXT:
+                from Chat.blocked_words import check_text
+                check_text(chat, user, normalized_content)
             if message_type == MessageTypeChoice.STICKER:
                 from Sticker.models import StickerAsset, UserSticker
                 sticker_payload = cls._parse_payload(content)
@@ -984,6 +987,9 @@ class Message(models.Model):
             raise MessageErrors.FORWARD_UNSUPPORTED
         if not chat.has_active_member(user):
             raise MessageErrors.NOT_A_MEMBER
+        if source.type == MessageTypeChoice.TEXT:
+            from Chat.blocked_words import check_text
+            check_text(chat, user, source.content)
         message = cls.objects.create(
             chat=chat,
             user=user,
@@ -1033,6 +1039,8 @@ class Message(models.Model):
         with override(language):
             names = _('、').join(member_names)
             event = payload.get('event')
+            if event == 'blocked_word_request':
+                return _('%(actor)s requested a chat blocked word') % dict(actor=actor)
             if event == 'group_created':
                 if member_names:
                     return _('%(actor)s created the group and invited %(names)s') % dict(actor=actor, names=names)
@@ -1440,6 +1448,14 @@ class Message(models.Model):
                 payload['text'] = self.system_message_text(
                     self._viewer_from_request(request),
                 )
+                if payload.get('event') == 'blocked_word_request':
+                    from Chat.models import ChatBlockedWordRequest
+                    item = ChatBlockedWordRequest.objects.filter(id=payload.get('request_id'), chat_id=self.chat_id).first()
+                    if item is not None:
+                        payload['blocked_word_request'] = dict(
+                            id=item.id, word=item.word, status=item.status,
+                            applicant_id=item.applicant_id,
+                        )
                 return payload
             return dict(kind='system', text=self.system_message_text())
         if self.type == MessageTypeChoice.SUBMISSION_INVITE:
