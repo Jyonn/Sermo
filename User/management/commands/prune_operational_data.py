@@ -6,7 +6,7 @@ from django.db import connection, transaction
 from django.db.models import Q
 from django.utils import timezone
 
-from PlatformAdmin.models import PlatformAdminEmailCode
+from PlatformAdmin.models import ClientDebugReport, PlatformAdminEmailCode
 from Space.models import SpaceEmailVerificationCode, SpacePhoneVerificationCode
 from User.models import (
     AccountSwitchTicket,
@@ -61,6 +61,7 @@ class Command(BaseCommand):
         credential_cutoff = now - datetime.timedelta(days=credential_grace_days)
         web_push_cutoff = now - datetime.timedelta(days=web_push_stale_days)
         rules = {
+            'client_debug_reports': ClientDebugReport.objects.filter(created_at__lt=now - datetime.timedelta(hours=6)),
             'notification_deliveries': NotificationDelivery.objects.filter(
                 status__in=(
                     NotificationDeliveryStatusChoice.SENT,

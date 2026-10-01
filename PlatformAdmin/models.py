@@ -67,6 +67,15 @@ class PlatformAuditLog(models.Model):
         ordering = ['-id']
 
 
+class ClientDebugReport(models.Model):
+    user = models.ForeignKey('User.User', on_delete=models.CASCADE, related_name='debug_reports')
+    report = models.JSONField()
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ['-created_at', '-id']
+
+
 class PlatformAdminEmailReviewState(models.Model):
     CAPTURE_LIMIT = 20
 

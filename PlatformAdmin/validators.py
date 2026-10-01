@@ -5,6 +5,8 @@ from smartdjango import Code, Error
 @Error.register
 class PlatformAdminErrors:
     ACCESS_DENIED = Error(_('Platform administrator access denied'), code=Code.Forbidden)
+    DEBUG_REPORT_VERIFICATION_REQUIRED = Error(_('Account verification is required to use developer tools'), code=Code.Forbidden)
+    DEBUG_REPORT_INVALID = Error(_('Invalid diagnostic report'), code=Code.BadRequest)
     CODE_INVALID = Error(_('Verification code is invalid or expired'), code=Code.BadRequest)
     MFA_REQUIRED = Error(_('MFA code required'), code=Code.Unauthorized)
     MFA_INVALID = Error(_('MFA code is invalid'), code=Code.BadRequest)

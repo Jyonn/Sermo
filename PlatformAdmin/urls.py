@@ -1,4 +1,5 @@
 from django.urls import path
+from PlatformAdmin.debug_reports import DebugReportDetailView, DebugReportListView, DebugReportUploadView
 
 from PlatformAdmin.views import (
     AuditLogView, ChatListView, ChatMessageView, DashboardView, EmailCodeView, EmailDeliveryListView,
@@ -11,6 +12,9 @@ from AccessPolicy.views import (
 )
 
 urlpatterns = [
+    path('debug-reports/upload', DebugReportUploadView.as_view()),
+    path('debug-reports', DebugReportListView.as_view()),
+    path('debug-reports/<int:report_id>', DebugReportDetailView.as_view()),
     path('email-code', EmailCodeView.as_view()),
     path('login', LoginView.as_view()),
     path('dashboard', DashboardView.as_view()),
