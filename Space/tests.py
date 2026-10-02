@@ -1286,7 +1286,7 @@ class SpaceAdminApiTests(TestCase):
         self.assertEqual(response.status_code, 200, response.content)
         self.assertFalse(PinnedMessage.objects.filter(message=message).exists())
 
-    def test_group_member_cannot_manage_pinned_messages(self):
+    def test_group_members_have_individual_pin_limits_and_owner_can_remove_them(self):
         chat = Chat.objects.create(
             space=self.space,
             chat_type=ChatTypeChoice.GROUP,
@@ -1305,13 +1305,59 @@ class SpaceAdminApiTests(TestCase):
             role=ChatMemberRoleChoice.MEMBER,
             status=ChatMemberStatusChoice.ACTIVE,
         )
-        message = Message.create(chat, self.official, MessageTypeChoice.TEXT, 'Owner note')
-
+        messages = [Message.create(chat, self.official, MessageTypeChoice.TEXT, f'Note {index}') for index in range(24)]
+        for message in messages[20:23]:
+            response = self.client.post(
+                f'/messages/pins?message_id={message.id}',
+                **self.user_authorization(self.member),
+            )
+            self.assertEqual(response.status_code, 200, response.content)
         response = self.client.post(
-            f'/messages/pins?message_id={message.id}',
+            f'/messages/pins?message_id={messages[23].id}',
             **self.user_authorization(self.member),
         )
-        self.assertEqual(response.status_code, 403, response.content)
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertEqual(PinnedMessage.objects.filter(chat=chat, pinned_by=self.member).count(), 3)
+
+        for message in messages[:20]:
+            response = self.client.post(
+                f'/messages/pins?message_id={message.id}',
+                **self.user_authorization(self.official),
+            )
+            self.assertEqual(response.status_code, 200, response.content)
+        response = self.client.post(
+            f'/messages/pins?message_id={messages[20].id}',
+            **self.user_authorization(self.official),
+        )
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertEqual(PinnedMessage.objects.filter(chat=chat, pinned_by=self.official).count(), 20)
+
+        response = self.client.get(
+            f'/messages/pins?chat_id={chat.id}',
+            **self.user_authorization(self.member),
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(len(response.json()['body']), 23)
+
+        response = self.client.delete(
+            f'/messages/pins?message_id={messages[20].id}',
+            **self.user_authorization(self.official),
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertFalse(PinnedMessage.objects.filter(message=messages[20]).exists())
+
+        response = self.client.post(
+            f'/messages/pins?message_id={messages[0].id}',
+            **self.user_authorization(self.member),
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(PinnedMessage.objects.filter(message=messages[0]).count(), 2)
+        response = self.client.delete(
+            f'/messages/pins?message_id={messages[0].id}',
+            **self.user_authorization(self.official),
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertFalse(PinnedMessage.objects.filter(message=messages[0]).exists())
 
     def test_space_admin_email_does_not_bypass_contact_matching(self):
         self.member.email = self.space.email

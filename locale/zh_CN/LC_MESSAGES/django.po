@@ -197,6 +197,12 @@ msgstr "你没有权限管理这个聊天的锁定消息"
 msgid "This chat has reached the locked message limit"
 msgstr "这个聊天最多锁定20条消息"
 
+msgid "You can lock up to 3 messages in this group"
+msgstr "你在本群最多可锁定 3 条消息"
+
+msgid "Group owners can lock up to 20 messages in this group"
+msgstr "群主在本群最多可锁定 20 条消息"
+
 #| msgid "enabled should be 0 or 1"
 msgid "group_square_enabled should be 0 or 1"
 msgstr "group_square_enabled 必须为 0 或 1"

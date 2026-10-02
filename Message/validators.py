@@ -22,6 +22,8 @@ class MessageErrors:
     REPLY_TEXT_ONLY = Error(message=_('Only text messages can reply to another message'), code=Code.BadRequest)
     PIN_FORBIDDEN = Error(message=_('You cannot manage locked messages in this chat'), code=Code.Forbidden)
     PIN_LIMIT_REACHED = Error(message=_('This chat has reached the locked message limit'), code=Code.BadRequest)
+    PIN_MEMBER_LIMIT_REACHED = Error(message=_('You can lock up to 3 messages in this group'), code=Code.BadRequest)
+    PIN_OWNER_LIMIT_REACHED = Error(message=_('Group owners can lock up to 20 messages in this group'), code=Code.BadRequest)
     MAP_ACCESS_DIRECT_ONLY = Error(message=_('Map access can only be shared in a direct chat'), code=Code.BadRequest)
     MAP_ACCESS_TARGET_INVALID = Error(message=_('The map access recipient is invalid'), code=Code.BadRequest)
     SYSTEM_MESSAGE_FORBIDDEN = Error(message=_('System messages cannot be managed by users'), code=Code.Forbidden)
