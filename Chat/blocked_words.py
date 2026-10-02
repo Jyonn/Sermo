@@ -30,18 +30,28 @@ def check_text(chat, sender, text):
     else:
         member_ids = ChatMember.objects.filter(chat=chat, status=ChatMemberStatusChoice.ACTIVE).values_list('user_id', flat=True)
         rules = ChatBlockedWord.objects.filter(chat=chat, owner_id__in=member_ids)
-    if any(rule in normalized for rule in rules.values_list('normalized', flat=True)):
-        raise ChatErrors.BLOCKED_WORD_MATCHED
+    matched = [rule for rule in rules.only('word', 'normalized') if rule.normalized in normalized]
+    if matched:
+        rule = max(matched, key=lambda item: (len(item.normalized), -item.id))
+        raise ChatErrors.BLOCKED_WORD_MATCHED(word=rule.word)
 
 
 def rules_for(chat, user):
-    rules = ChatBlockedWord.objects.filter(chat=chat, owner=None if chat.group else user).order_by('id')
+    rules = ChatBlockedWord.objects.filter(chat=chat).select_related('owner', 'created_by').order_by('id')
+    if chat.group:
+        rules = rules.filter(owner__isnull=True)
+    else:
+        member_ids = ChatMember.objects.filter(chat=chat, status=ChatMemberStatusChoice.ACTIVE).values_list('user_id', flat=True)
+        rules = rules.filter(owner_id__in=member_ids)
     requests = []
     if chat.group:
         base = ChatBlockedWordRequest.objects.filter(chat=chat).select_related('applicant')
         requests = list(base.filter(status='pending').order_by('-id')) + list(base.exclude(status='pending').order_by('-id')[:50])
     return {
-        'words': [dict(id=item.id, word=item.word) for item in rules],
+        'words': [dict(id=item.id, word=item.word,
+                       owner_id=(item.created_by_id or item.owner_id),
+                       owner_name=(item.created_by or item.owner).name if item.created_by or item.owner else '') for item in rules],
+        'own_count': rules.filter(owner=user).count() if not chat.group else 0,
         'requests': [dict(id=item.id, word=item.word, status=item.status, applicant_id=item.applicant_id,
                           applicant_name=item.applicant.name, message_id=item.message_id) for item in requests],
         'is_owner': chat.is_owner(user) if chat.group else False,
@@ -69,7 +79,7 @@ def change_rules(chat, user, action, word=None, item_id=None):
                 raise ChatErrors.FORBIDDEN
             if scope.count() >= limit:
                 raise ChatErrors.BLOCKED_WORD_LIMIT
-            ChatBlockedWord.objects.create(chat=chat, owner=None if chat.group else user, word=word, normalized=normalized)
+            ChatBlockedWord.objects.create(chat=chat, owner=None if chat.group else user, created_by=user, word=word, normalized=normalized)
         else:
             if not chat.group or is_owner:
                 raise ChatErrors.FORBIDDEN
@@ -107,7 +117,7 @@ def change_rules(chat, user, action, word=None, item_id=None):
                     raise ChatErrors.BLOCKED_WORD_LIMIT
                 if scope.filter(normalized=item.normalized).exists():
                     raise ChatErrors.BLOCKED_WORD_DUPLICATE
-                ChatBlockedWord.objects.create(chat=chat, word=item.word, normalized=item.normalized)
+                ChatBlockedWord.objects.create(chat=chat, created_by=item.applicant, word=item.word, normalized=item.normalized)
         item.resolved_at = timezone.now()
         item.save(update_fields=['status', 'resolved_at'])
         if item.message_id:

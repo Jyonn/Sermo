@@ -1554,6 +1554,7 @@ class ChatBlockedWord(models.Model):
     chat = models.ForeignKey(Chat, on_delete=models.CASCADE, related_name='blocked_words')
     # NULL means a group-wide rule; direct-chat rules belong to one participant.
     owner = models.ForeignKey(User, on_delete=models.CASCADE, null=True, blank=True, related_name='direct_chat_blocked_words')
+    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='created_chat_blocked_words')
     word = models.CharField(max_length=80)
     normalized = models.CharField(max_length=80)
     created_at = models.DateTimeField(auto_now_add=True)

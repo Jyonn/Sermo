@@ -25,8 +25,15 @@ class BlockedWordTests(TestCase):
     def test_direct_rule_set_by_sender_blocks_sender_and_peer(self):
         change_rules(self.direct, self.owner, 'add', word='Ａ B')
         for sender in (self.owner, self.peer):
-            with self.assertRaises(ChatErrors.BLOCKED_WORD_MATCHED.__class__):
+            with self.assertRaises(ChatErrors.BLOCKED_WORD_MATCHED.__class__) as error:
                 check_text(self.direct, sender, 'Say ab now')
+            self.assertIn('Ａ B', str(error.exception))
+
+    def test_direct_rules_show_both_owners_but_only_count_own_rules(self):
+        change_rules(self.direct, self.owner, 'add', word='spoiler')
+        response = change_rules(self.direct, self.peer, 'add', word='advertisement')
+        self.assertEqual(response['own_count'], 1)
+        self.assertEqual({item['owner_name'] for item in response['words']}, {'Owner', 'Peer'})
 
     def test_group_request_requires_owner_approval_and_can_be_withdrawn(self):
         proposal = change_rules(self.group, self.peer, 'request', word='Bad Word')['requests'][0]

@@ -30,7 +30,7 @@ class ChatErrors:
     BLOCKED_WORD_LIMIT = Error(_('This chat has reached its blocked-word limit'))
     BLOCKED_WORD_PENDING_LIMIT = Error(_('You already have three pending blocked-word requests in this chat'))
     BLOCKED_WORD_NOT_FOUND = Error(_('This blocked-word rule or request is no longer available'))
-    BLOCKED_WORD_MATCHED = Error(_('This message contains a blocked word in this chat and was not sent'))
+    BLOCKED_WORD_MATCHED = Error(_('This message contains the blocked word “{word}” and was not sent'))
 
 
 @Error.register
