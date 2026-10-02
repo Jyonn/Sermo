@@ -983,6 +983,8 @@ class Message(models.Model):
     @classmethod
     def forward_individual(cls, source, chat: Chat, user: User):
         chat.require_user_message_allowed(user)
+        if source.type == MessageTypeChoice.AUDIO:
+            raise MessageErrors.FORWARD_AUDIO_BUNDLE_ONLY
         if source.type in (MessageTypeChoice.SYSTEM, MessageTypeChoice.OFFICIAL_NOTICE, MessageTypeChoice.SUBMISSION_INVITE, MessageTypeChoice.MAP_ACCESS, MessageTypeChoice.FORWARD_BUNDLE):
             raise MessageErrors.FORWARD_UNSUPPORTED
         if not chat.has_active_member(user):

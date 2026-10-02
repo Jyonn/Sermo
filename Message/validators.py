@@ -31,6 +31,7 @@ class MessageErrors:
     HISTORY_RECOVERY_LIMIT_REACHED = Error(message=_('Chat history recovery limit reached'), code=Code.Forbidden)
     HISTORY_RECOVERY_EMPTY = Error(message=_('There are no hidden messages to restore'), code=Code.BadRequest)
     FORWARD_UNSUPPORTED = Error(message=_('This message cannot be forwarded'), code=Code.BadRequest)
+    FORWARD_AUDIO_BUNDLE_ONLY = Error(message=_('Voice messages can only be forwarded as a chat history card'), code=Code.BadRequest)
     FORWARD_TARGET_INVALID = Error(message=_('Invalid forwarding target'), code=Code.BadRequest)
     MEDIA_ASSET_INVALID = Error(message=_('The cloud resource is unavailable'), code=Code.BadRequest)
     MEDIA_STORAGE_EXCEEDED = Error(message=_('Cloud storage is full'), code=Code.BadRequest)

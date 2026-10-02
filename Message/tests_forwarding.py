@@ -86,3 +86,28 @@ class MessageForwardingTests(TestCase):
         self.assertEqual(payload['first_person_user_id'], self.user.id)
         self.assertEqual(payload['items'][0]['author']['chat_bubble_style'], 'comic')
         self.assertEqual(payload['items'][0]['author']['avatar_frame_style'], 'polaroid')
+
+    def test_voice_cannot_be_forwarded_individually(self):
+        asset = MediaAsset.objects.create(
+            source_key='sermo/messages/audio/source.m4a',
+            source_uri='https://example.com/sermo/messages/audio/source.m4a',
+            kind=MediaAsset.KIND_AUDIO,
+            status=MediaAsset.STATUS_READY,
+        )
+        resource = MediaResource.acquire(self.peer, asset, MediaAsset.KIND_AUDIO, 'source.m4a')
+        voice = Message.objects.create(
+            chat=self.source_chat, user=self.peer, type=MessageTypeChoice.AUDIO,
+            content=json.dumps({'kind': 'audio', 'uri': asset.source_uri, 'duration_seconds': 5}),
+            media_resource=resource,
+        )
+        text = Message.create(self.source_chat, self.peer, MessageTypeChoice.TEXT, 'Hello')
+
+        for source_ids in ([voice.id], [text.id, voice.id]):
+            with self.subTest(source_ids=source_ids):
+                response = self.post_forward(source_ids, 'individual')
+                self.assertEqual(response.status_code, 400, response.content)
+                self.assertFalse(Message.objects.filter(chat=self.target_chat).exists())
+
+        response = self.post_forward([voice.id], 'bundle')
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertTrue(Message.objects.filter(chat=self.target_chat, type=MessageTypeChoice.FORWARD_BUNDLE).exists())

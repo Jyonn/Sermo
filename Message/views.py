@@ -210,6 +210,10 @@ class MessageForwardView(View):
                 raise MessageErrors.FORWARD_UNSUPPORTED
             if not message.is_visible_to(request.user):
                 raise MessageErrors.NOT_A_MEMBER
+        if request.json.forward_mode == 'individual' and any(
+            message.type == MessageTypeChoice.AUDIO for message in source_messages
+        ):
+            raise MessageErrors.FORWARD_AUDIO_BUNDLE_ONLY
 
         targets = list(Chat.objects.filter(
             id__in=target_chat_ids,

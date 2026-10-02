@@ -153,15 +153,19 @@ class MessageAudioTranscriptTests(TestCase):
 
     @patch('Message.views.sign_private_download_url', return_value='https://signed.example.com/audio.m4a')
     @patch('Message.views.transcribe_short_audio', return_value=('转发后仍然复用。', 'request-forward'))
-    def test_forwarded_audio_reuses_asset_transcript(self, transcribe, sign):
+    def test_audio_resource_reuses_asset_transcript(self, transcribe, sign):
         target_peer = User.create(self.space, 'Target', email='target@example.com', verified=True)
         Friendship.ensure_locked_friendship(self.user, target_peer)
         target_chat = Chat.get_or_create_direct(self.user, target_peer)
 
         first = self.client.post(self.endpoint(), data='{}', content_type='application/json', **self.authorization(self.user))
-        forwarded = Message.forward_individual(self.message, target_chat, self.user)
-        forwarded_endpoint = f'/messages/audio-transcript?message_id={forwarded.id}'
-        second = self.client.post(forwarded_endpoint, data='{}', content_type='application/json', **self.authorization(self.user))
+        reused_resource = self.message.media_resource.clone_for(self.user)
+        reused = Message.objects.create(
+            chat=target_chat, user=self.user, type=MessageTypeChoice.AUDIO,
+            content=self.message.content, media_resource=reused_resource,
+        )
+        reused_endpoint = f'/messages/audio-transcript?message_id={reused.id}'
+        second = self.client.post(reused_endpoint, data='{}', content_type='application/json', **self.authorization(self.user))
 
         self.assertEqual(first.status_code, 200, first.content)
         self.assertEqual(second.status_code, 200, second.content)
@@ -170,7 +174,7 @@ class MessageAudioTranscriptTests(TestCase):
             'text': '转发后仍然复用。',
             'cached': True,
         })
-        self.assertEqual(forwarded.media_resource.asset_id, self.message.media_resource.asset_id)
+        self.assertEqual(reused.media_resource.asset_id, self.message.media_resource.asset_id)
         self.assertEqual(AudioTranscript.objects.count(), 1)
         transcribe.assert_called_once_with('https://signed.example.com/audio.m4a')
         sign.assert_called_once()
