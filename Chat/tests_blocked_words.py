@@ -35,11 +35,25 @@ class BlockedWordTests(TestCase):
         self.assertEqual(response['own_count'], 1)
         self.assertEqual({item['owner_name'] for item in response['words']}, {'Owner', 'Peer'})
 
+    def test_add_and_remove_broadcast_system_messages(self):
+        response = change_rules(self.direct, self.owner, 'add', word='spoiler')
+        change_rules(self.direct, self.owner, 'remove', item_id=response['words'][0]['id'])
+        notices = list(Message.objects.filter(chat=self.direct, type=MessageTypeChoice.SYSTEM).order_by('id'))
+        self.assertEqual([item._payload_for_type()['event'] for item in notices], ['blocked_word_added', 'blocked_word_removed'])
+        self.assertTrue(all(item._payload_for_type()['word'] == 'spoiler' for item in notices))
+        self.assertIn('spoiler', notices[0].system_message_text(self.peer))
+
+    def test_failed_change_does_not_broadcast(self):
+        with self.assertRaises(ChatErrors.BLOCKED_WORD_NOT_FOUND.__class__):
+            change_rules(self.direct, self.owner, 'remove', item_id=999)
+        self.assertFalse(Message.objects.filter(chat=self.direct, type=MessageTypeChoice.SYSTEM).exists())
+
     def test_group_request_requires_owner_approval_and_can_be_withdrawn(self):
         proposal = change_rules(self.group, self.peer, 'request', word='Bad Word')['requests'][0]
         self.assertEqual(proposal['status'], 'pending')
         self.assertIsNotNone(proposal['message_id'])
         change_rules(self.group, self.owner, 'approve', item_id=proposal['id'])
+        self.assertTrue(Message.objects.filter(chat=self.group, type=MessageTypeChoice.SYSTEM, content__contains='blocked_word_added').exists())
         self.assertEqual(Message.objects.get(id=proposal['message_id'])._payload_for_type()['blocked_word_request']['status'], 'approved')
         with self.assertRaises(ChatErrors.BLOCKED_WORD_MATCHED.__class__):
             Message.create(self.group, self.owner, MessageTypeChoice.TEXT, 'bad word')

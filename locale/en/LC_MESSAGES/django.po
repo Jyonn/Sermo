@@ -795,6 +795,12 @@ msgstr "Only the official account can pin its own statement"
 msgid "System message"
 msgstr "System message"
 
+msgid "%(actor)s added the chat blocked word “%(word)s”"
+msgstr "%(actor)s added the chat blocked word “%(word)s”"
+
+msgid "%(actor)s removed the chat blocked word “%(word)s”"
+msgstr "%(actor)s removed the chat blocked word “%(word)s”"
+
 msgid "、"
 msgstr ", "
 

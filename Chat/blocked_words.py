@@ -80,6 +80,7 @@ def change_rules(chat, user, action, word=None, item_id=None):
             if scope.count() >= limit:
                 raise ChatErrors.BLOCKED_WORD_LIMIT
             ChatBlockedWord.objects.create(chat=chat, owner=None if chat.group else user, created_by=user, word=word, normalized=normalized)
+            Message.create_system(chat, user, 'blocked_word_added', word=word)
         else:
             if not chat.group or is_owner:
                 raise ChatErrors.FORBIDDEN
@@ -94,9 +95,12 @@ def change_rules(chat, user, action, word=None, item_id=None):
         scope = ChatBlockedWord.objects.filter(chat=chat, owner=None if chat.group else user)
         if chat.group and not is_owner:
             raise ChatErrors.FORBIDDEN
-        if not scope.filter(id=item_id).exists():
+        item = scope.filter(id=item_id).first()
+        if item is None:
             raise ChatErrors.BLOCKED_WORD_NOT_FOUND
-        scope.filter(id=item_id).delete()
+        word = item.word
+        item.delete()
+        Message.create_system(chat, user, 'blocked_word_removed', word=word)
     elif action in ('approve', 'reject', 'withdraw'):
         if not chat.group:
             raise ChatErrors.FORBIDDEN
@@ -118,6 +122,7 @@ def change_rules(chat, user, action, word=None, item_id=None):
                 if scope.filter(normalized=item.normalized).exists():
                     raise ChatErrors.BLOCKED_WORD_DUPLICATE
                 ChatBlockedWord.objects.create(chat=chat, created_by=item.applicant, word=item.word, normalized=item.normalized)
+                Message.create_system(chat, user, 'blocked_word_added', word=item.word)
         item.resolved_at = timezone.now()
         item.save(update_fields=['status', 'resolved_at'])
         if item.message_id:

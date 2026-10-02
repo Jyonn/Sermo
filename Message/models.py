@@ -1041,6 +1041,14 @@ class Message(models.Model):
             event = payload.get('event')
             if event == 'blocked_word_request':
                 return _('%(actor)s requested a chat blocked word') % dict(actor=actor)
+            if event == 'blocked_word_added':
+                return _('%(actor)s added the chat blocked word “%(word)s”') % dict(
+                    actor=actor, word=str(payload.get('word') or '').strip(),
+                )
+            if event == 'blocked_word_removed':
+                return _('%(actor)s removed the chat blocked word “%(word)s”') % dict(
+                    actor=actor, word=str(payload.get('word') or '').strip(),
+                )
             if event == 'group_created':
                 if member_names:
                     return _('%(actor)s created the group and invited %(names)s') % dict(actor=actor, names=names)

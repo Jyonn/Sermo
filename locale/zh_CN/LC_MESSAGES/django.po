@@ -834,6 +834,12 @@ msgstr "你无法删除这条评论"
 msgid "System message"
 msgstr "系统消息"
 
+msgid "%(actor)s added the chat blocked word “%(word)s”"
+msgstr "%(actor)s 设置了会话屏蔽词「%(word)s」"
+
+msgid "%(actor)s removed the chat blocked word “%(word)s”"
+msgstr "%(actor)s 取消了会话屏蔽词「%(word)s」"
+
 msgid "、"
 msgstr "、"
 
