@@ -1,4 +1,5 @@
 from django.urls import path
+from User.oauth_views import OAuthAuthorizeView, OAuthTokenView, OAuthUserinfoView, OAuthRevokeView
 
 from User.views import (
     HeartbeatView,
@@ -51,6 +52,10 @@ from User.views import (
 )
 
 urlpatterns = [
+    path('oauth/authorize', OAuthAuthorizeView.as_view(), name='oauth authorize'),
+    path('oauth/token', OAuthTokenView.as_view(), name='oauth token'),
+    path('oauth/userinfo', OAuthUserinfoView.as_view(), name='oauth userinfo'),
+    path('oauth/revoke', OAuthRevokeView.as_view(), name='oauth revoke'),
     path('wechat-miniprogram/login', WeChatMiniProgramLoginView.as_view(), name='wechat miniprogram login'),
     path('wechat-miniprogram/onboarding', WeChatMiniProgramOnboardingView.as_view(), name='wechat miniprogram onboarding'),
     path('me/wechat-miniprogram', WeChatMiniProgramBindingView.as_view(), name='wechat miniprogram binding'),
