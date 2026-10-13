@@ -11,7 +11,6 @@ from Chat.validators import ChatErrors
 from Message.models import AudioTranscript, AudioTranscriptStatusChoice, ForwardBundle, LinkPreview, MediaAsset, MediaResource, Message, MessageEvent, MessageHistoryRecovery, MessageTypeChoice, PinnedMessage
 from Message.params import MessageParams
 from utils.content_safety import ContentSafetyScene, check_user_text
-from Chat.blocked_words import check_text as check_chat_blocked_words
 from Message.validators import MessageErrors
 from utils.qiniu import ShortAudioTranscriptionError, issue_message_upload, build_message_image_thumbnail_uri, build_message_video_thumbnail_uri, sign_private_download_url, avatar_uri_for_key, transcribe_short_audio, validate_message_media_key, validate_message_media_size
 from utils import auth
@@ -229,10 +228,6 @@ class MessageForwardView(View):
                 target.submission_record.require_send_allowed(request.user)
             if target.group:
                 target.space.require_group_send_allowed(request.user)
-            if request.json.forward_mode == 'individual':
-                for source in source_messages:
-                    if source.type == MessageTypeChoice.TEXT:
-                        check_chat_blocked_words(target, request.user, source.content)
 
         created = []
         with transaction.atomic():
@@ -502,7 +497,7 @@ class MessageLinkPreviewView(View):
 class ExternalMediaPreviewView(View):
     SUPPORTED_PROVIDERS = {
         'douyin_video', 'douyin_gallery', 'xiaohongshu_video', 'xiaohongshu_gallery', 'netease_music', 'qq_music', 'kugou_music',
-        'qishui_music', 'apple_music', 'kuwo_music',
+        'qishui_music', 'apple_music', 'kuwo_music', 'stillfolio_collection',
     }
 
     @auth.require_user

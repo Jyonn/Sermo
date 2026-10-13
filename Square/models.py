@@ -445,7 +445,7 @@ class Statement(models.Model):
         provider = (link_preview.provider_data or {}).get('provider') if link_preview else None
         supported_providers = {
             'douyin_video', 'douyin_gallery', 'xiaohongshu_video', 'xiaohongshu_gallery', 'netease_music', 'qq_music', 'kugou_music',
-            'qishui_music', 'apple_music', 'kuwo_music',
+            'qishui_music', 'apple_music', 'kuwo_music', 'stillfolio_collection',
         }
         if external_media_url and (
             link_preview is None

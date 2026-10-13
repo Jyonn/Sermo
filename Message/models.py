@@ -25,6 +25,7 @@ from Chat.models import Chat, ChatMember, ChatMemberStatusChoice, ChatPurposeCho
 from Message.providers.douyin import DouyinProvider
 from Message.providers.xiaohongshu import XiaohongshuProvider
 from Message.providers.music import MusicProvider
+from Message.providers.stillfolio import StillfolioProvider
 from Message.preview_queue import platform_slot, submit_preview
 from Message.validators import MessageErrors, MessageValidator
 from User.models import User, UserEmojiUsage
@@ -400,6 +401,15 @@ class LinkPreview(models.Model):
                 raise ValueError('douyin provider could not resolve media')
             return cls._douyin_preview_data(douyin_data)
 
+        if StillfolioProvider.token(current_url):
+            data = StillfolioProvider.parse(current_url)
+            return dict(
+                url=data['canonical_url'], title=data['title'],
+                description=data['description'] or data['author'],
+                image_url=data['cover_url'], site_name='留幅 Stillfolio',
+                favicon_url='', provider_data=data,
+            )
+
         response = None
         for _ in range(cls.MAX_REDIRECTS + 1):
             cls.normalize_public_url(current_url)
@@ -512,7 +522,7 @@ class LinkPreview(models.Model):
         preview_hostname = (urlparse(preview.url).hostname or '').lower()
         if (
             preview.status == LinkPreviewStatusChoice.READY
-            and preview_hostname in cls.NETEASE_HOSTS | DouyinProvider.HOSTS | MusicProvider.HOSTS | XiaohongshuProvider.HOSTS
+            and preview_hostname in cls.NETEASE_HOSTS | DouyinProvider.HOSTS | MusicProvider.HOSTS | XiaohongshuProvider.HOSTS | {StillfolioProvider.HOST}
             and not preview.provider_data
         ):
             preview.status = LinkPreviewStatusChoice.PENDING
@@ -795,9 +805,6 @@ class Message(models.Model):
                 normalized_content = ''
             else:
                 normalized_content = cls.normalize_content(message_type, content)
-            if message_type == MessageTypeChoice.TEXT:
-                from Chat.blocked_words import check_text
-                check_text(chat, user, normalized_content)
             if message_type == MessageTypeChoice.STICKER:
                 from Sticker.models import StickerAsset, UserSticker
                 sticker_payload = cls._parse_payload(content)
@@ -989,9 +996,6 @@ class Message(models.Model):
             raise MessageErrors.FORWARD_UNSUPPORTED
         if not chat.has_active_member(user):
             raise MessageErrors.NOT_A_MEMBER
-        if source.type == MessageTypeChoice.TEXT:
-            from Chat.blocked_words import check_text
-            check_text(chat, user, source.content)
         message = cls.objects.create(
             chat=chat,
             user=user,
@@ -1458,14 +1462,6 @@ class Message(models.Model):
                 payload['text'] = self.system_message_text(
                     self._viewer_from_request(request),
                 )
-                if payload.get('event') == 'blocked_word_request':
-                    from Chat.models import ChatBlockedWordRequest
-                    item = ChatBlockedWordRequest.objects.filter(id=payload.get('request_id'), chat_id=self.chat_id).first()
-                    if item is not None:
-                        payload['blocked_word_request'] = dict(
-                            id=item.id, word=item.word, status=item.status,
-                            applicant_id=item.applicant_id,
-                        )
                 return payload
             return dict(kind='system', text=self.system_message_text())
         if self.type == MessageTypeChoice.SUBMISSION_INVITE:
