@@ -1,8 +1,10 @@
 from unittest.mock import Mock, patch
+from datetime import timedelta
 
 from django.test import SimpleTestCase
+from django.utils import timezone
 
-from Message.models import LinkPreview
+from Message.models import LinkPreview, LinkPreviewStatusChoice
 from Message.providers.stillfolio import StillfolioProvider
 
 
@@ -15,6 +17,10 @@ class StillfolioProviderTests(SimpleTestCase):
         self.assertEqual(StillfolioProvider.token(URL), TOKEN)
         self.assertIsNone(StillfolioProvider.token(f'https://stillfolio.jyonn.space.evil/share/{TOKEN}'))
         self.assertIsNone(StillfolioProvider.token(f'https://stillfolio.jyonn.space/share/{TOKEN}/assets'))
+
+    def test_failed_share_retries_after_one_minute(self):
+        preview = LinkPreview(url=URL, status=LinkPreviewStatusChoice.FAILED, fetched_at=timezone.now() - timedelta(minutes=2))
+        self.assertTrue(LinkPreview._is_expired(preview))
 
     @patch('Message.providers.stillfolio.requests.get')
     def test_parses_public_collection_in_photo_order(self, get):
@@ -31,6 +37,8 @@ class StillfolioProviderTests(SimpleTestCase):
         self.assertEqual(preview['provider_data']['provider'], 'stillfolio_collection')
         self.assertEqual(preview['provider_data']['photo_count'], 2)
         self.assertIn('22222222', preview['image_url'])
+        self.assertTrue(preview['image_url'].startswith('https://api.stillfolio.jyonn.space/'))
+        self.assertEqual(get.call_args.args[0], f'https://api.stillfolio.jyonn.space/api/v1/sync/share/{TOKEN}')
         self.assertEqual(preview['site_name'], '留幅 Stillfolio')
         get.assert_called_once()
 

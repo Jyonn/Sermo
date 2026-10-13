@@ -8,6 +8,7 @@ import requests
 
 class StillfolioProvider:
     HOST = 'stillfolio.jyonn.space'
+    API_HOST = 'api.stillfolio.jyonn.space'
     SHARE_RE = re.compile(r'^/share/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/?$', re.I)
 
     @classmethod
@@ -25,7 +26,7 @@ class StillfolioProvider:
             return {}
         canonical_url = f'https://{cls.HOST}/share/{token}'
         response = requests.get(
-            f'https://{cls.HOST}/api/v1/sync/share/{token}',
+            f'https://{cls.API_HOST}/api/v1/sync/share/{token}',
             headers={'Accept': 'application/json'}, timeout=(3, 7), allow_redirects=False,
         )
         if response.status_code != 200 or 'application/json' not in response.headers.get('Content-Type', '').lower() or len(response.content) > 1024 * 1024:
@@ -44,7 +45,7 @@ class StillfolioProvider:
             path = photo.get('content_url')
             if not isinstance(path, str) or not re.fullmatch(rf'/api/v1/sync/share/{token}/assets/[0-9a-f-]{{36}}', path, re.I):
                 continue
-            images.append(f'https://{cls.HOST}{path}')
+            images.append(f'https://{cls.API_HOST}{path}')
         owner = collection.get('owner') or {}
         title = str(collection.get('name') or '留幅作品集').strip()[:255]
         author = str(owner.get('nickname') or '').strip()[:120] if isinstance(owner, dict) else ''
