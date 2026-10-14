@@ -2469,7 +2469,9 @@ class MediaAsset(models.Model):
         return metadata
 
     def jsonl(self):
+        from Message.image_metadata import parse_exposure
         return dict(
+            **(parse_exposure(self.raw_metadata) if self.kind == self.KIND_IMAGE else {}),
             status=self.status,
             duration_seconds=self.duration_seconds,
             file_size=self.file_size,

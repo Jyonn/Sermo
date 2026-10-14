@@ -1,4 +1,5 @@
 import datetime
+import math
 import re
 import threading
 import time
@@ -117,6 +118,30 @@ def parse_exif(raw):
         taken_at=_taken_at(raw),
         latitude=latitude,
         longitude=longitude,
+    )
+
+
+def parse_exposure(raw):
+    raw = raw if isinstance(raw, dict) else {}
+    def positive(*keys):
+        for key in keys:
+            try:
+                text = str(_value(raw, key) or '').strip()
+                match = re.fullmatch(r'(?:[fF]/)?\s*([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:\s*/\s*\d+(?:\.\d*)?)?)(?:\s*(?:mm|sec\.?|s))?', text)
+                if not match:
+                    continue
+                value = _number(match.group(1))
+                if math.isfinite(value) and value > 0:
+                    return value
+            except (TypeError, ValueError, ZeroDivisionError):
+                continue
+        return None
+
+    return dict(
+        focal_length_mm=positive('FocalLength'),
+        aperture=positive('FNumber'),
+        exposure_seconds=positive('ExposureTime'),
+        iso=positive('PhotographicSensitivity', 'ISOSpeedRatings', 'ISO'),
     )
 
 

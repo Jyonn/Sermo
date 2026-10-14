@@ -4,7 +4,7 @@ from unittest.mock import Mock, patch
 
 from django.test import SimpleTestCase, TestCase
 
-from Message.image_metadata import _reverse_geocode_opencage, parse_image_info, reverse_geocode, search_nearby_places
+from Message.image_metadata import _reverse_geocode_opencage, parse_exposure, parse_image_info, reverse_geocode, search_nearby_places
 from Message.video_metadata import parse_avinfo
 from Message.models import MediaAsset, Message, MessageTypeChoice
 from utils.qiniu import QINIU_UPLOAD_URL, build_message_media_key, build_upload_token, validate_message_media_key, validate_message_media_size
@@ -43,6 +43,25 @@ class MessageFileUploadTests(SimpleTestCase):
 
 
 class ImageMetadataTests(SimpleTestCase):
+    def test_exposure_supports_rationals_and_existing_raw_metadata(self):
+        raw = {'FocalLength': {'val': '65/1'}, 'FNumber': {'val': '56/10'},
+               'ExposureTime': {'val': '1/400'}, 'ISOSpeedRatings': {'val': '125'}}
+        asset = MediaAsset(kind=MediaAsset.KIND_IMAGE, raw_metadata=raw)
+        payload = asset.jsonl()
+        self.assertEqual(payload['focal_length_mm'], 65)
+        self.assertEqual(payload['aperture'], 5.6)
+        self.assertEqual(payload['exposure_seconds'], .0025)
+        self.assertEqual(payload['iso'], 125)
+
+    def test_invalid_exposure_is_hidden(self):
+        self.assertEqual(parse_exposure({'FocalLength': {'val': '1/0'}, 'FNumber': 'nan', 'ExposureTime': '-1', 'ISO': 'unknown'}),
+                         dict(focal_length_mm=None, aperture=None, exposure_seconds=None, iso=None))
+
+    def test_qiniu_exposure_values_with_units(self):
+        self.assertEqual(parse_exposure({'FocalLength': {'val': '65.0 mm'}, 'FNumber': {'val': 'f/5.6'},
+                                        'ExposureTime': {'val': '1/400 sec.'}, 'ISO': 125}),
+                         dict(focal_length_mm=65, aperture=5.6, exposure_seconds=.0025, iso=125))
+
     def test_parse_image_info(self):
         self.assertEqual(
             parse_image_info({'size': 214513, 'width': 640, 'height': 427}),
