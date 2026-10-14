@@ -364,7 +364,10 @@ class LinkPreview(models.Model):
         if preview.status == LinkPreviewStatusChoice.READY:
             provider_data = preview.provider_data or {}
             provider = provider_data.get('provider')
-            ttl = datetime.timedelta(minutes=15) if provider in ('douyin_video', 'xiaohongshu_video') else datetime.timedelta(hours=1) if provider == 'douyin_gallery' else datetime.timedelta(minutes=30) if str(provider or '').endswith('_music') else cls.READY_TTL
+            if provider == 'stillfolio_collection':
+                ttl = datetime.timedelta(minutes=5 if provider_data.get('images') else 1)
+            else:
+                ttl = datetime.timedelta(minutes=15) if provider in ('douyin_video', 'xiaohongshu_video') else datetime.timedelta(hours=1) if provider == 'douyin_gallery' else datetime.timedelta(minutes=30) if str(provider or '').endswith('_music') else cls.READY_TTL
         elif preview.status == LinkPreviewStatusChoice.FAILED:
             retry_social = (
                 DouyinProvider.supports(preview.url) and 'douyin provider could not resolve' in (preview.error or '')

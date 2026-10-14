@@ -22,6 +22,22 @@ class StillfolioProviderTests(SimpleTestCase):
         preview = LinkPreview(url=URL, status=LinkPreviewStatusChoice.FAILED, fetched_at=timezone.now() - timedelta(minutes=2))
         self.assertTrue(LinkPreview._is_expired(preview))
 
+    def test_empty_collection_cache_expires_after_one_minute(self):
+        now = timezone.now()
+        preview = LinkPreview(url=URL, status=LinkPreviewStatusChoice.READY, fetched_at=now - timedelta(minutes=2),
+                              provider_data={'provider': 'stillfolio_collection', 'images': [], 'photo_count': 0})
+        self.assertTrue(LinkPreview._is_expired(preview, now))
+        preview.fetched_at = now - timedelta(seconds=30)
+        self.assertFalse(LinkPreview._is_expired(preview, now))
+
+    def test_nonempty_collection_cache_expires_after_five_minutes(self):
+        now = timezone.now()
+        preview = LinkPreview(url=URL, status=LinkPreviewStatusChoice.READY, fetched_at=now - timedelta(minutes=6),
+                              provider_data={'provider': 'stillfolio_collection', 'images': ['https://api.stillfolio.jyonn.space/photo'], 'photo_count': 1})
+        self.assertTrue(LinkPreview._is_expired(preview, now))
+        preview.fetched_at = now - timedelta(minutes=4)
+        self.assertFalse(LinkPreview._is_expired(preview, now))
+
     @patch.object(LinkPreview, '_require_public_host')
     @patch('Message.providers.stillfolio.requests.get')
     def test_other_links_produce_plain_cards_without_requests(self, get, _require_public_host):
