@@ -31,6 +31,17 @@ class LinkPreviewExpiryTests(TestCase):
 
     @patch.object(LinkPreview, '_require_public_host')
     @patch.object(LinkPreview, 'fetch_async')
+    def test_stillfolio_plain_card_without_provider_data_is_reused(self, fetch_async, _require_public_host):
+        self.URL = 'https://stillfolio.jyonn.space/'
+        preview = self.create_preview(LinkPreviewStatusChoice.READY, timedelta(days=1))
+        with self.captureOnCommitCallbacks(execute=True):
+            result = LinkPreview.queue_for_text(self.URL)
+        self.assertEqual(result.status, LinkPreviewStatusChoice.READY)
+        self.assertEqual(result.id, preview.id)
+        fetch_async.assert_not_called()
+
+    @patch.object(LinkPreview, '_require_public_host')
+    @patch.object(LinkPreview, 'fetch_async')
     def test_expired_ready_preview_refreshes_without_hiding_stale_card(self, fetch_async, _require_public_host):
         preview = self.create_preview(LinkPreviewStatusChoice.READY, timedelta(days=8))
 

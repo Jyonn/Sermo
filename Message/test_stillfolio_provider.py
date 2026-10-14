@@ -22,6 +22,18 @@ class StillfolioProviderTests(SimpleTestCase):
         preview = LinkPreview(url=URL, status=LinkPreviewStatusChoice.FAILED, fetched_at=timezone.now() - timedelta(minutes=2))
         self.assertTrue(LinkPreview._is_expired(preview))
 
+    @patch.object(LinkPreview, '_require_public_host')
+    @patch('Message.providers.stillfolio.requests.get')
+    def test_other_links_produce_plain_cards_without_requests(self, get, _require_public_host):
+        for path in ('/', '/auth/sermo/callback', '/share', '/share/not-a-uuid'):
+            with self.subTest(path=path):
+                url = f'https://{StillfolioProvider.HOST}{path}'
+                preview = LinkPreview.fetch_preview_data(url)
+                self.assertEqual(preview['url'], url)
+                self.assertEqual(preview['provider_data'], {})
+                self.assertEqual(preview['title'], '留幅 Stillfolio')
+        get.assert_not_called()
+
     @patch('Message.providers.stillfolio.requests.get')
     def test_parses_public_collection_in_photo_order(self, get):
         get.return_value = Mock(status_code=200, headers={'Content-Type': 'application/json'}, content=b'{}')

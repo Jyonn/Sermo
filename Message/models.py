@@ -410,6 +410,12 @@ class LinkPreview(models.Model):
                 favicon_url='', provider_data=data,
             )
 
+        if urlparse(current_url).hostname == StillfolioProvider.HOST:
+            return dict(
+                url=current_url, title='留幅 Stillfolio', description='',
+                image_url='', site_name='留幅 Stillfolio', favicon_url='', provider_data={},
+            )
+
         response = None
         for _ in range(cls.MAX_REDIRECTS + 1):
             cls.normalize_public_url(current_url)
@@ -522,7 +528,8 @@ class LinkPreview(models.Model):
         preview_hostname = (urlparse(preview.url).hostname or '').lower()
         if (
             preview.status == LinkPreviewStatusChoice.READY
-            and preview_hostname in cls.NETEASE_HOSTS | DouyinProvider.HOSTS | MusicProvider.HOSTS | XiaohongshuProvider.HOSTS | {StillfolioProvider.HOST}
+            and (preview_hostname in cls.NETEASE_HOSTS | DouyinProvider.HOSTS | MusicProvider.HOSTS | XiaohongshuProvider.HOSTS
+                 or StillfolioProvider.token(preview.url))
             and not preview.provider_data
         ):
             preview.status = LinkPreviewStatusChoice.PENDING
