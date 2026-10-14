@@ -820,6 +820,10 @@ class ChatNotificationPreferenceTests(TestCase):
         self.assertEqual(unlocked_response.status_code, 200, unlocked_response.content)
         message.refresh_from_db()
         self.assertTrue(message.is_deleted)
+        notice = Message.objects.filter(chat=self.chat, type=MessageTypeChoice.SYSTEM).order_by('-id').first()
+        self.assertEqual(notice._payload_for_type()['event'], 'message_recalled')
+        self.assertEqual(notice.user_id, self.sender.id)
+        self.assertIn('撤回了一条消息', notice.system_message_text(self.recipient))
 
     def test_member_departure_creates_system_message_before_leaving(self):
         self.chat.leave(self.recipient)

@@ -105,7 +105,9 @@ class MessageView(View):
                 raise MessageErrors.RECALL_WINDOW_EXPIRED
             if message.user_id != request.user.id:
                 raise MessageErrors.NOT_OWNER
-            message.remove()
+            with transaction.atomic():
+                message.remove()
+                Message.create_system(message.chat, request.user, 'message_recalled')
             return OK
         if request.query.delete_scope == 'me':
             message.hide_for(request.user)
@@ -115,7 +117,9 @@ class MessageView(View):
             recall_window = timedelta(days=7) if request.user.is_permanent_vip else timedelta(minutes=2)
             if timezone.now() - message.created_at > recall_window:
                 raise MessageErrors.RECALL_WINDOW_EXPIRED
-            message.remove()
+            with transaction.atomic():
+                message.remove()
+                Message.create_system(message.chat, request.user, 'message_recalled')
         return OK
 
 

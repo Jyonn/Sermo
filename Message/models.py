@@ -1100,6 +1100,8 @@ class Message(models.Model):
                 return _('%(actor)s locked a message') % dict(actor=actor)
             if event == 'message_unpinned':
                 return _('%(actor)s unlocked a message') % dict(actor=actor)
+            if event == 'message_recalled':
+                return _('%(actor)s recalled a message') % dict(actor=actor)
             if event == 'operator_assigned':
                 return _('You are now a space operator. You can manage Square mutes and publish merged chat records as posts.')
             if event == 'operator_removed':

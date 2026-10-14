@@ -828,6 +828,9 @@ msgstr "%(actor)s locked a message"
 msgid "%(actor)s unlocked a message"
 msgstr "%(actor)s unlocked a message"
 
+msgid "%(actor)s recalled a message"
+msgstr "%(actor)s recalled a message"
+
 msgid "You are now a space operator. You can manage Square mutes and publish merged chat records as posts."
 msgstr "You are now a space operator. You can manage Square mutes and publish merged chat records as posts."
 
