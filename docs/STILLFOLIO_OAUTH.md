@@ -1,6 +1,6 @@
 # Stillfolio sign-in contract
 
-Sermo exposes a single registered public OAuth-style client: `stillfolio`. Stillfolio is not yet integrated. No user data is sent when the user merely opens Stillfolio from the Sermo menu.
+Sermo exposes a single registered public OAuth-style client: `stillfolio`. Stillfolio has implemented the authorization-code flow. User profile, phone and VIP data are shared only after consent. The menu launch now targets Stillfolio's automatic sign-in entry; that new entry still needs implementation in Stillfolio. See [direct sign-in integration](STILLFOLIO_DIRECT_LOGIN.md).
 
 ## Browser flow
 
@@ -12,4 +12,6 @@ Sermo exposes a single registered public OAuth-style client: `stillfolio`. Still
 
 `profile` returns `sub`, `space_slug`, `nickname`; `phone` returns `phone` in `+86` format only for verified mainland numbers (otherwise `null`) and `phone_verified`; `vip` returns `is_vip` for permanent VIP status. `sub` includes the Sermo space and user ID, so identical nicknames or phone numbers never collide. `sub` and `space_slug` are always returned for account identity even if `profile` was not requested. The requested scopes are shown on Sermo's consent page.
 
-Deployment can override the callback exactly with `SERMO_OAUTH_STILLFOLIO_REDIRECT_URI`; set the frontend build's `VITE_STILLFOLIO_CALLBACK_URI` to the same value. Stillfolio must serve the callback URL (including direct navigation on its static host) before enabling SSO. Sermo's menu currently opens the Stillfolio home page rather than initiating a code flow because Stillfolio has not added the requesting side yet.
+Deployment can override the callback exactly with `SERMO_OAUTH_STILLFOLIO_REDIRECT_URI`; set the frontend build's `VITE_STILLFOLIO_CALLBACK_URI` to the same value. Stillfolio must serve the callback URL, including direct navigation on its static host.
+
+The authorization page also accepts an optional `login_hint` in `space_slug:user_id` format. This selects a locally saved Sermo account; it is not a credential or an identity assertion. The selected account must still have a valid session and approve the requested scopes. Hints are not included in the authorize POST, token exchange or userinfo response. The browser can move to `/{space_slug}/oauth/authorize` while retaining the original code challenge and state.
