@@ -81,3 +81,28 @@ class OAuthTests(TestCase):
         self.assertEqual(self.client.post('/users/oauth/token', json.dumps(token_request), content_type='application/json').status_code, 400)
         profile = self.client.get('/users/oauth/userinfo', HTTP_AUTHORIZATION=f'Bearer {access_token}')
         self.assertEqual(profile.json()['nickname'], 'Photographer')
+
+    def test_chronelle_profile_exchange_and_client_isolation(self):
+        callback = registered_redirect_uri('chronelle')
+        redirect = self.authorize(client_id='chronelle', redirect_uri=callback, scope='profile')
+        code = parse_qs(urlparse(redirect).query)['code'][0]
+        with self.assertRaises(OAuthError):
+            exchange(client_id='stillfolio', redirect_uri=registered_redirect_uri(), code=code, code_verifier=self.verifier)
+        result = exchange(client_id='chronelle', redirect_uri=callback, code=code, code_verifier=self.verifier)
+        self.assertEqual(result['scope'], 'profile')
+        profile = userinfo(result['access_token'])
+        self.assertIn('avatar_url', profile)
+        self.assertNotIn('phone', profile)
+        self.assertNotIn('is_vip', profile)
+        with self.assertRaises(OAuthError):
+            exchange(client_id='chronelle', redirect_uri=callback, code=code, code_verifier=self.verifier)
+
+    def test_chronelle_requires_exact_callback_profile_only_and_s256(self):
+        callback = registered_redirect_uri('chronelle')
+        for overrides in ({'scope': 'phone'}, {'scope': 'profile vip'}, {'redirect_uri': callback.rstrip('/')},
+                          {'redirect_uri': callback + '?extra=1'}, {'redirect_uri': registered_redirect_uri()},
+                          {'code_challenge_method': 'plain'}):
+            values = {'client_id': 'chronelle', 'redirect_uri': callback, 'scope': 'profile', **overrides}
+            with self.subTest(overrides=overrides), self.assertRaises(OAuthError):
+                self.authorize(**values)
+        self.assertEqual(OAuthGrant.objects.count(), 0)

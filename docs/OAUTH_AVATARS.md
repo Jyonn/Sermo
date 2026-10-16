@@ -86,12 +86,30 @@ StillFolio's existing client ID, callback, scopes and code exchange need no
 changes. Existing `profile` grants automatically receive the additive fields;
 clients may ignore unknown fields. No broader consent is introduced.
 
-The current Frienden registry contains only `stillfolio` with its exact
-StillFolio callback. Chronelle is **not yet a registered OAuth client** and must
-not impersonate StillFolio or reuse its callback. Before Chronelle can initiate
-Frienden sign-in, register its own client ID and exact callback through the
-existing registration policy, then use that ID with `scope=profile`, unique
-state and PKCE. This change deliberately does not add clients or redirect URIs.
+Chronelle is now registered with the following exact configuration:
+
+```text
+client_id: chronelle
+redirect_uri: https://chronelle.jyonn.space/api/profile/sermo/callback/
+scope: profile
+code_challenge_method: S256
+response_type: code
+```
+
+The trailing slash is required. No other callbacks or additional scopes are
+allowed for this client. No client secret is required; keep the PKCE verifier
+on Chronelle's backend and validate state before exchanging the one-time code.
+Use `client_id=chronelle` and the exact callback above in both authorize and
+token requests. The standard token and userinfo endpoints above are unchanged.
+Authorize URL template (placeholders are not credentials):
+
+```text
+https://sermo.jyonn.space/oauth/authorize?client_id=chronelle&redirect_uri=https%3A%2F%2Fchronelle.jyonn.space%2Fapi%2Fprofile%2Fsermo%2Fcallback%2F&response_type=code&scope=profile&state=<RANDOM_STATE>&code_challenge=<S256_CHALLENGE>&code_challenge_method=S256
+```
+
+No configuration changes are required in StillFolio. Chronelle must use its own
+client ID, not StillFolio's. Authorization pages show the requested app's icon
+and localized name, with account, nickname and avatar disclosure for `profile`.
 Frienden's separate Chronelle calendar authorization is the opposite direction
 and does not grant Chronelle a Frienden OAuth identity token.
 

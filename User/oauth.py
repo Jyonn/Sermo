@@ -14,8 +14,8 @@ from django.utils import timezone
 from User.models import OAuthGrant
 
 
-CLIENT_ID = 'stillfolio'
 SCOPES = frozenset({'profile', 'phone', 'vip'})
+CLIENT_SCOPES = {'stillfolio': SCOPES, 'chronelle': frozenset({'profile'})}
 CODE_LIFETIME = timedelta(minutes=5)
 TOKEN_LIFETIME = timedelta(hours=1)
 PKCE_RE = re.compile(r'^[A-Za-z0-9_-]{43}$')
@@ -29,12 +29,16 @@ class OAuthError(ValueError):
         self.code = code
 
 
-def registered_redirect_uri():
-    return os.environ.get('SERMO_OAUTH_STILLFOLIO_REDIRECT_URI', 'https://stillfolio.jyonn.space/auth/sermo/callback')
+def registered_redirect_uri(client_id='stillfolio'):
+    if client_id == 'stillfolio':
+        return os.environ.get('SERMO_OAUTH_STILLFOLIO_REDIRECT_URI', 'https://stillfolio.jyonn.space/auth/sermo/callback')
+    if client_id == 'chronelle':
+        return 'https://chronelle.jyonn.space/api/profile/sermo/callback/'
+    return None
 
 
 def validate_authorization(client_id, redirect_uri, scope, state, code_challenge, code_challenge_method, response_type):
-    if client_id != CLIENT_ID or redirect_uri != registered_redirect_uri():
+    if not isinstance(client_id, str) or client_id not in CLIENT_SCOPES or redirect_uri != registered_redirect_uri(client_id):
         raise OAuthError('invalid_request', 'Unknown client or redirect URI')
     if response_type != 'code':
         raise OAuthError('unsupported_response_type', 'Authorization code required')
@@ -43,7 +47,7 @@ def validate_authorization(client_id, redirect_uri, scope, state, code_challenge
     if not isinstance(state, str) or not 16 <= len(state) <= 512:
         raise OAuthError('invalid_request', 'State must be 16 to 512 characters')
     scopes = set(scope.split()) if isinstance(scope, str) else set()
-    if not scopes or not scopes <= SCOPES:
+    if not scopes or not scopes <= CLIENT_SCOPES[client_id]:
         raise OAuthError('invalid_scope', 'Unsupported scope')
     return sorted(scopes)
 
@@ -60,7 +64,7 @@ def authorize(user, *, client_id, redirect_uri, scope, state, code_challenge, co
 
 
 def exchange(*, client_id, redirect_uri, code, code_verifier):
-    if client_id != CLIENT_ID or redirect_uri != registered_redirect_uri() or not isinstance(code, str) or not PKCE_RE.fullmatch(code):
+    if not isinstance(client_id, str) or client_id not in CLIENT_SCOPES or redirect_uri != registered_redirect_uri(client_id) or not isinstance(code, str) or not PKCE_RE.fullmatch(code):
         raise OAuthError('invalid_grant', 'Invalid authorization code')
     if not isinstance(code_verifier, str) or not VERIFIER_RE.fullmatch(code_verifier):
         raise OAuthError('invalid_grant', 'Invalid PKCE verifier')

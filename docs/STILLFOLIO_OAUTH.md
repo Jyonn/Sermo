@@ -1,6 +1,10 @@
 # Stillfolio sign-in contract
 
-Sermo exposes a single registered public OAuth-style client: `stillfolio`. Stillfolio has implemented the authorization-code flow. User profile, phone and VIP data are shared only after consent. The menu launch now targets Stillfolio's automatic sign-in entry; that new entry still needs implementation in Stillfolio. See [direct sign-in integration](STILLFOLIO_DIRECT_LOGIN.md).
+Frienden exposes registered public OAuth-style clients `stillfolio` and `chronelle`.
+StillFolio supports `profile phone vip`; Chronelle is restricted to `profile`.
+Both reuse the authorization-code flow with mandatory S256 PKCE. User data is
+shared only after consent. See [direct sign-in integration](STILLFOLIO_DIRECT_LOGIN.md)
+for StillFolio's menu launch and [avatar integration](OAUTH_AVATARS.md) for Chronelle.
 
 ## Browser flow
 
