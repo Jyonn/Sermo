@@ -285,6 +285,7 @@ class User(models.Model):
     chat_bubble_style = models.CharField(max_length=16, default='default')
     avatar_frame_style = models.CharField(max_length=16, default='none')
     profile_card_theme = models.CharField(max_length=16, default='default')
+    chronelle_calendar_id = models.CharField(max_length=36, default='', blank=True)
     statement_card_style = models.CharField(max_length=16, default='default')
     show_self_avatar = models.BooleanField(default=False)
     pinned_square_statement_id = models.PositiveIntegerField(null=True, blank=True)
@@ -1280,6 +1281,7 @@ class User(models.Model):
             'avatar_uri',
             'avatar_cache_key',
         )
+        payload['chronelle_calendar_id'] = self.chronelle_calendar_id
         payload['plaza_greeting'] = self.display_plaza_greeting()
         payload['permanent_vip_slot'] = self.permanent_vip_slot()
         return payload
@@ -1300,6 +1302,7 @@ class User(models.Model):
             'avatar_cache_key',
             'last_heartbeat',
         )
+        payload['chronelle_calendar_id'] = self.chronelle_calendar_id
         payload['permanent_vip_slot'] = self.permanent_vip_slot()
         return payload
 
@@ -1348,6 +1351,7 @@ class User(models.Model):
             'profile_card_theme',
             'show_self_avatar',
         )
+        payload['chronelle_calendar_id'] = self.chronelle_calendar_id
         payload['chat_background_uri'] = (
             sign_private_download_url(self.chat_background_uri)
             if self.chat_background_uri
