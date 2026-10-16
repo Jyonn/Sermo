@@ -286,6 +286,7 @@ class User(models.Model):
     avatar_frame_style = models.CharField(max_length=16, default='none')
     profile_card_theme = models.CharField(max_length=16, default='default')
     chronelle_calendar_id = models.CharField(max_length=36, default='', blank=True)
+    chronelle_authorization = models.JSONField(default=dict, blank=True)
     statement_card_style = models.CharField(max_length=16, default='default')
     show_self_avatar = models.BooleanField(default=False)
     pinned_square_statement_id = models.PositiveIntegerField(null=True, blank=True)
