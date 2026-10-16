@@ -176,9 +176,13 @@ def build_message_video_thumbnail_uri(uri: str, width: int = 480):
     return sign_private_processed_url(uri, f'vframe/jpg/offset/0.1/w/{normalized_width}')
 
 
-def build_avatar_display_uri(uri: str, size: int = 400):
+def build_avatar_display_uri(uri: str, size: int = 400, *, raster: bool = False,
+                             expire_seconds: int = AVATAR_DOWNLOAD_EXPIRE_SECONDS):
     normalized_size = max(96, min(int(size), 1024))
-    return sign_private_processed_url(uri, f'imageView2/1/w/{normalized_size}/h/{normalized_size}/q/85')
+    processing = f'imageView2/1/w/{normalized_size}/h/{normalized_size}/q/85'
+    if raster:
+        processing += '/format/png'
+    return sign_private_processed_url(uri, processing, expire_seconds=expire_seconds)
 
 
 def _guess_extension(file_name: str, content_type: str = None):

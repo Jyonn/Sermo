@@ -100,6 +100,9 @@ def userinfo(token):
     payload = {'sub': f'sermo:{user.space_id}:{user.id}', 'space_slug': user.space.slug}
     if 'profile' in grant.scopes:
         payload['nickname'] = user.name
+        from User.oauth_avatar import profile_avatar_url
+        payload['avatar_url'] = profile_avatar_url(user)
+        payload['avatar_updated_at'] = None
     if 'vip' in grant.scopes:
         payload['is_vip'] = bool(user.is_permanent_vip)
     if 'phone' in grant.scopes:
