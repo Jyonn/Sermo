@@ -37,6 +37,7 @@ class ChronelleBindingTests(TestCase):
             result = self.client.post('/users/me/chronelle/authorize', **headers)
             self.assertIn('/#/authorize/', result.json()['body']['authorize_url'])
             self.assertEqual(remote.call_args.kwargs['json']['code_challenge_method'], 'S256')
+            self.assertTrue(remote.call_args.kwargs['json']['app_icon'].startswith('data:image/png;base64,'))
         self.user.refresh_from_db()
         pending = self.user.chronelle_authorization
         self.assertNotIn('verifier', result.json()['body'])

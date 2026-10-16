@@ -10,6 +10,7 @@ from django.views import View
 from smartdjango import Error, Code, OK
 
 from User.models import User
+from User.chronelle_branding import application_icon
 from utils import auth
 
 BASE = 'https://chronelle.jyonn.space'
@@ -32,13 +33,14 @@ class ChronelleAuthorizationView(View):
             with transaction.atomic():
                 user = User.objects.select_for_update().get(pk=request.user.pk)
                 previous = active_pending(user)
-                if previous:
+                if previous and previous.get('branding_version') == 1:
                     return {'authorize_url': f'{BASE}/#/authorize/{previous["request_id"]}'}
                 verifier = secrets.token_urlsafe(48)
                 challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b'=').decode()
                 state = secrets.token_urlsafe(32)
                 response = requests.post(f'{BASE}/api/integrations/requests/', json={
                     'app_name': 'Sermo', 'app_url': 'https://sermo.jyonn.space',
+                    'app_icon': application_icon(),
                     'purpose': 'Verify calendar ownership and display the public calendar on your Sermo profile. Private groups are not published.',
                     'code_challenge': challenge, 'code_challenge_method': 'S256', 'state': state,
                 }, timeout=15, allow_redirects=False)
@@ -47,6 +49,7 @@ class ChronelleAuthorizationView(View):
                 request_id = str(UUID(response.json()['request_id']))
                 user.chronelle_authorization = {
                     'request_id': request_id, 'verifier': verifier, 'state': state,
+                    'branding_version': 1,
                     'expires_at': timezone.now().timestamp() + 590, 'claim_after': 0,
                 }
                 user.save(update_fields=['chronelle_authorization'])

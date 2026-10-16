@@ -14,7 +14,9 @@ Friends and strangers see only the calendar's public schedules.
 - `DELETE /users/me/chronelle`: authenticated; removes only the caller's binding.
 - Public profile and current-user responses include `chronelle_calendar_id`.
 - The server generates a random verifier and S256 challenge, checks the state,
-  and stores pending secrets in a private per-user database field, not browser
+  and includes the official FRIENDEN icon as a PNG base64 data URL (under 32 KiB).
+  Pending requests without this branding are replaced when authorization restarts.
+- Pending secrets are stored in a private per-user database field, not browser
   storage or process-local memory. Claims are serialized and throttled. Pending
   state expires and is cleared on completion, denial, expiry or unlinking.
 - Only the calendar UUID is public. The returned private access key is discarded,
