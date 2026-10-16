@@ -49,6 +49,16 @@ class ChronelleBindingTests(TestCase):
         self.assertEqual(self.user.chronelle_calendar_id, calendar_id)
         self.assertEqual(self.user.chronelle_authorization, {})
 
+    def test_authorization_replaces_old_brand_and_uses_user_language(self):
+        self.user.language = 'zh-CN'
+        self.user.chronelle_authorization = {'request_id': 'old-request', 'branding_version': 1, 'expires_at': 9999999999}
+        self.user.save(update_fields=['language', 'chronelle_authorization'])
+        with patch('User.chronelle_views.requests.post', return_value=Mock(status_code=201, json=lambda: {'request_id': '35c6deab-103d-4f60-9cf9-9f42c812cc5a'})) as remote:
+            self.client.post('/users/me/chronelle/authorize', HTTP_AUTHORIZATION=f"Bearer {auth.get_login_token(self.user)['auth']}")
+        payload = remote.call_args.kwargs['json']
+        self.assertEqual(payload['app_name'], 'Frienden 友间')
+        self.assertEqual(payload['purpose'], '把你的公开日程展示在个人名片中')
+
     def test_claim_does_not_use_another_accounts_authorization(self):
         self.other.chronelle_authorization = {'request_id': 'other', 'expires_at': 9999999999}
         self.other.save(update_fields=['chronelle_authorization'])
