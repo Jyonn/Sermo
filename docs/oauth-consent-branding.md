@@ -22,4 +22,35 @@ Verification links retain the original opaque search string (including state, cl
 
 Backend: 38 isolated SQLite OAuth/eligibility/registry/avatar/migration tests, with 37 passes and the existing engine-specific concurrency test skipped. `manage.py check` passes. Frontend: 10 tests cover production verification-card rendering states, exact opaque return parameters, safe internal navigation, safe image URLs and existing callback/registry presentation security. Production build passes.
 
-Actual browser evidence so far: requester and Frienden icons both loaded, desktop width matched document width, and the missing-both state had zero consent buttons with distinct verification links. A later open Chrome extension UI blocked subsequent browser operations. Final mobile/dark layouts, image-error event rendering, dynamic status refresh and full contact-sheet return still require browser acceptance; component rendering and helper tests are not counted as those visual/interaction checks. No real verification message, real grant or production state was created.
+## Completed follow-up browser acceptance
+
+The earlier Chrome interruption was intermittent extension UI occupancy, not a filesystem/permission approval rejection. Supported browser APIs subsequently worked without disabling protections, changing permissions or switching control mechanisms. No rejected action was bypassed.
+
+- Real desktop rendering: both official icons load, document/viewport widths both 1512px. Missing-both state has distinct email/phone actions and no consent button.
+- Real 390×844 viewport: document width 390px; light and dark layouts visually inspected. Dark card/text computed colors were `rgb(21,29,25)` / `rgb(238,245,241)`. Viewport override was reset afterward.
+- Missing-email, missing-phone and all-complete controls show correct rows/main actions. A synthetic eligibility change followed by the real focus-refresh handler removes the guide and exposes consent only after eligibility becomes true.
+- Requester image error invokes the neutral accessible fallback. Eligibility check failure shows retry plus a disabled checking action, without an enabled consent action.
+- The actual `MenuPage` email form was exercised with `preview@example.test` and a local dummy code through stubbed APIs. Successful binding returned to the authorization component with the exact original route/search string, including state, redirect, client, scopes and PKCE; consent became available after fresh mocked eligibility. Phone deep link opens the actual phone form. Cancel/back and keyboard Enter/Escape preserve the original request too.
+- The fixture uses `MemoryRouter`; production route helpers and actual menu/consent components are exercised, but a real production BrowserRouter session, real OTP provider and real grant exchange are intentionally not tested. A fixture-only resource inventory shape mismatch was corrected from object to array before the successful menu checks. These local results do not imply the production client icon has been configured.
+
+Synthetic screenshots: `artifacts/oauth-consent-review/mobile-light.jpg`, `mobile-dark.jpg`, `desktop-light.jpg` in the shared workspace. No screenshot was uploaded to Library. No real verification message, real grant or production state was created.
+
+## Exact existing client and minimal pending production metadata plan
+
+Read-only production lookup on 2026-10-17 identified exactly one matching approved application:
+
+| Field | Existing value to preserve |
+| --- | --- |
+| Application ID | `4` |
+| Client ID | `supervision-web` (retain despite the displayed Abandon name) |
+| Application version | `4` at inspection time |
+| Approved revision | `6` at inspection time |
+| Enabled / display name | `true` / `板凳 · Abandon` |
+| Redirect URIs | `https://api.supervision.qijiong.work/api/auth/friendom/callback/` and `https://api.abandon.qijiong.work/api/auth/friendom/callback/` |
+| Scopes / loopback exceptions | `email`, `profile` / none |
+
+Only proposed delta: `icon_url = https://abandon.qijiong.work/assets/abandon.svg?v=e82ca44054de`. Retain description, owner, enabled state, both callbacks, scopes, client ID and every other field byte-for-byte. Do not create an `abandon` client or add phone scope. This plan has not been executed.
+
+Provenance: the official `https://abandon.qijiong.work/` HTML declares that URL via `rel=icon` and `type=image/svg+xml`. Versioned and unversioned `/assets/abandon.svg` both returned 200, SVG content type, 408 bytes, cache max-age 600, and SHA-256 `e82ca44054def7f84b5161cf3f5ad6db54df875e6784075156d03094ed398e08`. The query version matches the first 12 hash characters. The underlying path is maintained by the Abandon site and is not an immutable archive; future brand updates should be rechecked rather than assuming permanent byte stability.
+
+After explicit deployment/metadata approval: (1) apply additive 0084 and deploy compatible backend/frontend; (2) re-read application 4, abort/review if version 4, approved revision 6 or any preserved field has drifted, and stop if an unfinished draft/pending revision exists; (3) create an ordinary revision copied from the current approved configuration with only icon URL changed, then submit and approve via the existing version-checked workflow using returned IDs/versions (never guess a revision ID); (4) read public metadata for both exact callbacks and verify the icon and unchanged scope set, without creating a grant; (5) retain old revision 6 and audit entries. No seed command or direct SQL update is part of this plan. To revert branding, submit a normal revision restoring the previous icon metadata while retaining the `.20` dual-verification rule.
