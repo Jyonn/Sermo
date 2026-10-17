@@ -15,7 +15,7 @@ from User.models import OAuthGrant
 
 
 SCOPES = frozenset({'profile', 'phone', 'vip'})
-CLIENT_SCOPES = {'stillfolio': SCOPES, 'chronelle': frozenset({'profile'})}
+CLIENT_SCOPES = {'stillfolio': SCOPES, 'chronelle': frozenset({'profile'}), 'supervision-local': frozenset({'profile'})}
 CODE_LIFETIME = timedelta(minutes=5)
 TOKEN_LIFETIME = timedelta(hours=1)
 PKCE_RE = re.compile(r'^[A-Za-z0-9_-]{43}$')
@@ -34,6 +34,8 @@ def registered_redirect_uri(client_id='stillfolio'):
         return os.environ.get('SERMO_OAUTH_STILLFOLIO_REDIRECT_URI', 'https://stillfolio.jyonn.space/auth/sermo/callback')
     if client_id == 'chronelle':
         return 'https://chronelle.jyonn.space/api/profile/sermo/callback/'
+    if client_id == 'supervision-local':
+        return 'http://127.0.0.1:8001/api/auth/friendom/callback/'
     return None
 
 
