@@ -1,7 +1,57 @@
 # Frienden OAuth application registry — local implementation
 
-Status: implemented locally; no production migration, seeding, approval, grant creation,
-push, or deployment performed. Frontend draft release ID: `2026.10.17.17`.
+Current status: production release `2026.10.17.17` completed on 2026-10-17 after explicit
+user approval. Backend runtime code is `bb021795a481e10a5e94c4e771896d7942adc4d4`;
+frontend is `af88051a6b7a3db569e49f8890c3aa5d1bdf8a8d`. Main site and mirror were
+independently verified at the new release ID. No Chronelle/Supervision deployment or
+real-user consent/grant creation was performed.
+
+## Final production release result
+
+- User approved publication and the separate optional Supervision email scope with
+  the known possibility of brief OAuth impact and incomplete exact-version rehearsal.
+- Separate server staging passed `manage.py check` and showed only 0083 in the plan.
+  Under installed Python 3.12.3 / Django 5.1.12, 30 isolated SQLite tests ran: 29 passed,
+  the engine-specific lock test skipped. MySQL 9.6 local rehearsal had all 30 pass.
+- Server-only consistent pre-migration backup:
+  `/home/ubuntu/sermo-release-backups/oauth-bb02179-20261017/sermo-verified.sql.gz`.
+  Directory mode 700, file mode 600, 26,084,215 bytes. A supplemental
+  `registry-after.sql.gz` (mode 600) retains the approved registry/revision/audit state.
+  Both gzip integrity/checksum checks passed; checksum manifest stays in that directory.
+  Temporary client config was removed. No backup was copied to this workstation.
+- Production MySQL 8.0.46 applied User 0083 successfully while old workers served.
+  Legacy seed ran twice successfully, retaining exact callbacks and original scopes.
+  Only then was the clean runtime checkout fast-forwarded and the verified Frienden
+  Gunicorn master reloaded. All four old workers drained; four new workers serve.
+- After worker replacement, Supervision revision ID 4 (application version 4) was
+  revised, submitted and approved. Audits contain `revise`, `submit`, `approve`, the
+  configured admin actor, explicit user-release authorization source and scope diff.
+  Only Supervision now permits `email profile`; its exact 8001 loopback is unchanged.
+- Safe final aggregate grant verification: Chronelle 4 with profile; StillFolio 15
+  with phone/profile/vip; Supervision-local 2 with profile. Total 21 before/after.
+  No original grant implicitly gained email. Per-grant code/token/user-ID manifests
+  were not generated: automatic approval rejected that private-field inspection and
+  the release used explicitly authorized aggregate checks instead.
+- All three clients' public metadata passed. Supervision profile+email passed;
+  StillFolio/Chronelle email, localhost callback alias, invalid code, missing access
+  token and unauthenticated developer/admin management were rejected as expected.
+  No real token or consent was used to test these paths.
+- GitHub Pages build and deploy succeeded for the exact frontend commit:
+  https://github.com/Jyonn/Sermo-Frontend/actions/runs/39017197326.
+  `npm run deploy:mirror` succeeded and verified the same release. Public main/mirror
+  release IDs and deployed menu/admin/consent chunks were independently checked.
+- User's unrelated `logos/frienden/preview.html` change remains unstaged and untouched.
+
+Remaining limitations: no production-size restore or exact MySQL 8.0 isolated test
+suite was run; actual DDL/checks succeeded on production, but that is not a substitute
+for the missing rehearsal. Native PWA install/SW lifecycle and real-user OAuth consent
+were intentionally not performed. No rollback was needed. After policy use, rollback
+must retain compatible registry enforcement and current decisions; never revert to
+the old backend that ignores disabled clients or restore a stale snapshot blindly.
+
+The sections below retain the pre-release design, tests and proposed runbook as a
+historical review record. Their earlier pending/not-run statements describe preflight;
+the final production results above are the authoritative outcome for this release.
 
 ## Changes
 
