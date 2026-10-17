@@ -85,3 +85,14 @@ class DebugReportTests(TestCase):
         delete_request = self.factory.delete(f'/platform-admin/debug-reports/{report_id}', HTTP_AUTHORIZATION=f'Bearer {self.admin_token}')
         DebugReportDetailView.as_view()(delete_request, report_id=report_id)
         self.assertFalse(ClientDebugReport.objects.filter(pk=report_id).exists())
+
+    def test_update_report_versions_are_strict_and_admin_can_read(self):
+        payload = {**self.report, 'entries': [{'at': 1, 'elapsed': 0, 'event': 'update', 'metrics': {
+            'stage': 3, 'targetVersion': '2026.10.17.5', 'entryVersion': None, 'online': True,
+        }}]}
+        self.upload(payload)
+        request = self.factory.get('/platform-admin/debug-reports', HTTP_AUTHORIZATION=f'Bearer {self.admin_token}')
+        self.assertEqual(DebugReportListView.as_view()(request)['items'][0]['kind'], 'update')
+        payload['entries'][0]['metrics']['targetVersion'] = 'secret-token'
+        with self.assertRaises(PlatformAdminErrors.DEBUG_REPORT_INVALID.__class__):
+            self.upload(payload)

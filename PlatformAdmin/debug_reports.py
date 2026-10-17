@@ -1,6 +1,7 @@
 import datetime
 import json
 import math
+import re
 
 from django.db import transaction
 from django.utils import timezone
@@ -16,7 +17,7 @@ from utils import auth
 REPORT_LIFETIME = datetime.timedelta(hours=6)
 ALLOWED_EVENTS = {
     'viewport', 'layout', 'keyboard', 'windowScroll', 'scrollCorrection',
-    'focusIn', 'focusOut', 'action', 'anomaly', 'listScroll',
+    'focusIn', 'focusOut', 'action', 'anomaly', 'listScroll', 'update',
 }
 ALLOWED_METRICS = {
     'viewportHeight', 'viewportOffsetTop', 'viewportPageTop', 'windowScrollY',
@@ -29,7 +30,10 @@ ALLOWED_METRICS = {
     'lastRenderedIndex', 'firstVisibleIndex', 'lastVisibleIndex',
     'spacerHeight', 'spacerTop', 'paddingBefore', 'paddingAfter',
     'duration',
+    'stage', 'site', 'online', 'resourceCount', 'hasWorker', 'hasController', 'failureCode', 'retry',
+    'httpStatus', 'offlineFallback',
 }
+VERSION_METRICS = {'targetVersion', 'runningVersion', 'entryVersion', 'workerVersion'}
 
 
 def prune_expired():
@@ -59,6 +63,11 @@ def safe_report(request):
             raise PlatformAdminErrors.DEBUG_REPORT_INVALID
         safe_metrics = {}
         for key, value in metrics.items():
+            if entry['event'] == 'update' and key in VERSION_METRICS:
+                if value is not None and (not isinstance(value, str) or not re.fullmatch(r'\d{4}\.\d{2}\.\d{2}\.\d{1,8}', value)):
+                    raise PlatformAdminErrors.DEBUG_REPORT_INVALID
+                safe_metrics[key] = value
+                continue
             if key not in ALLOWED_METRICS:
                 raise PlatformAdminErrors.DEBUG_REPORT_INVALID
             if value is not None and type(value) not in (bool, int, float):
@@ -101,6 +110,7 @@ class DebugReportListView(View):
                 'space': item.user.space.slug,
                 'created_at': item.created_at.timestamp(),
                 'entry_count': len(item.report.get('entries', [])),
+                'kind': 'update' if any(entry.get('event') == 'update' for entry in item.report.get('entries', [])) else 'layout',
             }
             for item in items
         ]}
