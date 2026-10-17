@@ -19,7 +19,7 @@ class OAuthMetadataView(View):
             rev = approved(request.GET['client_id'], request.GET['redirect_uri'])
             if not rev:
                 raise OAuthError('invalid_request', 'Application is no longer available')
-            response = JsonResponse(dict(id=rev.application.client_id, name=rev.name, description=rev.description,
+            response = JsonResponse(dict(id=rev.application.client_id, name=rev.name, description=rev.description, icon_url=rev.icon_url,
                                          callback=request.GET['redirect_uri'], scopes=scopes))
             response['Cache-Control'] = 'no-store'
             return response

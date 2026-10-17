@@ -3967,6 +3967,7 @@ class OAuthApplicationRevision(models.Model):
     application = models.ForeignKey(OAuthApplication, on_delete=models.CASCADE, related_name='revisions')
     name = models.CharField(max_length=120)
     description = models.CharField(max_length=1000, blank=True, default='')
+    icon_url = models.URLField(max_length=512, blank=True, default='')
     redirect_uris = models.JSONField(default=list)
     scopes = models.JSONField(default=list)
     loopback_uris = models.JSONField(default=list)

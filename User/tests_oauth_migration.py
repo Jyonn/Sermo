@@ -25,7 +25,7 @@ class OAuthMigrationTests(TransactionTestCase):
 
     def test_additive_stages_keep_legacy_runtime_until_seed_is_ready(self):
         previous = [('User', '0082_user_chronelle_authorization')]
-        latest = [('User', '0083_oauth_application_registry')]
+        latest = [('User', '0084_oauthapplicationrevision_icon_url')]
         legacy = self.legacy_runtime()
         MigrationExecutor(connection).migrate(previous)
         try:
@@ -86,7 +86,7 @@ class OAuthMigrationTests(TransactionTestCase):
 
     def test_registry_schema_forward_reverse_preserves_existing_grant(self):
         previous = [('User', '0082_user_chronelle_authorization')]
-        latest = [('User', '0083_oauth_application_registry')]
+        latest = [('User', '0084_oauthapplicationrevision_icon_url')]
         executor = MigrationExecutor(connection)
         executor.migrate(previous)
         try:

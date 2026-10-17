@@ -18,6 +18,20 @@ CALLBACK = 'https://stillfolio.jyonn.space/auth/sermo/callback'
 
 
 class RegistryTests(TestCase):
+    def test_icon_is_validated_and_only_approved_revision_reaches_metadata(self):
+        for icon in ('http://example.com/icon.png', 'data:image/svg+xml,test', 'https://u:p@example.com/a', 'https://example.com/a#fragment', 'https://example.com:bad/a'):
+            with self.subTest(icon=icon), self.assertRaises(RegistryError):
+                configuration({**self.config, 'icon_url': icon})
+        app = mutate(actor='admin@example.com', admin=True, data=dict(action='create', client_id='icon-test', icon_url='https://example.com/old.svg', **self.config))
+        params = {**self.params, 'client_id': 'icon-test', 'redirect_uri': self.config['redirect_uris'][0]}
+        revised = self.change(app, 'revise', admin=True, icon_url='https://example.com/new.svg', **self.config)
+        self.assertEqual(self.client.get('/users/oauth/metadata', params).json()['icon_url'], 'https://example.com/old.svg')
+        revision_id = revised['revisions'][0]['id']
+        pending = self.change(revised, 'submit', admin=True, revision_id=revision_id)
+        self.assertEqual(self.client.get('/users/oauth/metadata', params).json()['icon_url'], 'https://example.com/old.svg')
+        self.change(pending, 'approve', admin=True, revision_id=revision_id)
+        self.assertEqual(self.client.get('/users/oauth/metadata', params).json()['icon_url'], 'https://example.com/new.svg')
+
     def setUp(self):
         seed(CALLBACK)
         self.space = Space.objects.create(name='Registry', slug='registry', email='test@example.com')

@@ -21,6 +21,17 @@ def configuration(data):
     name, description = data.get('name'), data.get('description', '')
     uris, scopes = data.get('redirect_uris'), data.get('scopes')
     loopbacks = data.get('loopback_uris', [])
+    icon_url = data.get('icon_url', '')
+    if not isinstance(icon_url, str) or len(icon_url) > 512:
+        raise RegistryError('Icon URL must be an HTTPS URL (up to 512 characters)')
+    if icon_url:
+        try:
+            icon = urlsplit(icon_url)
+            port = icon.port
+        except ValueError:
+            raise RegistryError('Invalid icon URL')
+        if icon.scheme != 'https' or not icon.hostname or icon.username is not None or icon.password is not None or icon.fragment or any(c.isspace() or ord(c) < 32 for c in icon_url) or '\\' in icon_url:
+            raise RegistryError('Icon URL must use HTTPS without credentials or fragments')
     if not isinstance(name, str) or not name.strip() or len(name) > 120 or not isinstance(description, str) or len(description) > 1000:
         raise RegistryError('A name and description of at most 120/1000 characters are required')
     if not isinstance(scopes, list) or not scopes or any(not isinstance(s, str) for s in scopes) or not set(scopes) <= SCOPES:
@@ -46,7 +57,7 @@ def configuration(data):
             raise RegistryError('HTTPS required except explicitly approved HTTP loopback URLs')
     if set(actual_loopbacks) != set(loopbacks):
         raise RegistryError('Every HTTP loopback URI requires an explicit exact exception')
-    return dict(name=name.strip(), description=description, redirect_uris=list(dict.fromkeys(uris)), scopes=sorted(set(scopes)), loopback_uris=list(dict.fromkeys(loopbacks)))
+    return dict(name=name.strip(), description=description, icon_url=icon_url, redirect_uris=list(dict.fromkeys(uris)), scopes=sorted(set(scopes)), loopback_uris=list(dict.fromkeys(loopbacks)))
 
 
 def approved(client_id, redirect_uri=None):
@@ -61,7 +72,7 @@ def approved(client_id, redirect_uri=None):
 
 def serialize(app):
     def revision(r):
-        return dict(id=r.id, name=r.name, description=r.description, redirect_uris=r.redirect_uris, scopes=r.scopes,
+        return dict(id=r.id, name=r.name, description=r.description, icon_url=r.icon_url, redirect_uris=r.redirect_uris, scopes=r.scopes,
                     loopback_uris=r.loopback_uris, status=r.status, review_note=r.review_note,
                     reviewed_by=r.reviewed_by, reviewed_at=r.reviewed_at.isoformat() if r.reviewed_at else None)
     return dict(id=app.id, client_id=app.client_id, owner_id=app.owner_id, enabled=app.enabled, version=app.version,
@@ -117,7 +128,7 @@ def mutate(*, actor, owner=None, admin=False, app_id=None, data):
                     for key, value in configuration(data).items():
                         setattr(rev, key, value)
                 else:
-                    configuration(dict(name=rev.name, description=rev.description, redirect_uris=rev.redirect_uris, scopes=rev.scopes, loopback_uris=rev.loopback_uris))
+                    configuration(dict(name=rev.name, description=rev.description, icon_url=rev.icon_url, redirect_uris=rev.redirect_uris, scopes=rev.scopes, loopback_uris=rev.loopback_uris))
                     rev.status = 'pending'
             else:
                 if not admin:
@@ -129,7 +140,7 @@ def mutate(*, actor, owner=None, admin=False, app_id=None, data):
                 note = data.get('review_note', '')
                 if not isinstance(note, str) or len(note) > 1000 or action == 'reject' and not note.strip():
                     raise RegistryError('Provide a review note (up to 1000 characters)')
-                configuration(dict(name=rev.name, description=rev.description, redirect_uris=rev.redirect_uris, scopes=rev.scopes, loopback_uris=rev.loopback_uris))
+                configuration(dict(name=rev.name, description=rev.description, icon_url=rev.icon_url, redirect_uris=rev.redirect_uris, scopes=rev.scopes, loopback_uris=rev.loopback_uris))
                 rev.status = 'approved' if action == 'approve' else 'rejected'
                 rev.reviewed_by, rev.reviewed_at, rev.review_note = actor, timezone.now(), note
                 if action == 'approve':
