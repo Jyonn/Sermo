@@ -6,6 +6,7 @@ import requests
 from django.core import signing
 from django.http import HttpResponse
 from django.views import View
+from User.oauth_eligibility import eligibility
 from smartdjango import Error
 
 from User.models import User, UserAvatarTypeChoice
@@ -57,7 +58,8 @@ def profile_avatar_url(user):
 
 def image_response(content=b'', status=404):
     response = HttpResponse(content, status=status, content_type='image/png' if status == 200 else 'text/plain')
-    response['Cache-Control'] = 'public, max-age=300' if status == 200 else 'no-store'
+    # Current eligibility is checked at origin; do not cache future identity responses.
+    response['Cache-Control'] = 'no-store'
     response['Cross-Origin-Resource-Policy'] = 'cross-origin'
     response['Access-Control-Allow-Origin'] = '*'
     response['X-Content-Type-Options'] = 'nosniff'
@@ -71,7 +73,7 @@ class OAuthAvatarView(View):
         try:
             identity = signing.Signer(salt=AVATAR_SALT).unsign_object(token)
             user = User.objects.filter(pk=identity['u'], is_deleted=False, avatar_type=UserAvatarTypeChoice.CUSTOM).first()
-            if not user or not secrets.compare_digest(user._dictify_avatar_cache_key(), identity['v']):
+            if not user or not eligibility(user)['eligible'] or not secrets.compare_digest(user._dictify_avatar_cache_key(), identity['v']):
                 return image_response()
             url = custom_avatar_download(user)
             if not url:

@@ -4,6 +4,7 @@ from unittest.mock import Mock, patch
 from urllib.parse import parse_qs, urlparse
 
 from django.test import TestCase
+from django.utils import timezone
 
 from Config.models import CI
 from Space.models import Space
@@ -18,6 +19,8 @@ class OAuthAvatarTests(TestCase):
         seed('https://stillfolio.jyonn.space/auth/sermo/callback')
         self.space = Space.objects.create(name='Avatar OAuth', slug='avatar-oauth', email='avatar@example.com')
         self.user = User.create(self.space, 'Avatar', verified=True)
+        User.objects.filter(pk=self.user.pk).update(email='verified@example.test', email_verified_at=timezone.now(), phone='+8613800138000', phone_verified_at=timezone.now())
+        self.user.refresh_from_db()
 
     def token(self, scope='profile'):
         verifier = 'v' * 43
@@ -94,7 +97,7 @@ class OAuthAvatarTests(TestCase):
         self.assertEqual(response['Content-Type'], 'image/png')
         self.assertEqual(response['Cross-Origin-Resource-Policy'], 'cross-origin')
         self.assertEqual(response['X-Content-Type-Options'], 'nosniff')
-        self.assertEqual(response['Cache-Control'], 'public, max-age=300')
+        self.assertEqual(response['Cache-Control'], 'no-store')
         self.assertIn('/format/png', fetch.call_args.args[0])
         self.assertFalse(fetch.call_args.kwargs['allow_redirects'])
 

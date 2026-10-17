@@ -22,6 +22,8 @@ class RegistryTests(TestCase):
         seed(CALLBACK)
         self.space = Space.objects.create(name='Registry', slug='registry', email='test@example.com')
         self.owner = User.create(self.space, 'Developer', verified=True)
+        User.objects.filter(pk=self.owner.pk).update(email='verified@example.test', email_verified_at=timezone.now(), phone='+8613800138000', phone_verified_at=timezone.now())
+        self.owner.refresh_from_db()
         self.other = User.create(self.space, 'Other', verified=True)
         self.config = dict(name='Example app', description='Example', redirect_uris=['https://example.com/callback'], scopes=['profile'], loopback_uris=[])
         self.params = dict(client_id='supervision-local', redirect_uri='http://127.0.0.1:8001/api/auth/friendom/callback/', scope='profile', state='s' * 32,
@@ -117,15 +119,19 @@ class RegistryTests(TestCase):
         self.change(app, 'approve', admin=True, revision_id=rev, approved_loopback_uris=current.loopback_uris)
         token = self.grant(scope='profile email')['access_token']
         self.assertNotIn('email', userinfo(old_token))
-        self.assertEqual(userinfo(token)['email_verified'], False)
-        self.assertIsNone(userinfo(token)['email'])
+        self.assertIs(userinfo(token)['email_verified'], True)
+        self.assertEqual(userinfo(token)['email'], 'verified@example.test')
         self.owner.email = 'dev@example.com'
-        self.owner.save(update_fields=['email'])
-        self.assertEqual(userinfo(token)['email'], 'dev@example.com')
-        self.assertIs(userinfo(token)['email_verified'], False)
+        self.owner.email_verified_at = None
+        self.owner.save(update_fields=['email', 'email_verified_at'])
+        for access_token in (token, old_token):
+            with self.assertRaises(OAuthError) as error:
+                userinfo(access_token)
+            self.assertEqual(error.exception.code, 'verification_required')
         self.owner.email_verified_at = timezone.now()
         self.owner.save(update_fields=['email_verified_at'])
         self.assertIs(userinfo(token)['email_verified'], True)
+        self.assertEqual(userinfo(token)['email'], 'dev@example.com')
         self.assertEqual(userinfo(token)['sub'], userinfo(old_token)['sub'])
         self.assertNotIn('email', userinfo(old_token))
         self.assertEqual(OAuthApplication.objects.get(client_id='stillfolio').approved_revision.scopes, ['phone', 'profile', 'vip'])

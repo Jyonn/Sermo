@@ -18,6 +18,8 @@ class OAuthTests(TestCase):
         seed('https://stillfolio.jyonn.space/auth/sermo/callback')
         self.space = Space.objects.create(name='OAuth test', slug='oauth-test', email='oauth@example.com')
         self.user = User.create(self.space, 'Photographer', verified=True)
+        User.objects.filter(pk=self.user.pk).update(email='verified@example.test', email_verified_at=timezone.now(), phone='+8613800138000', phone_verified_at=timezone.now())
+        self.user.refresh_from_db()
         self.verifier = 'v' * 43
         self.challenge = base64.urlsafe_b64encode(hashlib.sha256(self.verifier.encode()).digest()).rstrip(b'=').decode()
 
@@ -46,7 +48,7 @@ class OAuthTests(TestCase):
             exchange(client_id='stillfolio', redirect_uri=registered_redirect_uri(), code=code, code_verifier=self.verifier)
         profile = userinfo(result['access_token'])
         self.assertEqual(profile['nickname'], 'Photographer')
-        self.assertIsNone(profile['phone'])
+        self.assertEqual(profile['phone'], '+8613800138000')
         self.assertFalse(profile['is_vip'])
         revoke(result['access_token'])
         with self.assertRaises(OAuthError):

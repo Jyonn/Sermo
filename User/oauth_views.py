@@ -5,6 +5,7 @@ from django.views import View
 
 from User.oauth import OAuthError, authorize, exchange, revoke, userinfo
 from utils import auth
+from User.oauth_eligibility import eligibility, VERIFICATION_PATH
 
 
 def _payload(request):
@@ -18,8 +19,11 @@ def _payload(request):
 
 
 def _error(error):
-    status = 401 if error.code == 'invalid_token' else 400
-    response = JsonResponse({'error': error.code, 'error_description': str(error)}, status=status)
+    status = 403 if error.code == 'verification_required' else 401 if error.code == 'invalid_token' else 400
+    payload = {'error': error.code, 'error_description': str(error)}
+    if error.code == 'verification_required':
+        payload['verification_path'] = VERIFICATION_PATH
+    response = JsonResponse(payload, status=status)
     response['Cache-Control'] = 'no-store'
     return response
 
@@ -42,6 +46,14 @@ class OAuthAuthorizeView(View):
         except OAuthError as error:
             return _error(error)
         response = JsonResponse({'redirect_uri': redirect_url})
+        response['Cache-Control'] = 'no-store'
+        return response
+
+
+class OAuthEligibilityView(View):
+    @auth.require_user
+    def get(self, request):
+        response = JsonResponse(eligibility(request.user))
         response['Cache-Control'] = 'no-store'
         return response
 

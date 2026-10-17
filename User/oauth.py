@@ -10,7 +10,8 @@ from urllib.parse import urlencode
 from django.db import transaction
 from django.utils import timezone
 
-from User.models import OAuthGrant
+from User.models import OAuthGrant, User
+from User.oauth_eligibility import eligibility
 from User.oauth_registry import SCOPES, approved
 
 
@@ -25,6 +26,11 @@ class OAuthError(ValueError):
     def __init__(self, code, description):
         super().__init__(description)
         self.code = code
+
+
+def require_eligible_user(user):
+    if not eligibility(user)['eligible']:
+        raise OAuthError('verification_required', 'Verify both your email and phone in account security to use OAuth.')
 
 
 def registered_redirect_uri(client_id='stillfolio'):
@@ -51,11 +57,14 @@ def validate_authorization(client_id, redirect_uri, scope, state, code_challenge
 def authorize(user, *, client_id, redirect_uri, scope, state, code_challenge, code_challenge_method, response_type):
     scopes = validate_authorization(client_id, redirect_uri, scope, state, code_challenge, code_challenge_method, response_type)
     code = secrets.token_urlsafe(32)
-    OAuthGrant.objects.create(
-        user=user, client_id=client_id, redirect_uri=redirect_uri, scopes=scopes,
-        code_challenge=code_challenge, code_hash=hashlib.sha256(code.encode()).hexdigest(),
-        code_expires_at=timezone.now() + CODE_LIFETIME,
-    )
+    with transaction.atomic():
+        current_user = User.objects.select_for_update().get(pk=user.pk)
+        require_eligible_user(current_user)
+        OAuthGrant.objects.create(
+            user=current_user, client_id=client_id, redirect_uri=redirect_uri, scopes=scopes,
+            code_challenge=code_challenge, code_hash=hashlib.sha256(code.encode()).hexdigest(),
+            code_expires_at=timezone.now() + CODE_LIFETIME,
+        )
     return f'{redirect_uri}{"&" if "?" in redirect_uri else "?"}{urlencode({"code": code, "state": state})}'
 
 
@@ -73,6 +82,7 @@ def exchange(*, client_id, redirect_uri, code, code_verifier):
             or not secrets.compare_digest(grant.code_challenge, challenge)
         ):
             raise OAuthError('invalid_grant', 'Invalid or expired authorization code')
+        require_eligible_user(User.objects.select_for_update().get(pk=grant.user_id))
         token = secrets.token_urlsafe(32)
         grant.code_used_at = timezone.now()
         grant.access_token_hash = hashlib.sha256(token.encode()).hexdigest()
@@ -81,7 +91,7 @@ def exchange(*, client_id, redirect_uri, code, code_verifier):
     return {'access_token': token, 'token_type': 'Bearer', 'expires_in': int(TOKEN_LIFETIME.total_seconds()), 'scope': ' '.join(grant.scopes)}
 
 
-def grant_for_token(token):
+def grant_for_token(token, *, enforce_eligibility=True):
     if not isinstance(token, str) or len(token) > 256 or not token:
         raise OAuthError('invalid_token', 'Invalid access token')
     grant = OAuthGrant.objects.select_related('user', 'user__space').filter(
@@ -92,6 +102,8 @@ def grant_for_token(token):
     # Existing grants keep their original consent, even after an approved revision changes.
     if not grant or not approved(grant.client_id):
         raise OAuthError('invalid_token', 'Invalid or expired access token')
+    if enforce_eligibility:
+        require_eligible_user(grant.user)
     return grant
 
 
@@ -118,6 +130,7 @@ def userinfo(token):
 
 
 def revoke(token):
-    grant = grant_for_token(token)
+    # Losing eligibility must not prevent revoking an existing authorization.
+    grant = grant_for_token(token, enforce_eligibility=False)
     grant.revoked_at = timezone.now()
     grant.save(update_fields=['revoked_at'])

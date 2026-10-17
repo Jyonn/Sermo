@@ -30,7 +30,7 @@ class OAuthMigrationTests(TransactionTestCase):
         MigrationExecutor(connection).migrate(previous)
         try:
             space = Space.objects.create(name='Synthetic rollout', slug='rollout-test', email='synthetic@example.com')
-            user = User.objects.create(space=space, name='Synthetic')
+            user = User.objects.create(space=space, name='Synthetic', email='verified@example.test', email_verified_at=timezone.now(), phone='+8613800138000', phone_verified_at=timezone.now())
             verifier = 'v' * 43
             challenge = legacy['base64'].urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b'=').decode()
             params = dict(client_id='supervision-local', redirect_uri='http://127.0.0.1:8001/api/auth/friendom/callback/', scope='profile', state='s' * 32,
