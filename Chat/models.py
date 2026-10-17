@@ -130,8 +130,8 @@ class Chat(models.Model):
         ).select_related('user').first()
         return owner.user.tiny_json() if owner else None
 
-    def json(self):
-        return self.dictify(
+    def json(self, *, include_last_message=True):
+        fields = (
             'id->chat_id',
             'chat_type',
             'purpose',
@@ -143,8 +143,8 @@ class Chat(models.Model):
             'group',
             'created_at',
             'last_chat_at',
-            'last_message',
         )
+        return self.dictify(*fields, *(['last_message'] if include_last_message else []))
 
     def set_group_background(self, operator: User, theme: str):
         if not self.group or self.submission:

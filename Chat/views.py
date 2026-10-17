@@ -6,6 +6,7 @@ from smartdjango import analyse, OK
 from Chat.models import Chat, ChatMember, ChatMemberStatusChoice, ChatPurposeChoice, ChatReadState, ChatUserPreference, Submission, SubmissionInvite, SubmissionInviteStatusChoice, SubmissionMemberRoleChoice
 from Chat.params import ChatParams, ChatMemberParams, ChatPreferenceParams
 from Chat.validators import ChatErrors
+from Chat.compact import compact_chat_list
 from Message.models import MediaResource, Message, MessageTypeChoice
 from Message.params import MessageParams
 from Message.validators import MessageErrors
@@ -18,7 +19,7 @@ from utils.content_safety import ContentSafetyScene, check_user_text
 class ChatListView(View):
     @staticmethod
     def build_chat_payload(chat, user, request):
-        data = chat.jsonl()
+        data = chat.json(include_last_message=False)
         if chat.submission:
             data['submission'] = chat.submission_record.jsonl(user)
             data['submission_role'] = chat.submission_record.role_for(user)
@@ -56,6 +57,8 @@ class ChatListView(View):
         chats = Chat.get_user_chats(request.user, purpose=purpose, submission_role=submission_role)
         payloads = [self.build_chat_payload(chat, request.user, request) for chat in chats]
         payloads.sort(key=lambda item: (bool(item['pinned']), item['last_chat_at']), reverse=True)
+        if request.GET.get('format') == 'compact-v1':
+            return compact_chat_list(payloads, accept_gzip='gzip' in request.headers.get('Accept-Encoding', '').lower())
         return payloads
 
 

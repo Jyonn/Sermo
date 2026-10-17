@@ -1,6 +1,7 @@
 import json
 
 from django.http import HttpResponse
+from django.middleware.gzip import GZipMiddleware
 from django.utils.functional import Promise
 
 from smartdjango.error import Error, OK
@@ -19,6 +20,16 @@ def _safe_error_eq(self, other):
 
 
 Error.__eq__ = _safe_error_eq
+
+
+class ChatListCompression(GZipMiddleware):
+    """Compress only packed chat-list responses, using Django's safeguards."""
+
+    def process_response(self, request, response):
+        match = getattr(request, 'resolver_match', None)
+        if request.method != 'GET' or getattr(match, 'url_name', None) != 'chat_list' or response.status_code != 200:
+            return response
+        return super().process_response(request, response)
 
 
 class GrowthAwardHeader:

@@ -69,6 +69,7 @@ MIDDLEWARE = [
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     'utils.middleware.GrowthAwardHeader',
+    'utils.middleware.ChatListCompression',
     'utils.middleware.APIPacker',
 ]
 
