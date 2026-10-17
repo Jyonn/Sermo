@@ -144,7 +144,7 @@ def get_login_token(user: User):
     return dict(
         auth=access_token,
         refresh=refresh_token,
-        data=access_payload,
+        data={**access_payload, **user.dictify('avatar_type', 'avatar_uri', 'avatar_cache_key', 'avatar_frame_style')},
     )
 
 
