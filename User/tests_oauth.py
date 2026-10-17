@@ -108,3 +108,41 @@ class OAuthTests(TestCase):
             with self.subTest(overrides=overrides), self.assertRaises(OAuthError):
                 self.authorize(**values)
         self.assertEqual(OAuthGrant.objects.count(), 0)
+
+    def test_all_legacy_clients_http_roundtrip_and_cross_client_code_isolation(self):
+        login_token = get_login_token(self.user)['auth']
+        for client_id, scope in [('stillfolio', 'profile phone vip'), ('chronelle', 'profile'), ('supervision-local', 'profile')]:
+            with self.subTest(client_id=client_id):
+                callback = registered_redirect_uri(client_id)
+                params = dict(client_id=client_id, redirect_uri=callback, scope=scope, state='s' * 32,
+                              code_challenge=self.challenge, code_challenge_method='S256', response_type='code')
+                metadata = self.client.get('/users/oauth/metadata', params)
+                self.assertEqual(metadata.status_code, 200)
+                self.assertEqual(metadata.json()['callback'], callback)
+                response = self.client.post('/users/oauth/authorize', json.dumps(params), content_type='application/json', HTTP_AUTHORIZATION=f'Bearer {login_token}')
+                self.assertEqual(response.status_code, 200)
+                destination = urlparse(response.json()['redirect_uri'])
+                self.assertEqual(parse_qs(destination.query)['state'], ['s' * 32])
+                code = parse_qs(destination.query)['code'][0]
+                for other in {'stillfolio', 'chronelle', 'supervision-local'} - {client_id}:
+                    with self.assertRaises(OAuthError):
+                        exchange(client_id=other, redirect_uri=registered_redirect_uri(other), code=code, code_verifier=self.verifier)
+                result = exchange(client_id=client_id, redirect_uri=callback, code=code, code_verifier=self.verifier)
+                self.assertEqual(set(result['scope'].split()), set(scope.split()))
+                profile = userinfo(result['access_token'])
+                self.assertEqual(profile['sub'], f'sermo:{self.space.id}:{self.user.id}')
+                self.assertNotIn('email', profile)
+                self.assertNotIn('email_verified', profile)
+                if client_id != 'stillfolio':
+                    self.assertNotIn('phone', profile)
+                    self.assertNotIn('is_vip', profile)
+                with self.assertRaises(OAuthError):
+                    exchange(client_id=client_id, redirect_uri=callback, code=code, code_verifier=self.verifier)
+                revoke(result['access_token'])
+                with self.assertRaises(OAuthError):
+                    userinfo(result['access_token'])
+
+    def test_all_legacy_clients_reject_email_scope_without_registry_revision(self):
+        for client_id in ('stillfolio', 'chronelle', 'supervision-local'):
+            with self.subTest(client_id=client_id), self.assertRaises(OAuthError):
+                self.authorize(client_id=client_id, redirect_uri=registered_redirect_uri(client_id), scope='profile email')
