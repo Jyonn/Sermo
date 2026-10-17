@@ -102,6 +102,8 @@ component at desktop/light and 390px/dark sizes, with DOM scroll width equal to 
 and no horizontal overflow. The exact-loopback checkbox changed Approve from disabled
 to enabled, without submitting any mutation. A later extension UI block prevented
 empty/error/loading-state and integrated PWA drawer acceptance; it was not bypassed.
+Those gaps were subsequently completed in the explicitly authorized temporary real-app
+QA tab described below.
 Synthetic SQL backup/restore is now verified below; production backup recoverability
 and exact production-version rehearsal remain unverified.
 
@@ -131,11 +133,33 @@ There is no installed compatible container runner in which to use an official ma
 image. No new software or network/security changes were attempted. Matching-version
 execution remains **not run**, rather than being relabeled as passed by the 9.6 tests.
 
-The previous ephemeral QA tab is closed. The browser inventory now contains user and
-other-task tabs, not the OAuth fixture; none were repurposed and no additional tab was
-opened. Full PWA/empty/error/loading acceptance remains **not run** pending a permitted
-existing local app test surface or user-selected session. Prior desktop/light and
-mobile/dark component observations remain valid only for their synthetic fixture.
+After explicit authorization, one temporary local QA tab exercised the real `App`,
+router, `MenuPage`, `AppChrome`, `SideDrawer`, `PlatformAdminPage` and their normal
+providers with synthetic sessions and mocked application APIs. No user/other-task tab
+was repurposed, no real credentials or online grant data were used, and no native PWA
+installation or notification permission was requested. The tab was closed, its viewport
+reset, temporary fixture files removed and server stopped after verification.
+
+Verified within that real app surface:
+
+- `/app/menu` → Apps and plugins → OAuth applications opens the nested drawer in the
+  same tab, using `panel=more-apps/oauth-applications` history.
+- Empty list, initial unresolved loading request, load error, successful Refresh recovery,
+  and save error preserving entered client ID/name/callback all behave correctly.
+  QA caught and fixed a stale error remaining after successful list refresh; a save
+  failure still survives the automatic background resynchronization.
+- Ordinary synthetic user has no platform review link. Setting a synthetic existing
+  platform session reveals the link, which opens `/admin?section=oauth` in the same tab
+  and existing platform-console layout. Backend role enforcement remains covered by tests.
+- At 390×844, page and both developer drawers have scroll width 390; admin page is also
+  390 with no horizontal overflow. Existing PWA recommendation is dismissible; input
+  computed foreground/background contrast remains readable in the platform layout.
+- Standalone PWA detection was simulated through the existing `isStandalonePwa` path;
+  the normal app drawer opens and browser Back/Forward restores its history correctly.
+  Escape closes one drawer level. No separate website or new tab navigation is used by
+  the feature. Native iOS/Android installation, nonzero device safe-area insets and
+  production service-worker upgrade/offline caching were not claimed by this browser
+  simulation; these existing infrastructure behaviors were not changed by the feature.
 
 ### Reviewable release checklist
 
@@ -152,7 +176,7 @@ mobile/dark component observations remain valid only for their synthetic fixture
 | Rollback after custom-client approval/disable use | Old backend shown unsafe; use compatible backend or keep new backend and revert frontend |
 | Frontend callback tests and production build | PASS: 2 tests; latest frontend build passes |
 | Desktop/light, mobile/dark shared component | PASS within synthetic fixture; no 390px horizontal overflow |
-| Integrated PWA and empty/error/loading UI | NOT RUN: no available OAuth QA tab; other tabs left untouched |
+| Integrated app/PWA standalone navigation and empty/error/loading UI | PASS in real app with synthetic APIs: Back/Forward/Escape, role entry, 390px layout; no native install/SW lifecycle claim |
 | Exact MySQL 8.0.46 / Python 3.12.3 / Django 5.1.12 | NOT RUN: matching installed environment/container runtime absent |
 | Production DDL/seed/backup/switch/email approval/push/mirror | NOT RUN: requires separate user authorization and operational preflight |
 | i18n/migration drift full checks | Existing baseline warnings; required CI gates still must be resolved or explicitly accepted |
@@ -192,8 +216,9 @@ callback is an unchanged protocol URL, not a display-name correction target.
 - **Release gate:** verify an operator backup and recovery plan and validate grant
   compatibility via the approved seed. Live grant inventory has not been read or copied.
   Seed must stop on any mismatch; it is not authorized to repair records automatically.
-- **Acceptance gap:** desktop/light and mobile/dark shared component checks passed;
-  full PWA navigation and loading/empty/error acceptance remain blocked by browser UI.
+- **Acceptance completed:** real-app drawer/PWA standalone navigation and empty/error/
+  loading/retry states passed with synthetic APIs. Native installation and production
+  service-worker lifecycle are outside this local simulation and were not changed here.
 - **Not an 0083 SQL blocker:** existing model-state drift for OAuthGrant and Chat index
   names also exists on the previous committed baseline; do not run `makemigrations`
   automatically during release or include its suggested changes in this migration.
