@@ -1,4 +1,4 @@
-# OAuth application registry — local implementation
+# Frienden OAuth application registry — local implementation
 
 Status: implemented locally; no production migration, seeding, approval, grant creation,
 push, or deployment performed. Frontend draft release ID: `2026.10.17.17`.
@@ -16,6 +16,14 @@ push, or deployment performed. Frontend draft release ID: `2026.10.17.17`.
   Exact HTTP loopback exceptions require explicit approval. Rejection needs a note.
 - All mutations include `version` except creation; edits/reviews also include
   `revision_id`. Stale writes return 409. Mutations/audits share a transaction.
+- Navigation is inside the existing Frienden router. Developer management is a
+  `SideDrawer` under `/app/menu` → More apps, within the existing `AppChrome` and user
+  authentication. Admin review is a section of the existing `/admin` platform-console
+  layout and existing platform-admin authentication. A same-tab menu link to
+  `/admin?section=oauth` is shown only when an existing platform-admin session is present.
+  There is no new website or authentication system. The extra browser tab was only a
+  temporary synthetic UI fixture; its files were removed and server stopped. Ordinary
+  users cannot see the admin menu link or pass the admin API JWT checks.
 - Pending/rejected revisions leave the approved pointer unchanged. Disabling blocks
   authorization, code exchange and userinfo. Restoring preserves unexpired grants.
 - `/users/oauth/metadata` validates the complete authorization request and returns
@@ -84,22 +92,50 @@ renames and OAuthGrant model-state normalization; 0083 intentionally excludes th
 unrelated alterations. `npm run i18n:check` fails on existing missing Spanish keys and
 existing lab-page hardcoded strings, reproduced from HEAD; new keys exist in every
 locale and Chinese/English copy is provided. Other locales use English fallback copy.
-Chrome extension UI blocks automated visual inspection. Mobile/desktop/dark-mode,
-PWA drawer navigation, loading/empty/error screens still need browser acceptance.
-The production version and physical backup/restore procedure remain unverified.
+Supported Chrome automation subsequently verified the synthetic shared management
+component at desktop/light and 390px/dark sizes, with DOM scroll width equal to 390px
+and no horizontal overflow. The exact-loopback checkbox changed Approve from disabled
+to enabled, without submitting any mutation. A later extension UI block prevented
+empty/error/loading-state and integrated PWA drawer acceptance; it was not bypassed.
+Physical backup/restore and exact production-version rehearsal remain unverified.
+
+### Read-only production observations (2026-10-17)
+
+- Deployed checkout: `73b2edf7f099e2c7020cd260f8d26970d6002696`; tracked files clean.
+- Deployment virtual environment: Python `3.12.3`, Django `5.1.12`.
+- Database `SELECT VERSION(), @@version_comment`: MySQL
+  `8.0.46-0ubuntu0.24.04.4` (Ubuntu). No grant rows or tokens were queried/exported.
+- Public main site and mirror both report release `2026.10.17.16`.
+- Matching Sermo processes' allowlisted callback environment was evaluated against
+  deployed registration source. All observed processes agree on the three callbacks
+  and scopes in the seed table; StillFolio uses the displayed default callback.
+  This checks deployed source/configuration, not an authenticated grant roundtrip or
+  introspection of already-loaded worker Python functions. Some worker executable
+  symlinks refer to a deleted Python binary; the listed patch version is the currently
+  installed deployment interpreter, not an independently measured running-worker patch.
+- Local installed tools provide MySQL 9.6 / Django 6.1.2, not the production versions.
+  No new software was installed. Existing same-family rehearsal passes, but a matching
+  8.0/5.1 rehearsal has not been completed and no production DDL has been exercised.
+
+These probes were read-only: no service reload, endpoint pause, production backup,
+migration, seed, application approval, token creation, push or deployment was performed.
+Existing server credentials were used internally by the standard MySQL client; their
+contents and all non-allowlisted process environment values were not emitted.
+Display branding is Frienden. Historical `friendom` inside the approved Supervision
+callback is an unchanged protocol URL, not a display-name correction target.
 
 ### Release gates versus baseline warnings
 
 - **Release gate:** user approval for push/deployment, production schema changes and
   seeding has not been granted. Do not deploy on the strength of local tests.
-- **Release gate:** confirm actual production MySQL and Django versions/configuration;
-  the available local rehearsal used MySQL 9.6.0 and Django 6.1.2. Rehearse on matching
-  versions if different, especially before any destructive schema reversal.
-- **Release gate:** confirm StillFolio's actual callback and the original scopes/grants;
-  verify an operator backup and recovery plan before migration. No live inventory was
-  read in this task. Seed must stop on any mismatch.
-- **Release gate:** browser acceptance of mobile/desktop/dark-mode/PWA and error/loading
-  paths is incomplete because Chrome automation is blocked by an extension UI.
+- **Release gate:** versions and callbacks are now observed above; decide whether to
+  require a matching MySQL 8.0 / Django 5.1 rehearsal before approved production DDL.
+  Local 9.6/6.1 success alone is not proof of version-equivalent behavior.
+- **Release gate:** verify an operator backup and recovery plan and validate grant
+  compatibility via the approved seed. Live grant inventory has not been read or copied.
+  Seed must stop on any mismatch; it is not authorized to repair records automatically.
+- **Acceptance gap:** desktop/light and mobile/dark shared component checks passed;
+  full PWA navigation and loading/empty/error acceptance remain blocked by browser UI.
 - **Not an 0083 SQL blocker:** existing model-state drift for OAuthGrant and Chat index
   names also exists on the previous committed baseline; do not run `makemigrations`
   automatically during release or include its suggested changes in this migration.
@@ -151,14 +187,18 @@ only. StillFolio and Chronelle keep their exact original scopes, with no email a
 - Email fields appear only on newly consented email grants. Email requests before
   Supervision registry approval fail `invalid_scope`. Normal profile responses keep
   their old fields, and login/session/account merge behavior is unchanged.
-- Pause OAuth authorize/token/userinfo/revoke traffic during the registry switchover;
-  it is an OAuth availability window, not a planned general Sermo login shutdown.
-  Plan maintenance messaging and keep non-OAuth traffic running where deployment permits.
+- A planned OAuth pause is not inherently required by the additive schema: pre-create
+  and seed before the new backend serves traffic. A single-step in-place replacement
+  without preparation does require an OAuth maintenance window to avoid an empty
+  registry. DDL metadata locking, worker reloads and failed health checks may still
+  cause a brief OAuth interruption; duration cannot be estimated responsibly without
+  live schema/traffic/reload measurements. Do not promise zero downtime or a time bound.
 
 ## Proposed production procedure — requires separate explicit approval
 
-1. Review both repository commits and finish browser acceptance. Confirm deployment
-   engine/version and rehearse schema migration/rollback with synthetic data on it.
+1. Review the local commits and remaining acceptance gaps. Choose staged rollout below
+   or explicitly approve an OAuth maintenance window. Production versions are listed
+   above; matching-version rehearsal and backup restoration are still not proven.
 2. Confirm the three exact live client IDs, callback URLs (especially StillFolio's
    environment override), scopes and active grant inventory. A conflict stops import;
    never broaden scopes or overwrite records to make an import pass.
@@ -166,22 +206,44 @@ only. StillFolio and Chronelle keep their exact original scopes, with no email a
    original OAuthGrant rows, and registry/audit tables if already present. Record
    grant/client counts, exact callbacks/scopes and previous backend/frontend revisions;
    verify the backup is restorable on an isolated target, without exporting secrets into
-   this workspace. Keep old code/assets available. Pause OAuth endpoints during backend transition:
-   database-backed authorization requires both schema and seed records before traffic
-   resumes. Apply schema migration 0083, then explicitly run:
+   this workspace. Keep old code/assets available. From a separate prepared release
+   directory, with existing workers still serving their unchanged old source tree,
+   apply schema migration 0083 and explicitly run:
    `python manage.py seed_oauth_applications --stillfolio-redirect-uri <confirmed-existing-uri>`.
    Inspect `migrate --plan` first and target the reviewed 0083 schema migration; do not
    let unrelated generated migrations enter the release. Seed validates grants/records and inserts only missing legacy registrations in one
    transaction; it never edits grants. Repeated identical imports do nothing.
-4. Verify three registered clients and unchanged grant counts/scopes. Deploy backend
-   and frontend as a coordinated release; resume OAuth endpoints after metadata and
-   legacy login checks. Publish mirror only through `npm run deploy:mirror`, then
-   verify its release ID. No push/mirror operation is authorized by this local task.
+4. Verify three registered clients and unchanged grants before new workers receive
+   traffic. Switch backend, validate metadata/legacy OAuth, then publish frontend and
+   mirror. Old frontend remains compatible with the three original clients while the
+   prepared new backend runs. No new clients, email approvals or disabling operations
+   should be enabled during mixed-worker transition. Publish mirror only through
+   `npm run deploy:mirror`, then verify its release ID. No such operation is authorized
+   by the present read-only preflight.
 5. Separately approve any Supervision scope expansion with an exact diff:
    `['profile'] -> ['profile', 'email']`, same client ID and exact loopback callback.
    Submit/review a registry revision with explicit loopback confirmation. Existing
    grants stay profile-only. Each user must explicitly consent to a new `profile email`
    request before Supervision consumes a verified address for its Gravatar hash.
+
+### Staged rollout feasibility
+
+The code permits an additive expand-then-switch rollout: old runtime ignores the new
+tables, old workers continue writing the same valid grants during seeding, and a fully
+seeded registry accepts those grants when new workers replace old ones. Keep old source
+directories immutable: placing new files directly over the live checkout can make old
+workers lazily import new modules before the registry is ready. A separate release
+directory and controlled worker/proxy switch are operational prerequisites, not changes
+performed by this task. Verify the active API launch/reload arrangement before using
+this plan; current checks did not establish a blue/green or graceful-reload mechanism.
+
+After all new workers are healthy, remove old workers, release the frontend, and only
+then open new-client/email approval and disable/restore operations. Mixed old/new workers
+cannot consistently enforce new registration or disable decisions. If that operational
+isolation cannot be arranged, choose a short explicitly approved OAuth maintenance
+window instead of pretending the in-place rollout is safe. Ordinary Sermo sessions
+are not intentionally invalidated; metadata locks or a shared-process restart could
+still affect other requests. The authorization for either switch strategy remains pending.
 
 ## Rollback proposal
 
@@ -189,8 +251,14 @@ Pause OAuth traffic, restore previous frontend/backend code together (backend ba
 `73b2edf`, frontend baseline `6b8bb95` for this task), keep additive
 registry tables and audit records intact, and resume only after legacy-client checks.
 Existing OAuthGrant records are unchanged, so previous code can still consume original
-legacy grants. Newly registered clients and email scope will be unavailable on old code;
-communicate that interruption before rollback. Do not drop registry tables to roll back
+legacy grants during an initial legacy-only rollout. Do not treat this as an unrestricted
+rollback after management features have been used: the old backend ignores registry
+disable flags and does not emit email fields, and its userinfo/revoke paths may still
+accept already-issued custom-client tokens while new authorization/code exchange for
+those clients fails. A rollback then requires a policy-compatible backend or a separately
+approved plan to contain/revoke affected grants; this task has not authorized revocation.
+Prefer retaining the new backend and rolling back only the frontend where viable.
+Communicate the actual affected clients before rollback. Do not drop registry tables to roll back
 an incident. Schema reversal to 0082 is destructive to registry records and audits and
 needs separate approval plus backup/export; it is not part of this task. No reverse
 migration or production rollback has been executed on production. The reverse migration
