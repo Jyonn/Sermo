@@ -20,7 +20,7 @@ def compact_chat_list(chats, *, accept_gzip=False):
     def user_ref(user):
         if user is None:
             return None
-        identity = json.dumps(user, sort_keys=True, ensure_ascii=False, separators=(',', ':'))
+        identity = json.dumps(user, sort_keys=True, ensure_ascii=False, separators=(',', ':'), default=str)
         if identity not in user_ids:
             user_ids[identity] = len(users)
             users.append(user)
@@ -53,6 +53,6 @@ def compact_chat_list(chats, *, accept_gzip=False):
     compact = {'format': 'compact-v1', 'users': pack_records(users), 'chats': pack_records(rows)}
     # Tiny lists may cost more with tables; the client accepts either representation.
     def size(value):
-        encoded = json.dumps(value, ensure_ascii=False, separators=(',', ':')).encode()
+        encoded = json.dumps(value, ensure_ascii=False, separators=(',', ':'), default=str).encode()
         return len(gzip.compress(encoded, mtime=0)) if accept_gzip else len(encoded)
     return compact if size(compact) < size(chats) else chats
