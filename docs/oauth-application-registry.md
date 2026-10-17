@@ -66,25 +66,30 @@ python manage.py test User.tests_oauth_registry User.tests_oauth User.tests_oaut
 python manage.py check --settings=Sermo.isolated_settings
 ```
 
-29 tests run: ownership, separate admin JWT, stale versions, rejection, pending
+30 tests run: ownership, separate admin JWT, stale versions, rejection, pending
 revision isolation, exact redirects, loopback approval, disable/restore and exchange,
 atomic/idempotent seed conflicts, grant preservation, incremental email and truthful
 verification, PKCE/code reuse, scoped userinfo and existing avatar behavior. All 14
 preexisting model/HTTP/PKCE/avatar tests remain and pass; 11 registry tests, two
-additional legacy-client matrix tests and two migration/concurrency tests extend them.
+additional legacy-client matrix tests and three migration/concurrency/staged-cutover tests extend them.
 The old three static-AST registration tests were replaced by database-backed exact
 registration/scope checks, rather than preserving tests of the removed hardcoding.
 The matrix independently exercises StillFolio, Chronelle and Supervision-local:
 metadata, authorization, state return, wrong-client code exchange, successful exchange,
 exact granted scopes, stable subject, absence of email, one-time code and revocation.
-SQLite passes 28 and skips only the engine-dependent concurrent-lock test.
-Installed MySQL 9.6.0 passes all 29 using a fresh `/tmp` datadir, no-defaults startup,
+SQLite passes 29 and skips only the engine-dependent concurrent-lock test.
+Installed MySQL 9.6.0 passes all 30 using a fresh `/tmp` datadir, no-defaults startup,
 TCP/X Protocol disabled, and only a dedicated Unix socket. No deployment config,
 production database, secrets, or extra software were used. Full migration history
 applied on the empty MySQL database; 0082→0083→0082→0083 preserved synthetic existing
 OAuthGrant rows byte-for-byte at ORM field level. Two concurrent writes produced one
-success, one 409 and exactly one mutation audit. This verifies engine behavior locally,
-not equivalence with the unknown production MySQL version/configuration.
+success, one 409 and exactly one mutation audit. The staged test runs the frozen actual
+`73b2edf` OAuth module from `User/fixtures/oauth_legacy_73b2edf.txt` before/after DDL,
+continues serving through the old runtime until seed completes, and only then switches
+to new enforcement. It also proves an early switch fails and that old userinfo can
+bypass disable policy for both a legacy and newly registered client, so it is rejected
+as a rollback destination after policy use. This verifies engine behavior locally,
+not version-equivalence with production MySQL 8.0.46 / Django 5.1.12.
 Frontend callback tests: 2 passed. `npm run build` passed, including style checks.
 
 Known baseline checks: `makemigrations --check --dry-run` reports existing Chat index
@@ -97,7 +102,60 @@ component at desktop/light and 390px/dark sizes, with DOM scroll width equal to 
 and no horizontal overflow. The exact-loopback checkbox changed Approve from disabled
 to enabled, without submitting any mutation. A later extension UI block prevented
 empty/error/loading-state and integrated PWA drawer acceptance; it was not bypassed.
-Physical backup/restore and exact production-version rehearsal remain unverified.
+Synthetic SQL backup/restore is now verified below; production backup recoverability
+and exact production-version rehearsal remain unverified.
+
+### Synthetic backup/restore rehearsal
+
+`scripts/rehearse_oauth_backup.py` refuses settings other than the named synthetic
+settings, non-`/tmp/sermo-oauth-mysql.*` sockets, nonempty source databases, non-root or
+nonempty credentials, and any database name other than `oauth_rehearsal`. It uses the
+already installed MySQL client/dump tools with `--no-defaults`. No deployment file or
+production connection is accepted. All identities and grant hashes are generated locally.
+
+- Before 0083: backup restored into `oauth_restore_before_registry`; legacy grant,
+  user, space and migration-history rows compared exactly; registry tables absent.
+- After 0083 and seed: backup restored into `oauth_restore_after_registry`; the same
+  four tables plus applications/revisions/audits compared exactly. Original three
+  grants remained unchanged. A new synthetic client and a disabled legacy client were
+  retained with disabled flags after restore; no policy was reopened by restoration.
+- No real grant/token/secret was read or copied. Dumps stay in the disposable `/tmp`
+  datadir. This is a MySQL 9.6 logical-backup rehearsal with synthetic data, not proof of
+  production snapshots, MySQL 8.0 recovery, large-database timing or point-in-time recovery.
+
+### Exact environment and UI blockers
+
+Read-only local inventory found MySQL 9.6 and Python 3.14 (test venv), plus Python 3.11,
+but no Python 3.12/MySQL 8.0 or Docker, Podman, Colima, Lima, nerdctl, OrbStack runtime.
+There is no installed compatible container runner in which to use an official matching
+image. No new software or network/security changes were attempted. Matching-version
+execution remains **not run**, rather than being relabeled as passed by the 9.6 tests.
+
+The previous ephemeral QA tab is closed. The browser inventory now contains user and
+other-task tabs, not the OAuth fixture; none were repurposed and no additional tab was
+opened. Full PWA/empty/error/loading acceptance remains **not run** pending a permitted
+existing local app test surface or user-selected session. Prior desktop/light and
+mobile/dark component observations remain valid only for their synthetic fixture.
+
+### Reviewable release checklist
+
+| Item | Evidence/status |
+| --- | --- |
+| Three legacy callbacks/scopes preserved, no implicit email | PASS: legacy matrix, seed checks, read-only deployed configuration |
+| All old model/HTTP/PKCE/avatar tests | PASS: original 14 included in suite |
+| New permissions, owner isolation, audit, stale versions | PASS: registry suite |
+| Migration, code/token preservation, true concurrent writes | PASS on local MySQL 9.6; lock test skipped on SQLite |
+| Add tables → seed → backend switch → frontend dependency order | PASS as synthetic old/new runtime sequence; actual process/proxy rollout NOT RUN |
+| Early backend switch against empty registry | Expected denial demonstrated; forbidden rollout order |
+| SQL backup/restore before and after registry | PASS with synthetic data on local MySQL 9.6; no production backup/restore |
+| Disable policy after restore | PASS: restored flags match exactly; compatible runtime enforcement tests pass |
+| Rollback after custom-client approval/disable use | Old backend shown unsafe; use compatible backend or keep new backend and revert frontend |
+| Frontend callback tests and production build | PASS: 2 tests; latest frontend build passes |
+| Desktop/light, mobile/dark shared component | PASS within synthetic fixture; no 390px horizontal overflow |
+| Integrated PWA and empty/error/loading UI | NOT RUN: no available OAuth QA tab; other tabs left untouched |
+| Exact MySQL 8.0.46 / Python 3.12.3 / Django 5.1.12 | NOT RUN: matching installed environment/container runtime absent |
+| Production DDL/seed/backup/switch/email approval/push/mirror | NOT RUN: requires separate user authorization and operational preflight |
+| i18n/migration drift full checks | Existing baseline warnings; required CI gates still must be resolved or explicitly accepted |
 
 ### Read-only production observations (2026-10-17)
 
@@ -263,6 +321,13 @@ an incident. Schema reversal to 0082 is destructive to registry records and audi
 needs separate approval plus backup/export; it is not part of this task. No reverse
 migration or production rollback has been executed on production. The reverse migration
 was exercised only with synthetic rows on local SQLite/MySQL. If a database restore is
-actually required, keep traffic paused, restore the validated backup under operator
-control, verify migration history and grant/client inventories, and only then resume
-legacy OAuth smoke checks. Physical backup restoration has not been rehearsed here.
+actually required, keep traffic paused and use a separately approved recovery plan.
+After management has been used, never restore the pre-registry or a stale pre-disable
+snapshot and blindly rerun the legacy seed: doing so can lose disable/review/audit
+decisions and reopen access. Preserve or reconcile all current disable and approval
+decisions under a policy-compatible backend before any traffic resumes; a backup is
+not an authorization to discard later security decisions. If that reconciliation cannot
+be proven, remain paused rather than serve through old permissive enforcement.
+Verify migration history, client/grant inventories, latest disabled state and audits
+on the recovery target. Synthetic logical SQL restoration was rehearsed locally;
+production physical/PITR recovery and latest-policy reconciliation were not performed.
