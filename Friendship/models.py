@@ -210,8 +210,10 @@ class Friendship(models.Model):
 
     @classmethod
     def create(cls, from_user: User, to_user: User, source: str = SOURCE_DIRECT, bypass_capability=False):
+        from Space.models import SpaceOperator
+        auto_accept = SpaceOperator.objects.filter(space=from_user.space, user=to_user, user__is_deleted=False).exists()
         source = source if source in cls.SOURCES else cls.SOURCE_DIRECT
-        if not bypass_capability:
+        if not bypass_capability and not auto_accept:
             from_user.require_capability(
                 'contacts.friend_request',
                 context={'qr_invite': source == cls.SOURCE_QR},
@@ -232,12 +234,17 @@ class Friendship(models.Model):
             if item.status == FriendshipStatusChoice.ACCEPTED:
                 raise FriendshipErrors.ALREADY_FRIENDS
             if item.status == FriendshipStatusChoice.PENDING:
+                if auto_accept:
+                    return item.accept(item._request_target())
                 raise FriendshipErrors.REQUEST_EXISTS
             item.requested_by = from_user
             item.status = FriendshipStatusChoice.PENDING
             item.responded_at = None
             item.source = source
             item.save(update_fields=['requested_by', 'status', 'source', 'responded_at', 'updated_at'])
+
+        if auto_accept:
+            return item.accept(to_user)
 
         from User.models import NotificationEvent
         NotificationEvent.emit_system_event(

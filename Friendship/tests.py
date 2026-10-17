@@ -58,12 +58,31 @@ class FriendshipExactSearchTests(TestCase):
             **self.authorization(self.unverified_searcher),
         )
         self.assertEqual(created.status_code, 200, created.content)
-        self.assertEqual(Friendship.between(self.unverified_searcher, self.verified_user).status, FriendshipStatusChoice.PENDING)
+        self.assertEqual(Friendship.between(self.unverified_searcher, self.verified_user).status, FriendshipStatusChoice.ACCEPTED)
+
+    def test_regular_request_to_operator_auto_accepts_but_member_request_does_not(self):
+        SpaceOperator.objects.create(space=self.space, user=self.verified_user)
+        relation = Friendship.create(self.unverified_searcher, self.verified_user)
+        self.assertEqual(relation.status, FriendshipStatusChoice.ACCEPTED)
+        self.assertIsNotNone(relation.responded_at)
+        normal = Friendship.create(self.verified_user, self.unverified_target)
+        self.assertEqual(normal.status, FriendshipStatusChoice.PENDING)
 
     def test_operator_list_marks_current_operator_as_self(self):
         SpaceOperator.objects.create(space=self.space, user=self.verified_user)
         listing = self.client.get('/friends/operators', **self.authorization(self.verified_user))
         self.assertEqual(listing.json()['body'][0]['relationship'], 'self')
+
+    def test_pending_operator_request_is_accepted_and_other_spaces_are_rejected(self):
+        SpaceOperator.objects.create(space=self.space, user=self.verified_user)
+        low, high = sorted([self.unverified_searcher, self.verified_user], key=lambda user: user.id)
+        Friendship.objects.create(space=self.space, user_low=low, user_high=high, requested_by=self.unverified_searcher, status=FriendshipStatusChoice.PENDING)
+        self.assertEqual(Friendship.create(self.unverified_searcher, self.verified_user).status, FriendshipStatusChoice.ACCEPTED)
+        other_space = Space.objects.create(name='Other', slug='other-operator', email='other@example.com')
+        other_operator = User.create(other_space, 'Other operator', verified=True)
+        SpaceOperator.objects.create(space=other_space, user=other_operator)
+        rejected = self.client.post('/friends/operators', data=json.dumps({'to_user_id': other_operator.id}), content_type='application/json', **self.authorization(self.verified_user))
+        self.assertEqual(rejected.status_code, 400)
 
 
 class FriendshipStateEventTests(TestCase):
