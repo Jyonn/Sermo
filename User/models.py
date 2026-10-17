@@ -3954,6 +3954,39 @@ class NotificationDelivery(models.Model):
         return deliveries
 
 
+class OAuthApplication(models.Model):
+    client_id = models.CharField(max_length=80, unique=True)
+    owner = models.ForeignKey(User, null=True, blank=True, on_delete=models.PROTECT, related_name='oauth_applications')
+    enabled = models.BooleanField(default=True)
+    version = models.PositiveIntegerField(default=1)
+    approved_revision = models.ForeignKey('OAuthApplicationRevision', null=True, blank=True, on_delete=models.PROTECT, related_name='+')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
+class OAuthApplicationRevision(models.Model):
+    application = models.ForeignKey(OAuthApplication, on_delete=models.CASCADE, related_name='revisions')
+    name = models.CharField(max_length=120)
+    description = models.CharField(max_length=1000, blank=True, default='')
+    redirect_uris = models.JSONField(default=list)
+    scopes = models.JSONField(default=list)
+    loopback_uris = models.JSONField(default=list)
+    status = models.CharField(max_length=16, default='draft', choices=[(s, s) for s in ('draft', 'pending', 'approved', 'rejected')])
+    review_note = models.CharField(max_length=1000, blank=True, default='')
+    reviewed_by = models.EmailField(blank=True, default='')
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
+class OAuthApplicationAudit(models.Model):
+    application = models.ForeignKey(OAuthApplication, on_delete=models.PROTECT, related_name='audit')
+    revision = models.ForeignKey(OAuthApplicationRevision, null=True, on_delete=models.PROTECT)
+    actor = models.CharField(max_length=254)
+    action = models.CharField(max_length=32)
+    version = models.PositiveIntegerField()
+    detail = models.JSONField(default=dict)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
 class OAuthGrant(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='oauth_grants')
     client_id = models.CharField(max_length=80)

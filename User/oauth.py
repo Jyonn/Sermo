@@ -2,7 +2,6 @@
 
 import base64
 import hashlib
-import os
 import re
 import secrets
 from datetime import timedelta
@@ -12,10 +11,9 @@ from django.db import transaction
 from django.utils import timezone
 
 from User.models import OAuthGrant
+from User.oauth_registry import SCOPES, approved
 
 
-SCOPES = frozenset({'profile', 'phone', 'vip'})
-CLIENT_SCOPES = {'stillfolio': SCOPES, 'chronelle': frozenset({'profile'}), 'supervision-local': frozenset({'profile'})}
 CODE_LIFETIME = timedelta(minutes=5)
 TOKEN_LIFETIME = timedelta(hours=1)
 PKCE_RE = re.compile(r'^[A-Za-z0-9_-]{43}$')
@@ -30,17 +28,13 @@ class OAuthError(ValueError):
 
 
 def registered_redirect_uri(client_id='stillfolio'):
-    if client_id == 'stillfolio':
-        return os.environ.get('SERMO_OAUTH_STILLFOLIO_REDIRECT_URI', 'https://stillfolio.jyonn.space/auth/sermo/callback')
-    if client_id == 'chronelle':
-        return 'https://chronelle.jyonn.space/api/profile/sermo/callback/'
-    if client_id == 'supervision-local':
-        return 'http://127.0.0.1:8001/api/auth/friendom/callback/'
-    return None
+    revision = approved(client_id)
+    return revision.redirect_uris[0] if revision else None
 
 
 def validate_authorization(client_id, redirect_uri, scope, state, code_challenge, code_challenge_method, response_type):
-    if not isinstance(client_id, str) or client_id not in CLIENT_SCOPES or redirect_uri != registered_redirect_uri(client_id):
+    revision = approved(client_id, redirect_uri) if isinstance(client_id, str) else None
+    if not revision:
         raise OAuthError('invalid_request', 'Unknown client or redirect URI')
     if response_type != 'code':
         raise OAuthError('unsupported_response_type', 'Authorization code required')
@@ -49,7 +43,7 @@ def validate_authorization(client_id, redirect_uri, scope, state, code_challenge
     if not isinstance(state, str) or not 16 <= len(state) <= 512:
         raise OAuthError('invalid_request', 'State must be 16 to 512 characters')
     scopes = set(scope.split()) if isinstance(scope, str) else set()
-    if not scopes or not scopes <= CLIENT_SCOPES[client_id]:
+    if not scopes or not scopes <= set(revision.scopes):
         raise OAuthError('invalid_scope', 'Unsupported scope')
     return sorted(scopes)
 
@@ -62,11 +56,11 @@ def authorize(user, *, client_id, redirect_uri, scope, state, code_challenge, co
         code_challenge=code_challenge, code_hash=hashlib.sha256(code.encode()).hexdigest(),
         code_expires_at=timezone.now() + CODE_LIFETIME,
     )
-    return f'{redirect_uri}?{urlencode({"code": code, "state": state})}'
+    return f'{redirect_uri}{"&" if "?" in redirect_uri else "?"}{urlencode({"code": code, "state": state})}'
 
 
 def exchange(*, client_id, redirect_uri, code, code_verifier):
-    if not isinstance(client_id, str) or client_id not in CLIENT_SCOPES or redirect_uri != registered_redirect_uri(client_id) or not isinstance(code, str) or not PKCE_RE.fullmatch(code):
+    if not isinstance(client_id, str) or not approved(client_id) or not isinstance(code, str) or not PKCE_RE.fullmatch(code):
         raise OAuthError('invalid_grant', 'Invalid authorization code')
     if not isinstance(code_verifier, str) or not VERIFIER_RE.fullmatch(code_verifier):
         raise OAuthError('invalid_grant', 'Invalid PKCE verifier')
@@ -95,7 +89,8 @@ def grant_for_token(token):
         access_expires_at__gt=timezone.now(), revoked_at__isnull=True,
         user__is_deleted=False,
     ).first()
-    if not grant:
+    # Existing grants keep their original consent, even after an approved revision changes.
+    if not grant or not approved(grant.client_id):
         raise OAuthError('invalid_token', 'Invalid or expired access token')
     return grant
 
@@ -111,6 +106,9 @@ def userinfo(token):
         payload['avatar_updated_at'] = None
     if 'vip' in grant.scopes:
         payload['is_vip'] = bool(user.is_permanent_vip)
+    if 'email' in grant.scopes:
+        payload['email'] = (user.email or '').strip() or None
+        payload['email_verified'] = bool(payload['email'] and user.email_verified_at)
     if 'phone' in grant.scopes:
         raw = (user.phone or '').strip()
         digits = raw[3:] if raw.startswith('+86') else raw[2:] if raw.startswith('86') else raw

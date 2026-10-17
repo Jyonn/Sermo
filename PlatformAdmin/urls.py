@@ -1,4 +1,5 @@
 from django.urls import path
+from User.oauth_application_views import OAuthAdminApplicationsView
 from PlatformAdmin.debug_reports import DebugReportDetailView, DebugReportListView, DebugReportUploadView
 
 from PlatformAdmin.views import (
@@ -12,6 +13,8 @@ from AccessPolicy.views import (
 )
 
 urlpatterns = [
+    path('oauth/applications', OAuthAdminApplicationsView.as_view()),
+    path('oauth/applications/<int:app_id>', OAuthAdminApplicationsView.as_view()),
     path('debug-reports/upload', DebugReportUploadView.as_view()),
     path('debug-reports', DebugReportListView.as_view()),
     path('debug-reports/<int:report_id>', DebugReportDetailView.as_view()),

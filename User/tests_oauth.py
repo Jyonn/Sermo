@@ -14,6 +14,8 @@ from utils.auth import get_login_token
 
 class OAuthTests(TestCase):
     def setUp(self):
+        from User.management.commands.seed_oauth_applications import seed
+        seed('https://stillfolio.jyonn.space/auth/sermo/callback')
         self.space = Space.objects.create(name='OAuth test', slug='oauth-test', email='oauth@example.com')
         self.user = User.create(self.space, 'Photographer', verified=True)
         self.verifier = 'v' * 43

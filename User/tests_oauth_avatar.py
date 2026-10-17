@@ -14,6 +14,8 @@ from User.oauth_avatar import profile_avatar_url
 
 class OAuthAvatarTests(TestCase):
     def setUp(self):
+        from User.management.commands.seed_oauth_applications import seed
+        seed('https://stillfolio.jyonn.space/auth/sermo/callback')
         self.space = Space.objects.create(name='Avatar OAuth', slug='avatar-oauth', email='avatar@example.com')
         self.user = User.create(self.space, 'Avatar', verified=True)
 

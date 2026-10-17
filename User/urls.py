@@ -2,6 +2,7 @@ from django.urls import path
 from User.chronelle_views import ChronelleBindingView, ChronelleAuthorizationView, ChronelleClaimView
 from User.oauth_views import OAuthAuthorizeView, OAuthTokenView, OAuthUserinfoView, OAuthRevokeView
 from User.oauth_avatar import OAuthAvatarView
+from User.oauth_application_views import OAuthMetadataView, OAuthDeveloperApplicationsView
 
 from User.views import (
     HeartbeatView,
@@ -54,6 +55,9 @@ from User.views import (
 )
 
 urlpatterns = [
+    path('oauth/metadata', OAuthMetadataView.as_view()),
+    path('oauth/applications', OAuthDeveloperApplicationsView.as_view()),
+    path('oauth/applications/<int:app_id>', OAuthDeveloperApplicationsView.as_view()),
     path('oauth/avatar/<str:token>', OAuthAvatarView.as_view(), name='oauth avatar'),
     path('me/chronelle', ChronelleBindingView.as_view(), name='chronelle binding'),
     path('me/chronelle/authorize', ChronelleAuthorizationView.as_view(), name='chronelle authorization'),
