@@ -3955,6 +3955,7 @@ class NotificationDelivery(models.Model):
 
 
 class OAuthApplication(models.Model):
+    space_admin_proof_enabled = models.BooleanField(default=False)
     client_id = models.CharField(max_length=80, unique=True)
     owner = models.ForeignKey(User, null=True, blank=True, on_delete=models.PROTECT, related_name='oauth_applications')
     enabled = models.BooleanField(default=True)
@@ -3989,6 +3990,8 @@ class OAuthApplicationAudit(models.Model):
 
 
 class OAuthGrant(models.Model):
+    target_space = models.ForeignKey('Space.Space', null=True, blank=True, on_delete=models.CASCADE, related_name='+')
+    authorization_request = models.OneToOneField('OAuthAuthorizationRequest', null=True, blank=True, on_delete=models.PROTECT, related_name='grant')
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='oauth_grants')
     client_id = models.CharField(max_length=80)
     redirect_uri = models.URLField(max_length=512)
@@ -4001,3 +4004,13 @@ class OAuthGrant(models.Model):
     access_expires_at = models.DateTimeField(null=True, blank=True)
     revoked_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
+
+
+class OAuthAuthorizationRequest(models.Model):
+    token_hash = models.CharField(max_length=64, unique=True)
+    parameters = models.JSONField()
+    space = models.ForeignKey('Space.Space', on_delete=models.CASCADE, related_name='+')
+    purpose = models.CharField(max_length=24, default='join')
+    expires_at = models.DateTimeField()
+    used_at = models.DateTimeField(null=True, blank=True)
+    cancelled_at = models.DateTimeField(null=True, blank=True)

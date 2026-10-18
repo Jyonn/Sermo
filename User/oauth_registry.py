@@ -76,6 +76,7 @@ def serialize(app):
                     loopback_uris=r.loopback_uris, status=r.status, review_note=r.review_note,
                     reviewed_by=r.reviewed_by, reviewed_at=r.reviewed_at.isoformat() if r.reviewed_at else None)
     return dict(id=app.id, client_id=app.client_id, owner_id=app.owner_id, enabled=app.enabled, version=app.version,
+                space_admin_proof_enabled=app.space_admin_proof_enabled,
                 approved_revision_id=app.approved_revision_id, revisions=[revision(r) for r in app.revisions.order_by('-id')],
                 audit=[dict(actor=a.actor, action=a.action, version=a.version, detail=a.detail, created_at=a.created_at.isoformat()) for a in app.audit.order_by('-id')[:100]])
 
@@ -148,9 +149,13 @@ def mutate(*, actor, owner=None, admin=False, app_id=None, data):
             rev.save()
         elif action in ('disable', 'restore') and admin:
             app.enabled = action == 'restore'
+        elif action == 'admin_proof' and admin:
+            if type(data.get('enabled')) is not bool:
+                raise RegistryError('Explicit boolean administrator-proof capability required')
+            app.space_admin_proof_enabled = data['enabled']
         else:
             raise RegistryError('Action not allowed', 403)
-        app.save(update_fields=['enabled', 'approved_revision'])
+        app.save(update_fields=['enabled', 'approved_revision', 'space_admin_proof_enabled'])
     OAuthApplicationAudit.objects.create(application=app, revision=rev, actor=actor, action=action, version=app.version,
-                                         detail={'review_note': rev.review_note} if rev else {})
+                                         detail={'review_note': rev.review_note} if rev else {'enabled': app.space_admin_proof_enabled} if action == 'admin_proof' else {})
     return serialize(app)

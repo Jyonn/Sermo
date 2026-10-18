@@ -54,13 +54,22 @@ def validate_authorization(client_id, redirect_uri, scope, state, code_challenge
     return sorted(scopes)
 
 
-def authorize(user, *, client_id, redirect_uri, scope, state, code_challenge, code_challenge_method, response_type):
+def authorize(user, *, client_id, redirect_uri, scope, state, code_challenge, code_challenge_method, response_type, flow=None):
     scopes = validate_authorization(client_id, redirect_uri, scope, state, code_challenge, code_challenge_method, response_type)
     code = secrets.token_urlsafe(32)
     with transaction.atomic():
         current_user = User.objects.select_for_update().get(pk=user.pk)
         require_eligible_user(current_user)
+        if flow:
+            from User.oauth_requests import require_identity
+            require_identity(flow, current_user)
+            if flow.used_at or flow.cancelled_at or flow.expires_at <= timezone.now():
+                raise OAuthError('invalid_request', 'Authorization request is no longer active')
+            # Conditional consumption also prevents replay on SQLite.
+            if not type(flow).objects.filter(pk=flow.pk, used_at__isnull=True, cancelled_at__isnull=True).update(used_at=timezone.now()):
+                raise OAuthError('invalid_request', 'Authorization request already used')
         OAuthGrant.objects.create(
+            target_space_id=flow.space_id if flow else None, authorization_request=flow,
             user=current_user, client_id=client_id, redirect_uri=redirect_uri, scopes=scopes,
             code_challenge=code_challenge, code_hash=hashlib.sha256(code.encode()).hexdigest(),
             code_expires_at=timezone.now() + CODE_LIFETIME,
@@ -82,7 +91,9 @@ def exchange(*, client_id, redirect_uri, code, code_verifier):
             or not secrets.compare_digest(grant.code_challenge, challenge)
         ):
             raise OAuthError('invalid_grant', 'Invalid or expired authorization code')
-        require_eligible_user(User.objects.select_for_update().get(pk=grant.user_id))
+        current_user = User.objects.select_for_update().get(pk=grant.user_id)
+        require_eligible_user(current_user)
+        require_grant_identity(grant, current_user)
         token = secrets.token_urlsafe(32)
         grant.code_used_at = timezone.now()
         grant.access_token_hash = hashlib.sha256(token.encode()).hexdigest()
@@ -104,13 +115,16 @@ def grant_for_token(token, *, enforce_eligibility=True):
         raise OAuthError('invalid_token', 'Invalid or expired access token')
     if enforce_eligibility:
         require_eligible_user(grant.user)
+        require_grant_identity(grant, grant.user)
     return grant
 
 
 def userinfo(token):
     grant = grant_for_token(token)
     user = grant.user
-    payload = {'sub': f'sermo:{user.space_id}:{user.id}', 'space_slug': user.space.slug}
+    payload = {'sub': f'sermo:{user.space_id}:{user.id}', 'space_id': user.space_id, 'space_slug': user.space.slug}
+    if grant.authorization_request_id and grant.authorization_request.purpose == 'space_admin':
+        payload['space_admin'] = True
     if 'profile' in grant.scopes:
         payload['nickname'] = user.name
         from User.oauth_avatar import profile_avatar_url
@@ -119,7 +133,7 @@ def userinfo(token):
     if 'vip' in grant.scopes:
         payload['is_vip'] = bool(user.is_permanent_vip)
     if 'email' in grant.scopes:
-        payload['email'] = (user.email or '').strip() or None
+        payload['email'] = (user.email or '').strip().lower() or None
         payload['email_verified'] = bool(payload['email'] and user.email_verified_at)
     if 'phone' in grant.scopes:
         raw = (user.phone or '').strip()
@@ -127,6 +141,14 @@ def userinfo(token):
         payload['phone'] = f'+86{digits}' if user.phone_verified_at and MAINLAND_PHONE_RE.fullmatch(digits) else None
         payload['phone_verified'] = payload['phone'] is not None
     return payload
+
+
+def require_grant_identity(grant, user):
+    if grant.target_space_id and grant.target_space_id != user.space_id:
+        raise OAuthError('invalid_grant', 'Space identity changed')
+    if grant.authorization_request_id:
+        from User.oauth_requests import require_identity
+        require_identity(grant.authorization_request, user)
 
 
 def revoke(token):

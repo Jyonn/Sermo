@@ -12,15 +12,24 @@ from utils import auth
 class OAuthMetadataView(View):
     def get(self, request):
         try:
-            if any(len(request.GET.getlist(key)) != 1 for key in ('client_id', 'redirect_uri', 'scope', 'state', 'code_challenge', 'code_challenge_method', 'response_type')):
+            flow = None
+            params = request.GET
+            if 'request_id' in params:
+                from User.oauth_requests import resolve
+                if set(params) != {'request_id'} or len(params.getlist('request_id')) != 1:
+                    raise OAuthError('invalid_request', 'Request parameters are immutable')
+                flow = resolve(params['request_id'])
+                params = flow.parameters
+            elif any(len(request.GET.getlist(key)) != 1 for key in ('client_id', 'redirect_uri', 'scope', 'state', 'code_challenge', 'code_challenge_method', 'response_type')):
                 raise OAuthError('invalid_request', 'Provide each authorization parameter exactly once')
-            scopes = validate_authorization(**{key: request.GET.get(key, '') for key in (
+            scopes = validate_authorization(**{key: params.get(key, '') for key in (
                 'client_id', 'redirect_uri', 'scope', 'state', 'code_challenge', 'code_challenge_method', 'response_type')})
-            rev = approved(request.GET['client_id'], request.GET['redirect_uri'])
+            rev = approved(params['client_id'], params['redirect_uri'])
             if not rev:
                 raise OAuthError('invalid_request', 'Application is no longer available')
             response = JsonResponse(dict(id=rev.application.client_id, name=rev.name, description=rev.description, icon_url=rev.icon_url,
-                                         callback=request.GET['redirect_uri'], scopes=scopes))
+                                         callback=params['redirect_uri'], scopes=scopes,
+                                         **(dict(parameters=flow.parameters, target_space=dict(id=flow.space_id, slug=flow.space.slug, name=flow.space.name), purpose=flow.purpose) if flow else {})))
             response['Cache-Control'] = 'no-store'
             return response
         except OAuthError as error:

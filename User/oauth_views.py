@@ -38,7 +38,16 @@ class OAuthAuthorizeView(View):
     def post(self, request):
         data = _payload(request)
         try:
-            redirect_url = authorize(request.user, **{
+            if 'request_id' in data:
+                from django.db import transaction
+                from User.oauth_requests import resolve
+                if set(data) != {'request_id'}:
+                    raise OAuthError('invalid_request', 'Request parameters are immutable')
+                with transaction.atomic():
+                    flow = resolve(data['request_id'], lock=True)
+                    redirect_url = authorize(request.user, **flow.parameters, flow=flow)
+            else:
+                redirect_url = authorize(request.user, **{
                 key: data.get(key, '') for key in (
                     'client_id', 'redirect_uri', 'scope', 'state', 'code_challenge', 'code_challenge_method', 'response_type',
                 )
@@ -48,6 +57,34 @@ class OAuthAuthorizeView(View):
         response = JsonResponse({'redirect_uri': redirect_url})
         response['Cache-Control'] = 'no-store'
         return response
+
+
+class OAuthRequestsView(View):
+    def post(self, request):
+        from User.oauth_requests import create
+        try:
+            response = JsonResponse(create(_payload(request)), status=201)
+            response['Cache-Control'] = 'no-store'
+            return response
+        except OAuthError as error:
+            return _error(error)
+
+
+class OAuthRequestCancelView(View):
+    def post(self, request):
+        from django.db import transaction
+        from django.utils import timezone
+        from User.oauth_requests import resolve
+        try:
+            with transaction.atomic():
+                flow = resolve(_payload(request).get('request_id'), lock=True)
+                flow.cancelled_at = timezone.now()
+                flow.save(update_fields=['cancelled_at'])
+            response = JsonResponse({'cancelled': True})
+            response['Cache-Control'] = 'no-store'
+            return response
+        except OAuthError as error:
+            return _error(error)
 
 
 class OAuthEligibilityView(View):

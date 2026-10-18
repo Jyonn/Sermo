@@ -2,6 +2,7 @@ from django.urls import path
 from User.chronelle_views import ChronelleBindingView, ChronelleAuthorizationView, ChronelleClaimView
 from User.oauth_views import OAuthAuthorizeView, OAuthTokenView, OAuthUserinfoView, OAuthRevokeView, OAuthEligibilityView
 from User.oauth_avatar import OAuthAvatarView
+from User.oauth_views import OAuthRequestsView, OAuthRequestCancelView
 from User.oauth_application_views import OAuthMetadataView, OAuthDeveloperApplicationsView
 
 from User.views import (
@@ -55,6 +56,8 @@ from User.views import (
 )
 
 urlpatterns = [
+    path('oauth/requests', OAuthRequestsView.as_view()),
+    path('oauth/requests/cancel', OAuthRequestCancelView.as_view()),
     path('oauth/metadata', OAuthMetadataView.as_view()),
     path('oauth/eligibility', OAuthEligibilityView.as_view()),
     path('oauth/applications', OAuthDeveloperApplicationsView.as_view()),

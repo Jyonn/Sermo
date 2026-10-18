@@ -28,6 +28,7 @@ SECRET_KEY = open(os.path.join(BASE_DIR, '.auth')).read()
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 PROJ_INIT = True
+OAUTH_SPACE_REQUESTS_ENABLED = os.environ.get('OAUTH_SPACE_REQUESTS_ENABLED') == '1'
 
 # ALLOWED_HOSTS = ['api.sermo.jyonn.space']
 ALLOWED_HOSTS = ['*']
