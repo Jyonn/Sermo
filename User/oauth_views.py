@@ -40,11 +40,12 @@ class OAuthAuthorizeView(View):
         try:
             if 'request_id' in data:
                 from django.db import transaction
-                from User.oauth_requests import resolve
+                from User.oauth_requests import resolve, select_admin_space
                 if set(data) != {'request_id'}:
                     raise OAuthError('invalid_request', 'Request parameters are immutable')
                 with transaction.atomic():
                     flow = resolve(data['request_id'], lock=True)
+                    select_admin_space(flow, request.user)
                     redirect_url = authorize(request.user, **flow.parameters, flow=flow)
             else:
                 redirect_url = authorize(request.user, **{
@@ -90,7 +91,7 @@ class OAuthRequestCancelView(View):
 class OAuthEligibilityView(View):
     @auth.require_user
     def get(self, request):
-        response = JsonResponse(eligibility(request.user))
+        response = JsonResponse({**eligibility(request.user), 'space_admin': bool(request.user.is_official and request.user.space.official_user_id == request.user.id)})
         response['Cache-Control'] = 'no-store'
         return response
 

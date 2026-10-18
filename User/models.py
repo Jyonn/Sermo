@@ -4009,7 +4009,7 @@ class OAuthGrant(models.Model):
 class OAuthAuthorizationRequest(models.Model):
     token_hash = models.CharField(max_length=64, unique=True)
     parameters = models.JSONField()
-    space = models.ForeignKey('Space.Space', on_delete=models.CASCADE, related_name='+')
+    space = models.ForeignKey('Space.Space', null=True, blank=True, on_delete=models.CASCADE, related_name='+')
     purpose = models.CharField(max_length=24, default='join')
     expires_at = models.DateTimeField()
     used_at = models.DateTimeField(null=True, blank=True)

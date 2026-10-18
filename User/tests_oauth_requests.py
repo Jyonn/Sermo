@@ -103,3 +103,67 @@ class SpaceRequestTests(OAuthTests):
         self.assertTrue(userinfo(access)['space_admin'])
         OAuthApplication.objects.filter(client_id='stillfolio').update(space_admin_proof_enabled=False)
         with self.assertRaises(OAuthError): userinfo(access)
+
+    def bootstrap(self):
+        from User.models import OAuthApplication
+        OAuthApplication.objects.filter(client_id='stillfolio').update(space_admin_proof_enabled=True)
+        params=resolve(self.request()).parameters
+        return create({**params,'purpose':'space_admin'})['request_id']
+
+    def test_bootstrap_requires_admin_and_freezes_selected_space(self):
+        from utils.auth import get_login_token
+        from User.models import UserRoleChoice
+        token=self.bootstrap()
+        self.assertIsNone(resolve(token).space_id)
+        self.assertIsNone(self.client.get('/users/oauth/metadata',{'request_id':token}).json()['target_space'])
+        header={'HTTP_AUTHORIZATION':'Bearer '+get_login_token(self.user)['auth']}
+        response=self.client.post('/users/oauth/authorize',data={'request_id':token},content_type='application/json',**header)
+        self.assertEqual(response.json()['error'],'admin_required')
+        self.assertIsNone(resolve(token).space_id)
+        self.user.role=UserRoleChoice.OFFICIAL
+        self.user.save(update_fields=['role'])
+        self.space.official_user=self.user
+        self.space.save(update_fields=['official_user'])
+        self.assertTrue(self.client.get('/users/oauth/eligibility',**header).json()['space_admin'])
+        response=self.client.post('/users/oauth/authorize',data={'request_id':token,'space_id':999},content_type='application/json',**header)
+        self.assertEqual(response.status_code,400)
+        self.assertIsNone(resolve(token).space_id)
+        response=self.client.post('/users/oauth/authorize',data={'request_id':token},content_type='application/json',**header)
+        self.assertEqual(response.status_code,200)
+        flow=OAuthAuthorizationRequest.objects.get(token_hash=__import__('hashlib').sha256(token.encode()).hexdigest())
+        self.assertEqual(flow.space_id,self.space.id)
+        code=parse_qs(urlparse(response.json()['redirect_uri']).query)['code'][0]
+        access=exchange(client_id='stillfolio',redirect_uri=self.redirect,code=code,code_verifier=self.verifier)['access_token']
+        profile=userinfo(access)
+        self.assertEqual(profile['sub'],f'sermo:{self.space.id}:{self.user.id}')
+        self.assertTrue(profile['space_admin'])
+        self.assertEqual(self.client.post('/users/oauth/authorize',data={'request_id':token},content_type='application/json',**header).status_code,400)
+
+    def test_student_cannot_discover_space_and_bootstrap_cancellation(self):
+        params=resolve(self.request()).parameters
+        with self.assertRaises(OAuthError): create(params)
+        with self.assertRaises(OAuthError): create({**params,'purpose':'join','space_id':None})
+        with self.assertRaises(OAuthError): create({**params,'purpose':'space_admin','space_id':None})
+        token=self.bootstrap()
+        self.assertEqual(self.client.post('/users/oauth/requests/cancel',data={'request_id':token},content_type='application/json').status_code,200)
+        with self.assertRaises(OAuthError): resolve(token)
+
+    def test_bootstrap_chooses_authenticated_space_among_multiple_admins(self):
+        from User.models import UserRoleChoice
+        from User.oauth_requests import select_admin_space
+        from django.db import transaction
+        other=Space.objects.create(name='second admin space',slug='second-admin',email='second@example.test')
+        admin=User.create(other,'second-admin',role=UserRoleChoice.OFFICIAL)
+        User.objects.filter(pk=admin.pk).update(email='second@example.test',email_verified_at=timezone.now(),phone='+8613800138002',phone_verified_at=timezone.now())
+        admin.refresh_from_db()
+        other.official_user=admin
+        other.save(update_fields=['official_user'])
+        token=self.bootstrap()
+        with transaction.atomic():
+            flow=resolve(token,lock=True)
+            select_admin_space(flow,admin)
+            url=authorize(admin,**flow.parameters,flow=flow)
+        code=parse_qs(urlparse(url).query)['code'][0]
+        token=exchange(client_id='stillfolio',redirect_uri=self.redirect,code=code,code_verifier=self.verifier)['access_token']
+        self.assertEqual(userinfo(token)['space_id'],other.id)
+        self.assertEqual(userinfo(token)['sub'],f'sermo:{other.id}:{admin.id}')

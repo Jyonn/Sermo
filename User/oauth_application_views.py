@@ -29,7 +29,7 @@ class OAuthMetadataView(View):
                 raise OAuthError('invalid_request', 'Application is no longer available')
             response = JsonResponse(dict(id=rev.application.client_id, name=rev.name, description=rev.description, icon_url=rev.icon_url,
                                          callback=params['redirect_uri'], scopes=scopes,
-                                         **(dict(parameters=flow.parameters, target_space=dict(id=flow.space_id, slug=flow.space.slug, name=flow.space.name), purpose=flow.purpose) if flow else {})))
+                                         **(dict(parameters=flow.parameters, target_space=dict(id=flow.space_id, slug=flow.space.slug, name=flow.space.name) if flow.space_id else None, purpose=flow.purpose) if flow else {})))
             response['Cache-Control'] = 'no-store'
             return response
         except OAuthError as error:
