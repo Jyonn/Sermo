@@ -12,7 +12,8 @@ from django.utils import timezone
 
 from User.models import OAuthGrant, User
 from User.oauth_eligibility import eligibility
-from User.oauth_registry import SCOPES, approved
+from User.oauth_registry import DELEGATED_SCOPES, approved
+from User.oauth_scopes import LEGACY_SCOPES, available_scopes
 
 
 CODE_LIFETIME = timedelta(minutes=5)
@@ -49,13 +50,19 @@ def validate_authorization(client_id, redirect_uri, scope, state, code_challenge
     if not isinstance(state, str) or not 16 <= len(state) <= 512:
         raise OAuthError('invalid_request', 'State must be 16 to 512 characters')
     scopes = set(scope.split()) if isinstance(scope, str) else set()
-    if not scopes or not scopes <= set(revision.scopes):
+    if not scopes or not scopes <= set(revision.scopes) or not scopes <= available_scopes():
         raise OAuthError('invalid_scope', 'Unsupported scope')
     return sorted(scopes)
 
 
+def require_delegation_context(scopes, flow):
+    if set(scopes) & DELEGATED_SCOPES and (flow is None or flow.space_id is None or flow.purpose != 'join'):
+        raise OAuthError('invalid_scope', 'Delegated actions require a fixed-space join request')
+
+
 def authorize(user, *, client_id, redirect_uri, scope, state, code_challenge, code_challenge_method, response_type, flow=None):
     scopes = validate_authorization(client_id, redirect_uri, scope, state, code_challenge, code_challenge_method, response_type)
+    require_delegation_context(scopes, flow)
     code = secrets.token_urlsafe(32)
     with transaction.atomic():
         current_user = User.objects.select_for_update().get(pk=user.pk)
@@ -144,6 +151,11 @@ def userinfo(token):
 
 
 def require_grant_identity(grant, user):
+    delegated_scopes = set(grant.scopes) - LEGACY_SCOPES
+    if delegated_scopes:
+        revision = approved(grant.client_id)
+        if not revision or not delegated_scopes <= available_scopes() or not delegated_scopes <= set(revision.scopes) or not grant.target_space_id or not grant.authorization_request_id or grant.authorization_request.purpose != 'join':
+            raise OAuthError('invalid_token', 'Delegation is no longer approved')
     if grant.target_space_id and grant.target_space_id != user.space_id:
         raise OAuthError('invalid_grant', 'Space identity changed')
     if grant.authorization_request_id:

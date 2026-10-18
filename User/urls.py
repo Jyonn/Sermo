@@ -3,6 +3,10 @@ from User.chronelle_views import ChronelleBindingView, ChronelleAuthorizationVie
 from User.oauth_views import OAuthAuthorizeView, OAuthTokenView, OAuthUserinfoView, OAuthRevokeView, OAuthEligibilityView
 from User.oauth_avatar import OAuthAvatarView
 from User.oauth_views import OAuthRequestsView, OAuthRequestCancelView
+from User.oauth_chat import OAuthChatsView, OAuthChatMessagesView, OAuthChatEventsView, OAuthChatPreferenceView
+from User.oauth_actions import (OAuthSquareView, OAuthSquareCommentsView, OAuthContactsView,
+    OAuthContactResponseView, OAuthSubmissionsView, OAuthSubmissionMessagesView,
+    OAuthSubmissionSubmitView, OAuthSubmissionReviewView, OAuthPersonalView)
 from User.oauth_application_views import OAuthMetadataView, OAuthDeveloperApplicationsView
 
 from User.views import (
@@ -56,6 +60,19 @@ from User.views import (
 )
 
 urlpatterns = [
+    path('oauth/square/statements', OAuthSquareView.as_view()),
+    path('oauth/square/statements/<int:statement_id>/comments', OAuthSquareCommentsView.as_view()),
+    path('oauth/contacts', OAuthContactsView.as_view()),
+    path('oauth/contacts/requests/<int:request_id>/respond', OAuthContactResponseView.as_view()),
+    path('oauth/submissions', OAuthSubmissionsView.as_view()),
+    path('oauth/submissions/<int:chat_id>/messages', OAuthSubmissionMessagesView.as_view()),
+    path('oauth/submissions/<int:chat_id>/submit', OAuthSubmissionSubmitView.as_view()),
+    path('oauth/submissions/<int:chat_id>/review', OAuthSubmissionReviewView.as_view()),
+    path('oauth/personal', OAuthPersonalView.as_view()),
+    path('oauth/chat/chats', OAuthChatsView.as_view()),
+    path('oauth/chat/chats/<int:chat_id>/messages', OAuthChatMessagesView.as_view()),
+    path('oauth/chat/chats/<int:chat_id>/events', OAuthChatEventsView.as_view()),
+    path('oauth/chat/chats/<int:chat_id>/preference', OAuthChatPreferenceView.as_view()),
     path('oauth/requests', OAuthRequestsView.as_view()),
     path('oauth/requests/cancel', OAuthRequestCancelView.as_view()),
     path('oauth/metadata', OAuthMetadataView.as_view()),

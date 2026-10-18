@@ -8,7 +8,12 @@ from django.utils import timezone
 
 from User.models import OAuthApplication, OAuthApplicationRevision, OAuthApplicationAudit
 
-SCOPES = frozenset({'profile', 'phone', 'vip', 'email'})
+from User.oauth_scopes import IMPLEMENTED_SCOPES, LEGACY_SCOPES, available_scopes
+
+DELEGATED_SCOPES = IMPLEMENTED_SCOPES
+CHAT_SCOPES = frozenset(scope for scope in DELEGATED_SCOPES if scope.startswith('chat.'))
+# Kept for seed/migration consumers; runtime validation uses available_scopes().
+SCOPES = LEGACY_SCOPES
 
 
 class RegistryError(ValueError):
@@ -34,7 +39,7 @@ def configuration(data):
             raise RegistryError('Icon URL must use HTTPS without credentials or fragments')
     if not isinstance(name, str) or not name.strip() or len(name) > 120 or not isinstance(description, str) or len(description) > 1000:
         raise RegistryError('A name and description of at most 120/1000 characters are required')
-    if not isinstance(scopes, list) or not scopes or any(not isinstance(s, str) for s in scopes) or not set(scopes) <= SCOPES:
+    if not isinstance(scopes, list) or not scopes or any(not isinstance(s, str) for s in scopes) or not set(scopes) <= available_scopes():
         raise RegistryError('Unsupported scopes')
     if not isinstance(uris, list) or not 1 <= len(uris) <= 20 or any(not isinstance(u, str) for u in uris):
         raise RegistryError('Provide 1 to 20 exact redirect URIs')

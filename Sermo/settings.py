@@ -29,6 +29,7 @@ SECRET_KEY = open(os.path.join(BASE_DIR, '.auth')).read()
 DEBUG = True
 PROJ_INIT = True
 OAUTH_SPACE_REQUESTS_ENABLED = os.environ.get('OAUTH_SPACE_REQUESTS_ENABLED') == '1'
+OAUTH_DELEGATED_ACTIONS_ENABLED = os.environ.get('OAUTH_DELEGATED_ACTIONS_ENABLED') == '1'
 
 # ALLOWED_HOSTS = ['api.sermo.jyonn.space']
 ALLOWED_HOSTS = ['*']

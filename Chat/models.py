@@ -1307,6 +1307,8 @@ class Submission(models.Model):
             from Message.models import Message
             official = self.chat.space.ensure_official_user()
             for reviewer in self.member_users(SubmissionMemberRoleChoice.REVIEWER):
+                if reviewer.id == official.id:
+                    continue
                 Message.create_official_notice(
                     reviewer,
                     official,

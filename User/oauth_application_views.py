@@ -3,8 +3,9 @@ from django.http import JsonResponse
 from django.views import View
 
 from User.models import OAuthApplication
-from User.oauth import OAuthError, validate_authorization
+from User.oauth import OAuthError, validate_authorization, require_delegation_context
 from User.oauth_registry import RegistryError, approved, mutate, serialize
+from User.oauth_scopes import catalog, permission_groups
 from User.oauth_views import _payload, _error
 from utils import auth
 
@@ -24,11 +25,12 @@ class OAuthMetadataView(View):
                 raise OAuthError('invalid_request', 'Provide each authorization parameter exactly once')
             scopes = validate_authorization(**{key: params.get(key, '') for key in (
                 'client_id', 'redirect_uri', 'scope', 'state', 'code_challenge', 'code_challenge_method', 'response_type')})
+            require_delegation_context(scopes, flow)
             rev = approved(params['client_id'], params['redirect_uri'])
             if not rev:
                 raise OAuthError('invalid_request', 'Application is no longer available')
             response = JsonResponse(dict(id=rev.application.client_id, name=rev.name, description=rev.description, icon_url=rev.icon_url,
-                                         callback=params['redirect_uri'], scopes=scopes,
+                                         callback=params['redirect_uri'], scopes=scopes, permission_groups=permission_groups(scopes),
                                          **(dict(parameters=flow.parameters, target_space=dict(id=flow.space_id, slug=flow.space.slug, name=flow.space.name) if flow.space_id else None, purpose=flow.purpose) if flow else {})))
             response['Cache-Control'] = 'no-store'
             return response
@@ -50,7 +52,7 @@ def write(request, admin, app_id):
 
 
 def listing(query):
-    response = JsonResponse({'applications': [serialize(app) for app in query.prefetch_related('revisions').order_by('-id')]})
+    response = JsonResponse({'applications': [serialize(app) for app in query.prefetch_related('revisions').order_by('-id')], 'scope_catalog': catalog()})
     response['Cache-Control'] = 'no-store'
     return response
 

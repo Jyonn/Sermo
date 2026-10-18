@@ -19,7 +19,7 @@ def _payload(request):
 
 
 def _error(error):
-    status = 403 if error.code == 'verification_required' else 401 if error.code == 'invalid_token' else 400
+    status = 403 if error.code in ('verification_required', 'access_denied', 'insufficient_scope') else 401 if error.code == 'invalid_token' else 400
     payload = {'error': error.code, 'error_description': str(error)}
     if error.code == 'verification_required':
         payload['verification_path'] = VERIFICATION_PATH

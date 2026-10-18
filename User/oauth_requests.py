@@ -10,7 +10,7 @@ from django.utils import timezone
 from Space.models import Space
 from User.models import OAuthAuthorizationRequest
 from User.oauth import OAuthError, validate_authorization
-from User.oauth_registry import approved
+from User.oauth_registry import DELEGATED_SCOPES, approved
 
 PARAMETERS = ('client_id', 'redirect_uri', 'scope', 'state', 'code_challenge', 'code_challenge_method', 'response_type')
 
@@ -39,6 +39,8 @@ def create(data):
         raise OAuthError('invalid_request', 'Valid space and purpose required')
     if purpose == 'space_admin' and not revision.application.space_admin_proof_enabled:
         raise OAuthError('invalid_scope', 'Administrator proof is not approved for this client')
+    if purpose == 'space_admin' and set(params['scope'].split()) & DELEGATED_SCOPES:
+        raise OAuthError('invalid_scope', 'Administrator proof does not authorize delegated actions')
     token = secrets.token_urlsafe(32)
     OAuthAuthorizationRequest.objects.create(token_hash=digest(token), parameters=params, space=space,
         purpose=purpose, expires_at=timezone.now() + timedelta(minutes=30))
