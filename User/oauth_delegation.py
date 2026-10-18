@@ -15,8 +15,8 @@ def require_scope(scope):
         def wrapped(self, request, *args, **kwargs):
             try:
                 grant = grant_for_token(_bearer(request))
-                if not grant.target_space_id or not grant.authorization_request_id or grant.authorization_request.purpose != 'join':
-                    raise OAuthError('invalid_token', 'Fixed-space user consent required')
+                if not grant.target_space_id or not grant.authorization_request_id or grant.authorization_request.purpose not in ('join','space_admin'):
+                    raise OAuthError('invalid_token', 'Space-bound user consent required')
                 if request.headers.get('X-OAuth-Client-ID') != grant.client_id:
                     raise OAuthError('invalid_token', 'Client does not match this delegation')
                 if scope not in grant.scopes:

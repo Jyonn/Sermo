@@ -17,6 +17,7 @@ IMPLEMENTED_SCOPES = frozenset({
     'contacts.read', 'contacts.write', 'contacts.modify',
     'personal.read', 'personal.modify',
 })
+COLLABORATION_SCOPES = frozenset(scope for scope in IMPLEMENTED_SCOPES if scope.split('.')[0] in ('chat','contacts'))
 
 
 def delegation_enabled():

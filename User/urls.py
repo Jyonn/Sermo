@@ -7,6 +7,9 @@ from User.oauth_chat import OAuthChatsView, OAuthChatMessagesView, OAuthChatEven
 from User.oauth_actions import (OAuthSquareView, OAuthSquareCommentsView, OAuthContactsView,
     OAuthContactResponseView, OAuthSubmissionsView, OAuthSubmissionMessagesView,
     OAuthSubmissionSubmitView, OAuthSubmissionReviewView, OAuthPersonalView)
+from User.oauth_collaboration import (OAuthDirectChatView, OAuthGroupCreateView, OAuthChatDetailView,
+    OAuthGroupManageView, OAuthGroupInvitationsView, OAuthGroupInvitationResponseView,
+    OAuthChatReadView, OAuthContactSearchView, OAuthChatCapabilitiesView)
 from User.oauth_application_views import OAuthMetadataView, OAuthDeveloperApplicationsView
 
 from User.views import (
@@ -60,6 +63,15 @@ from User.views import (
 )
 
 urlpatterns = [
+    path('oauth/chat/direct', OAuthDirectChatView.as_view()),
+    path('oauth/chat/capabilities', OAuthChatCapabilitiesView.as_view()),
+    path('oauth/chat/groups', OAuthGroupCreateView.as_view()),
+    path('oauth/chat/invitations', OAuthGroupInvitationsView.as_view()),
+    path('oauth/chat/chats/<int:chat_id>', OAuthChatDetailView.as_view()),
+    path('oauth/chat/chats/<int:chat_id>/manage', OAuthGroupManageView.as_view()),
+    path('oauth/chat/chats/<int:chat_id>/invitation', OAuthGroupInvitationResponseView.as_view()),
+    path('oauth/chat/chats/<int:chat_id>/read', OAuthChatReadView.as_view()),
+    path('oauth/contacts/search', OAuthContactSearchView.as_view()),
     path('oauth/square/statements', OAuthSquareView.as_view()),
     path('oauth/square/statements/<int:statement_id>/comments', OAuthSquareCommentsView.as_view()),
     path('oauth/contacts', OAuthContactsView.as_view()),

@@ -25,7 +25,7 @@ class OAuthMetadataView(View):
                 raise OAuthError('invalid_request', 'Provide each authorization parameter exactly once')
             scopes = validate_authorization(**{key: params.get(key, '') for key in (
                 'client_id', 'redirect_uri', 'scope', 'state', 'code_challenge', 'code_challenge_method', 'response_type')})
-            require_delegation_context(scopes, flow)
+            require_delegation_context(scopes, flow, metadata=True)
             rev = approved(params['client_id'], params['redirect_uri'])
             if not rev:
                 raise OAuthError('invalid_request', 'Application is no longer available')

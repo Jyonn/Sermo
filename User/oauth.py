@@ -13,7 +13,7 @@ from django.utils import timezone
 from User.models import OAuthGrant, User
 from User.oauth_eligibility import eligibility
 from User.oauth_registry import DELEGATED_SCOPES, approved
-from User.oauth_scopes import LEGACY_SCOPES, available_scopes
+from User.oauth_scopes import LEGACY_SCOPES, COLLABORATION_SCOPES, available_scopes
 
 
 CODE_LIFETIME = timedelta(minutes=5)
@@ -55,9 +55,16 @@ def validate_authorization(client_id, redirect_uri, scope, state, code_challenge
     return sorted(scopes)
 
 
-def require_delegation_context(scopes, flow):
-    if set(scopes) & DELEGATED_SCOPES and (flow is None or flow.space_id is None or flow.purpose != 'join'):
-        raise OAuthError('invalid_scope', 'Delegated actions require a fixed-space join request')
+def require_delegation_context(scopes, flow, *, metadata=False):
+    delegated = set(scopes) & DELEGATED_SCOPES
+    if not delegated:
+        return
+    if flow is None or flow.purpose not in ('join','space_admin'):
+        raise OAuthError('invalid_scope', 'A space-bound authorization request is required')
+    if flow.purpose == 'space_admin' and not delegated <= COLLABORATION_SCOPES:
+        raise OAuthError('invalid_scope', 'Administrator collaboration permits only chat and contacts')
+    if flow.space_id is None and not (metadata and flow.purpose == 'space_admin'):
+        raise OAuthError('invalid_scope', 'Select and freeze the space before consent')
 
 
 def authorize(user, *, client_id, redirect_uri, scope, state, code_challenge, code_challenge_method, response_type, flow=None):
@@ -154,8 +161,9 @@ def require_grant_identity(grant, user):
     delegated_scopes = set(grant.scopes) - LEGACY_SCOPES
     if delegated_scopes:
         revision = approved(grant.client_id)
-        if not revision or not delegated_scopes <= available_scopes() or not delegated_scopes <= set(revision.scopes) or not grant.target_space_id or not grant.authorization_request_id or grant.authorization_request.purpose != 'join':
+        if not revision or not delegated_scopes <= available_scopes() or not delegated_scopes <= set(revision.scopes) or not grant.target_space_id or not grant.authorization_request_id:
             raise OAuthError('invalid_token', 'Delegation is no longer approved')
+        require_delegation_context(delegated_scopes, grant.authorization_request)
     if grant.target_space_id and grant.target_space_id != user.space_id:
         raise OAuthError('invalid_grant', 'Space identity changed')
     if grant.authorization_request_id:
