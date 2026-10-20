@@ -28,8 +28,9 @@ class BgmService:
     MODE = 'bgm_collection'
     ZONE = ZoneInfo('Asia/Shanghai')
     # Day and point requirements are cumulative, never consecutive. First track is a gift.
-    GATES = [(0, 0), (1, 10), (2, 25), (3, 40), (4, 60), (5, 80),
-             (7, 105), (9, 130), (11, 155), (12, 180), (14, 210), (15, 240)]
+    # Fifteen daily posts earn 90 points; extra interactions can shorten this to ten days.
+    GATES = [(0, 0), (1, 6), (2, 12), (3, 18), (4, 24), (5, 30),
+             (6, 36), (7, 42), (8, 54), (9, 66), (10, 78), (10, 90)]
     TASKS = {'publish': (1, 6), 'comment': (3, 3), 'like': (5, 1)}
 
     @classmethod
@@ -165,9 +166,9 @@ class BgmService:
             newly_claimed=bool(run.attention_started_at and not run.user_views.filter(user=user).exists()),
             verified=bool(user.verified), today_earned=bool(today['publish'] or today['comment'] >= 2),
             claimable_points=0, available_points=points, contributed_points=0,
-            personal_event_count=days, personal_event_target=15,
+            personal_event_count=days, personal_event_target=cls.GATES[-1][0],
             personal_reward_claimable=False, personal_reward=None, space_reward_claimable=None,
-            official_user=None, space_total=0, target=240, milestones=[], awakenings=[],
+            official_user=None, space_total=0, target=cls.GATES[-1][1], milestones=[], awakenings=[],
             bgm=dict(joined=participation is not None, style=participation.style if participation else None,
                      mode=participation.mode if participation else 'off', track=participation.track if participation else '1',
                      receive_audio=True,

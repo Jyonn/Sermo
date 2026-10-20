@@ -105,14 +105,43 @@ class BgmTests(TestCase):
         BgmService.record(self.user, 'publish', self.statement(self.user))
         self.assertEqual(BgmInteraction.objects.count(), 0)
 
-    def test_at_least_fifteen_distinct_active_days_even_with_unlimited_points(self):
+    def record_day(self, day, accelerate=False):
+        with patch('Activity.bgm.timezone.localdate', return_value=day):
+            BgmService.record(self.user, 'publish', self.statement(self.user))
+            if accelerate:
+                target = self.statement()
+                comment = StatementComment.objects.create(statement=target, user=self.user, text='A thoughtful response')
+                BgmService.record(self.user, 'comment', comment)
+                BgmService.record(self.user, 'like', target)
+
+    def test_daily_posts_collect_every_track_on_day_fifteen(self):
         today = timezone.localdate(timezone=BgmService.ZONE)
         for day in range(14):
-            BgmInteraction.objects.create(progress=self.progress, kind='publish', reference=str(day), target=str(day), event_date=today - timedelta(days=day), points=20)
+            self.record_day(today - timedelta(days=day))
         tracks = BgmService.payload(self.campaign, self.user, self.run)['bgm']['tracks']
         self.assertFalse(tracks[-1]['owned'])
-        BgmInteraction.objects.create(progress=self.progress, kind='publish', reference='15', target='15', event_date=today - timedelta(days=18), points=20)
-        self.assertTrue(BgmService.payload(self.campaign, self.user, self.run)['bgm']['tracks'][-1]['owned'])
+        self.record_day(today - timedelta(days=14))
+        self.assertEqual(BgmService.stats(self.progress)[:2], (90, 15))
+        self.assertTrue(all(track['owned'] for track in BgmService.payload(self.campaign, self.user, self.run)['bgm']['tracks']))
+
+    def test_comments_and_likes_accelerate_to_ten_days_and_allow_playback(self):
+        today = timezone.localdate(timezone=BgmService.ZONE)
+        for day in range(9):
+            self.record_day(today - timedelta(days=day), accelerate=True)
+        self.assertEqual(BgmService.stats(self.progress)[:2], (90, 9))
+        self.assertFalse(BgmService.payload(self.campaign, self.user, self.run)['bgm']['tracks'][-1]['owned'])
+        self.record_day(today - timedelta(days=9), accelerate=True)
+        self.assertTrue(all(track['owned'] for track in BgmService.payload(self.campaign, self.user, self.run)['bgm']['tracks']))
+        BgmService.configure(self.campaign, self.user, {'style': 'blue', 'slots': ['12'], 'mode': 'manual'})
+        result = BgmService.enter(self.campaign, self.user, {'chat_id': self.chat(self.user).id, 'request_id': 'accelerated-001', 'track': '12'})
+        self.assertTrue(result['sent'])
+
+    def test_new_gates_preserve_all_previously_unlocked_tracks(self):
+        previous = [(0, 0), (1, 10), (2, 25), (3, 40), (4, 60), (5, 80),
+                    (7, 105), (9, 130), (11, 155), (12, 180), (14, 210), (15, 240)]
+        for old, new in zip(previous, BgmService.GATES):
+            self.assertLessEqual(new[0], old[0])
+            self.assertLessEqual(new[1], old[1])
 
     def test_expiry_freezes_points_but_preserves_collection(self):
         self.run.ends_at = timezone.now() - timedelta(seconds=1)
