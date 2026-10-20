@@ -134,7 +134,8 @@ class BgmService:
                 raise BgmErrors.INVALID
             if mode == 'manual' and not slots:
                 raise BgmErrors.INVALID
-            BgmParticipation.objects.update_or_create(progress=progress, defaults={'style': style, 'slots': slots, 'mode': mode, 'track': track, 'receive_audio': receive})
+            # Keep accepting the legacy boolean without making reception opt-in.
+            BgmParticipation.objects.update_or_create(progress=progress, defaults={'style': style, 'slots': slots, 'mode': mode, 'track': track, 'receive_audio': True})
         return cls.payload(campaign, user, run)
 
     @classmethod
@@ -166,7 +167,7 @@ class BgmService:
             official_user=None, space_total=0, target=240, milestones=[], awakenings=[],
             bgm=dict(joined=participation is not None, style=participation.style if participation else None,
                      mode=participation.mode if participation else 'off', track=participation.track if participation else '1',
-                     receive_audio=participation.receive_audio if participation else False,
+                     receive_audio=True,
                      slots=participation.slots if participation else [], points=points, active_days=days,
                      today_points=sum(today[kind] * value for kind, (_, value) in cls.TASKS.items()),
                      tasks=[dict(kind=kind, count=today[kind], limit=limit, points=value) for kind, (limit, value) in cls.TASKS.items()],

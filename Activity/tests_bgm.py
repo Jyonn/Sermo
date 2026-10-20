@@ -48,6 +48,11 @@ class BgmTests(TestCase):
         self.assertEqual(data['style'], 'pink')
         self.assertEqual(data['slots'], ['1'])
 
+    def test_peer_audio_is_enabled_even_for_legacy_opt_out(self):
+        data = BgmService.configure(self.campaign, self.user, {'style': 'blue', 'receive_audio': False})['bgm']
+        self.assertTrue(data['receive_audio'])
+        self.assertTrue(BgmService.payload(self.campaign, self.user, self.run)['bgm']['receive_audio'])
+
     def test_daily_cap_distinct_targets_and_relike(self):
         post = self.statement(self.user)
         for _ in range(3): BgmService.record(self.user, 'publish', post)
