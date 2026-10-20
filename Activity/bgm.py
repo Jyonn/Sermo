@@ -18,6 +18,7 @@ from utils.qiniu import sign_private_download_url
 
 @Error.register
 class BgmErrors:
+    STYLE_LOCKED = Error(_('Keychain style cannot be changed after joining'), code=Code.Forbidden)
     INVALID = Error(_('Invalid activity settings'), code=Code.BadRequest)
     CLOSED = Error(_('This activity is not available'), code=Code.Forbidden)
     VERIFIED = Error(_('Please verify your account first'), code=Code.Forbidden)
@@ -120,6 +121,8 @@ class BgmService:
             _, progress = ActivityService._progress(campaign, user, run)
             progress = type(progress).objects.select_for_update().get(pk=progress.pk)
             participation = BgmParticipation.objects.filter(progress=progress).first()
+            if participation is not None and participation.style != style:
+                raise BgmErrors.STYLE_LOCKED
             if participation is None and (not campaign.enabled or not run.is_active()):
                 raise BgmErrors.CLOSED
             points, days, _ = cls.stats(progress)

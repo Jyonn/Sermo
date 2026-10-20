@@ -43,15 +43,34 @@ class BgmTests(TestCase):
         self.assertEqual([t['key'] for t in data['tracks'] if t['owned']], ['1'])
         self.assertIsNone(data['tracks'][1]['uri'])
         with self.assertRaises(type(BgmErrors.INVALID)):
-            BgmService.configure(self.campaign, self.user, {'style': 'pink', 'slots': ['12']})
-        data = BgmService.configure(self.campaign, self.user, {'style': 'pink', 'slots': ['1']})['bgm']
-        self.assertEqual(data['style'], 'pink')
+            BgmService.configure(self.campaign, self.user, {'style': 'blue', 'slots': ['12']})
+        with self.assertRaises(type(BgmErrors.STYLE_LOCKED)):
+            BgmService.configure(self.campaign, self.user, {'style': 'pink', 'slots': ['1']})
+        data = BgmService.configure(self.campaign, self.user, {'style': 'blue', 'slots': ['1']})['bgm']
+        self.assertEqual(data['style'], 'blue')
         self.assertEqual(data['slots'], ['1'])
 
     def test_peer_audio_is_enabled_even_for_legacy_opt_out(self):
         data = BgmService.configure(self.campaign, self.user, {'style': 'blue', 'receive_audio': False})['bgm']
         self.assertTrue(data['receive_audio'])
         self.assertTrue(BgmService.payload(self.campaign, self.user, self.run)['bgm']['receive_audio'])
+
+    def test_style_lock_preserves_preferences_and_allows_same_style_updates(self):
+        self.join()
+        with self.assertRaises(type(BgmErrors.STYLE_LOCKED)):
+            BgmService.configure(self.campaign, self.user, {'style': 'pink', 'mode': 'auto'})
+        participation = BgmParticipation.objects.get(progress=self.progress)
+        self.assertEqual(participation.style, 'blue')
+        self.assertEqual(participation.mode, 'off')
+        result = BgmService.configure(self.campaign, self.user, {'style': 'blue', 'mode': 'auto', 'track': 'random'})
+        self.assertEqual(result['bgm']['mode'], 'auto')
+        self.assertEqual(result['bgm']['style'], 'blue')
+
+    def test_new_user_can_choose_pink_once(self):
+        result = BgmService.configure(self.campaign, self.peer, {'style': 'pink'})
+        self.assertEqual(result['bgm']['style'], 'pink')
+        with self.assertRaises(type(BgmErrors.STYLE_LOCKED)):
+            BgmService.configure(self.campaign, self.peer, {'style': 'blue'})
 
     def test_daily_cap_distinct_targets_and_relike(self):
         post = self.statement(self.user)
@@ -100,7 +119,7 @@ class BgmTests(TestCase):
         self.run.save(update_fields=['ends_at'])
         BgmService.record(self.user, 'publish', self.statement(self.user))
         self.assertEqual(BgmInteraction.objects.count(), 0)
-        result = BgmService.configure(self.campaign, self.user, {'style': 'pink'})
+        result = BgmService.configure(self.campaign, self.user, {'style': 'blue'})
         self.assertFalse(result['active'])
         self.assertTrue(result['bgm']['tracks'][0]['owned'])
 
@@ -147,8 +166,10 @@ class BgmTests(TestCase):
     def test_authenticated_settings_endpoint_and_no_client_awarded_points(self):
         from utils import auth
         authorization = {'HTTP_AUTHORIZATION': f'Bearer {auth.get_login_token(self.user)["auth"]}'}
-        response = self.client.post('/activities/bgm-test/bgm', data={'style': 'pink', 'slots': ['1']}, content_type='application/json', **authorization)
-        self.assertEqual(response.json()['body']['bgm']['style'], 'pink')
+        response = self.client.post('/activities/bgm-test/bgm', data={'style': 'blue', 'slots': ['1']}, content_type='application/json', **authorization)
+        self.assertEqual(response.json()['body']['bgm']['style'], 'blue')
+        locked = self.client.post('/activities/bgm-test/bgm', data={'style': 'pink'}, content_type='application/json', **authorization)
+        self.assertNotEqual(locked.json()['identifier'], 'OK')
         forged = self.client.post('/activities/bgm-test/bgm', data={'style': 'blue', 'points': 9999}, content_type='application/json', **authorization)
         self.assertNotEqual(forged.json()['identifier'], 'OK')
         self.assertEqual(BgmService.stats(self.progress)[0], 0)
