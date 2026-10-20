@@ -5,6 +5,46 @@ from utils import auth
 from utils.auth import Request
 
 
+class BgmSettingsView(View):
+    @auth.require_user
+    def post(self, request: Request, key: str):
+        import json
+        from Activity.bgm import BgmErrors, BgmService
+        campaign = ActivityCampaign.objects.get(key=key, config__mode=BgmService.MODE)
+        try:
+            data = json.loads(request.body)
+        except (ValueError, UnicodeDecodeError):
+            raise BgmErrors.INVALID
+        return BgmService.configure(campaign, request.user, data)
+
+
+class BgmMeView(View):
+    @auth.require_user
+    def get(self, request: Request):
+        from Activity.bgm import BgmService
+        from Activity.models import BgmParticipation
+        participation = BgmParticipation.objects.filter(
+            progress__user=request.user, progress__campaign__enabled=True,
+            progress__space_activity__space=request.user.space,
+        ).select_related('progress__campaign', 'progress__space_activity').order_by('-joined_at').first()
+        if participation is None:
+            return None
+        return BgmService.payload(participation.progress.campaign, request.user, participation.progress.space_activity)
+
+
+class BgmEntranceView(View):
+    @auth.require_user
+    def post(self, request: Request, key: str):
+        import json
+        from Activity.bgm import BgmErrors, BgmService
+        campaign = ActivityCampaign.objects.get(key=key, enabled=True, config__mode=BgmService.MODE)
+        try:
+            data = json.loads(request.body)
+        except (ValueError, UnicodeDecodeError):
+            raise BgmErrors.INVALID
+        return BgmService.enter(campaign, request.user, data)
+
+
 class ActiveActivityView(View):
     @auth.require_user
     def get(self, request: Request):

@@ -462,6 +462,8 @@ class StatementLikeView(View):
         except Statement.DoesNotExist:
             raise SquareErrors.NOT_EXISTS
         _like, created = StatementLike.objects.get_or_create(statement=statement, user=request.user)
+        from Activity.bgm import BgmService
+        BgmService.record(request.user, 'like', statement)
         if created:
             request.user.award_growth('explore:square_like')
             NotificationEvent.emit_square_event(

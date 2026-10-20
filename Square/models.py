@@ -522,6 +522,8 @@ class Statement(models.Model):
             transaction.on_commit(lambda: ChatUserPreference.emit_peer_statement_events(statement))
         from Activity.models import ActivityService
         ActivityService.record_event(user, 'square.statement.publish', statement.id)
+        from Activity.bgm import BgmService
+        BgmService.record(user, 'publish', statement)
         return cls.objects.select_related('user', 'forward_bundle', 'link_preview').prefetch_related(
             statement_media_prefetch(), statement_forward_bundle_prefetch(),
         ).get(id=statement.id)
@@ -707,6 +709,8 @@ class StatementComment(models.Model):
         user.award_growth('explore:square_reply' if parent is not None else 'explore:square_comment')
         from Activity.models import ActivityService
         ActivityService.record_friendly_neighbor_reply(user, comment.id)
+        from Activity.bgm import BgmService
+        BgmService.record(user, 'comment', comment)
         return comment
 
     def jsonl(self, viewer=None, include_replies=False, request=None):

@@ -613,7 +613,7 @@ class MessageBlobView(View):
         asset = MediaAsset.objects.filter(blob_slug=str(blob_slug or '').strip().lower()).first()
         if asset is None or not asset.resources.filter(MediaResource.available_reference_q()).exists():
             raise MessageErrors.NOT_EXISTS
-        return self._redirect(sign_private_download_url(asset.source_uri))
+        return self._redirect(asset.source_uri if asset.raw_metadata.get('bgm_public') else sign_private_download_url(asset.source_uri))
 
 
 class MessageBlobThumbnailView(View):

@@ -938,3 +938,15 @@ msgstr "The content may not comply with the rules. Please revise it and try agai
 
 msgid "Content review is temporarily unavailable. Please try again later."
 msgstr "Content review is temporarily unavailable. Please try again later."
+
+msgid "%(actor)s entered the chat with “%(song)s”"
+msgstr "%(actor)s entered the chat with “%(song)s”"
+
+msgid "Invalid activity settings"
+msgstr "Invalid activity settings"
+
+msgid "This activity is not available"
+msgstr "This activity is not available"
+
+msgid "Please verify your account first"
+msgstr "Please verify your account first"

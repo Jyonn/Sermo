@@ -1055,6 +1055,8 @@ class Message(models.Model):
         with override(language):
             names = _('、').join(member_names)
             event = payload.get('event')
+            if event == 'bgm_entrance':
+                return _('%(actor)s entered the chat with “%(song)s”') % dict(actor=actor, song=str(payload.get('song_title') or ''))
             if event == 'blocked_word_request':
                 return _('%(actor)s requested a chat blocked word') % dict(actor=actor)
             if event == 'blocked_word_added':
@@ -1566,7 +1568,7 @@ class Message(models.Model):
                 if self.type in (MessageTypeChoice.IMAGE, MessageTypeChoice.VIDEO):
                     response['thumbnail_uri'] = self.media_blob_uri(request=request, thumbnail=True)
             elif uri:
-                response['uri'] = sign_private_download_url(uri)
+                response['uri'] = uri if payload.get('bgm_entrance') is True else sign_private_download_url(uri)
                 if self.type == MessageTypeChoice.IMAGE:
                     response['thumbnail_uri'] = build_message_image_thumbnail_uri(uri)
                 elif self.type == MessageTypeChoice.VIDEO:
@@ -1578,6 +1580,8 @@ class Message(models.Model):
                 response['mime_type'] = mime_type
             if self.type == MessageTypeChoice.AUDIO:
                 response['duration_seconds'] = metadata.duration_seconds if metadata is not None else payload.get('duration_seconds')
+                if payload.get('bgm_entrance') is True:
+                    response.update({key: payload.get(key) for key in ('bgm_entrance', 'song_title', 'song_author', 'system_message_id')})
             if self.type == MessageTypeChoice.FILE:
                 response['file_name'] = (resource.file_name if resource is not None else payload.get('file_name')) or '文件'
                 response['file_size'] = (metadata.file_size if metadata is not None else payload.get('file_size')) or 0

@@ -1058,3 +1058,15 @@ msgstr "内容可能不符合规范，请修改后重试。"
 
 msgid "Content review is temporarily unavailable. Please try again later."
 msgstr "内容审核暂时不可用，请稍后重试。"
+
+msgid "%(actor)s entered the chat with “%(song)s”"
+msgstr "%(actor)s 带着《%(song)s》进入聊天会话"
+
+msgid "Invalid activity settings"
+msgstr "活动设置无效"
+
+msgid "This activity is not available"
+msgstr "此活动暂不可用"
+
+msgid "Please verify your account first"
+msgstr "请先完成账号认证"

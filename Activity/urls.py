@@ -1,9 +1,13 @@
 from django.urls import path
+from Activity.views import BgmEntranceView, BgmMeView, BgmSettingsView
 
 from Activity.views import AdminActivityClaimView, AdminActivityListView, ActiveActivityView, ActivityClaimView, ActivityContributionView, ActivityDetailView, ActivityMilestoneRewardClaimView, ActivityPersonalRewardClaimView, ActivitySeenView, ActivitySpaceRewardClaimView, ActivityStarryNightRewardClaimView
 
 
 urlpatterns = [
+    path('bgm/me', BgmMeView.as_view(), name='my activity bgm'),
+    path('<slug:key>/bgm/enter', BgmEntranceView.as_view(), name='activity bgm entrance'),
+    path('<slug:key>/bgm', BgmSettingsView.as_view(), name='activity bgm settings'),
     path('active', ActiveActivityView.as_view(), name='active activities'),
     path('admin', AdminActivityListView.as_view(), name='admin activities'),
     path('admin/<slug:key>/claim', AdminActivityClaimView.as_view(), name='admin activity claim'),

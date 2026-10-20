@@ -146,6 +146,40 @@ class UserActivityReward(models.Model):
     claimed_at = models.DateTimeField(null=True, blank=True, db_index=True)
 
 
+class BgmParticipation(models.Model):
+    progress = models.OneToOneField(UserActivityProgress, on_delete=models.CASCADE, related_name='bgm_participation')
+    style = models.CharField(max_length=8, default='blue')
+    slots = models.JSONField(default=list)
+    mode = models.CharField(max_length=8, default='off')
+    track = models.CharField(max_length=8, default='1')
+    receive_audio = models.BooleanField(default=False)
+    joined_at = models.DateTimeField(auto_now_add=True)
+
+
+class BgmEntrance(models.Model):
+    participation = models.ForeignKey(BgmParticipation, on_delete=models.CASCADE, related_name='entrances')
+    chat_id = models.PositiveBigIntegerField(db_index=True)
+    request_id = models.CharField(max_length=80)
+    system_message_id = models.PositiveBigIntegerField()
+    audio_message_id = models.PositiveBigIntegerField()
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['participation', 'request_id'], name='bgm_entrance_once')]
+
+
+class BgmInteraction(models.Model):
+    progress = models.ForeignKey(UserActivityProgress, on_delete=models.CASCADE, related_name='bgm_interactions')
+    kind = models.CharField(max_length=12)
+    reference = models.CharField(max_length=80)
+    target = models.CharField(max_length=80)
+    event_date = models.DateField(db_index=True)
+    points = models.PositiveSmallIntegerField(default=0)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['progress', 'kind', 'reference'], name='bgm_interaction_once')]
+
+
 class ActivityService:
     AWAKENING_COUNT = 8
     FRIENDLY_NEIGHBOR_MODE = 'friendly_neighbor'
@@ -654,6 +688,9 @@ class ActivityService:
     def payload(cls, campaign, user, space_activity=None):
         if space_activity is None:
             space_activity = SpaceActivity.objects.get(campaign=campaign, space=user.space)
+        if campaign.config.get('mode') == 'bgm_collection':
+            from Activity.bgm import BgmService
+            return BgmService.payload(campaign, user, space_activity)
         if (
             campaign.config.get('mode') == cls.STARRY_NIGHT_MODE
             and space_activity.history_backfilled_at is None
