@@ -1,5 +1,6 @@
 """Server-owned, space-scoped BGM collection rules. No client-awarded points."""
 from collections import defaultdict
+from Activity.presentation import presentation
 from datetime import timedelta
 import json
 import random
@@ -155,6 +156,7 @@ class BgmService:
             summary=campaign.summary, summary_en=campaign.summary_en,
             starts_at=run.claimed_at.timestamp(), ends_at=run.ends_at.timestamp() if run.ends_at else None,
             active=campaign.enabled and run.is_active() and bool(catalog), theme='bgm',
+            presentation=presentation(campaign.config),
             assignment_mode=campaign.assignment_mode, duration_seconds=campaign.duration_seconds,
             newly_claimed=bool(run.attention_started_at and not run.user_views.filter(user=user).exists()),
             verified=bool(user.verified), today_earned=bool(today['publish'] or today['comment'] >= 2),

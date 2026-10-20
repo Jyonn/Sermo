@@ -1,4 +1,5 @@
 import random
+from Activity.presentation import presentation
 from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
@@ -727,6 +728,7 @@ class ActivityService:
             assignment_mode=campaign.assignment_mode,
             duration_seconds=campaign.duration_seconds,
             theme=campaign.config.get('theme', ''),
+            presentation=presentation(campaign.config),
             newly_claimed=bool(
                 space_activity.attention_started_at
                 and not space_activity.user_views.filter(user=user).exists()
