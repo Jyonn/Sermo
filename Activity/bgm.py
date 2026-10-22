@@ -1,8 +1,8 @@
 """Server-owned, space-scoped BGM collection rules. No client-awarded points."""
 from collections import defaultdict
 from Activity.presentation import presentation
-from datetime import timedelta
 import json
+import math
 import random
 from zoneinfo import ZoneInfo
 
@@ -26,6 +26,7 @@ class BgmErrors:
 
 class BgmService:
     MODE = 'bgm_collection'
+    ENTRANCE_COOLDOWN_SECONDS = 180
     ZONE = ZoneInfo('Asia/Shanghai')
     # Day and point requirements are cumulative, never consecutive. First track is a gift.
     # Fifteen daily posts earn 90 points; extra interactions can shorten this to ten days.
@@ -133,13 +134,12 @@ class BgmService:
                 raise BgmErrors.INVALID
             mode = data.get('mode', participation.mode if participation else 'off')
             track = data.get('track', participation.track if participation else '1')
-            receive = data.get('receive_audio', participation.receive_audio if participation else False)
+            receive = data.get('receive_audio', participation.receive_audio if participation else True)
             if not isinstance(mode, str) or mode not in {'off', 'auto', 'manual'} or not isinstance(track, str) or (track != 'random' and track not in owned) or not isinstance(receive, bool):
                 raise BgmErrors.INVALID
             if mode == 'manual' and not slots:
                 raise BgmErrors.INVALID
-            # Keep accepting the legacy boolean without making reception opt-in.
-            BgmParticipation.objects.update_or_create(progress=progress, defaults={'style': style, 'slots': slots, 'mode': mode, 'track': track, 'receive_audio': True})
+            BgmParticipation.objects.update_or_create(progress=progress, defaults={'style': style, 'slots': slots, 'mode': mode, 'track': track, 'receive_audio': receive})
         return cls.payload(campaign, user, run)
 
     @classmethod
@@ -171,7 +171,7 @@ class BgmService:
             official_user=None, space_total=0, target=cls.GATES[-1][1], milestones=[], awakenings=[],
             bgm=dict(joined=participation is not None, style=participation.style if participation else None,
                      mode=participation.mode if participation else 'off', track=participation.track if participation else '1',
-                     receive_audio=True,
+                     receive_audio=participation.receive_audio if participation else True,
                      slots=participation.slots if participation else [], points=points, active_days=days,
                      today_points=sum(today[kind] * value for kind, (_, value) in cls.TASKS.items()),
                      tasks=[dict(kind=kind, count=today[kind], limit=limit, points=value) for kind, (limit, value) in cls.TASKS.items()],
@@ -179,8 +179,23 @@ class BgmService:
         )
 
     @classmethod
-    def enter(cls, campaign, user, data):
+    def entrance_status(cls, user, chat_id):
+        """One policy for preflight and sending, scoped to the actor and conversation."""
+        latest = BgmEntrance.objects.filter(participation__progress__user=user, chat_id=chat_id).order_by('-created_at').first()
+        remaining = max(0, math.ceil(cls.ENTRANCE_COOLDOWN_SECONDS - (timezone.now() - latest.created_at).total_seconds())) if latest else 0
+        return dict(allowed=not remaining, reason='cooldown' if remaining else None, retry_after_seconds=remaining)
+
+    @classmethod
+    def entrance_chat(cls, user, chat_id):
         from Chat.models import Chat, ChatPurposeChoice
+        chat = Chat.objects.filter(pk=chat_id, space=user.space, purpose=ChatPurposeChoice.NORMAL).first()
+        if chat is None or not chat.has_active_member(user):
+            raise BgmErrors.CLOSED
+        chat.require_user_message_allowed(user)
+        return chat
+
+    @classmethod
+    def enter(cls, campaign, user, data):
         from Message.models import MediaResource, Message, MessageEvent, MessageTypeChoice
         if not isinstance(data, dict) or not isinstance(data.get('chat_id'), int) or isinstance(data['chat_id'], bool):
             raise BgmErrors.INVALID
@@ -189,13 +204,10 @@ class BgmService:
             raise BgmErrors.INVALID
         if not user.verified or user.is_deleted:
             raise BgmErrors.VERIFIED
-        chat = Chat.objects.filter(pk=data['chat_id'], space=user.space, purpose=ChatPurposeChoice.NORMAL).first()
-        if chat is None:
-            raise BgmErrors.CLOSED
-        if not chat.has_active_member(user):
-            raise BgmErrors.CLOSED
-        chat.require_user_message_allowed(user)
+        chat = cls.entrance_chat(user, data['chat_id'])
         with transaction.atomic():
+            # Serialize across campaigns too; one user's entrances never throttle another user.
+            type(user).objects.select_for_update().get(pk=user.pk)
             participation = BgmParticipation.objects.select_for_update().select_related('progress').filter(progress__campaign=campaign, progress__user=user).first()
             if participation is None:
                 raise BgmErrors.CLOSED
@@ -205,10 +217,9 @@ class BgmService:
                 return dict(sent=False, reason='duplicate')
             if participation.mode == 'off':
                 raise BgmErrors.CLOSED
-            recent = participation.entrances.filter(created_at__gte=timezone.now() - timedelta(seconds=30)).exists()
-            same_chat = participation.entrances.filter(chat_id=chat.id, created_at__gte=timezone.now() - timedelta(minutes=10)).exists()
-            if recent or same_chat:
-                return dict(sent=False, reason='cooldown')
+            status = cls.entrance_status(user, chat.id)
+            if not status['allowed']:
+                return dict(sent=False, **status)
             points, days, _ = cls.stats(participation.progress)
             tracks = [track for track in cls.catalog(campaign) if days >= track['days'] and points >= track['points']]
             if participation.mode == 'manual':

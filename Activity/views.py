@@ -21,7 +21,7 @@ class BgmSettingsView(View):
 class BgmMeView(View):
     @auth.require_user
     def get(self, request: Request):
-        from Activity.bgm import BgmService
+        from Activity.bgm import BgmErrors, BgmService
         from Activity.models import BgmParticipation
         participation = BgmParticipation.objects.filter(
             progress__user=request.user, progress__campaign__enabled=True,
@@ -29,7 +29,15 @@ class BgmMeView(View):
         ).select_related('progress__campaign', 'progress__space_activity').order_by('-joined_at').first()
         if participation is None:
             return None
-        return BgmService.payload(participation.progress.campaign, request.user, participation.progress.space_activity)
+        payload = BgmService.payload(participation.progress.campaign, request.user, participation.progress.space_activity)
+        if 'chat_id' in request.GET:
+            try:
+                chat_id = int(request.GET['chat_id'])
+            except (ValueError, TypeError):
+                raise BgmErrors.INVALID
+            BgmService.entrance_chat(request.user, chat_id)
+            payload['bgm']['entrance'] = BgmService.entrance_status(request.user, chat_id)
+        return payload
 
 
 class BgmEntranceView(View):

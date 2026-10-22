@@ -50,10 +50,11 @@ class BgmTests(TestCase):
         self.assertEqual(data['style'], 'blue')
         self.assertEqual(data['slots'], ['1'])
 
-    def test_peer_audio_is_enabled_even_for_legacy_opt_out(self):
+    def test_peer_autoplay_preference_is_saved_and_preserved(self):
         data = BgmService.configure(self.campaign, self.user, {'style': 'blue', 'receive_audio': False})['bgm']
-        self.assertTrue(data['receive_audio'])
-        self.assertTrue(BgmService.payload(self.campaign, self.user, self.run)['bgm']['receive_audio'])
+        self.assertFalse(data['receive_audio'])
+        self.assertFalse(self.join()['bgm']['receive_audio'])
+        self.assertTrue(BgmService.configure(self.campaign, self.user, {'style': 'blue', 'receive_audio': True})['bgm']['receive_audio'])
 
     def test_style_lock_preserves_preferences_and_allows_same_style_updates(self):
         self.join()
@@ -191,6 +192,43 @@ class BgmTests(TestCase):
         BgmService.configure(self.campaign, self.user, {'style': 'blue', 'mode': 'manual'})
         with self.assertRaises(type(BgmErrors.INVALID)):
             BgmService.enter(self.campaign, self.user, {'chat_id': own_chat.id, 'request_id': 'request-0001', 'track': '12'})
+
+    def test_cooldown_is_per_user_per_chat_and_expires_at_three_minutes(self):
+        from Chat.models import ChatMember
+        from Activity.models import BgmEntrance
+        chat = self.chat(self.user)
+        ChatMember.objects.create(chat=chat, user=self.peer, status=1)
+        BgmService.configure(self.campaign, self.user, {'style': 'blue', 'mode': 'manual'})
+        BgmService.configure(self.campaign, self.peer, {'style': 'pink', 'mode': 'manual'})
+        send = lambda actor, room, rid: BgmService.enter(self.campaign, actor, {'chat_id': room.id, 'request_id': rid, 'track': '1'})
+        self.assertTrue(send(self.user, chat, 'first-user-001')['sent'])
+        self.assertTrue(send(self.peer, chat, 'second-user-001')['sent'])
+        self.assertTrue(send(self.user, self.chat(self.user), 'other-chat-001')['sent'])
+        now = timezone.now()
+        BgmEntrance.objects.filter(participation__progress=self.progress, chat_id=chat.id).update(created_at=now - timedelta(seconds=179))
+        with patch('Activity.bgm.timezone.now', return_value=now):
+            self.assertEqual(BgmService.entrance_status(self.user, chat.id)['retry_after_seconds'], 1)
+            self.assertEqual(send(self.user, chat, 'too-soon-001')['retry_after_seconds'], 1)
+        with patch('Activity.bgm.timezone.now', return_value=now + timedelta(seconds=1)):
+            self.assertTrue(BgmService.entrance_status(self.user, chat.id)['allowed'])
+            self.assertTrue(send(self.user, chat, 'after-three-001')['sent'])
+
+    def test_preflight_is_authenticated_scoped_and_never_sends(self):
+        from utils import auth
+        from Activity.models import BgmEntrance
+        authorization = {'HTTP_AUTHORIZATION': f'Bearer {auth.get_login_token(self.user)["auth"]}'}
+        chat = self.chat(self.user)
+        BgmService.configure(self.campaign, self.user, {'style': 'blue', 'mode': 'auto'})
+        response = self.client.get(f'/activities/bgm/me?chat_id={chat.id}', **authorization).json()['body']
+        self.assertTrue(response['bgm']['entrance']['allowed'])
+        self.assertEqual(BgmEntrance.objects.count(), 0)
+        BgmService.enter(self.campaign, self.user, {'chat_id': chat.id, 'request_id': 'preflight-001'})
+        response = self.client.get(f'/activities/bgm/me?chat_id={chat.id}', **authorization).json()['body']
+        self.assertFalse(response['bgm']['entrance']['allowed'])
+        self.assertGreater(response['bgm']['entrance']['retry_after_seconds'], 0)
+        self.assertEqual(BgmEntrance.objects.count(), 1)
+        foreign = self.chat(self.peer)
+        self.assertNotEqual(self.client.get(f'/activities/bgm/me?chat_id={foreign.id}', **authorization).json()['identifier'], 'OK')
 
     def test_authenticated_settings_endpoint_and_no_client_awarded_points(self):
         from utils import auth
