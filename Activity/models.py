@@ -162,7 +162,7 @@ class BgmEntrance(models.Model):
     chat_id = models.PositiveBigIntegerField(db_index=True)
     request_id = models.CharField(max_length=80)
     system_message_id = models.PositiveBigIntegerField()
-    audio_message_id = models.PositiveBigIntegerField()
+    audio_message_id = models.PositiveBigIntegerField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
 
     class Meta:

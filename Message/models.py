@@ -929,7 +929,7 @@ class Message(models.Model):
         raise MessageErrors.NOT_A_MEMBER
 
     @classmethod
-    def create_system(cls, chat: Chat, user: User, event: str, **details):
+    def create_system(cls, chat: Chat, user: User, event: str, *, media_resource=None, **details):
         if not chat.has_active_member(user):
             raise MessageErrors.NOT_A_MEMBER
         payload = {
@@ -946,6 +946,7 @@ class Message(models.Model):
             user=user,
             type=MessageTypeChoice.SYSTEM,
             content=content,
+            media_resource=media_resource,
         )
         MessageEvent.record_created(message)
         return message

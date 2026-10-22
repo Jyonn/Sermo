@@ -162,23 +162,32 @@ class BgmTests(TestCase):
             BgmService.record(self.user, 'publish', self.statement(self.user))
         self.assertEqual(BgmInteraction.objects.get().event_date.isoformat(), '2026-10-21')
 
-    def test_entrance_creates_legacy_audio_and_system_pair_with_cooldown(self):
-        from Chat.models import Chat
-        from Message.models import Message, MessageTypeChoice
+    def test_entrance_creates_only_one_system_message_with_playback_and_cooldown(self):
+        from Activity.models import BgmEntrance
+        from Message.models import Message, MessageEvent, MessageTypeChoice
         chat = self.chat(self.user)
         BgmService.configure(self.campaign, self.user, {'style': 'blue', 'mode': 'manual'})
         response = BgmService.enter(self.campaign, self.user, {'chat_id': chat.id, 'request_id': 'request-0001', 'track': '1'})
         self.assertTrue(response['sent'])
-        audio = Message.objects.get(pk=response['audio_message_id'])
-        self.assertEqual(audio.type, MessageTypeChoice.AUDIO)
-        self.assertIsNotNone(audio.media_resource_id)
-        payload = audio._payload_for_type()
+        self.assertIsNone(response['audio_message_id'])
+        system = Message.objects.get(pk=response['system_message_id'])
+        self.assertEqual(Message.objects.filter(chat=chat).count(), 1)
+        self.assertEqual(MessageEvent.objects.filter(chat=chat).count(), 1)
+        self.assertFalse(Message.objects.filter(chat=chat, type=MessageTypeChoice.AUDIO).exists())
+        self.assertIsNotNone(system.media_resource_id)
+        self.assertEqual(system.media_resource.reference_count, 1)
+        payload = system._payload_for_type()
         self.assertTrue(payload['bgm_entrance'])
-        system = Message.objects.get(pk=payload['system_message_id'])
+        self.assertEqual(payload['kind'], 'system')
+        self.assertEqual(payload['uri'], response['uri'])
+        self.assertEqual(payload['duration_seconds'], response['duration'])
+        self.assertEqual(payload['song_title'], response['title'])
+        self.assertIsNone(BgmEntrance.objects.get(system_message_id=system.id).audio_message_id)
         self.assertEqual(system.type, MessageTypeChoice.SYSTEM)
         self.assertIn('Track 0', system.system_message_text(self.user))
         self.assertEqual(BgmService.enter(self.campaign, self.user, {'chat_id': chat.id, 'request_id': 'request-0001', 'track': '1'})['reason'], 'duplicate')
         self.assertEqual(BgmService.enter(self.campaign, self.user, {'chat_id': chat.id, 'request_id': 'request-0002', 'track': '1'})['reason'], 'cooldown')
+        self.assertEqual(Message.objects.filter(chat=chat).count(), 1)
         self.assertEqual(BgmInteraction.objects.count(), 0)
 
     def test_entry_requires_membership_and_owned_equipped_track(self):

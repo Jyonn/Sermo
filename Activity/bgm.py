@@ -1,7 +1,6 @@
 """Server-owned, space-scoped BGM collection rules. No client-awarded points."""
 from collections import defaultdict
 from Activity.presentation import presentation
-import json
 import math
 import random
 from zoneinfo import ZoneInfo
@@ -196,7 +195,7 @@ class BgmService:
 
     @classmethod
     def enter(cls, campaign, user, data):
-        from Message.models import MediaResource, Message, MessageEvent, MessageTypeChoice
+        from Message.models import MediaResource, Message
         if not isinstance(data, dict) or not isinstance(data.get('chat_id'), int) or isinstance(data['chat_id'], bool):
             raise BgmErrors.INVALID
         request_id = data.get('request_id')
@@ -234,15 +233,14 @@ class BgmService:
             if track is None:
                 raise BgmErrors.CLOSED
             asset = track['asset']
-            system = Message.create_system(chat, user, 'bgm_entrance', song_title=track['title'])
             resource = MediaResource.acquire(user, asset, MediaAsset.KIND_AUDIO)
-            audio = Message.objects.create(chat=chat, user=user, type=MessageTypeChoice.AUDIO, media_resource=resource, content=json.dumps(dict(
-                kind='audio', uri=asset.source_uri, duration_seconds=asset.duration_seconds,
-                bgm_entrance=True, song_title=track['title'], song_author=track['author'], system_message_id=system.id,
-            ), ensure_ascii=False))
-            MessageEvent.record_created(audio)
+            system = Message.create_system(
+                chat, user, 'bgm_entrance', media_resource=resource,
+                bgm_entrance=True, uri=asset.source_uri, duration_seconds=asset.duration_seconds,
+                song_title=track['title'], song_author=track['author'],
+            )
             resource.recalculate_reference_count()
             BgmEntrance.objects.create(participation=participation, chat_id=chat.id, request_id=request_id,
-                                       system_message_id=system.id, audio_message_id=audio.id)
-            return dict(sent=True, audio_message_id=audio.id, uri=asset.source_uri,
+                                       system_message_id=system.id)
+            return dict(sent=True, system_message_id=system.id, audio_message_id=None, uri=asset.source_uri,
                         title=track['title'], duration=asset.duration_seconds)
