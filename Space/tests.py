@@ -37,6 +37,16 @@ class SpaceSlugValidationTests(SimpleTestCase):
     def test_regular_space_slug_is_available(self):
         self.assertFalse(Space.vldt.reserved_slug('yuanmeng'))
 
+    def test_dev_space_slug_is_available(self):
+        for slug in ('dev', 'DEV', ' dev '):
+            with self.subTest(slug=slug):
+                self.assertFalse(Space.vldt.reserved_slug(slug))
+
+    def test_infrastructure_slugs_remain_reserved(self):
+        for slug in ('api', 'admin', 'test', 'staging'):
+            with self.subTest(slug=slug):
+                self.assertTrue(Space.vldt.reserved_slug(slug))
+
 
 class SpaceJoinNicknameConfirmationTests(TestCase):
     def setUp(self):

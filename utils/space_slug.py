@@ -4,7 +4,7 @@ SPACE_RESERVED_SLUGS = frozenset({
     # Static and infrastructure namespaces.
     'api', 'assets', 'icons', 'labs', 'static', 'cdn', 'www',
     'admin', 'mail', 'smtp', 'imap', 'pop', 'ftp', 'docs', 'status', 'support',
-    'help', 'blog', 'dev', 'test', 'staging',
+    'help', 'blog', 'test', 'staging',
 })
 
 
