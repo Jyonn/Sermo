@@ -202,7 +202,7 @@ class BgmTests(TestCase):
         with self.assertRaises(type(BgmErrors.INVALID)):
             BgmService.enter(self.campaign, self.user, {'chat_id': own_chat.id, 'request_id': 'request-0001', 'track': '12'})
 
-    def test_cooldown_is_per_user_per_chat_and_expires_at_three_minutes(self):
+    def test_cooldown_is_per_user_per_chat_and_expires_at_ten_minutes(self):
         from Chat.models import ChatMember
         from Activity.models import BgmEntrance
         chat = self.chat(self.user)
@@ -214,13 +214,16 @@ class BgmTests(TestCase):
         self.assertTrue(send(self.peer, chat, 'second-user-001')['sent'])
         self.assertTrue(send(self.user, self.chat(self.user), 'other-chat-001')['sent'])
         now = timezone.now()
-        BgmEntrance.objects.filter(participation__progress=self.progress, chat_id=chat.id).update(created_at=now - timedelta(seconds=179))
+        BgmEntrance.objects.filter(participation__progress=self.progress, chat_id=chat.id).update(created_at=now - timedelta(seconds=180))
+        with patch('Activity.bgm.timezone.now', return_value=now):
+            self.assertEqual(BgmService.entrance_status(self.user, chat.id)['retry_after_seconds'], 420)
+        BgmEntrance.objects.filter(participation__progress=self.progress, chat_id=chat.id).update(created_at=now - timedelta(seconds=599))
         with patch('Activity.bgm.timezone.now', return_value=now):
             self.assertEqual(BgmService.entrance_status(self.user, chat.id)['retry_after_seconds'], 1)
             self.assertEqual(send(self.user, chat, 'too-soon-001')['retry_after_seconds'], 1)
         with patch('Activity.bgm.timezone.now', return_value=now + timedelta(seconds=1)):
             self.assertTrue(BgmService.entrance_status(self.user, chat.id)['allowed'])
-            self.assertTrue(send(self.user, chat, 'after-three-001')['sent'])
+            self.assertTrue(send(self.user, chat, 'after-ten-001')['sent'])
 
     def test_preflight_is_authenticated_scoped_and_never_sends(self):
         from utils import auth

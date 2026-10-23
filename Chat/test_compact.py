@@ -3,7 +3,7 @@ import gzip
 from copy import deepcopy
 from unittest.mock import patch
 
-from django.test import SimpleTestCase, TestCase
+from django.test import SimpleTestCase, TestCase, override_settings
 from django.utils import timezone
 
 from Chat.compact import compact_chat_list
@@ -73,6 +73,7 @@ class CompactTransportTests(SimpleTestCase):
         self.assertLessEqual(zipped(selected), zipped(rows))
 
 
+@override_settings(MIDDLEWARE=['utils.middleware.ChatListCompression', 'utils.middleware.APIPacker'])
 class CompactChatListTests(TestCase):
     def setUp(self):
         self.space = Space.objects.create(name='Compact', slug='compact', email='compact@example.com')

@@ -5,6 +5,7 @@ from notificator import NotificatorAPIError
 from smartdjango import analyse, OK
 
 from utils import auth, function
+from utils.compact import compact_response
 from utils.content_safety import ContentSafetyScene, check_user_text, is_miniprogram_request
 from utils.auth import Request
 from utils.qiniu import (
@@ -220,12 +221,12 @@ class UserGrowthEventView(View):
 class UserGrowthAcknowledgementView(View):
     @auth.require_user
     def get(self, request: Request):
-        return request.user.calculate_growth()
+        return compact_response(request, request.user.calculate_growth(), 'growth')
 
     @auth.require_user
     @analyse.json(UserGrowthAcknowledgementParams.level)
     def post(self, request: Request):
-        return request.user.acknowledge_growth_level(request.json.level)
+        return compact_response(request, request.user.acknowledge_growth_level(request.json.level), 'growth')
 
 
 class UserFeatureDiscoveryView(View):

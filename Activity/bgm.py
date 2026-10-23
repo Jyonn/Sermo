@@ -25,7 +25,7 @@ class BgmErrors:
 
 class BgmService:
     MODE = 'bgm_collection'
-    ENTRANCE_COOLDOWN_SECONDS = 180
+    ENTRANCE_COOLDOWN_SECONDS = 600
     ZONE = ZoneInfo('Asia/Shanghai')
     # Day and point requirements are cumulative, never consecutive. First track is a gift.
     # Fifteen daily posts earn 90 points; extra interactions can shorten this to ten days.

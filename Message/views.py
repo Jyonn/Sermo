@@ -15,6 +15,7 @@ from Message.validators import MessageErrors
 from utils.qiniu import ShortAudioTranscriptionError, issue_message_upload, build_message_image_thumbnail_uri, build_message_video_thumbnail_uri, sign_private_download_url, avatar_uri_for_key, transcribe_short_audio, validate_message_media_key, validate_message_media_size
 from utils import auth
 from utils.auth import Request
+from utils.compact import compact_response
 from User.models import NotificationEvent, User
 
 
@@ -42,10 +43,12 @@ class MessageView(View):
         after = request.query.after
 
         if before is not None:
-            return Message.older(request.query.chat, before, request.query.limit, request=request, user=request.user)
-        if after is not None:
-            return Message.newer(request.query.chat, after, request.query.limit, request=request, user=request.user)
-        return Message.latest(request.query.chat, request.query.limit, request=request, user=request.user)
+            messages = Message.older(request.query.chat, before, request.query.limit, request=request, user=request.user)
+        elif after is not None:
+            messages = Message.newer(request.query.chat, after, request.query.limit, request=request, user=request.user)
+        else:
+            messages = Message.latest(request.query.chat, request.query.limit, request=request, user=request.user)
+        return compact_response(request, messages, 'messages')
 
     @auth.require_user
     @analyse.query(MessageParams.chat_id)

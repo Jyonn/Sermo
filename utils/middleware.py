@@ -23,11 +23,11 @@ Error.__eq__ = _safe_error_eq
 
 
 class ChatListCompression(GZipMiddleware):
-    """Compress only packed chat-list responses, using Django's safeguards."""
+    """Compress high-volume read endpoints, using Django's safeguards."""
 
     def process_response(self, request, response):
         match = getattr(request, 'resolver_match', None)
-        if request.method != 'GET' or getattr(match, 'url_name', None) != 'chat_list' or response.status_code != 200:
+        if request.method != 'GET' or getattr(match, 'url_name', None) not in {'chat_list', 'message', 'user growth acknowledgement'} or response.status_code != 200:
             return response
         return super().process_response(request, response)
 
