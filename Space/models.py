@@ -192,7 +192,7 @@ class Space(models.Model):
         official_user = User.create(
             space=self,
             name=self._build_official_name(self),
-            password=get_random_string(32),
+            password='Aa1!' + get_random_string(28),
             role=UserRoleChoice.OFFICIAL,
             language=language,
             email=self.email,

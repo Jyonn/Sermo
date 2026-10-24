@@ -514,6 +514,8 @@ class User(models.Model):
     def set_password(self, password, save=True):
         if not password:
             return self
+        from User.password_policy import validate_new_password
+        validate_new_password(self, password)
         had_password = self.has_password
         self.password = function.hash_password(password, self.salt)
         if save:
@@ -2177,38 +2179,53 @@ class UserPasswordRecoveryChallenge(models.Model):
             )
 
     @classmethod
-    def verify_code(cls, challenge_id, code):
+    def verify_code(cls, challenge_id, code, user_id=None, channel=None):
         now = timezone.now()
+        error = None
         with transaction.atomic():
-            challenge = cls.objects.select_for_update().filter(id=challenge_id, used_at__isnull=True).first()
+            query = cls.objects.select_for_update().filter(id=challenge_id, used_at__isnull=True)
+            if user_id is not None:
+                query = query.filter(user_id=user_id)
+            if channel is not None:
+                query = query.filter(channel=channel)
+            challenge = query.first()
             if challenge is None:
-                raise UserErrors.PASSWORD_RECOVERY_CODE_INVALID
-            if challenge.code_expires_at <= now:
+                error = UserErrors.PASSWORD_RECOVERY_CODE_INVALID
+            elif challenge.code_expires_at <= now:
                 challenge.used_at = now
                 challenge.save(update_fields=['used_at'])
-                raise UserErrors.PASSWORD_RECOVERY_CODE_EXPIRED
-            if challenge.attempts >= cls.MAX_ATTEMPTS:
-                raise UserErrors.PASSWORD_RECOVERY_ATTEMPTS_EXCEEDED
-            if challenge.code != (code or '').strip():
+                error = UserErrors.PASSWORD_RECOVERY_CODE_EXPIRED
+            elif challenge.attempts >= cls.MAX_ATTEMPTS:
+                error = UserErrors.PASSWORD_RECOVERY_ATTEMPTS_EXCEEDED
+            elif challenge.code != (code or '').strip():
                 challenge.attempts += 1
                 challenge.save(update_fields=['attempts'])
-                if challenge.attempts >= cls.MAX_ATTEMPTS:
-                    raise UserErrors.PASSWORD_RECOVERY_ATTEMPTS_EXCEEDED
-                raise UserErrors.PASSWORD_RECOVERY_CODE_INVALID
-            challenge.verified_at = now
-            challenge.reset_token = get_random_string(64)
-            challenge.reset_expires_at = now + datetime.timedelta(seconds=cls.RESET_EXPIRE_SECONDS)
-            challenge.save(update_fields=['verified_at', 'reset_token', 'reset_expires_at'])
-            return challenge
+                error = UserErrors.PASSWORD_RECOVERY_ATTEMPTS_EXCEEDED if challenge.attempts >= cls.MAX_ATTEMPTS else UserErrors.PASSWORD_RECOVERY_CODE_INVALID
+            else:
+                challenge.verified_at = now
+                challenge.reset_token = get_random_string(64)
+                challenge.reset_expires_at = now + datetime.timedelta(seconds=cls.RESET_EXPIRE_SECONDS)
+                challenge.save(update_fields=['verified_at', 'reset_token', 'reset_expires_at'])
+        if error is not None:
+            raise error
+        return challenge
 
     @classmethod
-    def reset_password(cls, reset_token, new_password):
+    def reset_password(cls, reset_token, new_password, user_id=None):
         now = timezone.now()
+        token_query = cls.objects.filter(reset_token=(reset_token or '').strip(), used_at__isnull=True, verified_at__isnull=False)
+        if user_id is not None:
+            token_query = token_query.filter(user_id=user_id)
+        target_user_id = token_query.values_list('user_id', flat=True).first()
+        if target_user_id is None:
+            raise UserErrors.PASSWORD_RECOVERY_TOKEN_INVALID
         with transaction.atomic():
-            challenge = cls.objects.select_for_update().select_related('user').filter(
+            current = User.objects.select_for_update().get(pk=target_user_id)
+            challenge = cls.objects.select_for_update().filter(
                 reset_token=(reset_token or '').strip(),
                 used_at__isnull=True,
                 verified_at__isnull=False,
+                user_id=current.id,
             ).first()
             if challenge is None:
                 raise UserErrors.PASSWORD_RECOVERY_TOKEN_INVALID
@@ -2216,10 +2233,13 @@ class UserPasswordRecoveryChallenge(models.Model):
                 challenge.used_at = now
                 challenge.save(update_fields=['used_at'])
                 raise UserErrors.PASSWORD_RECOVERY_TOKEN_EXPIRED
-            challenge.user.set_password(new_password)
-            RefreshToken.objects.filter(user=challenge.user, revoked_at__isnull=True).update(revoked_at=now)
-            cls.objects.filter(user=challenge.user, used_at__isnull=True).update(used_at=now)
-            return challenge.user
+            target = current.email if challenge.channel == UserNotificationChoice.EMAIL and current.email_verified_at else current.phone if challenge.channel == UserNotificationChoice.SMS and current.phone_verified_at else None
+            if not target or target != challenge.target or current.is_deleted:
+                raise UserErrors.PASSWORD_RECOVERY_TOKEN_INVALID
+            current.set_password(new_password)
+            RefreshToken.objects.filter(user=current, revoked_at__isnull=True).update(revoked_at=now)
+            cls.objects.filter(user=current, used_at__isnull=True).update(used_at=now)
+            return current
 
 
 class NotificationEventTypeChoice(Choice):

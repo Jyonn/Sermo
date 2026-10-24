@@ -1070,3 +1070,9 @@ msgstr "此活动暂不可用"
 
 msgid "Please verify your account first"
 msgstr "请先完成账号认证"
+
+msgid "Password must contain 6 to 128 characters"
+msgstr "密码需为 6–128 位"
+
+msgid "Official account password must contain 10 to 128 characters and at least three of uppercase, lowercase, digits and symbols; common passwords are not allowed"
+msgstr "官方账户密码需为 10–128 位，包含大写字母、小写字母、数字、符号中的至少三类，且不能使用常见弱密码"

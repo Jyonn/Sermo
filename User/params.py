@@ -141,8 +141,10 @@ class UserFeatureDiscoveryParams(metaclass=Params):
 class UserPasswordParams(metaclass=Params):
     old_password = UserParams.password.copy().rename('old_password', final_name='old_password') \
         .null().default(None)
-    new_password = UserParams.password.copy().rename('new_password', final_name='new_password') \
-        .null().default(None)
+    new_password = Validator('new_password').to(str)
+    method = Validator('method').to(str).null().default('password')
+    challenge_id = Validator('challenge_id').to(int).null().default(None)
+    code = Validator('code').to(str).null().default(None)
 
 
 class UserPasswordRecoveryParams(metaclass=Params):

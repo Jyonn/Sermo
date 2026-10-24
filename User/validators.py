@@ -18,6 +18,8 @@ class UserErrors:
     PASSWORD_TOO_SHORT = Error(message=_('Password should be at least {password_length} characters long'), code=Code.BadRequest)
     PASSWORD_ERROR = Error(message=_('Password error'), code=Code.BadRequest)
     OLD_PASSWORD_REQUIRED = Error(message=_('old_password is required'), code=Code.BadRequest)
+    PASSWORD_LENGTH_INVALID = Error(message=_('Password must contain 6 to 128 characters'), code=Code.BadRequest)
+    OFFICIAL_PASSWORD_WEAK = Error(message=_('Official account password must contain 10 to 128 characters and at least three of uppercase, lowercase, digits and symbols; common passwords are not allowed'), code=Code.BadRequest)
     PASSWORD_NOT_SET = Error(message=_('Password is not set'), code=Code.Forbidden)
     SPACE_IN_NAME = Error(message=_('Name cannot contain spaces'), code=Code.BadRequest)
     SPACE_SLUG_TOO_SHORT = Error(message=_('Space slug should be at least {min_length} characters long'), code=Code.BadRequest)

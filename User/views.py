@@ -657,20 +657,34 @@ class WebPushSubscriptionView(View):
 
 class PasswordView(View):
     @auth.require_user
+    def get(self, request: Request):
+        from User.password_policy import password_policy
+        return dict(has_password=request.user.has_password,
+                    channels=UserPasswordRecoveryChallenge.recovery_channels(request.user),
+                    policy=password_policy(request.user))
+
+    @auth.require_user
     @analyse.json(
         UserPasswordParams.old_password,
         UserPasswordParams.new_password,
+        UserPasswordParams.method,
+        UserPasswordParams.challenge_id,
+        UserPasswordParams.code,
     )
     def post(self, request: Request):
-        user = request.user
-        if user.has_password:
-            old_password = request.json.old_password
-            if not old_password:
-                raise UserErrors.OLD_PASSWORD_REQUIRED
-            if not function.verify_password(old_password, user.salt, user.password):
-                raise UserErrors.PASSWORD_ERROR
-        user.set_password(request.json.new_password)
-        return dict(has_password=user.has_password)
+        from User.password_change import change_password
+        user = change_password(request.user, request.json.new_password,
+                               method=request.json.method or 'password',
+                               old_password=request.json.old_password,
+                               challenge_id=request.json.challenge_id, code=request.json.code)
+        return dict(has_password=user.has_password, auth=auth.get_login_token(user))
+
+
+class PasswordCodeView(View):
+    @auth.require_user
+    @analyse.json(UserPasswordRecoveryParams.channel)
+    def post(self, request: Request):
+        return _send_password_code(request.user, request.json.channel)
 
 
 class PasswordRecoveryLookupView(View):
@@ -693,37 +707,31 @@ class PasswordRecoveryCodeView(View):
     def post(self, request: Request):
         space = Space.get_by_slug(request.json.slug)
         user = UserPasswordRecoveryChallenge.find_user(space, request.json.name)
-        challenge = UserPasswordRecoveryChallenge.issue(user, request.json.channel)
-        expire_minutes = UserPasswordRecoveryChallenge.CODE_EXPIRE_SECONDS // 60
-        title = verification_title('password_recovery', user.language)
-        try:
-            if challenge.channel == UserNotificationChoice.EMAIL:
-                send_verification_mail(
-                    challenge.target,
-                    code=challenge.code,
-                    time=expire_minutes,
-                    title=title,
-                    language=user.language,
-                    recipient_name=user.name,
-                )
-            elif challenge.channel == UserNotificationChoice.SMS:
-                send_verification_sms(
-                    challenge.target,
-                    code=challenge.code,
-                    time=expire_minutes,
-                    title=title,
-                    language=user.language,
-                )
-            else:
-                raise UserErrors.PASSWORD_RECOVERY_CHANNEL_INVALID
-        except NotificatorAPIError as error:
-            challenge.used_at = timezone.now()
-            challenge.save(update_fields=['used_at'])
-            raise UserErrors.CONTACT_SEND_FAILED(details=error)
-        return dict(
-            challenge_id=challenge.id,
-            expires_in=UserPasswordRecoveryChallenge.CODE_EXPIRE_SECONDS,
-        )
+        return _send_password_code(user, request.json.channel)
+
+
+def _send_password_code(user, channel):
+    challenge = UserPasswordRecoveryChallenge.issue(user, channel)
+    expire_minutes = UserPasswordRecoveryChallenge.CODE_EXPIRE_SECONDS // 60
+    title = verification_title('password_recovery', user.language)
+    try:
+        if challenge.channel == UserNotificationChoice.EMAIL:
+            send_verification_mail(
+                challenge.target, code=challenge.code, time=expire_minutes,
+                title=title, language=user.language, recipient_name=user.name,
+            )
+        elif challenge.channel == UserNotificationChoice.SMS:
+            send_verification_sms(
+                challenge.target, code=challenge.code, time=expire_minutes,
+                title=title, language=user.language,
+            )
+        else:
+            raise UserErrors.PASSWORD_RECOVERY_CHANNEL_INVALID
+    except NotificatorAPIError as error:
+        challenge.used_at = timezone.now()
+        challenge.save(update_fields=['used_at'])
+        raise UserErrors.CONTACT_SEND_FAILED(details=error)
+    return dict(challenge_id=challenge.id, expires_in=UserPasswordRecoveryChallenge.CODE_EXPIRE_SECONDS)
 
 
 class PasswordRecoveryVerifyView(View):
