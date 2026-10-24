@@ -34,7 +34,7 @@ class RegistryTests(TestCase):
 
     def setUp(self):
         seed(CALLBACK)
-        self.space = Space.objects.create(name='Registry', slug='registry', email='test@example.com')
+        self.space = Space.objects.create(name='Registry', slug='dev', email='test@example.com', oauth_developer_enabled=True)
         self.owner = User.create(self.space, 'Developer', verified=True)
         User.objects.filter(pk=self.owner.pk).update(email='verified@example.test', email_verified_at=timezone.now(), phone='+8613800138000', phone_verified_at=timezone.now())
         self.owner.refresh_from_db()

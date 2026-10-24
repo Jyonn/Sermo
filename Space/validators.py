@@ -7,6 +7,7 @@ from utils.space_slug import is_reserved_space_slug
 
 @Error.register
 class SpaceErrors:
+    OAUTH_DEVELOPER_UNAVAILABLE = Error(message=_('OAuth application management is not enabled for this space'), code=Code.Forbidden)
     NOT_EXISTS = Error(message=_('Space ({attr}={value}) does not exist'), code=Code.NotFound)
     NAME_EMPTY = Error(message=_('Space name cannot be empty'), code=Code.BadRequest)
     NAME_TOO_LONG = Error(message=_('Space name is too long'), code=Code.BadRequest)

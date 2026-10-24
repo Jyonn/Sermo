@@ -60,10 +60,12 @@ def listing(query):
 class OAuthDeveloperApplicationsView(View):
     @auth.require_user
     def get(self, request):
+        request.user.space.require_oauth_developer()
         return listing(OAuthApplication.objects.filter(owner=request.user))
 
     @auth.require_user
     def post(self, request, app_id=None):
+        request.user.space.require_oauth_developer()
         return write(request, False, app_id)
 
 

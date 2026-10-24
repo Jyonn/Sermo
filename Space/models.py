@@ -73,6 +73,7 @@ class Space(models.Model):
     submission_enabled = models.BooleanField(default=False)
     square_explore_enabled = models.BooleanField(default=True)
     qq_binding_enabled = models.BooleanField(default=False)
+    oauth_developer_enabled = models.BooleanField(default=False)
     unverified_group_policy = models.PositiveSmallIntegerField(default=2)
     member_limit = models.PositiveIntegerField(null=True, blank=True, default=None)
     level_names = models.JSONField(default=default_level_names)
@@ -261,7 +262,7 @@ class Space(models.Model):
     def set_admin_settings(
             self, name, group_square_enabled, chat_enabled, square_explore_enabled,
             unverified_group_policy, member_limit, level_names=None, submission_enabled=None,
-            square_free_post_enabled=None, qq_binding_enabled=None, space_group_enabled=None):
+            square_free_post_enabled=None, qq_binding_enabled=None, space_group_enabled=None, oauth_developer_enabled=None):
         was_space_group_enabled = self.space_group_enabled
         normalized_name = self.vldt.name(name)
         normalized_member_limit = self.vldt.member_limit(member_limit)
@@ -289,6 +290,10 @@ class Space(models.Model):
             raise SpaceErrors.SQUARE_MODES_REQUIRED
 
         self.name = normalized_name
+        if oauth_developer_enabled is not None:
+            if oauth_developer_enabled and not self.oauth_developer_eligible:
+                raise SpaceErrors.OAUTH_DEVELOPER_UNAVAILABLE
+            self.oauth_developer_enabled = bool(oauth_developer_enabled)
         self.group_square_enabled = normalized_square_enabled
         self.chat_enabled = normalized_chat_enabled
         self.space_group_enabled = (
@@ -308,7 +313,7 @@ class Space(models.Model):
         self.save(update_fields=[
             'name', 'group_square_enabled', 'chat_enabled', 'square_free_post_enabled',
             'submission_enabled', 'square_explore_enabled', 'space_group_enabled',
-            'unverified_group_policy', 'member_limit', 'level_names', 'qq_binding_enabled',
+            'unverified_group_policy', 'member_limit', 'level_names', 'qq_binding_enabled', 'oauth_developer_enabled',
         ])
         from Chat.models import Chat
         if self.space_group_enabled:
@@ -316,6 +321,18 @@ class Space(models.Model):
         elif was_space_group_enabled:
             Chat.dissolve_space_group(self)
         return self
+
+    @property
+    def oauth_developer_eligible(self):
+        return self.slug == 'dev'
+
+    @property
+    def oauth_developer_available(self):
+        return self.oauth_developer_eligible and self.oauth_developer_enabled
+
+    def require_oauth_developer(self):
+        if not self.oauth_developer_available:
+            raise SpaceErrors.OAUTH_DEVELOPER_UNAVAILABLE
 
     def is_feature_granted(self, feature_key):
         prefetched = getattr(self, '_prefetched_objects_cache', {}).get('feature_grants')
@@ -387,6 +404,7 @@ class Space(models.Model):
             'submission_enabled',
             'square_explore_enabled',
             'qq_binding_available',
+            'oauth_developer_available',
             'unverified_group_policy',
             'member_limit',
             'verification_tier',
@@ -411,6 +429,8 @@ class Space(models.Model):
             'square_explore_enabled',
             'qq_binding_enabled',
             'qq_binding_granted',
+            'oauth_developer_eligible',
+            'oauth_developer_enabled',
             'unverified_group_policy',
             'member_limit',
             'verification_tier',

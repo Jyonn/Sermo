@@ -112,7 +112,8 @@ class OAuthEligibilityTests(TestCase):
         from utils.auth import require_user, refresh_login_token
         request = RequestFactory().get('/', **headers)
         self.assertEqual(require_user(lambda current: current.user.pk)(request), self.user.pk)
-        self.assertEqual(self.client.get('/users/oauth/applications', **headers).status_code, 200)
+        # Registry management is a separate, dev-space-only capability.
+        self.assertEqual(self.client.get('/users/oauth/applications', **headers).status_code, 403)
         self.assertIn('auth', refresh_login_token(self.refresh))
 
     def test_refresh_grant_type_remains_unsupported(self):

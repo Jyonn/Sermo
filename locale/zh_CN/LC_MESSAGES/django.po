@@ -1071,6 +1071,9 @@ msgstr "此活动暂不可用"
 msgid "Please verify your account first"
 msgstr "请先完成账号认证"
 
+msgid "OAuth application management is not enabled for this space"
+msgstr "当前空间未开放 OAuth 应用管理"
+
 msgid "Password must contain 6 to 128 characters"
 msgstr "密码需为 6–128 位"
 
