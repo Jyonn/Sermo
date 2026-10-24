@@ -145,6 +145,7 @@ class UserPasswordParams(metaclass=Params):
     method = Validator('method').to(str).null().default('password')
     challenge_id = Validator('challenge_id').to(int).null().default(None)
     code = Validator('code').to(str).null().default(None)
+    reset_token = Validator('reset_token').to(str).null().default(None)
 
 
 class UserPasswordRecoveryParams(metaclass=Params):

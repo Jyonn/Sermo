@@ -1076,3 +1076,6 @@ msgstr "密码需为 6–128 位"
 
 msgid "Official account password must contain 10 to 128 characters and at least three of uppercase, lowercase, digits and symbols; common passwords are not allowed"
 msgstr "官方账户密码需为 10–128 位，包含大写字母、小写字母、数字、符号中的至少三类，且不能使用常见弱密码"
+
+msgid "Use 10 to 32 characters and at least three of uppercase, lowercase, digits and symbols; avoid common passwords"
+msgstr "请使用 10–32 位密码，包含大写字母、小写字母、数字、符号中的至少三类，避免常见弱密码"

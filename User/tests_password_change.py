@@ -7,7 +7,7 @@ from django.utils import timezone
 
 from Space.models import Space
 from User.models import User, UserNotificationChoice, UserPasswordRecoveryChallenge as Challenge, RefreshToken
-from User.password_change import change_password
+from User.password_change import change_password, verify_password_change
 from User.password_policy import validate_new_password
 from User.validators import UserErrors
 from utils import auth, function
@@ -114,6 +114,35 @@ class PasswordChangeTests(TestCase):
     def test_passwordless_setup(self):
         user = User.create(space=self.space, name='Passwordless')
         self.assertTrue(change_password(user, 'new-pass').has_password)
+
+    def test_official_maximum_is_32(self):
+        validate_new_password(self.official, 'Aa1!' + 'x' * 28)
+        with self.assertRaises(UserErrors.OFFICIAL_PASSWORD_WEAK.__class__):
+            validate_new_password(self.official, 'Aa1!' + 'x' * 29)
+
+    def test_two_step_password_verification_does_not_change_credentials(self):
+        original = self.user.password
+        with self.assertRaises(UserErrors.PASSWORD_ERROR.__class__):
+            verify_password_change(self.user, old_password='wrong')
+        self.assertTrue(verify_password_change(self.user, old_password='old-pass')['verified'])
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.password, original)
+
+    def test_two_step_email_token_is_owner_bound_and_single_use(self):
+        challenge = self.challenge()
+        result = verify_password_change(self.user, method='email', challenge_id=challenge.id, code=challenge.code)
+        with self.assertRaises(UserErrors.PASSWORD_RECOVERY_TOKEN_INVALID.__class__):
+            change_password(self.official, 'BrightMoon42!', method='email', reset_token=result['reset_token'])
+        change_password(self.user, 'new-pass', method='email', reset_token=result['reset_token'])
+        with self.assertRaises(UserErrors.PASSWORD_RECOVERY_TOKEN_INVALID.__class__):
+            change_password(self.user, 'other-pass', method='email', reset_token=result['reset_token'])
+
+    def test_verify_endpoint(self):
+        credentials = auth.get_login_token(self.user)
+        response = self.client.post('/users/me/password/verify', json.dumps(dict(
+            method='password', old_password='old-pass',
+        )), content_type='application/json', HTTP_AUTHORIZATION='Bearer ' + credentials['auth']).json()
+        self.assertTrue(response['body']['verified'], response)
 
     def test_authenticated_endpoints_and_legacy_payload(self):
         credentials = auth.get_login_token(self.user)

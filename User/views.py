@@ -670,14 +670,27 @@ class PasswordView(View):
         UserPasswordParams.method,
         UserPasswordParams.challenge_id,
         UserPasswordParams.code,
+        UserPasswordParams.reset_token,
     )
     def post(self, request: Request):
         from User.password_change import change_password
         user = change_password(request.user, request.json.new_password,
                                method=request.json.method or 'password',
                                old_password=request.json.old_password,
-                               challenge_id=request.json.challenge_id, code=request.json.code)
+                               challenge_id=request.json.challenge_id, code=request.json.code,
+                               reset_token=request.json.reset_token)
         return dict(has_password=user.has_password, auth=auth.get_login_token(user))
+
+
+class PasswordVerifyView(View):
+    @auth.require_user
+    @analyse.json(UserPasswordParams.method, UserPasswordParams.old_password,
+                  UserPasswordParams.challenge_id, UserPasswordParams.code)
+    def post(self, request: Request):
+        from User.password_change import verify_password_change
+        return verify_password_change(request.user, method=request.json.method or 'password',
+                                      old_password=request.json.old_password,
+                                      challenge_id=request.json.challenge_id, code=request.json.code)
 
 
 class PasswordCodeView(View):

@@ -5,7 +5,7 @@ from User.validators import UserErrors
 
 
 def password_policy(user):
-    return dict(min_length=10 if user.is_official else 6, max_length=128,
+    return dict(min_length=10 if user.is_official else 6, max_length=32 if user.is_official else 128,
                 required_classes=3 if user.is_official else 0, official=user.is_official)
 
 
