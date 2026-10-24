@@ -14,6 +14,22 @@ from User.chronelle_branding import APPLICATION_NAME, application_icon, authoriz
 from utils import auth
 
 BASE = 'https://chronelle.jyonn.space'
+MIRROR_BASE = 'https://chronelle.6-79.cn'
+APP_ORIGINS = {'https://sermo.jyonn.space', 'https://frienden.jyonn.space',
+               'https://sermo.6-79.cn', 'https://frienden.6-79.cn'}
+
+
+def authorization_site(request):
+    origin = request.headers.get('Origin', '')
+    app_origin = origin if origin in APP_ORIGINS else 'https://sermo.jyonn.space'
+    return (MIRROR_BASE if app_origin in {'https://sermo.6-79.cn', 'https://frienden.6-79.cn'} else BASE), app_origin
+
+
+def pending_site(pending):
+    base = pending.get('provider_base', BASE)
+    if base not in (BASE, MIRROR_BASE):
+        raise ChronelleErrors.UNAVAILABLE
+    return base
 
 
 @Error.register
@@ -29,18 +45,19 @@ def active_pending(user):
 class ChronelleAuthorizationView(View):
     @auth.require_user
     def post(self, request):
+        base, app_origin = authorization_site(request)
         try:
             with transaction.atomic():
                 user = User.objects.select_for_update().get(pk=request.user.pk)
                 purpose = authorization_purpose(user.language)
                 previous = active_pending(user)
-                if previous and previous.get('branding_version') == 2 and previous.get('purpose') == purpose:
-                    return {'authorize_url': f'{BASE}/#/authorize/{previous["request_id"]}'}
+                if previous and previous.get('branding_version') == 2 and previous.get('purpose') == purpose and pending_site(previous) == base:
+                    return {'authorize_url': f'{base}/#/authorize/{previous["request_id"]}'}
                 verifier = secrets.token_urlsafe(48)
                 challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b'=').decode()
                 state = secrets.token_urlsafe(32)
-                response = requests.post(f'{BASE}/api/integrations/requests/', json={
-                    'app_name': APPLICATION_NAME, 'app_url': 'https://sermo.jyonn.space',
+                response = requests.post(f'{base}/api/integrations/requests/', json={
+                    'app_name': APPLICATION_NAME, 'app_url': app_origin,
                     'app_icon': application_icon(),
                     'purpose': purpose,
                     'code_challenge': challenge, 'code_challenge_method': 'S256', 'state': state,
@@ -51,10 +68,11 @@ class ChronelleAuthorizationView(View):
                 user.chronelle_authorization = {
                     'request_id': request_id, 'verifier': verifier, 'state': state,
                     'branding_version': 2, 'purpose': purpose,
+                    'provider_base': base,
                     'expires_at': timezone.now().timestamp() + 590, 'claim_after': 0,
                 }
                 user.save(update_fields=['chronelle_authorization'])
-            return {'authorize_url': f'{BASE}/#/authorize/{request_id}'}
+            return {'authorize_url': f'{base}/#/authorize/{request_id}'}
         except (requests.RequestException, ValueError, KeyError, TypeError):
             raise ChronelleErrors.UNAVAILABLE
 
@@ -76,7 +94,7 @@ class ChronelleClaimView(View):
             user.chronelle_authorization = pending
             user.save(update_fields=['chronelle_authorization'])
         try:
-            response = requests.post(f'{BASE}/api/integrations/requests/{pending["request_id"]}/claim/',
+            response = requests.post(f'{pending_site(pending)}/api/integrations/requests/{pending["request_id"]}/claim/',
                                      json={'code_verifier': pending['verifier']}, timeout=15, allow_redirects=False)
             if response.status_code in (202, 429):
                 return {'status': 'pending'}

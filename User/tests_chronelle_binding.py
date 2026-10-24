@@ -79,3 +79,36 @@ class ChronelleBindingTests(TestCase):
         self.user.chronelle_calendar_id = '35c6deab-103d-4f60-9cf9-9f42c812cc5a'
         self.assertEqual(self.user.jsonl()['chronelle_calendar_id'], self.user.chronelle_calendar_id)
         self.assertEqual(self.user.json_friend()['chronelle_calendar_id'], self.user.chronelle_calendar_id)
+
+    def test_mirror_authorize_and_claim_use_same_provider_even_after_site_switch(self):
+        calendar_id = '35c6deab-103d-4f60-9cf9-9f42c812cc5a'
+        headers = {'HTTP_AUTHORIZATION': f"Bearer {auth.get_login_token(self.user)['auth']}"}
+        for origin in ('https://sermo.6-79.cn', 'https://frienden.6-79.cn'):
+            self.user.chronelle_authorization = {}
+            self.user.save(update_fields=['chronelle_authorization'])
+            with patch('User.chronelle_views.requests.post', return_value=Mock(status_code=201, json=lambda: {'request_id': calendar_id})) as remote:
+                result = self.client.post('/users/me/chronelle/authorize', HTTP_ORIGIN=origin, **headers)
+                self.assertTrue(result.json()['body']['authorize_url'].startswith('https://chronelle.6-79.cn/#/authorize/'))
+                self.assertEqual(remote.call_args.args[0], 'https://chronelle.6-79.cn/api/integrations/requests/')
+                self.assertEqual(remote.call_args.kwargs['json']['app_url'], origin)
+            self.user.refresh_from_db()
+            state = self.user.chronelle_authorization['state']
+            with patch('User.chronelle_views.requests.post', return_value=Mock(status_code=200, json=lambda: {'calendar': calendar_id, 'state': state})) as remote:
+                result = self.client.post('/users/me/chronelle/claim', HTTP_ORIGIN='https://frienden.jyonn.space', **headers)
+                self.assertEqual(result.json()['body']['status'], 'approved')
+                self.assertTrue(remote.call_args.args[0].startswith('https://chronelle.6-79.cn/'))
+
+    def test_untrusted_origin_cannot_choose_provider(self):
+        headers = {'HTTP_AUTHORIZATION': f"Bearer {auth.get_login_token(self.user)['auth']}"}
+        with patch('User.chronelle_views.requests.post', return_value=Mock(status_code=201, json=lambda: {'request_id': '35c6deab-103d-4f60-9cf9-9f42c812cc5a'})) as remote:
+            result = self.client.post('/users/me/chronelle/authorize', HTTP_ORIGIN='https://frienden.6-79.cn.evil.test', **headers)
+        self.assertTrue(result.json()['body']['authorize_url'].startswith('https://chronelle.jyonn.space/'))
+        self.assertEqual(remote.call_args.kwargs['json']['app_url'], 'https://sermo.jyonn.space')
+
+    def test_pending_provider_is_allowlisted(self):
+        self.user.chronelle_authorization = {'request_id': 'synthetic', 'provider_base': 'https://evil.test', 'expires_at': 9999999999}
+        self.user.save(update_fields=['chronelle_authorization'])
+        with patch('User.chronelle_views.requests.post') as remote:
+            response = self.client.post('/users/me/chronelle/claim', HTTP_AUTHORIZATION=f"Bearer {auth.get_login_token(self.user)['auth']}")
+        self.assertEqual(response.status_code, 400)
+        remote.assert_not_called()
