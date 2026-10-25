@@ -101,6 +101,8 @@ def _space_payload(space):
         square_enabled=space.group_square_enabled,
         qq_binding_granted=space.qq_binding_granted,
         qq_binding_enabled=space.qq_binding_enabled,
+        oauth_developer_granted=space.oauth_developer_granted,
+        oauth_developer_enabled=space.oauth_developer_enabled,
         identity_submitted_at=space.identity_submitted_at.timestamp() if space.identity_submitted_at else None,
         identity_verified_at=space.identity_verified_at.timestamp() if space.identity_verified_at else None,
         created_at=space.created_at.timestamp(),

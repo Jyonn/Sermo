@@ -196,6 +196,21 @@ class PlatformAdminSecurityTests(TestCase):
         self.assertFalse(revoked['qq_binding_granted'])
         self.assertFalse(revoked['qq_binding_enabled'])
 
+    def test_platform_admin_can_grant_dev_to_arbitrary_space_without_enabling_it(self):
+        space = Space.objects.create(name='Community', slug='community', email='community@example.test')
+        token = auth.get_platform_admin_token('admin@example.com')['auth']
+        key = SpaceFeatureKeyChoice.OAUTH_DEVELOPER
+        for enabled in (True, False):
+            request = RequestFactory().post(
+                f'/platform-admin/spaces/{space.id}/features/{key}',
+                data=json.dumps({'enabled': enabled}), content_type='application/json',
+                HTTP_AUTHORIZATION=f'Bearer {token}',
+            )
+            result = SpaceFeatureGrantView.as_view()(request, space_id=space.id, feature_key=key)
+            self.assertEqual(result['oauth_developer_granted'], enabled)
+            self.assertFalse(result['oauth_developer_enabled'])
+            self.assertFalse(result['qq_binding_granted'])
+
     def test_mfa_enabled_skips_email_code_and_logs_in_with_totp(self):
         secret = PlatformAdminSecurity.new_secret()
         security = PlatformAdminSecurity.primary()

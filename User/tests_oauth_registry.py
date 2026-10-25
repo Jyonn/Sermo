@@ -7,7 +7,7 @@ from django.core.management.base import CommandError
 from django.test import TestCase
 from django.utils import timezone
 
-from Space.models import Space
+from Space.models import Space, SpaceFeatureGrant, SpaceFeatureKeyChoice
 from User.models import OAuthApplication, OAuthApplicationAudit, OAuthGrant, User
 from User.management.commands.seed_oauth_applications import seed
 from User.oauth import OAuthError, authorize, exchange, userinfo, validate_authorization
@@ -34,7 +34,10 @@ class RegistryTests(TestCase):
 
     def setUp(self):
         seed(CALLBACK)
-        self.space = Space.objects.create(name='Registry', slug='dev', email='test@example.com', oauth_developer_enabled=True)
+        self.space = Space.objects.create(name='Registry', slug='developer-community', email='test@example.com')
+        SpaceFeatureGrant.set_granted(self.space, SpaceFeatureKeyChoice.OAUTH_DEVELOPER, True, 'admin@example.test')
+        self.space.oauth_developer_enabled = True
+        self.space.save(update_fields=['oauth_developer_enabled'])
         self.owner = User.create(self.space, 'Developer', verified=True)
         User.objects.filter(pk=self.owner.pk).update(email='verified@example.test', email_verified_at=timezone.now(), phone='+8613800138000', phone_verified_at=timezone.now())
         self.owner.refresh_from_db()

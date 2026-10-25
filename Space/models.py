@@ -35,6 +35,7 @@ class SpaceNormalizers:
 
 class SpaceFeatureKeyChoice(Choice):
     QQ_IDENTITY_BINDING = 'qq_identity_binding'
+    OAUTH_DEVELOPER = 'oauth_developer'
 
 
 class Space(models.Model):
@@ -324,11 +325,16 @@ class Space(models.Model):
 
     @property
     def oauth_developer_eligible(self):
-        return self.slug == 'dev'
+        # Compatibility name for older clients; eligibility now means a grant.
+        return self.oauth_developer_granted
+
+    @property
+    def oauth_developer_granted(self):
+        return self.is_feature_granted(SpaceFeatureKeyChoice.OAUTH_DEVELOPER)
 
     @property
     def oauth_developer_available(self):
-        return self.oauth_developer_eligible and self.oauth_developer_enabled
+        return self.oauth_developer_granted and self.oauth_developer_enabled
 
     def require_oauth_developer(self):
         if not self.oauth_developer_available:
@@ -430,6 +436,7 @@ class Space(models.Model):
             'qq_binding_enabled',
             'qq_binding_granted',
             'oauth_developer_eligible',
+            'oauth_developer_granted',
             'oauth_developer_enabled',
             'unverified_group_policy',
             'member_limit',
@@ -466,6 +473,7 @@ class SpaceFeatureGrant(models.Model):
                 feature_key=feature_key,
                 defaults={'granted_by': granted_by if granted else ''},
             )
+            was_granted = not _created and item.revoked_at is None
             if granted:
                 item.granted_by = str(granted_by or '')[:254]
                 item.granted_at = timezone.now()
@@ -473,9 +481,15 @@ class SpaceFeatureGrant(models.Model):
             else:
                 item.revoked_at = timezone.now()
             item.save(update_fields=['granted_by', 'granted_at', 'revoked_at'])
-            if not granted and feature_key == SpaceFeatureKeyChoice.QQ_IDENTITY_BINDING:
-                Space.objects.filter(id=space.id).update(qq_binding_enabled=False)
-                space.qq_binding_enabled = False
+            setting = {
+                SpaceFeatureKeyChoice.QQ_IDENTITY_BINDING: 'qq_binding_enabled',
+                SpaceFeatureKeyChoice.OAUTH_DEVELOPER: 'oauth_developer_enabled',
+            }[feature_key]
+            # A new grant never activates a legacy or stale space setting.
+            if not granted or not was_granted:
+                Space.objects.filter(id=space.id).update(**{setting: False})
+                setattr(space, setting, False)
+            getattr(space, '_prefetched_objects_cache', {}).pop('feature_grants', None)
         return item
 
 
