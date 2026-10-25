@@ -206,9 +206,9 @@ LEVEL_REWARDS = {
     13: [_reward('bubble.mosaic', 13, 'bubble', '马赛克气泡', 'common', 'mosaic'), _reward('frame.mechanical', 13, 'frame', '机械头像框', 'uncommon', 'mechanical')],
     14: [_reward('background.aurora_sky', 14, 'background', '极光天幕背景', 'epic', 'aurora-sky')],
     15: [_reward('background.newsprint', 15, 'background', '报刊背景', 'rare', 'newsprint'), _reward('background.hologram', 15, 'background', '幻彩膜背景', 'epic', 'hologram')],
-    16: [_reward('bubble.niko', 16, 'bubble', 'Niko 气泡', 'legendary', 'niko'), _reward('frame.niko', 16, 'frame', 'Niko Run 头像框', 'legendary', 'niko-run'), _reward('growth.report', 16, 'identity', '成长报告', 'epic', status='planned')],
-    17: [_reward('background.frienden_night', 17, 'background', '夜航友间背景', 'epic', 'frienden-night'), _reward('background.frienden_garden', 17, 'background', '午后花房背景', 'epic', 'frienden-garden'), _reward('bubble.fufu', 17, 'bubble', 'Fufu 气泡', 'legendary', 'fufu'), _reward('frame.fufu', 17, 'frame', 'Fufu Wave 头像框', 'legendary', 'fufu-wave'), _reward('frame.collection', 17, 'identity', '头像框收藏入口', 'epic', status='planned')],
-    18: [_reward('background.noir', 18, 'background', '黑色电影背景', 'legendary', 'noir-film'), _reward('identity.final_badge', 18, 'identity', '“尽兴”永久成长徽记', 'legendary', status='planned'), _reward('profile.final_slot', 18, 'identity', '满级个人名片展示位', 'legendary', status='planned')],
+    16: [_reward('bubble.niko', 16, 'bubble', 'Niko 气泡', 'legendary', 'niko'), _reward('frame.niko', 16, 'frame', 'Niko Run 头像框', 'legendary', 'niko-run'), _reward('growth.report', 16, 'identity', '成长报告', 'epic')],
+    17: [_reward('background.frienden_night', 17, 'background', '夜航友间背景', 'epic', 'frienden-night'), _reward('background.frienden_garden', 17, 'background', '午后花房背景', 'epic', 'frienden-garden'), _reward('bubble.fufu', 17, 'bubble', 'Fufu 气泡', 'legendary', 'fufu'), _reward('frame.fufu', 17, 'frame', 'Fufu Wave 头像框', 'legendary', 'fufu-wave')],
+    18: [_reward('background.noir', 18, 'background', '黑色电影背景', 'legendary', 'noir-film'), _reward('identity.final_badge', 18, 'identity', '“尽兴”永久成长徽记', 'legendary'), _reward('profile.final_slot', 18, 'identity', '满级个人名片展示位', 'legendary')],
 }
 
 

@@ -219,6 +219,13 @@ class UserGrowthEventView(View):
         )
 
 
+class UserGrowthReportView(View):
+    @auth.require_user
+    def get(self, request):
+        from User.growth_report import growth_report
+        return compact_response(request, growth_report(request.user), 'growth-report')
+
+
 class UserFounderMedalAcknowledgementView(View):
     @auth.require_user
     def post(self, request):

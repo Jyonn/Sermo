@@ -98,6 +98,7 @@ class UserErrors:
     GESTURE_LOCK_PAYLOAD_INVALID = Error(message=_('Invalid gesture lock payload'), code=Code.BadRequest)
     GROWTH_LEVEL_REQUIRED = Error(message=_('Level {level} is required for this feature'), code=Code.Forbidden)
     GROWTH_ACKNOWLEDGEMENT_INVALID = Error(message=_('Growth level acknowledgement is out of sequence'), code=Code.BadRequest)
+    GROWTH_REPORT_LOCKED = Error(message=_('Growth report unlocks at level 16'), code=Code.Forbidden)
     FEATURE_DISCOVERY_INVALID = Error(message=_('Invalid feature discovery'), code=Code.BadRequest)
     PERMANENT_VIP_NOT_ELIGIBLE = Error(message=_('Permanent VIP requirements are not met'), code=Code.Forbidden)
     PERMANENT_VIP_CAMPAIGN_FULL = Error(message=_('Permanent VIP campaign is full'), code=Code.BadRequest)

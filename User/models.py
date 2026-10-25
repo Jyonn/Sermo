@@ -1176,7 +1176,9 @@ class User(models.Model):
                 return rewards
             return [reward for reward in rewards if reward.get('category') != 'statement']
 
+        from User.growth_report import can_view_growth_report
         return dict(
+            report_available=can_view_growth_report(self, level),
             score=score,
             score_level=score_level,
             effective_level=level,
@@ -1290,6 +1292,7 @@ class User(models.Model):
         payload['chronelle_calendar_id'] = self.chronelle_calendar_id
         payload['growth_level_name'] = self._dictify_growth_level_name()
         payload['founder_medal_years'] = self.founder_medal_years()
+        payload['growth_honor'] = self.growth_honor()
         payload['plaza_greeting'] = self.display_plaza_greeting()
         payload['permanent_vip_slot'] = self.permanent_vip_slot()
         return payload
@@ -1314,6 +1317,7 @@ class User(models.Model):
         payload['growth_level'] = self.growth_level
         payload['growth_level_name'] = self._dictify_growth_level_name()
         payload['founder_medal_years'] = self.founder_medal_years()
+        payload['growth_honor'] = self.growth_honor()
         payload['permanent_vip_slot'] = self.permanent_vip_slot()
         return payload
 
@@ -1327,6 +1331,14 @@ class User(models.Model):
                        and not (item.metadata or {}).get('revoked_at')
                        and (not pending_only or not (item.metadata or {}).get('acknowledged_at'))
                        and re.fullmatch(r'identity\.founder\.\d{4}', item.reward_id)}, reverse=True)
+
+    def growth_honor(self):
+        prefetched = getattr(self, '_prefetched_objects_cache', {}).get('resource_inventory')
+        reward = next((item for item in prefetched if item.reward_id == 'profile.final_slot'), None) if prefetched is not None else self.resource_inventory.filter(reward_id='profile.final_slot').first()
+        if reward is None:
+            return None
+        names = self.space.level_names or []
+        return {'level': 18, 'name': names[17] if len(names) >= 18 else 'LV 18', 'earned_at': reward.acquired_at.timestamp()}
 
     def acknowledge_founder_medal(self, year):
         if type(year) is not int:
@@ -1395,6 +1407,7 @@ class User(models.Model):
         )
         payload['growth'] = self.calculate_growth()
         payload['resource_inventory'] = UserResourceInventory.payload_for(self)
+        payload['growth_honor'] = self.growth_honor()
         payload['founder_medal_years'] = self.founder_medal_years()
         payload['growth_level_name'] = self._dictify_growth_level_name()
         from TravelMap.unlocks import unlocked_city_bubble_styles
