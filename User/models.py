@@ -289,7 +289,7 @@ class User(models.Model):
     chronelle_calendar_id = models.CharField(max_length=36, default='', blank=True)
     chronelle_authorization = models.JSONField(default=dict, blank=True)
     statement_card_style = models.CharField(max_length=16, default='default')
-    show_self_avatar = models.BooleanField(default=False)
+    show_self_avatar = models.BooleanField(default=True)
     pinned_square_statement_id = models.PositiveIntegerField(null=True, blank=True)
     square_outfit_style = models.CharField(max_length=16, default='sunset')
     square_prop_style = models.CharField(max_length=16, default='none')

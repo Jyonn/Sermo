@@ -183,6 +183,7 @@ class CityBubbleUnlockTests(TestCase):
         self.assertEqual(self.user.chat_bubble_style, 'baxian-lv')
 
     def test_self_avatar_preference_is_persisted_in_private_profile(self):
+        self.assertTrue(User._meta.get_field('show_self_avatar').get_default())
         self.user.set_personalization(
             chat_bubble_style='default',
             avatar_frame_style='none',
@@ -192,6 +193,9 @@ class CityBubbleUnlockTests(TestCase):
         self.assertTrue(self.user.show_self_avatar)
         self.assertTrue(self.user.json_me()['show_self_avatar'])
         self.assertNotIn('show_self_avatar', self.user.tiny_json())
+        self.user.set_personalization(chat_bubble_style='default', avatar_frame_style='none', show_self_avatar=False)
+        self.user.refresh_from_db()
+        self.assertFalse(self.user.json_me()['show_self_avatar'])
 
     def test_profile_card_theme_requires_level_or_vip(self):
         with self.assertRaises(UserErrors.PERSONALIZATION_NOT_OWNED.__class__):
