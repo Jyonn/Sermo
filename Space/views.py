@@ -30,6 +30,7 @@ from Chat.models import Chat
 from Friendship.models import Friendship, FriendshipStatusChoice
 from Message.models import Message
 from Message.params import MessageParams
+from Sticker.params import StickerParams
 from User.models import (
     NotificationEvent,
     NotificationPreference,
@@ -576,6 +577,20 @@ class SpaceAdminUserListView(SpaceUserListView):
             item['statement_count'] = getattr(user, 'admin_statement_count', 0)
             payload.append(item)
         return payload
+
+
+class SpaceAdminStickerView(View):
+    explore = False
+
+    @auth.require_space
+    @analyse.query(StickerParams.offset, StickerParams.limit)
+    def get(self, request: Request):
+        from Sticker.library import sticker_library_payload, sticker_explore_payload
+        official = request.space.ensure_official_user()
+        # Sticker source labels must use the official account's space visibility.
+        request.user = official
+        loader = sticker_explore_payload if self.explore else sticker_library_payload
+        return loader(official, request.query.offset, request.query.limit, request)
 
 
 class SpaceAdminBroadcastView(View):
