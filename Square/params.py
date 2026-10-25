@@ -104,6 +104,8 @@ class SquareParams(metaclass=Params):
     pin = Validator('pin').to(int).bool(lambda value: value in (0, 1)).default(0)
     before = Validator('before').to(int).null().default(None)
     feed_date = Validator('date', final_name='feed_date').to(validate_feed_date).null().default(None)
+    feed_start = Validator('date_from').to(validate_feed_date).null().default(None)
+    feed_end = Validator('date_to').to(validate_feed_date).null().default(None)
     feed_keyword = Validator('keyword', final_name='feed_keyword').to(validate_feed_keyword).null().default(None)
     offset = Validator('offset').to(int).bool(lambda value: 0 <= value <= 5000).default(0)
     scope = Validator('scope').to(str).bool(lambda value: value in ('all', 'friends', 'mine')).default('all')

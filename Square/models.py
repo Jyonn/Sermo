@@ -316,13 +316,21 @@ class Statement(models.Model):
         )
 
     @classmethod
-    def feed(cls, user, before=None, limit=20, request=None, scope='all', user_id=None, feed_date=None, keyword=None):
+    def feed(cls, user, before=None, limit=20, request=None, scope='all', user_id=None, feed_date=None, keyword=None, date_from=None, date_to=None):
         queryset = cls.visible_for(user)
         queryset = cls._apply_feed_scope(queryset, user, scope=scope, user_id=user_id)
         if feed_date is not None:
             period_start, period_end = cls._local_date_filter_bounds(feed_date)
             queryset = queryset.filter(created_at__gte=period_start, created_at__lt=period_end)
         normalized_keyword = (keyword or '').strip()
+        start = cls._local_date_filter_bounds(date_from)[0] if date_from else None
+        end = cls._local_date_filter_bounds(date_to)[1] if date_to else None
+        if start and end and start >= end:
+            raise SquareErrors.DATE_INVALID
+        if start:
+            queryset = queryset.filter(created_at__gte=start)
+        if end:
+            queryset = queryset.filter(created_at__lt=end)
         if normalized_keyword:
             queryset = queryset.filter(text__icontains=normalized_keyword)
         queryset = queryset.select_related('user', 'user__qq_identity', 'forward_bundle', 'link_preview').prefetch_related(

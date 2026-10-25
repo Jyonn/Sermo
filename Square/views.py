@@ -73,7 +73,7 @@ class StatementView(View):
     @auth.require_user
     @analyse.query(
         SquareParams.before, SquareParams.limit, SquareParams.scope, SquareParams.user_id,
-        SquareParams.feed_date, SquareParams.feed_keyword,
+        SquareParams.feed_date, SquareParams.feed_keyword, SquareParams.feed_start, SquareParams.feed_end,
     )
     def get(self, request: Request):
         request.user.space.require_square_enabled(scope=request.query.scope)
@@ -85,6 +85,8 @@ class StatementView(View):
             scope=request.query.scope,
             user_id=request.query.user_id,
             feed_date=request.query.feed_date,
+            date_from=request.query.date_from,
+            date_to=request.query.date_to,
             keyword=request.query.feed_keyword,
         )
 

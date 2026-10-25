@@ -633,6 +633,30 @@ class StatementApiTests(TestCase):
             [friends_day_two.id],
         )
 
+    def test_date_range_feed_uses_inclusive_shanghai_days_and_shared_visibility(self):
+        rows = []
+        for day, hour in [(1, 15), (1, 16), (3, 15), (3, 16)]:
+            row = Statement.objects.create(space=self.space, user=self.author, text='range photo', visibility=StatementVisibilityChoice.PUBLIC)
+            Statement.objects.filter(pk=row.pk).update(created_at=datetime.datetime(2026, 1, day, hour, 59, tzinfo=datetime.timezone.utc))
+            rows.append(row)
+        hidden = Statement.objects.create(space=self.space, user=self.stranger, text='range hidden', visibility=StatementVisibilityChoice.FRIENDS)
+        Statement.objects.filter(pk=hidden.pk).update(created_at=datetime.datetime(2026, 1, 2, tzinfo=datetime.timezone.utc))
+        for suffix, expected in [
+            ('date_from=2026-01-02&date_to=2026-01-03', [rows[2].id, rows[1].id]),
+            ('date_from=2026-01-04', [rows[3].id]),
+            ('date_to=2026-01-01', [rows[0].id]),
+            (f'date_from=2026-01-02&date_to=2026-01-03&before={rows[2].id}', [rows[1].id]),
+        ]:
+            response = self.client.get(f'/square/statements?scope=friends&keyword=range&limit=20&{suffix}', **self.authorization(self.friend))
+            self.assertEqual(response.status_code, 200, response.content)
+            self.assertEqual([item['statement_id'] for item in response.json()['body']], expected)
+
+    def test_date_range_feed_rejects_invalid_and_reversed_ranges(self):
+        for suffix in ['date_from=2026-02-31', 'date_to=invalid', 'date_from=2026-01-03&date_to=2026-01-02']:
+            response = self.client.get(f'/square/statements?scope=all&limit=20&{suffix}', **self.authorization(self.friend))
+            self.assertEqual(response.status_code, 400, response.content)
+            self.assertEqual(response.json()['identifier'], 'SQUARE@DATE_INVALID')
+
     def test_date_feed_rejects_invalid_date(self):
         response = self.client.get(
             '/square/statements?scope=all&date=2026-02-31&limit=20',
