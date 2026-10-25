@@ -413,7 +413,7 @@ class ContactAvailabilityTests(TestCase):
             )
 
 
-class NotificatorIntegrationTests(SimpleTestCase):
+class NotificatorIntegrationTests(TestCase):
     @patch('utils.notificator_integration.notificator')
     def test_verification_mail_uses_structured_format_and_locale(self, client):
         send_verification_mail(
@@ -435,7 +435,7 @@ class NotificatorIntegrationTests(SimpleTestCase):
         )
 
     @patch('User.models.NotificationDelivery._message_digest_groups')
-    def test_message_email_is_grouped_markdown_without_content_leak(self, digest_groups):
+    def test_message_email_hides_content_without_metadata_leak(self, digest_groups):
         actor = SimpleNamespace(id=8, name='Fly')
         event = SimpleNamespace(
             actor=actor,

@@ -1082,3 +1082,33 @@ msgstr "官方账户密码需为 10–128 位，包含大写字母、小写字�
 
 msgid "Use 10 to 32 characters and at least three of uppercase, lowercase, digits and symbols; avoid common passwords"
 msgstr "请使用 10–32 位密码，包含大写字母、小写字母、数字、符号中的至少三类，避免常见弱密码"
+
+msgid "New like"
+msgstr "收到新的点赞"
+
+msgid "{name} liked your statement."
+msgstr "{name} 赞了你的发言。"
+
+msgid "New comment"
+msgstr "收到新的评论"
+
+msgid "{name} commented on your statement."
+msgstr "{name} 评论了你的发言。"
+
+msgid "Comment liked"
+msgstr "评论收到点赞"
+
+msgid "{name} liked your comment."
+msgstr "{name} 赞了你的评论。"
+
+msgid "New reply"
+msgstr "收到新的回复"
+
+msgid "{name} replied to your comment."
+msgstr "{name} 回复了你的评论。"
+
+msgid "New mention"
+msgstr "有人提到了你"
+
+msgid "{name} mentioned you in a comment."
+msgstr "{name} 在评论中提到了你。"

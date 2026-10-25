@@ -46,8 +46,10 @@ class PlatformAdminEmailReviewTests(TestCase):
     def authorization(self):
         return {'HTTP_AUTHORIZATION': f'Bearer {self.token}'}
 
-    @patch('utils.notificator_integration.notificator.mail', return_value={'request_id': 'mail-review'})
+    @patch('utils.notificator_integration.notificator')
     def test_review_captures_exactly_twenty_then_stops(self, mail):
+        mail.mail.return_value = {'request_id': 'mail-review'}
+        mail = mail.mail
         PlatformAdminEmailReviewState.start()
 
         for index in range(21):
@@ -71,8 +73,9 @@ class PlatformAdminEmailReviewTests(TestCase):
         self.assertEqual(last.status, PlatformAdminEmailReviewRecord.STATUS_SENT)
         self.assertEqual(last.request_id, 'mail-review')
 
-    @patch('utils.notificator_integration.notificator.mail', side_effect=RuntimeError('provider unavailable'))
+    @patch('utils.notificator_integration.notificator')
     def test_review_records_failed_email_content(self, _mail):
+        _mail.mail.side_effect = RuntimeError('provider unavailable')
         PlatformAdminEmailReviewState.start()
 
         with self.assertRaises(RuntimeError):
@@ -89,8 +92,9 @@ class PlatformAdminEmailReviewTests(TestCase):
         self.assertEqual(record.body, {'code': '123456', 'time': 10})
         self.assertIn('provider unavailable', record.detail)
 
-    @patch('utils.notificator_integration.notificator.mail', return_value={'request_id': 'detail'})
+    @patch('utils.notificator_integration.notificator')
     def test_review_api_resets_batch_and_protects_body_detail(self, _mail):
+        _mail.mail.return_value = {'request_id': 'detail'}
         PlatformAdminEmailReviewState.start()
         send_reviewable_mail(
             'reader@example.com',

@@ -21,6 +21,7 @@ from smartdjango import models, Choice
 
 from utils.global_settings import notificator
 from utils.notificator_integration import notificator_locale, notificator_result_detail, send_reviewable_mail
+from utils.email_layout import avatar_url as email_avatar_url, message_row as email_message_row, conversation_block, email_body, text as email_text
 from utils.qiniu import (
     sign_private_download_url,
     delete_avatar_by_uri,
@@ -3202,7 +3203,6 @@ class NotificationChannelCursor(models.Model):
 class NotificationDelivery(models.Model):
     DIGEST_CHAT_LIMIT = 3
     DIGEST_MESSAGE_LIMIT_PER_CHAT = 5
-    EMAIL_BATCH_BODY_LIMIT = 1200
     PROCESSING_LEASE_MINUTES = 15
     MIN_EMAIL_INTERVAL_MINUTES = 5
     MESSAGE_EVENT_TYPES = (
@@ -3519,10 +3519,6 @@ class NotificationDelivery(models.Model):
             return normalized
         return normalized[:limit - 1].rstrip() + '…'
 
-    @staticmethod
-    def _escape_email_markdown(value):
-        return re.sub(r'([\\`*_{}\[\]()#+.!|>-])', r'\\\1', str(value or ''))
-
     @classmethod
     def _email_action_url(cls, deliveries):
         if not deliveries:
@@ -3642,28 +3638,19 @@ class NotificationDelivery(models.Model):
                 message_count=total,
                 chat_count=chat_count,
             )
-        lines = [f'## {_("{count} unread messages").format(count=total)}', '']
+        blocks = []
         for group in grouped:
-            safe_name = cls._escape_email_markdown(group['name'])
-            lines.append(f'**{safe_name}** · {_("{count} messages").format(count=group["total_count"])}')
-            if not hide_message_content:
-                for delivery in group['selected']:
-                    _title, body = delivery.event.render_delivery_message(
-                        hide_message_content=False,
-                    )
-                    actor = delivery.event.actor
-                    prefix = f'{actor.name}: ' if actor and group['chat'].group else ''
-                    preview = cls._escape_email_markdown(cls._truncate_email_line(f'{prefix}{body}'))
-                    lines.append(f'> {preview}')
-            lines.append('')
-
+            rows = []
+            for delivery in group['selected']:
+                _title, body = delivery.event.render_delivery_message(hide_message_content=False)
+                actor = delivery.event.actor
+                rows.append(email_message_row(actor.name if actor else str(_('System notification')),
+                                              cls._truncate_email_line(body, limit=240), email_avatar_url(actor)))
+            blocks.append(conversation_block(group['name'], _('{count} messages').format(count=group['total_count']), rows))
         if omitted > 0:
-            lines.append(f'_{_("And {count} more messages.").format(count=omitted)}_')
-        lines.append(str(_('Return to FRIENDEN when you are ready to reply.')))
-        body = '\n'.join(lines).strip()
-        if len(body) <= cls.EMAIL_BATCH_BODY_LIMIT:
-            return body
-        return body[:cls.EMAIL_BATCH_BODY_LIMIT - 1].rstrip() + '…'
+            blocks.append(f'<p>{email_text(_("And {count} more messages.").format(count=omitted))}</p>')
+        return email_body(_('{count} unread messages').format(count=total), ''.join(blocks),
+                          _('Return to FRIENDEN when you are ready to reply.'))
 
     @classmethod
     def _render_message_digest_body(cls, deliveries, pref: NotificationPreference):
@@ -3708,7 +3695,7 @@ class NotificationDelivery(models.Model):
                     body = cls._render_email_batch_body(deliveries, pref)
                     result = send_reviewable_mail(
                         target,
-                        format='markdown',
+                        format='text' if pref.hide_message_content else 'html',
                         title=title,
                         body=body,
                         locale=notificator_locale(user.language),
@@ -3786,10 +3773,12 @@ class NotificationDelivery(models.Model):
             email_footer_note = str(_('You can adjust email reminders in Notification settings.'))
         try:
             if self.channel == UserNotificationChoice.EMAIL:
-                safe_body = self._escape_email_markdown(body)
+                actor = None if hide_message_content or (self.event.payload or {}).get('anonymous_actor') else self.event.actor
+                safe_body = email_body(title, '<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tbody>' +
+                                       email_message_row(actor.name if actor else '', body, email_avatar_url(actor)) + '</tbody></table>')
                 result = send_reviewable_mail(
                     target,
-                    format='markdown',
+                    format='html',
                     title=title,
                     body=safe_body,
                     locale=notificator_locale(self.event.user.language),
