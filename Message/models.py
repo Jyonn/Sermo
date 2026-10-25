@@ -1897,6 +1897,15 @@ class AudioTranscript(models.Model):
         }
 
 
+class MessageCopy(models.Model):
+    message = models.ForeignKey(Message, on_delete=models.CASCADE, related_name='copies')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='message_copies')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['message', 'user'], name='message_copy_user_unique')]
+
+
 class MessageUserState(models.Model):
     message = models.ForeignKey(Message, on_delete=models.CASCADE, related_name='hidden_states')
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='hidden_message_states')

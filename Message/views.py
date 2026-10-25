@@ -26,6 +26,29 @@ def _require_message_feature(chat, user):
         user.space.require_chat_enabled()
 
 
+class MessageCopyView(View):
+    @auth.require_user
+    @analyse.query(MessageParams.chat_id)
+    @auth.require_chat_member()
+    def get(self, request: Request):
+        from Message.copy_suggestions import copy_suggestions
+        _require_message_feature(request.query.chat, request.user)
+        if request.query.chat.group:
+            request.user.space.require_group_join_allowed(request.user)
+        return dict(items=copy_suggestions(request.query.chat, request.user))
+
+    @auth.require_user
+    @analyse.query(MessageParams.chat_id)
+    @auth.require_chat_member()
+    @analyse.json(MessageParams.message_ids)
+    def post(self, request: Request):
+        from Message.copy_suggestions import record_copies
+        _require_message_feature(request.query.chat, request.user)
+        if request.query.chat.group:
+            request.user.space.require_group_join_allowed(request.user)
+        return dict(message_ids=record_copies(request.query.chat, request.user, list(request.json.message_ids)))
+
+
 class MessageView(View):
     @auth.require_user
     @analyse.query(
