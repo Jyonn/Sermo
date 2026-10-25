@@ -1,3 +1,4 @@
+import json
 from django.views import View
 from django.db import transaction
 from django.utils import timezone
@@ -216,6 +217,17 @@ class UserGrowthEventView(View):
             growth=request.user.calculate_growth(),
             resource_inventory=UserResourceInventory.payload_for(request.user),
         )
+
+
+class UserFounderMedalAcknowledgementView(View):
+    @auth.require_user
+    def post(self, request):
+        try:
+            data = json.loads(request.body)
+            year = data.get('year') if isinstance(data, dict) else None
+        except (ValueError, TypeError):
+            year = None
+        return compact_response(request, request.user.acknowledge_founder_medal(year), 'growth')
 
 
 class UserGrowthAcknowledgementView(View):

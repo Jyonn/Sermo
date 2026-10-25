@@ -41,6 +41,24 @@ class FounderMedalTests(TestCase):
         self.assertTrue(UserResourceInventory.objects.filter(user=self.user, reward_id='identity.founder.2026').exists())
         self.assertEqual(self.update()['founder_medal_years'], [2026])
 
+    def test_ceremony_acknowledgement_is_persistent_and_idempotent(self):
+        self.update()
+        self.assertEqual(self.user.calculate_growth()['pending_founder_medal_years'], [2026])
+        self.assertEqual(self.user.acknowledge_founder_medal(2026)['pending_founder_medal_years'], [])
+        self.assertEqual(self.user.acknowledge_founder_medal(2026)['pending_founder_medal_years'], [])
+        self.update()
+        self.assertEqual(self.user.founder_medal_years(pending_only=True), [])
+        self.update(enabled=False)
+        with self.assertRaises(Error):
+            self.user.acknowledge_founder_medal(2026)
+        self.update()
+        self.assertEqual(self.user.founder_medal_years(pending_only=True), [2026])
+
+    def test_cannot_acknowledge_unowned_or_malformed_awards(self):
+        for year in [2026, True, '2026', None]:
+            with self.assertRaises(Error):
+                self.user.acknowledge_founder_medal(year)
+
     def test_invalid_input_and_member_token_are_rejected(self):
         for year in [True, '2026', 2025, timezone.localdate().year + 1]:
             with self.assertRaises(Error):

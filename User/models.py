@@ -1193,6 +1193,7 @@ class User(models.Model):
             privileges=privileges,
             level_cap=level_cap,
             level_cap_reason=level_cap_reason,
+            pending_founder_medal_years=self.founder_medal_years(pending_only=True),
             recent_events=[event.jsonl() for event in recent_events],
             daily=dict(
                 earned=GrowthEvent.period_points(self, 'daily', timezone.localdate().isoformat()),
@@ -1316,7 +1317,7 @@ class User(models.Model):
         payload['permanent_vip_slot'] = self.permanent_vip_slot()
         return payload
 
-    def founder_medal_years(self):
+    def founder_medal_years(self, pending_only=False):
         prefetched = getattr(self, '_prefetched_objects_cache', {}).get('resource_inventory')
         inventory = prefetched if prefetched is not None else self.resource_inventory.filter(
             resource_type=UserResourceTypeChoice.IDENTITY, reward_id__startswith='identity.founder.'
@@ -1324,7 +1325,22 @@ class User(models.Model):
         return sorted({int(item.reward_id.rsplit('.', 1)[-1]) for item in inventory
                        if item.resource_type == UserResourceTypeChoice.IDENTITY
                        and not (item.metadata or {}).get('revoked_at')
+                       and (not pending_only or not (item.metadata or {}).get('acknowledged_at'))
                        and re.fullmatch(r'identity\.founder\.\d{4}', item.reward_id)}, reverse=True)
+
+    def acknowledge_founder_medal(self, year):
+        if type(year) is not int:
+            raise UserErrors.GROWTH_ACKNOWLEDGEMENT_INVALID
+        with transaction.atomic():
+            User.objects.select_for_update().get(id=self.id)
+            medal = self.resource_inventory.filter(reward_id=f'identity.founder.{year}', resource_type=UserResourceTypeChoice.IDENTITY).first()
+            if medal is None or (medal.metadata or {}).get('revoked_at'):
+                raise UserErrors.GROWTH_ACKNOWLEDGEMENT_INVALID
+            if not (medal.metadata or {}).get('acknowledged_at'):
+                medal.metadata = {**(medal.metadata or {}), 'acknowledged_at': timezone.now().isoformat()}
+                medal.save(update_fields=['metadata'])
+        self._prefetched_objects_cache = {}
+        return self.calculate_growth()
 
     def jwt_json(self):
         return self.dictify('name', 'user_id', 'space_id', 'language', 'verified', 'official', 'operator')

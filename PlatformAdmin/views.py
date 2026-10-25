@@ -274,12 +274,15 @@ class FounderMedalView(View):
             user = User.objects.select_for_update().get(id=user.id, is_deleted=False)
             reward_id = f'identity.founder.{year}'
             if enabled:
-                UserResourceInventory.objects.update_or_create(user=user, reward_id=reward_id, defaults=dict(
+                medal, created = UserResourceInventory.objects.get_or_create(user=user, reward_id=reward_id, defaults=dict(
                     resource_type=UserResourceTypeChoice.IDENTITY,
                     resource_key=reward_id, source=UserResourceSourceChoice.SYSTEM,
                     source_reference='platform-admin',
                     metadata={'year': year},
                 ))
+                if not created and (medal.metadata or {}).get('revoked_at'):
+                    medal.metadata = {'year': year}
+                    medal.save(update_fields=['metadata'])
             else:
                 medal = user.resource_inventory.filter(reward_id=reward_id, resource_type=UserResourceTypeChoice.IDENTITY).first()
                 if medal:
