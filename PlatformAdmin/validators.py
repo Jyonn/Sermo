@@ -4,6 +4,7 @@ from smartdjango import Code, Error
 
 @Error.register
 class PlatformAdminErrors:
+    MEDAL_YEAR_INVALID = Error(_('Award year must be between 2026 and the current year'), code=Code.BadRequest)
     ACCESS_DENIED = Error(_('Platform administrator access denied'), code=Code.Forbidden)
     DEBUG_REPORT_VERIFICATION_REQUIRED = Error(_('Account verification is required to use developer tools'), code=Code.Forbidden)
     DEBUG_REPORT_INVALID = Error(_('Invalid diagnostic report'), code=Code.BadRequest)

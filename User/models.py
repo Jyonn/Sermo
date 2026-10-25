@@ -1246,6 +1246,7 @@ class User(models.Model):
             'profile_card_theme',
         )
         payload['permanent_vip_slot'] = self.permanent_vip_slot()
+        payload['growth_level_name'] = self._dictify_growth_level_name()
         if self.is_imported_placeholder:
             try:
                 qq = self.qq_identity.qq
@@ -1286,6 +1287,8 @@ class User(models.Model):
             'avatar_cache_key',
         )
         payload['chronelle_calendar_id'] = self.chronelle_calendar_id
+        payload['growth_level_name'] = self._dictify_growth_level_name()
+        payload['founder_medal_years'] = self.founder_medal_years()
         payload['plaza_greeting'] = self.display_plaza_greeting()
         payload['permanent_vip_slot'] = self.permanent_vip_slot()
         return payload
@@ -1307,8 +1310,21 @@ class User(models.Model):
             'last_heartbeat',
         )
         payload['chronelle_calendar_id'] = self.chronelle_calendar_id
+        payload['growth_level'] = self.growth_level
+        payload['growth_level_name'] = self._dictify_growth_level_name()
+        payload['founder_medal_years'] = self.founder_medal_years()
         payload['permanent_vip_slot'] = self.permanent_vip_slot()
         return payload
+
+    def founder_medal_years(self):
+        prefetched = getattr(self, '_prefetched_objects_cache', {}).get('resource_inventory')
+        inventory = prefetched if prefetched is not None else self.resource_inventory.filter(
+            resource_type=UserResourceTypeChoice.IDENTITY, reward_id__startswith='identity.founder.'
+        ).only('reward_id', 'resource_type', 'metadata')
+        return sorted({int(item.reward_id.rsplit('.', 1)[-1]) for item in inventory
+                       if item.resource_type == UserResourceTypeChoice.IDENTITY
+                       and not (item.metadata or {}).get('revoked_at')
+                       and re.fullmatch(r'identity\.founder\.\d{4}', item.reward_id)}, reverse=True)
 
     def jwt_json(self):
         return self.dictify('name', 'user_id', 'space_id', 'language', 'verified', 'official', 'operator')
@@ -1363,6 +1379,8 @@ class User(models.Model):
         )
         payload['growth'] = self.calculate_growth()
         payload['resource_inventory'] = UserResourceInventory.payload_for(self)
+        payload['founder_medal_years'] = self.founder_medal_years()
+        payload['growth_level_name'] = self._dictify_growth_level_name()
         from TravelMap.unlocks import unlocked_city_bubble_styles
         payload['city_bubble_styles'] = unlocked_city_bubble_styles(self)
         payload['permanent_vip_campaign'] = PermanentVipCampaign.status_for(self)

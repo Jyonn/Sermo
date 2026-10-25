@@ -32,6 +32,7 @@ from User.models import (
     UserAccountKindChoice,
     UserNotificationChoice,
     UserRoleChoice,
+    UserResourceInventory, UserResourceSourceChoice, UserResourceTypeChoice,
 )
 from utils import auth
 from utils.notificator_integration import send_verification_mail
@@ -257,6 +258,36 @@ class MemberListView(View):
             item['notifications_enabled'] = NotificationPreference.objects.filter(user=user, enabled=True).count()
             payload.append(item)
         return payload
+
+
+class FounderMedalView(View):
+    @auth.require_platform_admin
+    def post(self, request, user_id):
+        data = _body(request)
+        year, enabled = _value(data, 'year', None), _value(data, 'enabled', None)
+        if type(year) is not int or not 2026 <= year <= timezone.localdate().year:
+            raise PlatformAdminErrors.MEDAL_YEAR_INVALID
+        if type(enabled) is not bool:
+            raise PlatformAdminErrors.SPACE_FEATURE_ENABLED_INVALID
+        user = User.index(user_id)
+        with transaction.atomic():
+            user = User.objects.select_for_update().get(id=user.id, is_deleted=False)
+            reward_id = f'identity.founder.{year}'
+            if enabled:
+                UserResourceInventory.objects.update_or_create(user=user, reward_id=reward_id, defaults=dict(
+                    resource_type=UserResourceTypeChoice.IDENTITY,
+                    resource_key=reward_id, source=UserResourceSourceChoice.SYSTEM,
+                    source_reference='platform-admin',
+                    metadata={'year': year},
+                ))
+            else:
+                medal = user.resource_inventory.filter(reward_id=reward_id, resource_type=UserResourceTypeChoice.IDENTITY).first()
+                if medal:
+                    medal.metadata = {**(medal.metadata or {}), 'revoked_at': timezone.now().isoformat()}
+                    medal.save(update_fields=['metadata'])
+            _audit(request, 'member.founder_medal_granted' if enabled else 'member.founder_medal_revoked',
+                   'user', user.id, f'{"授予" if enabled else "撤销"} {year} 年度创始人奖章', metadata={'year': year})
+            return {'founder_medal_years': user.founder_medal_years()}
 
 
 class ChatListView(View):

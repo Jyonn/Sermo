@@ -3,6 +3,7 @@ from User.oauth_application_views import OAuthAdminApplicationsView
 from PlatformAdmin.debug_reports import DebugReportDetailView, DebugReportListView, DebugReportUploadView
 
 from PlatformAdmin.views import (
+    FounderMedalView,
     AuditLogView, ChatListView, ChatMessageView, DashboardView, EmailCodeView, EmailDeliveryListView,
     EmailReviewDetailView, EmailReviewView,
     IdentityDocumentView, IdentityReviewView, LoginView, MemberListView, MessageDeliveryView,
@@ -25,6 +26,7 @@ urlpatterns = [
     path('spaces/<int:space_id>/members', MemberListView.as_view()),
     path('spaces/<int:space_id>/features/<str:feature_key>', SpaceFeatureGrantView.as_view()),
     path('members/<int:user_id>/chats', ChatListView.as_view()),
+    path('members/<int:user_id>/founder-medal', FounderMedalView.as_view()),
     path('chats/<int:chat_id>/messages', ChatMessageView.as_view()),
     path('messages/<int:message_id>/deliveries', MessageDeliveryView.as_view()),
     path('email-deliveries', EmailDeliveryListView.as_view()),
