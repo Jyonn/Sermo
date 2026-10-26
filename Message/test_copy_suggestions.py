@@ -28,7 +28,7 @@ class CopySuggestionsTests(TestCase):
             message.refresh_from_db()
         return message
 
-    def test_unique_people_ranking_newest_ties_and_self_exclusion_before_limit(self):
+    def test_unique_people_ranking_newest_ties_and_own_messages_last_after_limit(self):
         rows = [self.message(str(index)) for index in range(5)]
         for message in rows:
             record_copies(self.chat, self.other, [message.id])
@@ -39,7 +39,8 @@ class CopySuggestionsTests(TestCase):
         record_copies(self.chat, self.other, [own.id])
         record_copies(self.chat, self.fourth, [own.id])
         result = copy_suggestions(self.chat, self.reader)
-        self.assertEqual([row['message_id'] for row in result], [rows[0].id, rows[4].id, rows[3].id])
+        self.assertEqual([row['message_id'] for row in result], [rows[0].id, rows[4].id, own.id])
+        self.assertEqual([row['own'] for row in result], [False, False, True])
         self.assertNotIn('copy_count', result[0])
         record_copies(self.chat, self.reader, [rows[0].id])
         self.assertTrue(copy_suggestions(self.chat, self.reader)[0]['copied'])
