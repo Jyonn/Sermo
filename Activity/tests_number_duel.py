@@ -140,10 +140,31 @@ class NumberDuelTests(TestCase):
 
     def test_validation_feedback_and_leading_zero(self):
         self.assertEqual(validate_digits('0123'), '0123')
-        self.assertEqual(feedback('0123', '0324'), (2, 1))
-        for invalid in ['1123', '１２３４', 1234, '123', '12345']:
+        self.assertEqual(feedback('0123', '0324'), (2, 0))
+        for value in ['1123', '0000', '1111', '0011']:
+            self.assertEqual(validate_digits(value), value)
+        self.assertEqual(feedback('0011', '0101'), (2, 0))
+        self.assertEqual(feedback('1111', '1111'), (4, 0))
+        self.assertEqual(feedback('0011', '1100'), (0, 0))
+        for invalid in ['１２３４', 1234, '123', '12345']:
             with self.assertRaises(type(DuelErrors.INVALID)):
                 validate_digits(invalid)
+
+    def test_repeated_codes_and_exact_only_gameplay(self):
+        match = self.room()
+        self.act(action='secret', id=match, value='0011')
+        self.act(self.guest, action='secret', id=match, value='1111')
+        first = self.act(action='guess', id=match, round=1, value='1110')
+        self.assertEqual(first['guesses'][0]['exact'], 3)
+        self.assertEqual(first['guesses'][0]['misplaced'], 0)
+        self.act(self.guest, action='guess', id=match, round=1, value='0101')
+        # Historical misplaced counts must not disclose extra hints either.
+        NumberDuel.objects.get(pk=match).guesses.update(misplaced=2)
+        visible = Game.serialize(NumberDuel.objects.get(pk=match), self.host)
+        self.assertTrue(all(row['misplaced'] == 0 for row in visible['guesses']))
+        self.act(action='guess', id=match, round=2, value='1111')
+        result = self.act(self.guest, action='guess', id=match, round=2, value='1111')
+        self.assertEqual(result['outcome'], 'loss')
 
     def test_only_explicit_email_or_phone_verification(self):
         self.host.email_verified_at = None

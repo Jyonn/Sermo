@@ -23,7 +23,7 @@ from User.growth import resolve_event_rule
 
 @Error.register
 class DuelErrors:
-    INVALID = Error(_('Use four different digits from 0 to 9'), code=Code.BadRequest)
+    INVALID = Error(_('Use four digits from 0 to 9; repeats are allowed'), code=Code.BadRequest)
     CLOSED = Error(_('This duel is unavailable or the activity has ended'), code=Code.BadRequest)
     FORBIDDEN = Error(_('This duel does not belong to you'), code=Code.Forbidden)
     ACCOUNT = Error(_('A verified personal account is required'), code=Code.Forbidden)
@@ -34,14 +34,14 @@ class DuelErrors:
 
 
 def validate_digits(value):
-    if not isinstance(value, str) or not re.fullmatch(r'[0-9]{4}', value) or len(set(value)) != 4:
+    if not isinstance(value, str) or not re.fullmatch(r'[0-9]{4}', value):
         raise DuelErrors.INVALID
     return value
 
 
 def feedback(secret, guess):
     exact = sum(a == b for a, b in zip(secret, guess))
-    return exact, len(set(secret) & set(guess)) - exact
+    return exact, 0
 
 
 def cipher():
@@ -214,7 +214,7 @@ class NumberDuelService:
             mine = row.user_id == user.id
             revealed = mine or row.round < duel.round or done
             guesses.append(dict(round=row.round, mine=mine, value=row.value if revealed else None,
-                                exact=row.exact if revealed else None, misplaced=row.misplaced if revealed else None))
+                                exact=row.exact if revealed else None, misplaced=0 if revealed else None))
         reward = duel.rewards.filter(user=user).first() if done else None
         return dict(id=str(duel.id), code=duel.code, status=duel.status, round=duel.round,
                     stake=duel.stake, funded=duel.funded, practice_reason=duel.practice_reason,
