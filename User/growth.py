@@ -85,6 +85,9 @@ PERIODIC_EVENT_RULES = (
 
 
 def resolve_event_rule(event_key):
+    duel = re.fullmatch(r'activity:number_duel:[0-9a-f]{32}:(10|20|40|50|100)', event_key)
+    if duel:
+        return GrowthEventRule('', 'activity', '数字交锋对局奖励', int(duel.group(1)))
     rule = EVENT_RULES.get(event_key)
     if rule is not None:
         return rule

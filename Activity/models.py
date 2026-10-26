@@ -1,4 +1,5 @@
 import random
+import uuid
 from Activity.presentation import presentation
 from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
@@ -29,6 +30,50 @@ class ActivityCampaign(models.Model):
     config = models.JSONField(default=dict, blank=True)
     enabled = models.BooleanField(default=True, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
+
+class NumberDuel(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    run = models.ForeignKey('SpaceActivity', on_delete=models.CASCADE, related_name='number_duels')
+    host = models.ForeignKey('User.User', on_delete=models.CASCADE, related_name='hosted_number_duels')
+    guest = models.ForeignKey('User.User', null=True, blank=True, on_delete=models.CASCADE, related_name='joined_number_duels')
+    code = models.CharField(max_length=8, unique=True)
+    status = models.CharField(max_length=12, default='waiting', db_index=True)
+    stake = models.PositiveSmallIntegerField(default=10)
+    host_secret = models.TextField(blank=True, default='')
+    guest_secret = models.TextField(blank=True, default='')
+    round = models.PositiveSmallIntegerField(default=1)
+    winner = models.ForeignKey('User.User', null=True, blank=True, on_delete=models.SET_NULL, related_name='won_number_duels')
+    reason = models.CharField(max_length=16, blank=True, default='')
+    deadline = models.DateTimeField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+
+
+class NumberDuelGuess(models.Model):
+    duel = models.ForeignKey(NumberDuel, on_delete=models.CASCADE, related_name='guesses')
+    user = models.ForeignKey('User.User', on_delete=models.CASCADE)
+    round = models.PositiveSmallIntegerField()
+    value = models.CharField(max_length=4)
+    exact = models.PositiveSmallIntegerField()
+    misplaced = models.PositiveSmallIntegerField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['duel', 'user', 'round'], name='number_duel_guess_unique')]
+
+
+class NumberDuelReward(models.Model):
+    duel = models.ForeignKey(NumberDuel, on_delete=models.CASCADE, related_name='rewards')
+    user = models.ForeignKey('User.User', on_delete=models.CASCADE, related_name='number_duel_rewards')
+    opponent = models.ForeignKey('User.User', on_delete=models.CASCADE, related_name='+')
+    date = models.DateField(db_index=True)
+    points = models.PositiveSmallIntegerField(default=0)
+    reason = models.CharField(max_length=16)
+    counted = models.BooleanField(default=False)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['duel', 'user'], name='number_duel_reward_unique')]
+
 
 class ActivityMilestone(models.Model):
     campaign = models.ForeignKey(ActivityCampaign, on_delete=models.CASCADE, related_name='milestones')
@@ -692,6 +737,9 @@ class ActivityService:
         if campaign.config.get('mode') == 'bgm_collection':
             from Activity.bgm import BgmService
             return BgmService.payload(campaign, user, space_activity)
+        if campaign.config.get('mode') == 'number_duel':
+            from Activity.number_duel import NumberDuelService
+            return NumberDuelService.activity_payload(campaign, user, space_activity)
         if (
             campaign.config.get('mode') == cls.STARRY_NIGHT_MODE
             and space_activity.history_backfilled_at is None

@@ -62,6 +62,23 @@ class ActiveActivityView(View):
         ]
 
 
+class NumberDuelView(View):
+    @auth.require_user
+    def get(self, request: Request, key: str):
+        from Activity.number_duel import NumberDuelService
+        return NumberDuelService.lobby(key, request.user, request.GET.get('match_id'))
+
+    @auth.require_user
+    def post(self, request: Request, key: str):
+        import json
+        from Activity.number_duel import DuelErrors, NumberDuelService
+        try:
+            data = json.loads(request.body)
+        except (ValueError, UnicodeDecodeError):
+            raise DuelErrors.INVALID
+        return NumberDuelService.act(key, request.user, data)
+
+
 class ActivityDetailView(View):
     @auth.require_user
     def get(self, request: Request, key: str):

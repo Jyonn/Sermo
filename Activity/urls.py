@@ -1,10 +1,12 @@
 from django.urls import path
+from Activity.views import NumberDuelView
 from Activity.views import BgmEntranceView, BgmMeView, BgmSettingsView
 
 from Activity.views import AdminActivityClaimView, AdminActivityListView, ActiveActivityView, ActivityClaimView, ActivityContributionView, ActivityDetailView, ActivityMilestoneRewardClaimView, ActivityPersonalRewardClaimView, ActivitySeenView, ActivitySpaceRewardClaimView, ActivityStarryNightRewardClaimView
 
 
 urlpatterns = [
+    path('<slug:key>/duel', NumberDuelView.as_view(), name='number duel'),
     path('bgm/me', BgmMeView.as_view(), name='my activity bgm'),
     path('<slug:key>/bgm/enter', BgmEntranceView.as_view(), name='activity bgm entrance'),
     path('<slug:key>/bgm', BgmSettingsView.as_view(), name='activity bgm settings'),
