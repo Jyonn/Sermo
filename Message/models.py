@@ -772,10 +772,10 @@ class Message(models.Model):
             if reply_to is not None and message_type != MessageTypeChoice.TEXT:
                 raise MessageErrors.REPLY_TEXT_ONLY
             if message_type == MessageTypeChoice.TEXT:
-                statement_reference = cls.statement_reference_from_text(content, user) if reply_to is None else None
-                if statement_reference is not None:
-                    message_type = MessageTypeChoice.STATEMENT
-                    content = json.dumps(statement_reference, separators=(',', ':'), ensure_ascii=False)
+                reference = cls.site_reference_from_text(content, user) if reply_to is None else None
+                if reference is not None:
+                    message_type = MessageTypeChoice.STATEMENT if reference['kind'] == 'statement' else MessageTypeChoice.ACTIVITY
+                    content = json.dumps(reference, separators=(',', ':'), ensure_ascii=False)
             capability = {
                 MessageTypeChoice.IMAGE: 'chat.message.send.image',
                 MessageTypeChoice.AUDIO: 'chat.message.send.audio',
@@ -1282,25 +1282,65 @@ class Message(models.Model):
     @classmethod
     def statement_reference_from_text(cls, content, user):
         from Square.models import Statement
+        from Message.site_links import space_site_link
 
         for match in LinkPreview.URL_RE.finditer(content or ''):
             raw_url = match.group(0).rstrip(LinkPreview.TRAILING_PUNCTUATION)
-            parsed = urlparse(raw_url)
-            hostname = (parsed.hostname or '').lower()
-            trusted_host = hostname in {'sermo.jyonn.space', 'sermo.6-79.cn', 'localhost', '127.0.0.1'}
-            if not trusted_host:
+            link = space_site_link(raw_url, user.space.slug)
+            if link is None:
                 continue
-            path_match = re.fullmatch(r'/(?:([^/]+)/)?app/square/statements/(\d+)/?', parsed.path)
+            path_match = re.fullmatch(r'/app/square/statements/(\d+)/?', link[1])
             if path_match is None:
                 continue
-            path_slug, statement_id = path_match.groups()
-            referenced_slug = (path_slug or user.space.slug).lower()
-            if referenced_slug != user.space.slug:
-                continue
+            statement_id = path_match[1]
             statement = Statement.visible_for(user).filter(id=int(statement_id)).first()
             if statement is None:
                 continue
             return dict(kind='statement', statement_id=statement.id, url=raw_url, text=(content or '').strip())
+        return None
+
+    @classmethod
+    def site_reference_from_text(cls, content, user):
+        from Activity.models import ActivityCampaign, NumberDuel
+        from Message.site_links import space_site_link
+
+        for match in LinkPreview.URL_RE.finditer(content or ''):
+            raw_url = match.group(0).rstrip(LinkPreview.TRAILING_PUNCTUATION)
+            link = space_site_link(raw_url, user.space.slug)
+            if link is None:
+                continue
+            parsed, path = link
+            if re.fullmatch(r'/app/square/statements/\d+/?', path):
+                reference = cls.statement_reference_from_text(raw_url, user)
+                if reference:
+                    return {**reference, 'text': (content or '').strip()}
+                continue
+            room_path = re.fullmatch(r'/app/number-duel/([A-Z2-9]{8})/?', path)
+            activity_path = re.fullmatch(r'/app/square/activities/([a-zA-Z0-9_-]+)/?', path)
+            campaign = None
+            room_code = room_path[1] if room_path else None
+            if activity_path:
+                campaign = ActivityCampaign.objects.filter(key=activity_path[1], enabled=True).first()
+                legacy_rooms = parse_qs(parsed.query).get('room', [])
+                if legacy_rooms:
+                    if len(legacy_rooms) != 1 or not re.fullmatch(r'[A-Z2-9]{8}', legacy_rooms[0]):
+                        continue
+                    room_code = legacy_rooms[0]
+            if room_code:
+                rooms = NumberDuel.objects.select_related('run__campaign').filter(
+                    code=room_code, run__space=user.space, run__campaign__enabled=True)
+                if activity_path:
+                    if campaign is None:
+                        continue
+                    rooms = rooms.filter(run__campaign=campaign)
+                room = rooms.first()
+                if room is None or room.run.campaign.config.get('mode') != 'number_duel':
+                    continue
+                campaign = room.run.campaign
+            if campaign:
+                return dict(kind='number_duel_room' if room_code else 'activity',
+                            **({'room_code': room_code} if room_code else {}),
+                            activity_key=campaign.key, title=campaign.title, url=raw_url)
         return None
 
     @classmethod

@@ -56,6 +56,48 @@ class ActivityMessageReferenceTests(TestCase):
         with self.assertRaises(MessageErrors.PAYLOAD_INVALID.__class__):
             Message.normalize_content(MessageTypeChoice.ACTIVITY, json.dumps({'activity_key': 'missing'}))
 
+    def test_four_sites_activity_links_are_normalized_on_send(self):
+        from Chat.models import ChatMember, ChatMemberRoleChoice, ChatMemberStatusChoice
+        from Friendship.models import Friendship
+        Friendship.ensure_locked_friendship(self.author, self.viewer)
+        for user in [self.author, self.viewer]:
+            ChatMember.objects.create(chat=self.chat, user=user, role=ChatMemberRoleChoice.MEMBER,
+                                      status=ChatMemberStatusChoice.ACTIVE, joined_at=timezone.now())
+        for host in ['sermo.jyonn.space', 'frienden.jyonn.space', 'sermo.6-79.cn', 'frienden.6-79.cn']:
+            with self.subTest(host=host):
+                url = f'https://{host}/{self.space.slug}/app/square/activities/{self.campaign.key}'
+                message = Message.create(self.chat, self.author, MessageTypeChoice.TEXT, url)
+                self.assertEqual(message.type, MessageTypeChoice.ACTIVITY)
+                self.assertEqual(json.loads(message.content)['activity_key'], self.campaign.key)
+
+    def test_room_links_and_legacy_links_are_scoped_to_space_and_campaign(self):
+        from Activity.models import SpaceActivity
+        self.campaign.config = {'mode': 'number_duel'}
+        self.campaign.save(update_fields=['config'])
+        run = SpaceActivity.objects.get(campaign=self.campaign, space=self.space)
+        room = NumberDuel.objects.create(run=run, host=self.author, code='ABCD2345', deadline=timezone.now() + timedelta(minutes=10))
+        for host in ['sermo.jyonn.space', 'frienden.jyonn.space', 'sermo.6-79.cn', 'frienden.6-79.cn']:
+            for path in [f'app/number-duel/{room.code}', f'app/square/activities/{self.campaign.key}?room={room.code}']:
+                with self.subTest(host=host, path=path):
+                    reference = Message.site_reference_from_text(f'https://{host}/{self.space.slug}/{path}', self.viewer)
+                    self.assertEqual(reference['kind'], 'number_duel_room')
+                    self.assertEqual(reference['room_code'], room.code)
+        for url in [
+            f'https://frienden.jyonn.space.evil.test/{self.space.slug}/app/number-duel/{room.code}',
+            f'https://frienden.jyonn.space/other/app/number-duel/{room.code}',
+            f'https://frienden.jyonn.space@evil.test/{self.space.slug}/app/number-duel/{room.code}',
+            f'https://frienden.jyonn.space/{self.space.slug}/app/number-duel/ZZZZ2345',
+            f'https://frienden.jyonn.space/{self.space.slug}/app/square/activities/missing?room={room.code}',
+            f'https://frienden.jyonn.space/{self.space.slug}/app/square/activities/{self.campaign.key}?room=invalid',
+        ]:
+            self.assertIsNone(Message.site_reference_from_text(url, self.viewer))
+        other = Space.objects.create(name='Other', slug='elsewhere', email='elsewhere@example.test')
+        outsider = User.create(space=other, name='Outsider')
+        self.assertIsNone(Message.site_reference_from_text(f'https://frienden.6-79.cn/app/number-duel/{room.code}', outsider))
+        self.campaign.enabled = False
+        self.campaign.save(update_fields=['enabled'])
+        self.assertIsNone(Message.site_reference_from_text(f'https://frienden.6-79.cn/{self.space.slug}/app/number-duel/{room.code}', self.viewer))
+
     def test_duel_room_reference_preserves_card_and_only_exposes_public_details(self):
         self.campaign.config = {'mode': 'number_duel'}
         self.campaign.save(update_fields=['config'])

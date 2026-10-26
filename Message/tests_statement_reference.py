@@ -51,6 +51,15 @@ class StatementMessageReferenceTests(TestCase):
         self.assertIsNone(Message.statement_reference_from_text(untrusted, self.viewer))
         self.assertIsNone(Message.statement_reference_from_text(foreign, self.viewer))
 
+    def test_all_four_sites_share_the_same_statement_parser(self):
+        for host in ['sermo.jyonn.space', 'frienden.jyonn.space', 'sermo.6-79.cn', 'frienden.6-79.cn']:
+            with self.subTest(host=host):
+                url = f'https://{host}/{self.space.slug}/app/square/statements/{self.statement.id}'
+                self.assertEqual(Message.site_reference_from_text(url, self.viewer)['statement_id'], self.statement.id)
+        self.statement.is_deleted = True
+        self.statement.save(update_fields=['is_deleted'])
+        self.assertIsNone(Message.site_reference_from_text(url, self.viewer))
+
     def test_statement_payload_is_resolved_for_each_viewer(self):
         content = Message.normalize_content(MessageTypeChoice.STATEMENT, json.dumps({
             'statement_id': self.statement.id,
