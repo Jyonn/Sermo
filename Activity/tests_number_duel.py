@@ -26,7 +26,13 @@ class NumberDuelTests(TestCase):
         return user
 
     def act(self, user=None, **data):
-        return Game.act(Game.KEY, user or self.host, data)
+        return Game.act(Game.KEY, user or self.host, {'room_flow': 2, **data})
+
+    def test_cached_clients_keep_legacy_setup_until_updated(self):
+        match = self.act(action='create', stake=10, room_flow=1)
+        result = self.act(self.guest, action='join', code=match['code'], stake=10, room_flow=1)
+        self.assertEqual(result['status'], 'secrets')
+        self.assertEqual(result['stake'], 10)
 
     def room(self, guest=None):
         host = self.act(action='create', stake=10)

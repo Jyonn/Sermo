@@ -201,7 +201,7 @@ class NumberDuelService:
                     own_tier=duel.host_stake if mine_host else duel.guest_stake,
                     opponent_tier=duel.guest_stake if mine_host else duel.host_stake,
                     deadline=duel.deadline.timestamp(), host=mine_host,
-                    opponent=dict(user_id=other.id, name=other.name) if other else None,
+                    opponent=dict(user_id=other.id, name=other.name, **other.dictify('avatar_uri', 'avatar_cache_key')) if other else None,
                     own_secret=cls.read_secret(own_secret), opponent_locked=bool(other_secret),
                     opponent_secret=cls.read_secret(other_secret) if done else None,
                     guesses=guesses, outcome=('draw' if not duel.winner_id else 'win' if duel.winner_id == user.id else 'loss') if done else None,
@@ -265,7 +265,12 @@ class NumberDuelService:
             code = ''.join(secrets.choice('23456789ABCDEFGHJKLMNPQRSTUVWXYZ') for _ in range(8))
             while NumberDuel.objects.filter(code=code).exists():
                 code = ''.join(secrets.choice('23456789ABCDEFGHJKLMNPQRSTUVWXYZ') for _ in range(8))
-            duel = NumberDuel.objects.create(run=run, host=user, code=code, deadline=cls.deadline(run, 600))
+            # Keep cached clients playable until the independent-room client is deployed.
+            new_flow = data.get('room_flow') == 2
+            stake = 0 if new_flow else data.get('stake', 10)
+            if not new_flow and (type(stake) is not int or stake not in cls.tiers(user, refresh=True)):
+                raise DuelErrors.TIER
+            duel = NumberDuel.objects.create(run=run, host=user, code=code, stake=stake, deadline=cls.deadline(run, 600))
             return cls.serialize(duel, user)
         if action in ('join', 'preview'):
             code = data.get('code')
@@ -285,7 +290,12 @@ class NumberDuelService:
                 raise DuelErrors.ACCOUNT
             if action == 'preview':
                 return dict(code=duel.code, stake=duel.stake, name=duel.host.name)
-            duel.guest, duel.status, duel.stake, duel.deadline = user, 'choosing', 0, cls.deadline(run, 90)
+            if data.get('room_flow') != 2 and duel.stake == 0:
+                raise DuelErrors.CLOSED
+            legacy = data.get('room_flow') != 2 and duel.stake != 0
+            if legacy and (data.get('stake') != duel.stake or duel.stake not in cls.tiers(user, refresh=True) or duel.stake not in cls.tiers(duel.host, refresh=True)):
+                raise DuelErrors.TIER
+            duel.guest, duel.status, duel.stake, duel.deadline = user, ('secrets' if legacy else 'choosing'), (duel.stake if legacy else 0), cls.deadline(run, 60 if legacy else 90)
             duel.save(update_fields=['guest', 'status', 'stake', 'deadline'])
             return cls.serialize(duel, user)
         if not isinstance(data.get('id'), str):
