@@ -262,14 +262,27 @@ class NumberDuelTests(TestCase):
         self.assertEqual(NumberDuelReward.objects.get(user=self.host).points, -10)
         self.assertEqual(self.win(self.person('NewOpponent'))['points'], 10)
 
-    def test_ten_unsolved_rounds_draw(self):
+    def test_thirty_unsolved_rounds_draw(self):
         match = self.start()
-        for round_no in range(1, 11):
+        for round_no in range(1, 31):
             self.act(action='guess', id=match, round=round_no, value='8910')
             result = self.act(self.guest, action='guess', id=match, round=round_no, value='8910')
+            if round_no < 30:
+                self.assertEqual(result['status'], 'playing')
+                self.assertEqual(result['round'], round_no + 1)
         self.assertEqual(result['status'], 'finished')
         self.assertEqual(result['outcome'], 'draw')
         self.assertEqual(result['points'], 0)
+
+    def test_creation_reserves_time_for_thirty_rounds(self):
+        self.assertEqual(Game.lobby(Game.KEY, self.host)['max_rounds'], 30)
+        self.run.ends_at = timezone.now() + timedelta(minutes=17)
+        self.run.save(update_fields=['ends_at'])
+        with self.assertRaises(type(DuelErrors.CLOSED)):
+            self.act(action='create')
+        self.run.ends_at = timezone.now() + timedelta(minutes=19)
+        self.run.save(update_fields=['ends_at'])
+        self.assertEqual(self.act(action='create')['status'], 'waiting')
 
     def test_custom_activity_and_share_payload_do_not_use_legacy_theme(self):
         self.campaign.config['presentation'] = {'palette': 'sage', 'artwork_url': '/activity/number-duel/digits.svg'}

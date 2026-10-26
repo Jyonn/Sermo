@@ -51,7 +51,7 @@ def cipher():
 class NumberDuelService:
     KEY = 'number-duel-2026'
     MODE = 'number_duel'
-    MAX_ROUNDS = 10
+    MAX_ROUNDS = 30
     DAILY_MATCHES = 5
     ROUND_SECONDS = 30
     ZONE = ZoneInfo('Asia/Shanghai')
@@ -283,7 +283,7 @@ class NumberDuelService:
         if action == 'create':
             if data.get('room_flow') != 2:
                 raise DuelErrors.CLOSED
-            if not run.is_active() or (run.ends_at and run.ends_at - timezone.now() < timedelta(minutes=8)):
+            if not run.is_active() or (run.ends_at and run.ends_at - timezone.now() < timedelta(seconds=cls.MAX_ROUNDS * cls.ROUND_SECONDS + 180)):
                 raise DuelErrors.CLOSED
             if current:
                 return cls.serialize(current, user)
