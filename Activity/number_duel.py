@@ -197,6 +197,9 @@ class NumberDuelService:
         reward = duel.rewards.filter(user=user).first() if done else None
         return dict(id=str(duel.id), code=duel.code, status=duel.status, round=duel.round,
                     stake=duel.stake,
+                    tiers=sorted(set(cls.tiers(duel.host)) & set(cls.tiers(duel.guest))) if duel.guest else [],
+                    own_tier=duel.host_stake if mine_host else duel.guest_stake,
+                    opponent_tier=duel.guest_stake if mine_host else duel.host_stake,
                     deadline=duel.deadline.timestamp(), host=mine_host,
                     opponent=dict(user_id=other.id, name=other.name) if other else None,
                     own_secret=cls.read_secret(own_secret), opponent_locked=bool(other_secret),
@@ -207,10 +210,17 @@ class NumberDuelService:
 
     @classmethod
     @transaction.atomic
-    def lobby(cls, key, user, match_id=None):
+    def lobby(cls, key, user, match_id=None, room_code=None):
         run = cls.run(key, user)
         current = cls.current(run, user)
         selected = current
+        room = None
+        if room_code:
+            room = NumberDuel.objects.select_related('run', 'host', 'guest').filter(run=run, code=str(room_code).upper()).first()
+            if room is None:
+                raise DuelErrors.CLOSED
+            cls.expire(room)
+            selected = room if user.id in (room.host_id, room.guest_id) else None
         if match_id:
             try:
                 selected = NumberDuel.objects.select_related('run', 'host', 'guest').get(id=match_id, run=run)
@@ -225,10 +235,17 @@ class NumberDuelService:
                     daily=cls.daily(user, run), eligible=cls.eligible(user), tiers=cls.tiers(user),
                     max_rounds=cls.MAX_ROUNDS, round_seconds=cls.ROUND_SECONDS, server_time=timezone.now().timestamp(),
                     match=cls.serialize(selected, user) if selected else None,
-                    history=[dict(id=str(row.id), opponent=(row.guest.name if row.guest else '') if row.host_id == user.id else row.host.name,
+                    room=cls.room_summary(room) if room else None,
+                    current_code=current.code if current else None,
+                    history=[dict(id=str(row.id), code=row.code, opponent=(row.guest.name if row.guest else '') if row.host_id == user.id else row.host.name,
                                   outcome='draw' if not row.winner_id else 'win' if row.winner_id == user.id else 'loss', reason=row.reason,
                                   finished_at=row.finished_at.timestamp()) for row in history],
                     leaders=[dict(user_id=row['user_id'], name=row['user__name'], points=row['points']) for row in leaders])
+
+    @staticmethod
+    def room_summary(duel):
+        return dict(code=duel.code, status=duel.status, name=duel.host.name,
+                    guest_name=duel.guest.name if duel.guest else None, stake=duel.stake)
 
     @classmethod
     @transaction.atomic
@@ -241,17 +258,14 @@ class NumberDuelService:
             raise DuelErrors.ACCOUNT
         current = cls.current(run, user)
         if action == 'create':
-            if not run.is_active() or (run.ends_at and run.ends_at - timezone.now() < timedelta(minutes=7)):
+            if not run.is_active() or (run.ends_at and run.ends_at - timezone.now() < timedelta(minutes=8)):
                 raise DuelErrors.CLOSED
             if current:
                 return cls.serialize(current, user)
             code = ''.join(secrets.choice('23456789ABCDEFGHJKLMNPQRSTUVWXYZ') for _ in range(8))
             while NumberDuel.objects.filter(code=code).exists():
                 code = ''.join(secrets.choice('23456789ABCDEFGHJKLMNPQRSTUVWXYZ') for _ in range(8))
-            stake = data.get('stake', 10)
-            if type(stake) is not int or stake not in cls.tiers(user, refresh=True):
-                raise DuelErrors.TIER
-            duel = NumberDuel.objects.create(run=run, host=user, code=code, stake=stake, deadline=cls.deadline(run, 600))
+            duel = NumberDuel.objects.create(run=run, host=user, code=code, deadline=cls.deadline(run, 600))
             return cls.serialize(duel, user)
         if action in ('join', 'preview'):
             code = data.get('code')
@@ -267,14 +281,12 @@ class NumberDuelService:
                 raise DuelErrors.BUSY
             if duel.status != 'waiting' or duel.guest_id:
                 raise DuelErrors.CLOSED
-            if duel.stake not in cls.tiers(user, refresh=True) or duel.stake not in cls.tiers(duel.host, refresh=True) or not cls.eligible(duel.host):
-                raise DuelErrors.TIER
+            if not cls.eligible(duel.host):
+                raise DuelErrors.ACCOUNT
             if action == 'preview':
                 return dict(code=duel.code, stake=duel.stake, name=duel.host.name)
-            if data.get('stake') != duel.stake:
-                raise DuelErrors.TIER
-            duel.guest, duel.status, duel.deadline = user, 'secrets', cls.deadline(run, 60)
-            duel.save(update_fields=['guest', 'status', 'deadline'])
+            duel.guest, duel.status, duel.stake, duel.deadline = user, 'choosing', 0, cls.deadline(run, 90)
+            duel.save(update_fields=['guest', 'status', 'stake', 'deadline'])
             return cls.serialize(duel, user)
         if not isinstance(data.get('id'), str):
             raise DuelErrors.CLOSED
@@ -289,6 +301,18 @@ class NumberDuelService:
             return cls.serialize(duel, user)
         if action == 'leave':
             cls.finish(duel, (duel.guest if duel.host_id == user.id else duel.host), 'forfeit')
+        elif action == 'tier':
+            value = data.get('stake')
+            if duel.status != 'choosing' or not duel.guest:
+                raise DuelErrors.LOCKED
+            allowed = set(cls.tiers(duel.host, refresh=True)) & set(cls.tiers(duel.guest, refresh=True))
+            if type(value) is not int or value not in allowed:
+                raise DuelErrors.TIER
+            field = 'host_stake' if duel.host_id == user.id else 'guest_stake'
+            setattr(duel, field, value)
+            if duel.host_stake == duel.guest_stake and value in allowed:
+                duel.stake, duel.status, duel.deadline = value, 'secrets', cls.deadline(run, 60)
+            duel.save(update_fields=[field, 'stake', 'status', 'deadline'])
         elif action == 'secret':
             value = validate_digits(data.get('value'))
             field = 'host_secret' if duel.host_id == user.id else 'guest_secret'

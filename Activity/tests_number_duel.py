@@ -31,6 +31,8 @@ class NumberDuelTests(TestCase):
     def room(self, guest=None):
         host = self.act(action='create', stake=10)
         self.act(guest or self.guest, action='join', code=host['code'], stake=10)
+        self.act(action='tier', id=host['id'], stake=10)
+        self.act(guest or self.guest, action='tier', id=host['id'], stake=10)
         return host['id']
 
     def start(self, guest=None):
@@ -63,14 +65,46 @@ class NumberDuelTests(TestCase):
         self.assertEqual(self.act(action='create')['status'], 'waiting')
 
     def test_server_tiers_and_join_agreement(self):
-        with self.assertRaises(type(DuelErrors.TIER)):
-            self.act(action='create', stake=50)
-        match = self.act(action='create')
+        match = self.act(action='create', stake=50)
+        self.assertEqual(match['stake'], 0)
         preview = self.act(self.guest, action='preview', code=match['code'])
-        self.assertEqual(preview['stake'], 10)
+        self.assertEqual(preview['stake'], 0)
         self.assertNotIn('own_secret', preview)
+        joined = self.act(self.guest, action='join', code=match['code'])
+        self.assertEqual(joined['status'], 'choosing')
+        with self.assertRaises(type(DuelErrors.CLOSED)):
+            self.act(action='secret', id=match['id'], value='0123')
         with self.assertRaises(type(DuelErrors.TIER)):
-            self.act(self.guest, action='join', code=match['code'], stake=20)
+            self.act(self.guest, action='tier', id=match['id'], stake=20)
+        self.assertEqual(self.act(action='tier', id=match['id'], stake=10)['status'], 'choosing')
+        self.assertEqual(self.act(self.guest, action='tier', id=match['id'], stake=10)['status'], 'secrets')
+
+    def test_room_preview_has_no_private_state(self):
+        match = self.act(action='create')
+        data = Game.lobby(Game.KEY, self.guest, room_code=match['code'])
+        self.assertIsNone(data['match'])
+        self.assertEqual(data['room']['name'], self.host.name)
+        self.assertNotIn('own_secret', data['room'])
+
+    def test_choosing_timeout_has_no_reward_or_slot(self):
+        match = self.act(action='create')
+        self.act(self.guest, action='join', code=match['code'])
+        NumberDuel.objects.filter(id=match['id']).update(deadline=timezone.now() - timedelta(seconds=1))
+        result = Game.lobby(Game.KEY, self.host, room_code=match['code'])['match']
+        self.assertEqual(result['reason'], 'timeout')
+        self.assertEqual(Game.daily(self.host, self.run)['matches'], 0)
+
+    def test_tiers_require_both_players_and_lowest_level(self):
+        match = self.act(action='create')
+        with self.assertRaises(type(DuelErrors.LOCKED)):
+            self.act(action='tier', id=match['id'], stake=10)
+        self.act(self.guest, action='join', code=match['code'])
+        with patch.object(Game, 'tiers', side_effect=lambda user, refresh=False: [10, 20, 50] if user.id == self.host.id else [10, 20]):
+            with self.assertRaises(type(DuelErrors.TIER)):
+                self.act(action='tier', id=match['id'], stake=50)
+            self.act(action='tier', id=match['id'], stake=20)
+            self.assertEqual(self.act(self.guest, action='tier', id=match['id'], stake=10)['status'], 'choosing')
+            self.assertEqual(self.act(self.guest, action='tier', id=match['id'], stake=20)['status'], 'secrets')
 
     def test_tier_boundaries(self):
         for level, expected in [(7, [10]), (8, [10, 20]), (13, [10, 20]), (14, [10, 20, 50])]:

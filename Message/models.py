@@ -815,6 +815,13 @@ class Message(models.Model):
                 normalized_content = ''
             else:
                 normalized_content = cls.normalize_content(message_type, content)
+            if message_type == MessageTypeChoice.ACTIVITY:
+                reference = cls._parse_payload(normalized_content)
+                if reference.get('kind') == 'number_duel_room':
+                    from Activity.models import NumberDuel
+                    if not NumberDuel.objects.filter(code=reference.get('room_code'), run__space=user.space,
+                                                     run__campaign__key=reference.get('activity_key')).exists():
+                        raise MessageErrors.PAYLOAD_INVALID
             if message_type == MessageTypeChoice.STICKER:
                 from Sticker.models import StickerAsset, UserSticker
                 sticker_payload = cls._parse_payload(content)
@@ -1400,9 +1407,16 @@ class Message(models.Model):
             campaign = ActivityCampaign.objects.filter(key=activity_key, enabled=True).first()
             if campaign is None:
                 raise MessageErrors.PAYLOAD_INVALID
+            room_code = None
+            if payload.get('kind') == 'number_duel_room':
+                from Activity.models import NumberDuel
+                room_code = str(payload.get('room_code') or '').upper()
+                if campaign.config.get('mode') != 'number_duel' or not NumberDuel.objects.filter(code=room_code, run__campaign=campaign).exists():
+                    raise MessageErrors.PAYLOAD_INVALID
             normalized = json.dumps(
                 dict(
-                    kind='activity',
+                    kind='number_duel_room' if room_code else 'activity',
+                    **({'room_code': room_code} if room_code else {}),
                     activity_key=campaign.key,
                     url=(str(payload.get('url') or '').strip())[:280],
                     title=(str(payload.get('title') or campaign.title).strip())[:80],
@@ -1530,7 +1544,7 @@ class Message(models.Model):
                 response['statement'] = Statement.detail(viewer, reference.get('statement_id'), request=request)
             return response
         if self.type == MessageTypeChoice.ACTIVITY:
-            from Activity.models import ActivityCampaign, ActivityService
+            from Activity.models import ActivityCampaign, ActivityService, SpaceActivity
 
             reference = self._parse_payload(self.content)
             viewer = self._viewer_from_request(request)
@@ -1538,12 +1552,22 @@ class Message(models.Model):
                 key=reference.get('activity_key'),
                 enabled=True,
             ).first()
+            room = None
+            activity_run = SpaceActivity.objects.filter(campaign=campaign, space=viewer.space).first() if campaign and viewer else None
+            if reference.get('kind') == 'number_duel_room' and viewer and campaign:
+                from Activity.models import NumberDuel
+                from Activity.number_duel import NumberDuelService
+                duel = NumberDuel.objects.select_related('host', 'guest').filter(
+                    code=reference.get('room_code'), run__space=viewer.space, run__campaign=campaign).first()
+                if duel:
+                    room = NumberDuelService.room_summary(duel)
             return dict(
                 kind='activity',
+                **({'room_code': room['code'], 'duel_room': room} if room else {}),
                 activity_key=reference.get('activity_key') or '',
                 url=reference.get('url') or '',
                 title=reference.get('title') or '',
-                activity=ActivityService.payload(campaign, viewer) if campaign is not None and viewer is not None else None,
+                activity=ActivityService.payload(campaign, viewer, activity_run) if activity_run else None,
             )
         if self.type == MessageTypeChoice.STICKER:
             from Sticker.models import StickerAsset

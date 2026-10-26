@@ -66,7 +66,7 @@ class NumberDuelView(View):
     @auth.require_user
     def get(self, request: Request, key: str):
         from Activity.number_duel import NumberDuelService
-        return NumberDuelService.lobby(key, request.user, request.GET.get('match_id'))
+        return NumberDuelService.lobby(key, request.user, request.GET.get('match_id'), request.GET.get('room_code'))
 
     @auth.require_user
     def post(self, request: Request, key: str):
