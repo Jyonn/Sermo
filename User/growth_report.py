@@ -15,8 +15,8 @@ def growth_report(user):
     growth = user.calculate_growth()
     today = timezone.localdate()
     start = today - datetime.timedelta(days=29)
-    events = user.growth_events.filter(points__gt=0)
-    categories = list(events.values('category').annotate(points=Sum('points'), count=Count('id')).order_by('-points', 'category'))
+    events = user.growth_events.exclude(points=0)
+    categories = list(events.filter(points__gt=0).values('category').annotate(points=Sum('points'), count=Count('id')).order_by('-points', 'category'))
     days = {row['day']: row['count'] for row in events.annotate(day=TruncDate('updated_at')).filter(day__gte=start).values('day').annotate(count=Count('id'))}
     return dict(
         level=growth['level'], name=growth['name'], score=growth['score'],

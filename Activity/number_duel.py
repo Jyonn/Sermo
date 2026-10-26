@@ -17,7 +17,8 @@ from smartdjango import Code, Error
 
 from Activity.models import ActivityCampaign, NumberDuel, NumberDuelGuess, NumberDuelReward, SpaceActivity
 from Activity.presentation import presentation
-from User.models import User
+from User.models import GrowthEvent, User
+from User.growth import resolve_event_rule
 
 
 @Error.register
@@ -29,6 +30,7 @@ class DuelErrors:
     BUSY = Error(_('Finish or leave your current duel first'), code=Code.BadRequest)
     LOCKED = Error(_('Already submitted; wait for the next round'), code=Code.BadRequest)
     TIER = Error(_('This challenge tier is not available to both players'), code=Code.BadRequest)
+    FUNDS = Error(_('One player has insufficient growth points; choose a lower tier'), code=Code.BadRequest)
 
 
 def validate_digits(value):
@@ -111,27 +113,46 @@ class NumberDuelService:
             return
         # Lock users in a deterministic order; both awards and quota checks share this transaction.
         people = list(User.objects.select_for_update().filter(id__in=[duel.host_id, duel.guest_id]).order_by('id'))
+        # The entry date owns the quota, including matches that cross midnight.
+        paid_normal = duel.funded and reason == 'normal' and all(cls.eligible(person) for person in people)
         for person in people:
             opponent_id = duel.guest_id if person.id == duel.host_id else duel.host_id
             amount, reward_reason = 0, reason
-            if reason == 'normal':
-                today = cls.daily(person, duel.run)
-                pair_paid = NumberDuelReward.objects.filter(user=person, opponent_id=opponent_id, duel__run=duel.run,
-                                                           date=cls.day(), counted=True).exists()
-                if not cls.eligible(person):
-                    reward_reason = 'account'
-                elif pair_paid:
-                    reward_reason = 'pair'
-                elif today['matches'] >= cls.DAILY_MATCHES:
-                    reward_reason = 'quota'
-                else:
-                    if winner and person.id == winner.id:
-                        proposed = duel.stake * (2 if today['matches'] == 0 else 1)
-                        amount = person.award_growth(f'activity:number_duel:{duel.id.hex}:{proposed}')
-                    reward_reason = 'rewarded'
+            if paid_normal and winner:
+                amount = duel.stake if winner.id == person.id else -duel.stake
+                if winner.id == person.id:
+                    person.award_growth(f'activity:number_duel:{duel.id.hex}:{duel.stake * 2}', notify=False)
+                reward_reason = 'rewarded'
+            elif duel.funded:
+                person.award_growth(f'activity:number_duel_refund:{duel.id.hex}:{duel.stake}', notify=False)
+                reward_reason = 'rewarded' if paid_normal else reason if reason != 'normal' else 'account'
+            else:
+                reward_reason = duel.practice_reason or 'legacy'
             NumberDuelReward.objects.create(duel=duel, user=person, opponent_id=opponent_id,
-                                           date=cls.day(), points=amount, reason=reward_reason,
-                                           counted=reward_reason == 'rewarded')
+                                           date=duel.scoring_date or cls.day(), points=amount, reason=reward_reason,
+                                           counted=paid_normal)
+
+    @classmethod
+    def fund(cls, duel, stake):
+        people = list(User.objects.select_for_update().filter(id__in=[duel.host_id, duel.guest_id]).order_by('id'))
+        if len(people) != 2 or not all(cls.eligible(person) for person in people):
+            raise DuelErrors.ACCOUNT
+        # Freeze practice/paid status before taking any points from either account.
+        pair = NumberDuelReward.objects.filter(duel__run=duel.run, date=cls.day(), counted=True,
+                                              user_id__in=[duel.host_id, duel.guest_id],
+                                              opponent_id__in=[duel.host_id, duel.guest_id]).exists()
+        duel.practice_reason = 'pair' if pair else 'quota' if any(cls.daily(person, duel.run)['matches'] >= cls.DAILY_MATCHES for person in people) else ''
+        if duel.practice_reason:
+            return
+        balances = {person.id: person.reconcile_growth() for person in people}
+        if any(value < stake for value in balances.values()):
+            raise DuelErrors.FUNDS
+        key = f'activity:number_duel_entry:{duel.id.hex}:{stake}'
+        rule = resolve_event_rule(key)
+        for person in people:
+            GrowthEvent.objects.create(user=person, event_key=key, category=rule.category, title=rule.title, points=rule.points)
+            person.reconcile_growth()
+        duel.funded, duel.scoring_date = True, cls.day()
 
     @classmethod
     def advance(cls, duel, timed_out=False):
@@ -196,7 +217,9 @@ class NumberDuelService:
                                 exact=row.exact if revealed else None, misplaced=row.misplaced if revealed else None))
         reward = duel.rewards.filter(user=user).first() if done else None
         return dict(id=str(duel.id), code=duel.code, status=duel.status, round=duel.round,
-                    stake=duel.stake,
+                    stake=duel.stake, funded=duel.funded, practice_reason=duel.practice_reason,
+                    balance=User.objects.values_list('growth_score', flat=True).get(id=user.id),
+                    returned=(duel.stake * 2 if duel.winner_id == user.id else 0) if done and reward and reward.counted and duel.winner_id else duel.stake if done and duel.funded else 0,
                     tiers=sorted(set(cls.tiers(duel.host)) & set(cls.tiers(duel.guest))) if duel.guest else [],
                     own_tier=duel.host_stake if mine_host else duel.guest_stake,
                     opponent_tier=duel.guest_stake if mine_host else duel.host_stake,
@@ -230,7 +253,7 @@ class NumberDuelService:
                 raise DuelErrors.FORBIDDEN
             cls.expire(selected)
         history = NumberDuel.objects.filter(run=run, status='finished').filter(Q(host=user) | Q(guest=user)).select_related('host', 'guest').order_by('-finished_at')[:8]
-        leaders = NumberDuelReward.objects.filter(duel__run=run, points__gt=0).values('user_id', 'user__name').annotate(points=Sum('points')).order_by('-points', 'user_id')[:10]
+        leaders = NumberDuelReward.objects.filter(duel__run=run).values('user_id', 'user__name').annotate(points=Sum('points')).filter(points__gt=0).order_by('-points', 'user_id')[:10]
         return dict(active=run.is_active(), ends_at=run.ends_at.timestamp() if run.ends_at else None,
                     daily=cls.daily(user, run), eligible=cls.eligible(user), tiers=cls.tiers(user),
                     max_rounds=cls.MAX_ROUNDS, round_seconds=cls.ROUND_SECONDS, server_time=timezone.now().timestamp(),
@@ -258,6 +281,8 @@ class NumberDuelService:
             raise DuelErrors.ACCOUNT
         current = cls.current(run, user)
         if action == 'create':
+            if data.get('room_flow') != 2:
+                raise DuelErrors.CLOSED
             if not run.is_active() or (run.ends_at and run.ends_at - timezone.now() < timedelta(minutes=8)):
                 raise DuelErrors.CLOSED
             if current:
@@ -265,12 +290,7 @@ class NumberDuelService:
             code = ''.join(secrets.choice('23456789ABCDEFGHJKLMNPQRSTUVWXYZ') for _ in range(8))
             while NumberDuel.objects.filter(code=code).exists():
                 code = ''.join(secrets.choice('23456789ABCDEFGHJKLMNPQRSTUVWXYZ') for _ in range(8))
-            # Keep cached clients playable until the independent-room client is deployed.
-            new_flow = data.get('room_flow') == 2
-            stake = 0 if new_flow else data.get('stake', 10)
-            if not new_flow and (type(stake) is not int or stake not in cls.tiers(user, refresh=True)):
-                raise DuelErrors.TIER
-            duel = NumberDuel.objects.create(run=run, host=user, code=code, stake=stake, deadline=cls.deadline(run, 600))
+            duel = NumberDuel.objects.create(run=run, host=user, code=code, deadline=cls.deadline(run, 600))
             return cls.serialize(duel, user)
         if action in ('join', 'preview'):
             code = data.get('code')
@@ -290,12 +310,9 @@ class NumberDuelService:
                 raise DuelErrors.ACCOUNT
             if action == 'preview':
                 return dict(code=duel.code, stake=duel.stake, name=duel.host.name)
-            if data.get('room_flow') != 2 and duel.stake == 0:
+            if data.get('room_flow') != 2:
                 raise DuelErrors.CLOSED
-            legacy = data.get('room_flow') != 2 and duel.stake != 0
-            if legacy and (data.get('stake') != duel.stake or duel.stake not in cls.tiers(user, refresh=True) or duel.stake not in cls.tiers(duel.host, refresh=True)):
-                raise DuelErrors.TIER
-            duel.guest, duel.status, duel.stake, duel.deadline = user, ('secrets' if legacy else 'choosing'), (duel.stake if legacy else 0), cls.deadline(run, 60 if legacy else 90)
+            duel.guest, duel.status, duel.stake, duel.deadline = user, 'choosing', 0, cls.deadline(run, 90)
             duel.save(update_fields=['guest', 'status', 'stake', 'deadline'])
             return cls.serialize(duel, user)
         if not isinstance(data.get('id'), str):
@@ -315,14 +332,16 @@ class NumberDuelService:
             value = data.get('stake')
             if duel.status != 'choosing' or not duel.guest:
                 raise DuelErrors.LOCKED
-            allowed = set(cls.tiers(duel.host, refresh=True)) & set(cls.tiers(duel.guest, refresh=True))
+            people = list(User.objects.select_for_update().filter(id__in=[duel.host_id, duel.guest_id]).order_by('id'))
+            allowed = set.intersection(*(set(cls.tiers(person, refresh=True)) for person in people))
             if type(value) is not int or value not in allowed:
                 raise DuelErrors.TIER
             field = 'host_stake' if duel.host_id == user.id else 'guest_stake'
             setattr(duel, field, value)
             if duel.host_stake == duel.guest_stake and value in allowed:
+                cls.fund(duel, value)
                 duel.stake, duel.status, duel.deadline = value, 'secrets', cls.deadline(run, 60)
-            duel.save(update_fields=[field, 'stake', 'status', 'deadline'])
+            duel.save(update_fields=[field, 'stake', 'status', 'deadline', 'funded', 'scoring_date', 'practice_reason'])
         elif action == 'secret':
             value = validate_digits(data.get('value'))
             field = 'host_secret' if duel.host_id == user.id else 'guest_secret'

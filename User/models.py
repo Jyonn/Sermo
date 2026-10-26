@@ -1050,7 +1050,7 @@ class User(models.Model):
         index = max(0, min(len(names) - 1, self.growth_level - 1))
         return names[index] if names else ''
 
-    def award_growth(self, key, points=None, category=None, title=None, daily_limit=None):
+    def award_growth(self, key, points=None, category=None, title=None, daily_limit=None, notify=True):
         rule = resolve_event_rule(key)
         if self.is_official or rule is None:
             return 0
@@ -1088,7 +1088,8 @@ class User(models.Model):
             self.growth_score = locked.growth_score
             self.growth_level = locked.growth_level
             UserResourceInventory.grant_growth_rewards(locked, locked.growth_level)
-        record_growth_award(awarded)
+        if notify:
+            record_growth_award(awarded)
         return awarded
 
     def reconcile_growth(self):
@@ -1124,6 +1125,7 @@ class User(models.Model):
                 if changed_fields:
                     event.save(update_fields=changed_fields)
                 total += normalized_points
+            total = max(0, total)
             level = min(locked._growth_level_for_score(total), locked.growth_level_cap()[0])
             if locked.growth_score != total or locked.growth_level != level:
                 locked.growth_score = total
@@ -1480,7 +1482,7 @@ class GrowthEvent(models.Model):
     event_key = models.CharField(max_length=100)
     category = models.CharField(max_length=20)
     title = models.CharField(max_length=40)
-    points = models.PositiveIntegerField(default=0)
+    points = models.IntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

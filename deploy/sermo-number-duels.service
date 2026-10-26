@@ -1,0 +1,11 @@
+[Unit]
+Description=Sermo expired number duel settlement
+After=network.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/home/ubuntu/Sermo
+ExecStart=/home/ubuntu/envs/sermo/bin/python manage.py settle_number_duels
+NoNewPrivileges=true
+

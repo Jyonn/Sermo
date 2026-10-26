@@ -23,16 +23,100 @@ class NumberDuelTests(TestCase):
         user = User.create(self.space, name, email=f'{name}@example.test', verified=True)
         user.email_verified_at = timezone.now()
         user.save(update_fields=['email_verified_at'])
+        user.award_growth('security:email')
         return user
 
     def act(self, user=None, **data):
         return Game.act(Game.KEY, user or self.host, {'room_flow': 2, **data})
 
-    def test_cached_clients_keep_legacy_setup_until_updated(self):
-        match = self.act(action='create', stake=10, room_flow=1)
-        result = self.act(self.guest, action='join', code=match['code'], stake=10, room_flow=1)
-        self.assertEqual(result['status'], 'secrets')
-        self.assertEqual(result['stake'], 10)
+    def test_cached_clients_cannot_accept_stakes_without_cost_disclosure(self):
+        with self.assertRaises(type(DuelErrors.CLOSED)):
+            self.act(action='create', stake=10, room_flow=1)
+
+    def test_entry_charge_is_atomic_when_one_player_cannot_afford_it(self):
+        match = self.act(action='create')
+        self.act(self.guest, action='join', code=match['code'])
+        self.guest.growth_events.all().delete()
+        self.guest.reconcile_growth()
+        self.act(action='tier', id=match['id'], stake=10)
+        with self.assertRaises(type(DuelErrors.FUNDS)):
+            self.act(self.guest, action='tier', id=match['id'], stake=10)
+        self.assertEqual(self.host.reconcile_growth(), 30)
+        self.assertFalse(self.host.growth_events.filter(points__lt=0).exists())
+        self.assertIsNone(NumberDuel.objects.get(id=match['id']).guest_stake)
+
+    def test_entry_can_lower_level_and_duplicate_confirmation_does_not_charge_again(self):
+        self.host.award_growth('explore:file')
+        self.assertEqual(self.host.calculate_growth()['level'], 2)
+        match = self.room()
+        self.assertEqual(self.host.calculate_growth()['score'], 35)
+        self.assertEqual(self.host.calculate_growth()['level'], 1)
+        with self.assertRaises(type(DuelErrors.LOCKED)):
+            self.act(action='tier', id=match, stake=10)
+        self.assertEqual(self.host.growth_events.filter(points__lt=0).count(), 1)
+
+    def test_draw_and_forfeit_refunds_are_idempotent(self):
+        match = self.start()
+        self.act(action='guess', id=match, round=1, value='4567')
+        result = self.act(self.guest, action='guess', id=match, round=1, value='0123')
+        self.assertEqual(result['returned'], 10)
+        self.assertEqual(self.host.reconcile_growth(), 30)
+        self.assertEqual(self.guest.reconcile_growth(), 30)
+        practice = self.start()
+        self.assertFalse(NumberDuel.objects.get(id=practice).funded)
+        self.act(action='leave', id=practice)
+        other = self.person('RefundPeer')
+        paid = self.start(other)
+        self.act(action='leave', id=paid)
+        self.act(action='leave', id=paid)
+        self.assertEqual(self.host.reconcile_growth(), 30)
+        self.assertEqual(other.reconcile_growth(), 30)
+
+    def test_background_settlement_refunds_with_no_connected_clients(self):
+        from django.core.management import call_command
+        from io import StringIO
+        match = self.room()
+        NumberDuel.objects.filter(id=match).update(deadline=timezone.now() - timedelta(seconds=1))
+        call_command('settle_number_duels', stdout=StringIO())
+        call_command('settle_number_duels', stdout=StringIO())
+        self.assertEqual(self.host.reconcile_growth(), 30)
+        self.assertEqual(self.guest.reconcile_growth(), 30)
+        self.assertEqual(self.host.growth_events.filter(event_key__contains='number_duel_refund').count(), 1)
+
+    def test_entry_day_owns_quota_across_midnight(self):
+        match = self.start()
+        day = NumberDuel.objects.get(id=match).scoring_date
+        with patch.object(Game, 'day', return_value=day + timedelta(days=1)):
+            self.act(action='guess', id=match, round=1, value='4567')
+            self.act(self.guest, action='guess', id=match, round=1, value='8910')
+        self.assertEqual(NumberDuelReward.objects.get(duel_id=match, user=self.host).date, day)
+
+    def test_fifty_point_pot_conserves_total_and_has_no_bonus(self):
+        self.host.award_growth('vip:permanent')
+        self.guest.award_growth('vip:permanent')
+        before = self.host.reconcile_growth() + self.guest.reconcile_growth()
+        match = self.act(action='create')
+        self.act(self.guest, action='join', code=match['code'])
+        with patch.object(Game, 'tiers', return_value=[10, 20, 50]):
+            self.act(action='tier', id=match['id'], stake=50)
+            self.act(self.guest, action='tier', id=match['id'], stake=50)
+        self.act(action='secret', id=match['id'], value='0123')
+        self.act(self.guest, action='secret', id=match['id'], value='4567')
+        self.act(action='guess', id=match['id'], round=1, value='4567')
+        result = self.act(self.guest, action='guess', id=match['id'], round=1, value='8910')
+        self.assertEqual(result['points'], -50)
+        self.assertEqual(self.host.reconcile_growth() + self.guest.reconcile_growth(), before)
+        self.assertEqual(self.host.growth_events.get(event_key__startswith='activity:number_duel:').points, 100)
+
+    def test_daily_and_leaderboard_use_net_points_not_gross_payout(self):
+        self.win()
+        peer = self.person('NetPeer')
+        match = self.start(peer)
+        self.act(action='guess', id=match, round=1, value='8910')
+        self.act(peer, action='guess', id=match, round=1, value='0123')
+        lobby = Game.lobby(Game.KEY, self.host)
+        self.assertEqual(lobby['daily']['points'], 0)
+        self.assertNotIn(self.host.id, [row['user_id'] for row in lobby['leaders']])
 
     def room(self, guest=None):
         host = self.act(action='create', stake=10)
@@ -130,14 +214,16 @@ class NumberDuelTests(TestCase):
         self.assertEqual(result['opponent_secret'], '0123')
         self.assertEqual(NumberDuelReward.objects.filter(counted=True).count(), 2)
 
-    def test_first_double_loser_zero_and_idempotent_reconciliation(self):
+    def test_first_match_has_no_protection_and_reconciliation_is_idempotent(self):
         result = self.win()
-        self.assertEqual(result['points'], 20)
-        self.assertEqual(NumberDuelReward.objects.get(user=self.guest).points, 0)
+        self.assertEqual(result['points'], 10)
+        self.assertEqual(NumberDuelReward.objects.get(user=self.guest).points, -10)
         duel = NumberDuel.objects.get(pk=result['id'])
         Game.finish(duel, self.host)
         self.assertEqual(NumberDuelReward.objects.count(), 2)
-        self.assertEqual(self.host.growth_events.filter(category='activity').count(), 1)
+        self.assertEqual(self.host.growth_events.filter(category='activity').count(), 2)
+        self.assertEqual(self.host.reconcile_growth(), 40)
+        self.assertEqual(self.guest.reconcile_growth(), 20)
         self.assertEqual(self.host.reconcile_growth(), self.host.calculate_growth()['score'])
         self.assertTrue(self.host.growth_events.filter(points=20).exists())
 
@@ -148,11 +234,11 @@ class NumberDuelTests(TestCase):
         self.assertEqual(second['reward_reason'], 'pair')
         self.assertEqual(Game.daily(self.guest, self.run)['matches'], 1)
 
-    def test_loss_consumes_first_slot_without_deduction(self):
+    def test_loss_consumes_slot_and_deducts_entry(self):
         match = self.start()
         self.act(action='guess', id=match, round=1, value='8910')
         self.act(self.guest, action='guess', id=match, round=1, value='0123')
-        self.assertEqual(NumberDuelReward.objects.get(user=self.host).points, 0)
+        self.assertEqual(NumberDuelReward.objects.get(user=self.host).points, -10)
         self.assertEqual(self.win(self.person('NewOpponent'))['points'], 10)
 
     def test_ten_unsolved_rounds_draw(self):
@@ -186,7 +272,7 @@ class NumberDuelTests(TestCase):
         rewards = []
         for index in range(6):
             rewards.append(self.win(self.person(f'Peer{index}'))['points'])
-        self.assertEqual(rewards, [20, 10, 10, 10, 10, 0])
+        self.assertEqual(rewards, [10, 10, 10, 10, 10, 0])
         self.assertEqual(Game.daily(self.host, self.run)['matches'], 5)
 
     def test_timeout_skips_one_round_and_disconnect_catches_up(self):
@@ -206,7 +292,7 @@ class NumberDuelTests(TestCase):
         self.act(action='guess', id=match, round=1, value='4567')
         NumberDuel.objects.filter(pk=match).update(deadline=timezone.now() - timedelta(seconds=1))
         Game.lobby(Game.KEY, self.host)
-        self.assertEqual(NumberDuelReward.objects.get(user=self.host).points, 20)
+        self.assertEqual(NumberDuelReward.objects.get(user=self.host).points, 10)
 
     def test_stale_or_repeated_submission_cannot_change_guess(self):
         match = self.start()
@@ -250,7 +336,7 @@ class NumberDuelTests(TestCase):
         response = self.client.get(url, **headers)
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.json()['body']['eligible'])
-        response = self.client.post(url, data='{"action":"create","stake":10}', content_type='application/json', **headers)
+        response = self.client.post(url, data='{"action":"create","room_flow":2}', content_type='application/json', **headers)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()['body']['status'], 'waiting')
         response = self.client.post(url, data='{', content_type='application/json', **headers)

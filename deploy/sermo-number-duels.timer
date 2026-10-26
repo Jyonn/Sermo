@@ -1,0 +1,11 @@
+[Unit]
+Description=Settle expired Sermo duels every 30 seconds
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=30s
+AccuracySec=1s
+Unit=sermo-number-duels.service
+
+[Install]
+WantedBy=timers.target

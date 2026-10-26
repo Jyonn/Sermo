@@ -85,6 +85,10 @@ PERIODIC_EVENT_RULES = (
 
 
 def resolve_event_rule(event_key):
+    entry = re.fullmatch(r'activity:number_duel_(entry|refund):[0-9a-f]{32}:(10|20|50)', event_key)
+    if entry:
+        spend = entry.group(1) == 'entry'
+        return GrowthEventRule('', 'activity', '数字交锋入场' if spend else '数字交锋退款', int(entry.group(2)) * (-1 if spend else 1))
     duel = re.fullmatch(r'activity:number_duel:[0-9a-f]{32}:(10|20|40|50|100)', event_key)
     if duel:
         return GrowthEventRule('', 'activity', '数字交锋对局奖励', int(duel.group(1)))

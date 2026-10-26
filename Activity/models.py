@@ -41,6 +41,9 @@ class NumberDuel(models.Model):
     stake = models.PositiveSmallIntegerField(default=0)
     host_stake = models.PositiveSmallIntegerField(null=True, blank=True)
     guest_stake = models.PositiveSmallIntegerField(null=True, blank=True)
+    funded = models.BooleanField(default=False)
+    scoring_date = models.DateField(null=True, blank=True)
+    practice_reason = models.CharField(max_length=16, blank=True, default='')
     host_secret = models.TextField(blank=True, default='')
     guest_secret = models.TextField(blank=True, default='')
     round = models.PositiveSmallIntegerField(default=1)
@@ -69,7 +72,7 @@ class NumberDuelReward(models.Model):
     user = models.ForeignKey('User.User', on_delete=models.CASCADE, related_name='number_duel_rewards')
     opponent = models.ForeignKey('User.User', on_delete=models.CASCADE, related_name='+')
     date = models.DateField(db_index=True)
-    points = models.PositiveSmallIntegerField(default=0)
+    points = models.SmallIntegerField(default=0)
     reason = models.CharField(max_length=16)
     counted = models.BooleanField(default=False)
 
