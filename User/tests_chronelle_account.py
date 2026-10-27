@@ -86,6 +86,9 @@ class ChronelleAccountTests(TestCase):
         self.assertNotIn('cba_secret',row.sealed)
         self.assertNotIn('cbr_secret',response.content.decode())
         self.assertEqual(unpack(row)['access_token'],'cba_secret')
+        remote.side_effect=None;remote.return_value={'active':True}
+        self.assertEqual(self.call({'action':'claim'}).json()['body']['status'],'active')
+        self.assertTrue(remote.call_args.args[1].endswith('/introspect/'))
 
     @patch('User.chronelle_account.remote')
     def test_uncertain_refresh_cannot_reuse_old_token(self,remote):

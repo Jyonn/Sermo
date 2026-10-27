@@ -110,12 +110,15 @@ def credentials(user, base):
     return value
 
 
-def claim(user, origin):
+def claim(user, origin, base):
     with transaction.atomic():
         row, _ = ChronelleAccount.objects.get_or_create(user=user)
         row = ChronelleAccount.objects.select_for_update().get(pk=row.pk)
         value = unpack(row)
         pending = value.get('pending', {})
+        if not pending and value.get('binding') and not value.get('claim_id') and not value.get('renewal_uncertain'):
+            status=remote(base,'/api/account-bindings/v1/introspect/',body={'binding_id':value['binding']['binding_id']})
+            return {'status':'active' if status.get('active') else 'expired'}
         if pending.get('until',0) <= timezone.now().timestamp() or pending.get('origin') != origin:
             return {'status':'expired'}
         if pending.get('after',0) > timezone.now().timestamp():
@@ -197,7 +200,7 @@ class FullChronelleView(View):
                 raise BindingFailure('origin_not_allowed', 403)
             config()
             if body.get('action') == 'claim':
-                return claim(request.user,origin)
+                return claim(request.user,origin,base)
             with transaction.atomic():
                 row, _ = ChronelleAccount.objects.get_or_create(user=request.user)
                 row = ChronelleAccount.objects.select_for_update().get(pk=row.pk)
