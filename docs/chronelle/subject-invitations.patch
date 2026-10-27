@@ -1,0 +1,64 @@
+*** Begin Patch
+*** Update File: calendar_extras/binding_api.py
+@@
+-            fields(request.data,EVENT_FIELDS|{'shares','share','emails','client_id','event_uid','version','proposal_version','action','reply','new_start'})
++            fields(request.data,EVENT_FIELDS|{'subjects','shares','share','emails','client_id','event_uid','version','proposal_version','action','reply','new_start'})
++            if 'subjects' in request.data:
++                from .binding_participants import resolve_bound_participants
++                if resource!='invitations' or request.method!='POST':fail('invalid_request')
++                resolve_bound_participants(request)
+@@
+     def execute(self,request,grant,resource,uid):
+         method=request.method.lower()
++        if resource=='invitations' and method=='post' and 'subjects' in request.data:
++            from .binding_participants import create_bound_invitation
++            return create_bound_invitation(request)
+*** Add File: calendar_extras/binding_participants.py
++"""Resolve immutable subjects only inside this client's active full bindings."""
++import uuid
++from calendarapp.models import Calendar
++from calendarapp.invitations import InvitationsView
++from .binding_models import CalendarBinding
++from .binding_auth import binding_status, fail
++
++
++def resolve_bound_participants(request):
++    data=request.data
++    subjects=data.get('subjects')
++    if any(key in data for key in ('share','shares','emails')):
++        fail('invalid_invitation_recipients')
++    if not isinstance(subjects,list) or not 1<=len(subjects)<=20 or any(not isinstance(s,str) for s in subjects):
++        fail('invalid_invitation_recipients')
++    try:
++        ids=[uuid.UUID(s) for s in subjects]
++    except (ValueError,TypeError,AttributeError):
++        fail('invalid_invitation_recipients')
++    if len(set(ids))!=len(ids) or request.full_binding.subject_id in ids:
++        fail('invalid_invitation_recipients')
++    rows=CalendarBinding.objects.filter(client_id=request.full_binding.client_id,subject_id__in=ids).select_related('client','subject__owner','grant').order_by('pk')
++    active={b.subject_id:b for b in rows if binding_status(b)=='active'}
++    if set(ids)!=set(active):
++        fail('invitation_recipient_unavailable',403)
++    calendars={c.owner_id:c for c in Calendar.objects.filter(owner_id__in=[b.subject.owner_id for b in active.values()])}
++    if any(b.subject.owner_id not in calendars or not calendars[b.subject.owner_id].allow_invitations for b in active.values()):
++        fail('invitation_recipient_unavailable',403)
++    return [calendars[active[i].subject.owner_id] for i in ids]
++
++
++def create_bound_invitation(request):
++    # Fingerprint/idempotency use the original subjects body. Existing invitation
++    # creation, notifications, rate limits and recipient consent remain shared.
++    calendars=resolve_bound_participants(request)
++    original=request._full_data
++    mapped={key:value for key,value in request.data.items() if key!='subjects'}
++    mapped['shares']=[str(calendar.share_token) for calendar in calendars]
++    try:
++        request._full_data=mapped
++        result=InvitationsView().post(request)
++        if result.status_code<300:
++            for participant in result.data.get('participants',[]):
++                participant.pop('share',None)
++        return result
++    finally:
++        request._full_data=original
+*** End Patch

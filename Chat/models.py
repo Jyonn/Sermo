@@ -1,4 +1,5 @@
 from datetime import timedelta
+import uuid
 from typing import List
 
 from django.db import transaction
@@ -1606,4 +1607,17 @@ class ResearchProject(models.Model):
     status = models.CharField(max_length=16, default='planning')
     revision = models.PositiveIntegerField(default=1)
     tasks = models.JSONField(default=list)
+    calendar_policies = models.JSONField(default=dict)
+    calendar_displays = models.JSONField(default=list)
     updated_at = models.DateTimeField(auto_now=True)
+
+
+class ResearchMeeting(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    project = models.ForeignKey(ResearchProject,on_delete=models.CASCADE,related_name='meetings')
+    creator = models.ForeignKey(User,on_delete=models.CASCADE,related_name='+')
+    payload = models.JSONField()
+    status = models.CharField(max_length=16,default='pending')
+    invitation_id = models.UUIDField(null=True,blank=True)
+    lease_until = models.DateTimeField(null=True,blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)

@@ -1,0 +1,58 @@
+*** Begin Patch
+*** Add File: calendar_extras/test_binding_participants.py
++import uuid
++from . import test_account_binding as fixtures
++from .binding_models import CalendarBinding
++from calendarapp.models import Invitation, Event
++
++
++class SubjectInvitationTests(fixtures.FullBindingTests):
++    def peer_binding(self):
++        original=self.owner
++        self.owner=self.visitor
++        try:return self.bind()
++        finally:self.owner=original
++
++    def test_subject_invitation_preserves_consent_and_idempotency(self):
++        sender=self.bind();peer=self.peer_binding()
++        data={**self.event_data,'subjects':[peer['binding']['subject']],'client_id':str(uuid.uuid4())}
++        key=str(uuid.uuid4())
++        first=self.resource(sender['access_token'],'invitations','post',data,key=key)
++        self.assertEqual(first.status_code,201,first.data)
++        recipient=next(p for p in first.data['participants'] if not p['organizer'])
++        self.assertEqual(recipient['status'],'pending')
++        self.assertNotIn('share',recipient)
++        self.assertFalse(Event.objects.filter(group__calendar=self.theirs).exists())
++        repeat=self.resource(sender['access_token'],'invitations','post',data,key=key)
++        self.assertEqual(repeat.status_code,201,repeat.data)
++        self.assertEqual(repeat.data['id'],first.data['id'])
++        self.assertEqual(Invitation.objects.count(),1)
++        changed=self.resource(sender['access_token'],'invitations','post',{**data,'title':'Different'},key=key)
++        self.assertEqual(changed.status_code,409)
++
++    def test_subjects_refuse_unknown_revoked_self_and_mixed_targets(self):
++        sender=self.bind();peer=self.peer_binding()
++        for fields in [{'subjects':[str(uuid.uuid4())]}, {'subjects':[sender['binding']['subject']]}, {'subjects':[peer['binding']['subject']], 'emails':['other@example.test']}]:
++            result=self.resource(sender['access_token'],'invitations','post',{**self.event_data,**fields})
++            self.assertIn(result.status_code,(400,403),result.data)
++        CalendarBinding.objects.filter(pk=peer['binding']['binding_id']).update(revoked=True)
++        result=self.resource(sender['access_token'],'invitations','post',{**self.event_data,'subjects':[peer['binding']['subject']]})
++        self.assertEqual(result.status_code,403,result.data)
++        self.assertFalse(Invitation.objects.exists())
+*** Add File: docs/bindings/BOUND-INVITATIONS.md
++# Bound-account invitation recipients
++
++Full-binding `POST /api/account-bindings/v1/calendar/invitations/` additionally accepts
++`subjects: [IMMUTABLE_CALENDAR_SUBJECT_UUID]` instead of shares/emails. Do not mix
++these recipient forms. Maximum 20 unique recipients, excluding the organizer.
++Every recipient must have an active full binding to the same enabled client and
++must allow invitations. Unknown, revoked, expired, foreign-client and unavailable
++recipients fail closed with `invitation_recipient_unavailable` (403).
++
++The existing send/notify scopes, transactional idempotency, invitation rate limits,
++organizer identity, invitation outbox and accept/decline behavior are unchanged.
++Recipients remain pending; no recipient event is written before their acceptance.
++Subject resolution does not issue or return sharing links, keys or credentials.
++The idempotency fingerprint retains the original subjects request. Replay checks
++current recipient binding authority before returning the recorded result.
+*** End Patch

@@ -66,6 +66,23 @@ class ResearchView(View):
             body = json.loads(request.body)
             if not isinstance(body, dict):
                 raise ValueError('Invalid request')
+            calendar_revoke = None
+            if project_id and body.get('action') in ('leave','remove','dissolve'):
+                from Chat.research_calendar import project_for
+                from User.chronelle_account import revocation_credentials, BindingFailure
+                from User.chronelle_views import authorization_site
+                try:
+                    snapshot = project_for(request.user,project_id)
+                    if body['action'] != 'leave' and not snapshot.chat.is_owner(request.user):
+                        return fail('Only the project owner can manage this project',403)
+                    base,_ = authorization_site(request)
+                    tokens = {}
+                    for display in snapshot.calendar_displays:
+                        if display['until'] > timezone.now().timestamp():
+                            tokens[display['owner']] = revocation_credentials(User.objects.get(pk=display['owner']),base)
+                    calendar_revoke = (base,tokens)
+                except BindingFailure as error:
+                    return fail(error.code,error.status)
             with transaction.atomic():
                 if project_id is None:
                     request.user.require_capability('chat.group.create')
@@ -91,6 +108,12 @@ class ResearchView(View):
                     if project.status == 'completed' and action not in ('settings', 'leave', 'dissolve'):
                         return fail('Completed projects are read-only', 403)
                     active = set(members(project).values_list('user_id', flat=True))
+                    if calendar_revoke:
+                        from Chat.research_calendar import revoke_displays
+                        try:
+                            revoke_displays(project,*calendar_revoke)
+                        except BindingFailure as error:
+                            return fail(error.code,error.status)
                     if action == 'invite':
                         user = User.objects.filter(pk=body.get('user_id'), space_id=request.user.space_id, is_deleted=False).first()
                         if not user:

@@ -4072,3 +4072,9 @@ class OAuthAuthorizationRequest(models.Model):
     expires_at = models.DateTimeField()
     used_at = models.DateTimeField(null=True, blank=True)
     cancelled_at = models.DateTimeField(null=True, blank=True)
+
+
+class ChronelleAccount(models.Model):
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='chronelle_account')
+    # Tokens and PKCE material are encrypted; never included in user serializers.
+    sealed = models.TextField(blank=True)

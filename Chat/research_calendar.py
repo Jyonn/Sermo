@@ -1,0 +1,136 @@
+"""Member-scoped restricted projections. The browser never selects a relationship tier."""
+import json
+import uuid
+from django.db import transaction
+from django.utils import timezone
+from django.views import View
+from Chat.models import ResearchProject, ChatMemberStatusChoice
+from Chat.research import fail
+from User.models import ChronelleAccount
+from User.chronelle_account import BindingFailure, calendar, config, credentials, remote, revocation_credentials
+from User.chronelle_views import authorization_site, APP_ORIGINS
+from utils import auth
+
+
+def project_for(user, pk):
+    if not user.space.research_enabled:
+        raise BindingFailure('research_disabled',403)
+    project = ResearchProject.objects.filter(pk=pk,chat__space_id=user.space_id,chat__is_deleted=False,
+        chat__chat_members__user=user,chat__chat_members__status=ChatMemberStatusChoice.ACTIVE).select_related('chat').first()
+    if not project:
+        raise BindingFailure('project_unavailable',404)
+    return project
+
+
+def error_response(error):
+    return fail(error.code,error.status)
+
+
+def revoke_displays(project, base, tokens):
+    for item in project.calendar_displays:
+        if item['until'] <= timezone.now().timestamp():
+            continue
+        value = tokens.get(item['owner'])
+        if value is None:
+            raise BindingFailure('binding_required')
+        if value.get('revoked'):
+            continue
+        try:
+            remote(base,'/api/account-bindings/v1/calendar/display-session/'+item['id']+'/',
+                method='DELETE',token=value['access_token'],key=str(uuid.uuid4()))
+        except BindingFailure as error:
+            if error.code not in ('binding_revoked','binding_expired','binding_superseded','calendar_resource_unavailable'):
+                raise
+    project.calendar_displays=[]
+
+
+class ResearchCalendarView(View):
+    @auth.require_user
+    def get(self,request,project_id):
+        try:
+            project = project_for(request.user,project_id)
+            config()
+            base,_ = authorization_site(request)
+            groups = calendar(request.user,base,'groups/')
+            policy = project.calendar_policies.get(str(request.user.pk),{'detail':[],'busy':[]})
+            return {'status':'active','groups':[{'id':g['id'],'name':g['name']} for g in groups],
+                'policy':policy,'members':[{'id':m.user_id,'name':m.user.name} for m in project.chat.chat_members.filter(status=ChatMemberStatusChoice.ACTIVE,user__is_deleted=False).select_related('user')]}
+        except BindingFailure as error:
+            if error.code in ('research_disabled','project_unavailable'):
+                return error_response(error)
+            return {'status':error.code,'groups':[],'policy':{'detail':[],'busy':[]},'members':[]}
+
+    @auth.require_user
+    def post(self,request,project_id):
+        try:
+            if len(request.body)>100000:raise BindingFailure('invalid_request',413)
+            body=json.loads(request.body)
+            if not isinstance(body,dict):raise BindingFailure('invalid_request',400)
+            project=project_for(request.user,project_id)
+            base,origin=authorization_site(request)
+            if request.headers.get('Origin') not in APP_ORIGINS:
+                raise BindingFailure('origin_not_allowed',403)
+            if body.get('action')=='policy':
+                group_ids={g['id'] for g in calendar(request.user,base,'groups/')}
+                detail,busy=body.get('detail'),body.get('busy')
+                if not isinstance(detail,list) or not isinstance(busy,list) or any(type(i) is not int for i in detail+busy) or not set(detail+busy)<=group_ids or set(detail)&set(busy):
+                    raise BindingFailure('invalid_policy',400)
+                # Renew before locking the project; refresh uncertainty must commit independently.
+                tokens={}
+                for item in project.calendar_displays:
+                    if item['until']>timezone.now().timestamp():
+                        tokens[item['owner']]=revocation_credentials(project.chat.chat_members.get(user_id=item['owner']).user,base)
+                with transaction.atomic():
+                    project=ResearchProject.objects.select_for_update().get(pk=project.pk)
+                    project_for(request.user,project.pk)
+                    revoke_displays(project,base,tokens)
+                    project.calendar_policies[str(request.user.pk)]={'detail':sorted(set(detail)),'busy':sorted(set(busy))}
+                    project.save(update_fields=['calendar_policies','calendar_displays'])
+                return {'status':'saved'}
+            if body.get('action')!='display':
+                raise BindingFailure('invalid_request',400)
+            selected=body.get('members')
+            if not isinstance(selected,list) or not 1<=len(selected)<=20 or len(set(selected))!=len(selected) or any(type(i) is not int for i in selected):
+                raise BindingFailure('invalid_selection',400)
+            active={m.user_id:m.user for m in project.chat.chat_members.filter(status=ChatMemberStatusChoice.ACTIVE,user__is_deleted=False).select_related('user')}
+            if not set(selected)<=set(active):
+                raise BindingFailure('member_unavailable',403)
+            viewer=credentials(request.user,base)
+            tokens={uid:credentials(active[uid],base) for uid in selected}
+            # Only the viewer's own new groups are automatically visible. Peers
+            # retain their explicit saved group policy; never expand it on read.
+            groups={request.user.pk:{g['id'] for g in calendar(request.user,base,'groups/')}} if request.user.pk in selected else {}
+            with transaction.atomic():
+                project=ResearchProject.objects.select_for_update().get(pk=project.pk)
+                project_for(request.user,project.pk)
+                current=set(project.chat.chat_members.filter(status=ChatMemberStatusChoice.ACTIVE).values_list('user_id',flat=True))
+                if not set(selected)<=current:
+                    raise BindingFailure('member_unavailable',403)
+                project.calendar_displays=[d for d in project.calendar_displays if d['until']>timezone.now().timestamp()]
+                if len(project.calendar_displays)+len(selected)>1000 or sum(d['viewer']==request.user.pk for d in project.calendar_displays)+len(selected)>100:
+                    raise BindingFailure('display_limit',429)
+                results=[]
+                # Preflight all policies before issuing anything. No partial merge fallback.
+                policies={}
+                for uid in selected:
+                    policy={'detail':list(groups[uid]),'busy':[]} if uid==request.user.pk else project.calendar_policies.get(str(uid),{'detail':[],'busy':[]})
+                    if uid!=request.user.pk and not (policy['detail'] or policy['busy']):
+                        raise BindingFailure('member_calendar_not_shared',403)
+                    policies[uid]=policy
+                for uid in selected:
+                    policy=policies[uid]
+                    allowed=groups[uid] if uid==request.user.pk else set(policy['detail']+policy['busy'])
+                    result=remote(base,'/api/account-bindings/v1/calendar/display-sessions/',
+                        token=tokens[uid]['access_token'],key=str(uuid.uuid4()),body={
+                            'calendar_subject':tokens[uid]['binding']['subject'],'viewer_subject':viewer['binding']['subject'],
+                            'detail_group_ids':list(set(policy['detail'])&allowed),'busy_group_ids':list(set(policy['busy'])&allowed),
+                            'purpose':'research-'+str(project.pk),'origins':[origin],'expires_in':300})
+                    display_id=str(uuid.UUID(result['display_id']))
+                    results.append({'member_id':uid,'id':display_id,'url':base+'/binding-embed/'+display_id+'/'})
+                    project.calendar_displays.append({'id':display_id,'owner':uid,'viewer':request.user.pk,'until':timezone.now().timestamp()+300})
+                project.save(update_fields=['calendar_displays'])
+            return {'displays':results,'renew_after':240}
+        except BindingFailure as error:
+            return error_response(error)
+        except (ValueError,TypeError,KeyError):
+            return fail('invalid_calendar_request',400)
