@@ -1,0 +1,166 @@
+"""Space-gated research workspace; chat membership is the authority source."""
+import json
+import uuid
+from datetime import date
+from django.db import transaction
+from django.http import JsonResponse
+from django.utils import timezone
+from django.views import View
+from Chat.models import Chat, ChatMember, ChatPurposeChoice, ChatTypeChoice, ChatMemberRoleChoice, ChatMemberStatusChoice, ResearchProject
+from Chat.validators import ChatErrors
+from User.models import User
+from utils import auth
+from utils.content_safety import check_user_text, ContentSafetyScene
+
+
+def fail(message, status=400):
+    return JsonResponse({'code': status, 'message': message, 'body': None}, status=status)
+
+
+def text(body, key, limit, required=True):
+    value = body.get(key, '')
+    if not isinstance(value, str) or len(value) > limit or (required and not value.strip()):
+        raise ValueError('Invalid ' + key)
+    return value.strip()
+
+
+def period(body):
+    start = date.fromisoformat(body['start'])
+    end = date.fromisoformat(body['end']) if body.get('end') else None
+    if end and end < start:
+        raise ValueError('Invalid date range')
+    return start, end
+
+
+def members(project):
+    return project.chat.chat_members.filter(status=ChatMemberStatusChoice.ACTIVE, user__is_deleted=False).select_related('user')
+
+
+def payload(project):
+    rows = list(members(project))
+    return dict(id=project.pk, chat_id=project.chat_id, title=project.chat.title, description=project.description,
+                start=project.start.isoformat(), end=project.end.isoformat() if project.end else None,
+                status=project.status, revision=project.revision, tasks=project.tasks,
+                members=[dict(id=row.user_id, name=row.user.name, owner=row.role == ChatMemberRoleChoice.OWNER) for row in rows])
+
+
+class ResearchView(View):
+    @auth.require_user
+    def get(self, request, project_id=None):
+        if not request.user.space.research_enabled:
+            return fail('Research is disabled in this space', 403)
+        rows = ResearchProject.objects.filter(chat__space_id=request.user.space_id, chat__is_deleted=False,
+            chat__chat_members__user=request.user, chat__chat_members__status=ChatMemberStatusChoice.ACTIVE).select_related('chat')
+        if project_id:
+            project = rows.filter(pk=project_id).first()
+            return payload(project) if project else fail('Project unavailable', 404)
+        return [dict(id=p.pk, title=p.chat.title, status=p.status, start=p.start.isoformat(), end=p.end.isoformat() if p.end else None) for p in rows.order_by('-updated_at')[:200]]
+
+    @auth.require_user
+    def post(self, request, project_id=None):
+        if not request.user.space.research_enabled:
+            return fail('Research is disabled in this space', 403)
+        try:
+            if len(request.body) > 100000:
+                return fail('Request too large', 413)
+            body = json.loads(request.body)
+            if not isinstance(body, dict):
+                raise ValueError('Invalid request')
+            with transaction.atomic():
+                if project_id is None:
+                    request.user.require_capability('chat.group.create')
+                    if ResearchProject.objects.filter(chat__space_id=request.user.space_id, chat__is_deleted=False).count() >= 200:
+                        return fail('Project limit reached')
+                    title = text(body, 'title', 50)
+                    description = text(body, 'description', 20000, False)
+                    start, end = period(body)
+                    check_user_text(request, title+'\n'+description, ContentSafetyScene.PROFILE)
+                    chat = Chat.objects.create(space=request.user.space, chat_type=ChatTypeChoice.GROUP, purpose=ChatPurposeChoice.RESEARCH, title=title, created_by=request.user)
+                    ChatMember.objects.create(chat=chat, user=request.user, role=ChatMemberRoleChoice.OWNER, status=ChatMemberStatusChoice.ACTIVE, joined_at=timezone.now(), invited_by=request.user)
+                    project = ResearchProject.objects.create(chat=chat, description=description, start=start, end=end)
+                else:
+                    project = ResearchProject.objects.select_for_update().select_related('chat').filter(pk=project_id, chat__space_id=request.user.space_id, chat__is_deleted=False).first()
+                    if not project or not project.chat.has_active_member(request.user):
+                        return fail('Project unavailable', 404)
+                    if type(body.get('revision')) is not int or body['revision'] != project.revision:
+                        return fail('Project changed. Refresh and try again.', 409)
+                    action = body.get('action')
+                    owner = project.chat.is_owner(request.user)
+                    if action not in ('progress', 'leave') and not owner:
+                        return fail('Only the project owner can manage this project', 403)
+                    if project.status == 'completed' and action not in ('settings', 'leave', 'dissolve'):
+                        return fail('Completed projects are read-only', 403)
+                    active = set(members(project).values_list('user_id', flat=True))
+                    if action == 'invite':
+                        user = User.objects.filter(pk=body.get('user_id'), space_id=request.user.space_id, is_deleted=False).first()
+                        if not user:
+                            return fail('Member unavailable', 404)
+                        if user.pk in active:
+                            return fail('User is already a project member')
+                        request.user.require_capability('chat.group.invite')
+                        Chat._require_friend_of(request.user, user)
+                        request.user.space.require_group_join_allowed(user)
+                        ChatMember.objects.update_or_create(chat=project.chat, user=user, defaults=dict(role=ChatMemberRoleChoice.MEMBER, status=ChatMemberStatusChoice.ACTIVE, invited_by=request.user, joined_at=timezone.now(), left_at=None))
+                    elif action in ('leave', 'remove'):
+                        user_id = request.user.pk if action == 'leave' else body.get('user_id')
+                        member = members(project).filter(user_id=user_id).first()
+                        if not member or member.role == ChatMemberRoleChoice.OWNER:
+                            return fail('Transfer ownership before leaving or removing the owner')
+                        member.status = ChatMemberStatusChoice.LEFT if action == 'leave' else ChatMemberStatusChoice.KICKED
+                        member.left_at = timezone.now()
+                        member.save()
+                    elif action == 'transfer':
+                        target = members(project).filter(user_id=body.get('user_id')).first()
+                        if not target or target.user_id == request.user.pk:
+                            return fail('Choose another active member')
+                        members(project).filter(user=request.user).update(role=ChatMemberRoleChoice.MEMBER)
+                        target.role = ChatMemberRoleChoice.OWNER
+                        target.save()
+                    elif action == 'dissolve':
+                        project.chat.is_deleted = True
+                        project.chat.save(update_fields=['is_deleted'])
+                    elif action == 'settings':
+                        status = body.get('status')
+                        if status not in ('planning', 'active', 'completed'):
+                            raise ValueError('Invalid status')
+                        project.status = status
+                    elif action == 'task':
+                        if len(project.tasks) >= 100:
+                            raise ValueError('Task limit reached')
+                        title = text(body, 'title', 160)
+                        content = text(body, 'body', 20000)
+                        start, end = period(body)
+                        assignees = body.get('assignees')
+                        if not isinstance(assignees, list) or not assignees or any(type(i) is not int or i not in active for i in assignees):
+                            raise ValueError('Choose active members')
+                        check_user_text(request, title+'\n'+content, ContentSafetyScene.PROFILE)
+                        project.tasks.append(dict(id=str(uuid.uuid4()), title=title, body=content, start=start.isoformat(), end=end.isoformat() if end else None, assignees=list(set(assignees)), status='doing', progress=[]))
+                    elif action in ('task_status', 'progress'):
+                        task = next((t for t in project.tasks if t['id'] == body.get('task_id')), None)
+                        if not task:
+                            return fail('Task unavailable', 404)
+                        if action == 'task_status':
+                            if body.get('status') not in ('todo', 'doing', 'done'):
+                                raise ValueError('Invalid task status')
+                            task['status'] = body['status']
+                        else:
+                            if len(task['progress']) >= 500:
+                                raise ValueError('Progress limit reached')
+                            content = text(body, 'body', 20000)
+                            reply = body.get('reply_to')
+                            if reply and not any(p['id'] == reply for p in task['progress']):
+                                raise ValueError('Reply unavailable')
+                            check_user_text(request, content, ContentSafetyScene.PROFILE)
+                            task['progress'].insert(0, dict(id=str(uuid.uuid4()), user_id=request.user.pk, body=content, created_at=timezone.now().isoformat(), reply_to=reply))
+                    else:
+                        raise ValueError('Unknown action')
+                    if len(json.dumps(project.tasks)) > 2000000:
+                        raise ValueError('Project content limit reached')
+                    project.revision += 1
+                    project.save()
+                if project_id is None or body.get('action') in ('invite', 'remove', 'leave', 'transfer', 'dissolve'):
+                    previous_members = active if project_id else {request.user.pk}
+                    transaction.on_commit(lambda: project.chat._emit_state_changed(previous_members))
+                return payload(project)
+        except (ValueError, TypeError, KeyError):
+            return fail('Invalid research request')

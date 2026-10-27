@@ -15,8 +15,11 @@ Including another URLconf
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
 from django.urls import path, include
+from Chat.research import ResearchView
 
 urlpatterns = [
+    path('research/', ResearchView.as_view()),
+    path('research/<int:project_id>/', ResearchView.as_view()),
     path('users/', include('User.urls')),
     path('spaces/', include('Space.urls')),
     path('friends/', include('Friendship.urls')),

@@ -19,6 +19,7 @@ class ChatTypeChoice(Choice):
 class ChatPurposeChoice(Choice):
     NORMAL = 0
     SUBMISSION = 1
+    RESEARCH = 2
 
 
 class ChatMemberRoleChoice(Choice):
@@ -90,8 +91,12 @@ class Chat(models.Model):
     def submission(self):
         return self.purpose == ChatPurposeChoice.SUBMISSION
 
+    @property
+    def research(self):
+        return self.purpose == ChatPurposeChoice.RESEARCH
+
     def _dictify_purpose(self):
-        return 'submission' if self.submission else 'normal'
+        return 'research' if self.research else 'submission' if self.submission else 'normal'
 
     def _dictify_created_at(self):
         return self.created_at.timestamp()
@@ -182,6 +187,8 @@ class Chat(models.Model):
         UserStateEvent.emit_many(user_ids, UserStateEventKindChoice.CHATS_CHANGED, self.id)
 
     def remove(self):
+        if self.research:
+            raise ChatErrors.FORBIDDEN
         if self.submission:
             raise ChatErrors.FORBIDDEN
         if self.is_space_group:
@@ -192,6 +199,8 @@ class Chat(models.Model):
         self._emit_state_changed(user_ids)
 
     def has_active_member(self, user: User):
+        if self.research and not user.space.research_enabled:
+            return False
         member_exists = ChatMember.objects.filter(
             chat=self,
             user=user,
@@ -300,7 +309,7 @@ class Chat(models.Model):
             is_deleted=False,
             chat_members__user=user,
             chat_members__status=ChatMemberStatusChoice.ACTIVE,
-            purpose=purpose,
+            purpose__in=[ChatPurposeChoice.NORMAL, ChatPurposeChoice.RESEARCH] if purpose == ChatPurposeChoice.NORMAL and user.space.research_enabled else [purpose],
         )
         if purpose == ChatPurposeChoice.SUBMISSION:
             if submission_role == 'reviewer':
@@ -677,6 +686,8 @@ class Chat(models.Model):
         return chat, True
 
     def rename(self, operator: User, title: str):
+        if self.research:
+            raise ChatErrors.FORBIDDEN
         if not self.group:
             raise ChatErrors.NOT_GROUP_CHAT(chat=self.id)
         if self.is_space_group and not operator.is_official:
@@ -700,6 +711,8 @@ class Chat(models.Model):
             self._emit_state_changed()
 
     def invite_member(self, inviter: User, user: User):
+        if self.research:
+            raise ChatErrors.FORBIDDEN
         if not self.group:
             raise ChatErrors.NOT_GROUP_CHAT(chat=self.id)
         if self.submission:
@@ -776,6 +789,8 @@ class Chat(models.Model):
         return member
 
     def remove_member(self, operator: User, user: User):
+        if self.research:
+            raise ChatErrors.FORBIDDEN
         if not self.group:
             raise ChatErrors.NOT_GROUP_CHAT(chat=self.id)
         if not self.is_owner(operator):
@@ -799,6 +814,8 @@ class Chat(models.Model):
             return members
 
     def transfer_ownership(self, operator: User, target: User):
+        if self.research:
+            raise ChatErrors.FORBIDDEN
         if self.submission or self.is_space_group:
             raise ChatErrors.FORBIDDEN
         if not self.group:
@@ -840,6 +857,8 @@ class Chat(models.Model):
         return target_member
 
     def leave(self, user: User):
+        if self.research:
+            raise ChatErrors.FORBIDDEN
         if self.submission:
             raise ChatErrors.SUBMISSION_LEAVE_FORBIDDEN
         member = ChatMember.objects.filter(
@@ -1577,3 +1596,14 @@ class ChatBlockedWordRequest(models.Model):
 
     class Meta:
         indexes = [models.Index(fields=['chat', 'status'])]
+
+
+class ResearchProject(models.Model):
+    chat = models.OneToOneField(Chat, on_delete=models.CASCADE, related_name='research_project')
+    description = models.TextField(blank=True)
+    start = models.DateField()
+    end = models.DateField(null=True, blank=True)
+    status = models.CharField(max_length=16, default='planning')
+    revision = models.PositiveIntegerField(default=1)
+    tasks = models.JSONField(default=list)
+    updated_at = models.DateTimeField(auto_now=True)

@@ -72,6 +72,7 @@ class Space(models.Model):
     space_group_enabled = models.BooleanField(default=False)
     square_free_post_enabled = models.BooleanField(default=True)
     submission_enabled = models.BooleanField(default=False)
+    research_enabled = models.BooleanField(default=False)
     square_explore_enabled = models.BooleanField(default=True)
     qq_binding_enabled = models.BooleanField(default=False)
     oauth_developer_enabled = models.BooleanField(default=False)
@@ -263,7 +264,7 @@ class Space(models.Model):
     def set_admin_settings(
             self, name, group_square_enabled, chat_enabled, square_explore_enabled,
             unverified_group_policy, member_limit, level_names=None, submission_enabled=None,
-            square_free_post_enabled=None, qq_binding_enabled=None, space_group_enabled=None, oauth_developer_enabled=None):
+            square_free_post_enabled=None, qq_binding_enabled=None, space_group_enabled=None, oauth_developer_enabled=None, research_enabled=None):
         was_space_group_enabled = self.space_group_enabled
         normalized_name = self.vldt.name(name)
         normalized_member_limit = self.vldt.member_limit(member_limit)
@@ -291,6 +292,8 @@ class Space(models.Model):
             raise SpaceErrors.SQUARE_MODES_REQUIRED
 
         self.name = normalized_name
+        if research_enabled is not None:
+            self.research_enabled = bool(research_enabled)
         if oauth_developer_enabled is not None:
             if oauth_developer_enabled and not self.oauth_developer_eligible:
                 raise SpaceErrors.OAUTH_DEVELOPER_UNAVAILABLE
@@ -313,7 +316,7 @@ class Space(models.Model):
         self.level_names = normalized_level_names
         self.save(update_fields=[
             'name', 'group_square_enabled', 'chat_enabled', 'square_free_post_enabled',
-            'submission_enabled', 'square_explore_enabled', 'space_group_enabled',
+            'submission_enabled', 'research_enabled', 'square_explore_enabled', 'space_group_enabled',
             'unverified_group_policy', 'member_limit', 'level_names', 'qq_binding_enabled', 'oauth_developer_enabled',
         ])
         from Chat.models import Chat
@@ -408,6 +411,7 @@ class Space(models.Model):
             'space_group_enabled',
             'square_free_post_enabled',
             'submission_enabled',
+            'research_enabled',
             'square_explore_enabled',
             'qq_binding_available',
             'oauth_developer_available',
@@ -432,6 +436,7 @@ class Space(models.Model):
             'space_group_enabled',
             'square_free_post_enabled',
             'submission_enabled',
+            'research_enabled',
             'square_explore_enabled',
             'qq_binding_enabled',
             'qq_binding_granted',
