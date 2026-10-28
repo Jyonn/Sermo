@@ -154,7 +154,14 @@ class ResearchView(View):
                         project.chat.is_deleted = True
                         project.chat.save(update_fields=['is_deleted'])
                     elif action == 'settings':
-                        project.status = research_status(body.get('status'))
+                        if 'status' not in body and 'description' not in body:
+                            raise ValueError('No settings provided')
+                        if 'status' in body:
+                            project.status = research_status(body['status'])
+                        if 'description' in body:
+                            description = text(body, 'description', 20000, False)
+                            check_user_text(request, description, ContentSafetyScene.PROFILE)
+                            project.description = description
                     elif action == 'task':
                         if len(project.tasks) >= 100:
                             raise ValueError('Task limit reached')

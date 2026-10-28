@@ -59,6 +59,22 @@ class ResearchTests(TestCase):
         self.assertEqual(p['tasks'][0]['progress'][0]['body'],'Preserved')
         self.assertEqual(self.update(p,dict(action='settings',status='unknown')).status_code,400)
 
+    def test_markdown_description_is_owner_only_versioned_and_safety_checked(self):
+        p=self.create();self.member(p,self.student)
+        body='## Research goals\n\n- **Evidence** first\n- [Resources](https://example.com)'
+        self.assertEqual(self.update(p,dict(action='settings',description=body),self.student).status_code,403)
+        with patch('Chat.research.check_user_text') as check:
+            result=self.update(p,dict(action='settings',description=body))
+            self.assertEqual(result.status_code,200,result.content)
+            check.assert_called_once()
+        updated=result.json()['body']
+        self.assertEqual(updated['description'],body)
+        self.assertEqual(updated['status'],'active')
+        self.assertEqual(self.call(self.student,id=p['id']).json()['body']['description'],body)
+        self.assertEqual(self.update(p,dict(action='settings',description='stale')).status_code,409)
+        self.assertEqual(self.update(updated,dict(action='settings',description='x'*20001)).status_code,400)
+        self.assertEqual(self.update(updated,dict(action='settings',description='')).json()['body']['description'],'')
+
     def test_status_migration_preserves_records_and_invalidates_old_revisions(self):
         from importlib import import_module
         from django.apps import apps
