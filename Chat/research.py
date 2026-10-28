@@ -41,7 +41,8 @@ def payload(project):
     return dict(id=project.pk, chat_id=project.chat_id, title=project.chat.title, description=project.description,
                 start=project.start.isoformat(), end=project.end.isoformat() if project.end else None,
                 status=project.status, revision=project.revision, tasks=project.tasks,
-                members=[dict(id=row.user_id, name=row.user.name, owner=row.role == ChatMemberRoleChoice.OWNER) for row in rows])
+                members=[dict(id=row.user_id, name=row.user.name, owner=row.role == ChatMemberRoleChoice.OWNER,
+                              **row.user.dictify('avatar_uri', 'avatar_cache_key', 'avatar_frame_style')) for row in rows])
 
 
 class ResearchView(View):

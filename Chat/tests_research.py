@@ -52,6 +52,17 @@ class ResearchTests(TestCase):
         self.assertEqual(self.call(foreign,id=p['id']).status_code,404)
         self.assertEqual(self.call(foreign).json()['body'],[])
 
+    def test_member_avatars_use_shared_public_serialization(self):
+        self.owner.avatar_frame_style='orbit'
+        self.owner.save(update_fields=['avatar_frame_style'])
+        p=self.create()
+        member=p['members'][0]
+        expected=self.owner.dictify('avatar_uri','avatar_cache_key','avatar_frame_style')
+        for key,value in expected.items():
+            self.assertEqual(member[key],value)
+        self.assertEqual(set(member),{'id','name','owner','avatar_uri','avatar_cache_key','avatar_frame_style'})
+        self.assertEqual(self.call(self.other,id=p['id']).status_code,404)
+
     def test_chat_list_and_membership_respect_space_gate(self):
         p=self.create()
         self.assertIn(p['chat_id'],[chat.pk for chat in Chat.get_user_chats(self.owner)])
