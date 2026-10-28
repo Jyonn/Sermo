@@ -18,7 +18,8 @@ from utils.content_safety import check_user_text, ContentSafetyScene
 
 def meeting_json(row):
     return dict(id=str(row.pk),creator_id=row.creator_id,status=row.status,
-        invitation_id=str(row.invitation_id) if row.invitation_id else None,**row.payload)
+        invitation_id=str(row.invitation_id) if row.invitation_id else None,
+        **{key:value for key,value in row.payload.items() if not key.startswith('_')})
 
 
 def validate(body,user_id):
@@ -65,14 +66,19 @@ class ResearchMeetingView(View):
             viewer=identities[request.user.pk]
             subjects=[value['binding']['subject'] for uid,value in identities.items() if uid!=request.user.pk]
             if len(set(subjects))!=len(subjects) or viewer['binding']['subject'] in subjects:raise BindingFailure('duplicate_calendar_identity',400)
+            authority={str(uid):value['binding']['subject'] for uid,value in identities.items()}
             with transaction.atomic():
                 ResearchProject.objects.select_for_update().get(pk=project.pk)
                 if ResearchMeeting.objects.filter(project=project,creator=request.user,status__in=['pending','unknown']).exclude(pk=command).exists():
                     raise BindingFailure('meeting_unresolved',409)
-                row,created=ResearchMeeting.objects.get_or_create(pk=command,defaults={'project':project,'creator':request.user,'payload':payload})
+                row,created=ResearchMeeting.objects.get_or_create(pk=command,defaults={'project':project,'creator':request.user,'payload':{**payload,'_authority':authority}})
                 row=ResearchMeeting.objects.select_for_update().get(pk=command)
-                if row.project_id!=project.pk or row.creator_id!=request.user.pk or row.payload!=payload:raise BindingFailure('meeting_command_conflict',409)
+                original={key:value for key,value in row.payload.items() if not key.startswith('_')}
+                if row.project_id!=project.pk or row.creator_id!=request.user.pk or original!=payload:raise BindingFailure('meeting_command_conflict',409)
                 if row.status=='invited':return meeting_json(row)
+                # Retrying after switching a linked account must never send the
+                # old uncertain operation as a different organizer or recipient.
+                if row.payload.get('_authority')!=authority:raise BindingFailure('meeting_unresolved',409)
                 if row.lease_until and row.lease_until>timezone.now():raise BindingFailure('meeting_processing',409)
                 row.status='pending';row.lease_until=timezone.now()+timedelta(seconds=60)
                 row.save(update_fields=['status','lease_until'])

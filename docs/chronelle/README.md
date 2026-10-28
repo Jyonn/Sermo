@@ -44,6 +44,9 @@ members. They create Chronelle invitations as the authenticated organizer; peers
 remain pending until they accept. The local command UUID and upstream idempotency
 key prevent duplicate writes. Unknown delivery is retained for the same-command
 retry, including after a page reload; it is never presented as successful.
+The verified organizer and recipient subjects are frozen with the command. A
+retry after switching a linked account fails closed instead of writing as a new
+identity; those internal subject mappings are omitted from frontend responses.
 
 ## Upstream increment
 

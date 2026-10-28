@@ -2,6 +2,7 @@ import uuid
 from unittest.mock import patch
 from User import tests_chronelle_account as fixtures
 from User.chronelle_account import BindingFailure
+from User.chronelle_account import store
 from Chat.models import ResearchMeeting
 
 
@@ -25,6 +26,7 @@ class ResearchMeetingTests(fixtures.ChronelleAccountTests):
         self.assertEqual(first.json()['body']['status'],'invited')
         self.assertEqual(remote.call_args.kwargs['body']['subjects'],[peer['binding']['subject']])
         self.assertNotIn('subjects',first.content.decode())
+        self.assertNotIn('_authority',first.content.decode())
         repeat=self.call(body,path)
         self.assertEqual(repeat.json()['body']['invitation_id'],first.json()['body']['invitation_id'])
         self.assertEqual(remote.call_count,1)
@@ -51,3 +53,14 @@ class ResearchMeetingTests(fixtures.ChronelleAccountTests):
         self.assertEqual(self.call(dict(self.meeting(),end='2026-10-01T09:00:00+08:00'),path).status_code,400)
         self.assertEqual(self.call(dict(self.meeting(),all_day=True),path).status_code,400)
         self.assertFalse(ResearchMeeting.objects.exists())
+
+    @patch('Chat.research_meetings.remote')
+    def test_uncertain_meeting_cannot_be_retried_as_a_different_calendar_account(self,remote):
+        self.bound();row,peer=self.bound(self.other)
+        remote.side_effect=BindingFailure('chronelle_unavailable',503)
+        body=self.meeting();path=f'/research/{self.project.pk}/meetings/'
+        self.assertEqual(self.call(body,path).status_code,503)
+        peer['binding']['subject']=str(uuid.uuid4());store(row,peer)
+        remote.reset_mock()
+        self.assertEqual(self.call(body,path).status_code,409)
+        remote.assert_not_called()
