@@ -1,6 +1,7 @@
 """Space-gated research workspace; chat membership is the authority source."""
 import json
 import uuid
+from Chat.research_status import research_status, normalize_tasks
 from datetime import date
 from django.db import transaction
 from django.http import JsonResponse
@@ -41,7 +42,7 @@ def payload(project):
     rows = list(members(project))
     return dict(id=project.pk, chat_id=project.chat_id, title=project.chat.title, description=project.description,
                 start=project.start.isoformat(), end=project.end.isoformat() if project.end else None,
-                status=project.status, revision=project.revision, tasks=project.tasks,
+                status=research_status(project.status), revision=project.revision, tasks=normalize_tasks(project.tasks),
                 pending_invitee_ids=list(SubmissionInvite.objects.filter(chat=project.chat,status=SubmissionInviteStatusChoice.PENDING,expires_at__gt=timezone.now()).values_list('invitee_id',flat=True)),
                 members=[dict(id=row.user_id, name=row.user.name, owner=row.role == ChatMemberRoleChoice.OWNER,
                               **row.user.dictify('avatar_uri', 'avatar_cache_key', 'avatar_frame_style')) for row in rows])
@@ -57,7 +58,7 @@ class ResearchView(View):
         if project_id:
             project = rows.filter(pk=project_id).first()
             return payload(project) if project else fail('Project unavailable', 404)
-        return [dict(id=p.pk, title=p.chat.title, status=p.status, start=p.start.isoformat(), end=p.end.isoformat() if p.end else None) for p in rows.order_by('-updated_at')[:200]]
+        return [dict(id=p.pk, title=p.chat.title, status=research_status(p.status), start=p.start.isoformat(), end=p.end.isoformat() if p.end else None) for p in rows.order_by('-updated_at')[:200]]
 
     @auth.require_user
     def post(self, request, project_id=None):
@@ -104,12 +105,14 @@ class ResearchView(View):
                         return fail('Project unavailable', 404)
                     if type(body.get('revision')) is not int or body['revision'] != project.revision:
                         return fail('Project changed. Refresh and try again.', 409)
+                    project.status = research_status(project.status)
+                    project.tasks = normalize_tasks(project.tasks)
                     action = body.get('action')
                     owner = project.chat.is_owner(request.user)
                     if action not in ('progress', 'leave') and not owner:
                         return fail('Only the project owner can manage this project', 403)
-                    if project.status == 'completed' and action not in ('settings', 'leave', 'dissolve'):
-                        return fail('Completed projects are read-only', 403)
+                    if project.status == 'archived' and action not in ('settings', 'leave', 'dissolve'):
+                        return fail('Archived projects are read-only', 403)
                     active = set(members(project).values_list('user_id', flat=True))
                     if calendar_revoke:
                         from Chat.research_calendar import revoke_displays
@@ -151,10 +154,7 @@ class ResearchView(View):
                         project.chat.is_deleted = True
                         project.chat.save(update_fields=['is_deleted'])
                     elif action == 'settings':
-                        status = body.get('status')
-                        if status not in ('planning', 'active', 'completed'):
-                            raise ValueError('Invalid status')
-                        project.status = status
+                        project.status = research_status(body.get('status'))
                     elif action == 'task':
                         if len(project.tasks) >= 100:
                             raise ValueError('Task limit reached')
@@ -165,16 +165,16 @@ class ResearchView(View):
                         if not isinstance(assignees, list) or not assignees or any(type(i) is not int or i not in active for i in assignees):
                             raise ValueError('Choose active members')
                         check_user_text(request, title+'\n'+content, ContentSafetyScene.PROFILE)
-                        project.tasks.append(dict(id=str(uuid.uuid4()), title=title, body=content, start=start.isoformat(), end=end.isoformat() if end else None, assignees=list(set(assignees)), status='doing', progress=[]))
+                        project.tasks.append(dict(id=str(uuid.uuid4()), title=title, body=content, start=start.isoformat(), end=end.isoformat() if end else None, assignees=list(set(assignees)), status='active', progress=[]))
                     elif action in ('task_status', 'progress'):
                         task = next((t for t in project.tasks if t['id'] == body.get('task_id')), None)
                         if not task:
                             return fail('Task unavailable', 404)
                         if action == 'task_status':
-                            if body.get('status') not in ('todo', 'doing', 'done'):
-                                raise ValueError('Invalid task status')
-                            task['status'] = body['status']
+                            task['status'] = research_status(body.get('status'))
                         else:
+                            if task['status'] == 'archived':
+                                return fail('Archived tasks are read-only', 403)
                             if len(task['progress']) >= 500:
                                 raise ValueError('Progress limit reached')
                             content = text(body, 'body', 20000)

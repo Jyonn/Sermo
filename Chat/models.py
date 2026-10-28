@@ -1120,7 +1120,7 @@ class SubmissionInvite(models.Model):
                         inviter=self.inviter.tiny_json(), invitee=self.invitee.tiny_json(),
                         created_at=self.created_at.timestamp(), expires_at=self.expires_at.timestamp(),
                         accepted_at=self.accepted_at.timestamp() if self.accepted_at else None,
-                        can_accept=bool(viewer and viewer.pk == self.invitee_id and status == 'pending' and not self.chat.is_deleted and self.chat.space.research_enabled and project.status != 'completed' and self.chat.is_owner(self.inviter)),
+                        can_accept=bool(viewer and viewer.pk == self.invitee_id and status == 'pending' and not self.chat.is_deleted and self.chat.space.research_enabled and project.status not in ('completed', 'archived') and self.chat.is_owner(self.inviter)),
                         submission=dict(title=self.chat.title, status='draft', authors=[self.inviter.tiny_json()], reviewers=[]))
         submission = self.chat.submission_record.jsonl()
         status = self.effective_status
@@ -1189,7 +1189,7 @@ class SubmissionInvite(models.Model):
                 raise ChatErrors.SUBMISSION_INVITE_FORBIDDEN
             if research:
                 if (invitation.chat.is_deleted or not user.space.research_enabled or user.space_id != invitation.chat.space_id
-                        or project.status == 'completed' or not invitation.chat.is_owner(invitation.inviter)):
+                        or project.status in ('completed', 'archived') or not invitation.chat.is_owner(invitation.inviter)):
                     raise ChatErrors.SUBMISSION_INVITE_CLOSED
                 user.space.require_group_join_allowed(user)
             if invitation.status != SubmissionInviteStatusChoice.PENDING:
@@ -1628,7 +1628,7 @@ class ResearchProject(models.Model):
     description = models.TextField(blank=True)
     start = models.DateField()
     end = models.DateField(null=True, blank=True)
-    status = models.CharField(max_length=16, default='planning')
+    status = models.CharField(max_length=16, default='active')
     revision = models.PositiveIntegerField(default=1)
     tasks = models.JSONField(default=list)
     calendar_policies = models.JSONField(default=dict)

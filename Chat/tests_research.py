@@ -40,6 +40,38 @@ class ResearchTests(TestCase):
         for response in [self.call(self.owner),self.call(self.owner,id=p['id']),self.update(p,{'action':'settings','status':'active'})]:
             self.assertEqual(response.status_code,403)
 
+    def test_two_state_lifecycle_and_legacy_clients(self):
+        p=self.create()
+        self.assertEqual(p['status'],'active')
+        p=self.update(p,dict(action='task',title='Task',body='Body',start='2026-10-28',assignees=[self.owner.pk])).json()['body']
+        task=p['tasks'][0]
+        self.assertEqual(task['status'],'active')
+        p=self.update(p,dict(action='task_status',task_id=task['id'],status='done')).json()['body']
+        self.assertEqual(p['tasks'][0]['status'],'archived')
+        self.assertEqual(self.update(p,dict(action='progress',task_id=task['id'],body='Blocked')).status_code,403)
+        p=self.update(p,dict(action='task_status',task_id=task['id'],status='active')).json()['body']
+        p=self.update(p,dict(action='progress',task_id=task['id'],body='Preserved')).json()['body']
+        p=self.update(p,dict(action='settings',status='completed')).json()['body']
+        self.assertEqual(p['status'],'archived')
+        self.assertEqual(self.call(self.owner).json()['body'][0]['status'],'archived')
+        self.assertEqual(self.update(p,dict(action='progress',task_id=task['id'],body='Blocked')).status_code,403)
+        p=self.update(p,dict(action='settings',status='active')).json()['body']
+        self.assertEqual(p['tasks'][0]['progress'][0]['body'],'Preserved')
+        self.assertEqual(self.update(p,dict(action='settings',status='unknown')).status_code,400)
+
+    def test_status_migration_preserves_records_and_invalidates_old_revisions(self):
+        from importlib import import_module
+        from django.apps import apps
+        from types import SimpleNamespace
+        p=self.create()
+        ResearchProject.objects.filter(pk=p['id']).update(status='completed',tasks=[dict(id='old',status='done',progress=[dict(id='record',body='Keep')]),dict(id='pending',status='todo',progress=[])])
+        import_module('Chat.migrations.0024_research_active_archived').simplify_statuses(apps,SimpleNamespace(connection=SimpleNamespace(alias='default')))
+        project=ResearchProject.objects.get(pk=p['id'])
+        self.assertEqual(project.status,'archived')
+        self.assertEqual([task['status'] for task in project.tasks],['archived','active'])
+        self.assertEqual(project.tasks[0]['progress'][0]['body'],'Keep')
+        self.assertEqual(project.revision,p['revision']+1)
+
     @patch.object(Chat, '_require_friendship')
     @patch.object(Chat, '_require_friend_of')
     def test_invitation_card_requires_recipient_consent_and_current_owner(self,*unused):

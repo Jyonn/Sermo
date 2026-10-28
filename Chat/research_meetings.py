@@ -57,7 +57,7 @@ class ResearchMeetingView(View):
             body=json.loads(request.body)
             command,payload=validate(body,request.user.pk)
             project=project_for(request.user,project_id)
-            if project.status=='completed':raise BindingFailure('project_read_only',403)
+            if project.status in ('completed','archived'):raise BindingFailure('project_read_only',403)
             active={m.user_id:m.user for m in project.chat.chat_members.filter(status=ChatMemberStatusChoice.ACTIVE,user__is_deleted=False).select_related('user')}
             if not set(payload['members'])<=set(active):raise BindingFailure('member_unavailable',403)
             check_user_text(request,'\n'.join(payload[k] for k in ('title','description','location')),ContentSafetyScene.PROFILE)
