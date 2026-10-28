@@ -133,4 +133,43 @@ class ChronelleAccountTests(TestCase):
             self.assertEqual(self.call(dict(body,action='policy'),path).status_code,400)
         self.assertEqual(self.call({'action':'policy','detail':[],'busy':[7]},path).status_code,200)
         self.project.refresh_from_db()
-        self.assertEqual(self.project.calendar_policies,{str(self.user.pk):{'detail':[],'busy':[7]}})
+        from Chat.models import ResearchCalendarPreference
+        preference = ResearchCalendarPreference.objects.get(user=self.user)
+        self.assertEqual(preference.overrides, {'7':'busy'})
+        self.assertFalse(preference.default_busy)
+
+    @patch('User.chronelle_account.remote')
+    def test_global_busy_default_requires_confirmation_and_applies_to_new_groups(self,remote):
+        from Chat.models import ResearchCalendarPreference
+        from Chat.research_calendar import shared_policy
+        self.bound();remote.return_value=[{'id':7,'name':'Private'}]
+        path=f'/research/{self.project.pk}/calendar/'
+        setup=self.call(path=path).json()['body']
+        self.assertFalse(setup['policy_configured'])
+        self.assertEqual(setup['policy'],{'detail':[],'busy':[7]})
+        self.assertFalse(ResearchCalendarPreference.objects.filter(user=self.user).exists())
+        self.assertEqual(shared_policy(self.user,self.project,[7]),{'detail':[],'busy':[]})
+        response=self.call({'action':'policy','default_busy':True,'detail':[],'busy':[7]},path)
+        self.assertEqual(response.status_code,200,response.content)
+        other_project=ResearchProject.objects.create(chat=Chat.objects.create(space=self.space,created_by=self.user,chat_type=1,purpose=2),start='2026-10-28')
+        self.assertEqual(shared_policy(self.user,other_project,[7,8]),{'detail':[],'busy':[7,8]})
+        self.assertEqual(self.call({'action':'policy','default_busy':True,'detail':[],'busy':[]},path).status_code,200)
+        self.assertEqual(shared_policy(self.user,other_project,[7,8]),{'detail':[],'busy':[8]})
+        row=ChronelleAccount.objects.get(user=self.user)
+        value=unpack(row);value['binding']['subject']=str(uuid.uuid4());store(row,value)
+        self.assertEqual(shared_policy(self.user,other_project,[7,8]),{'detail':[],'busy':[]})
+
+    @patch('Chat.research_calendar.remote')
+    @patch('User.chronelle_account.remote')
+    def test_global_privacy_save_revokes_owned_displays_across_projects(self,groups,remote):
+        self.bound();groups.return_value=[{'id':7,'name':'Private'}]
+        second=ResearchProject.objects.create(chat=Chat.objects.create(space=self.space,created_by=self.user,chat_type=1,purpose=2),start='2026-10-28')
+        ChatMember.objects.create(chat=second.chat,user=self.user,role=1,status=1)
+        for project in [self.project,second]:
+            project.calendar_displays=[{'id':str(uuid.uuid4()),'owner':self.user.pk,'viewer':self.other.pk,'until':timezone.now().timestamp()+300}]
+            project.save()
+        response=self.call({'action':'policy','default_busy':False,'detail':[],'busy':[]},f'/research/{self.project.pk}/calendar/')
+        self.assertEqual(response.status_code,200,response.content)
+        self.assertEqual(remote.call_count,2)
+        for project in [self.project,second]:
+            project.refresh_from_db();self.assertEqual(project.calendar_displays,[])

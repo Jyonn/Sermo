@@ -37,10 +37,12 @@ def members(project):
 
 
 def payload(project):
+    from Chat.models import SubmissionInvite, SubmissionInviteStatusChoice
     rows = list(members(project))
     return dict(id=project.pk, chat_id=project.chat_id, title=project.chat.title, description=project.description,
                 start=project.start.isoformat(), end=project.end.isoformat() if project.end else None,
                 status=project.status, revision=project.revision, tasks=project.tasks,
+                pending_invitee_ids=list(SubmissionInvite.objects.filter(chat=project.chat,status=SubmissionInviteStatusChoice.PENDING,expires_at__gt=timezone.now()).values_list('invitee_id',flat=True)),
                 members=[dict(id=row.user_id, name=row.user.name, owner=row.role == ChatMemberRoleChoice.OWNER,
                               **row.user.dictify('avatar_uri', 'avatar_cache_key', 'avatar_frame_style')) for row in rows])
 
@@ -124,7 +126,10 @@ class ResearchView(View):
                         request.user.require_capability('chat.group.invite')
                         Chat._require_friend_of(request.user, user)
                         request.user.space.require_group_join_allowed(user)
-                        ChatMember.objects.update_or_create(chat=project.chat, user=user, defaults=dict(role=ChatMemberRoleChoice.MEMBER, status=ChatMemberStatusChoice.ACTIVE, invited_by=request.user, joined_at=timezone.now(), left_at=None))
+                        from Chat.models import SubmissionInvite, SubmissionMemberRoleChoice
+                        from Message.models import Message
+                        invitation = SubmissionInvite.create_invitation(project.chat, request.user, user, SubmissionMemberRoleChoice.AUTHOR)
+                        Message.create_submission_invite(invitation)
                     elif action in ('leave', 'remove'):
                         user_id = request.user.pk if action == 'leave' else body.get('user_id')
                         member = members(project).filter(user_id=user_id).first()
@@ -140,6 +145,8 @@ class ResearchView(View):
                         members(project).filter(user=request.user).update(role=ChatMemberRoleChoice.MEMBER)
                         target.role = ChatMemberRoleChoice.OWNER
                         target.save()
+                        from Chat.models import SubmissionInvite, SubmissionInviteStatusChoice
+                        SubmissionInvite.objects.filter(chat=project.chat,status=SubmissionInviteStatusChoice.PENDING).update(status=SubmissionInviteStatusChoice.EXPIRED)
                     elif action == 'dissolve':
                         project.chat.is_deleted = True
                         project.chat.save(update_fields=['is_deleted'])

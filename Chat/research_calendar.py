@@ -4,10 +4,10 @@ import uuid
 from django.db import transaction
 from django.utils import timezone
 from django.views import View
-from Chat.models import ResearchProject, ChatMemberStatusChoice
+from Chat.models import ResearchProject, ResearchCalendarPreference, ChatMemberStatusChoice
 from Chat.research import fail
 from User.models import ChronelleAccount
-from User.chronelle_account import BindingFailure, calendar, config, credentials, remote, revocation_credentials
+from User.chronelle_account import BindingFailure, calendar, config, credentials, remote, revocation_credentials, unpack
 from User.chronelle_views import authorization_site, APP_ORIGINS
 from utils import auth
 
@@ -24,6 +24,21 @@ def project_for(user, pk):
 
 def error_response(error):
     return fail(error.code,error.status)
+
+
+def shared_policy(user, project, group_ids):
+    preference = ResearchCalendarPreference.objects.filter(user=user).first()
+    if preference is None:
+        return project.calendar_policies.get(str(user.pk), {'detail': [], 'busy': []})
+    account = ChronelleAccount.objects.filter(user=user).first()
+    if account is None or preference.binding_subject != unpack(account).get('binding',{}).get('subject'):
+        return {'detail': [], 'busy': []}
+    result = {'detail': [], 'busy': []}
+    for group_id in group_ids:
+        mode = preference.overrides.get(str(group_id), 'busy' if preference.default_busy else 'hidden')
+        if mode in result:
+            result[mode].append(group_id)
+    return result
 
 
 def revoke_displays(project, base, tokens):
@@ -52,9 +67,15 @@ class ResearchCalendarView(View):
             config()
             base,_ = authorization_site(request)
             groups = calendar(request.user,base,'groups/')
-            policy = project.calendar_policies.get(str(request.user.pk),{'detail':[],'busy':[]})
+            configured = ResearchCalendarPreference.objects.filter(user=request.user).first()
+            if configured and configured.binding_subject != credentials(request.user,base)['binding']['subject']:
+                configured = None
+            policy = shared_policy(request.user, project, [g['id'] for g in groups])
+            if configured is None:
+                policy = {'detail': [], 'busy': [g['id'] for g in groups]}
             return {'status':'active','groups':[{'id':g['id'],'name':g['name']} for g in groups],
-                'policy':policy,'members':[{'id':m.user_id,'name':m.user.name} for m in project.chat.chat_members.filter(status=ChatMemberStatusChoice.ACTIVE,user__is_deleted=False).select_related('user')]}
+                'policy':policy, 'policy_configured':configured is not None, 'default_busy':configured.default_busy if configured else True,
+                'members':[{'id':m.user_id,'name':m.user.name} for m in project.chat.chat_members.filter(status=ChatMemberStatusChoice.ACTIVE,user__is_deleted=False).select_related('user')]}
         except BindingFailure as error:
             if error.code in ('research_disabled','project_unavailable'):
                 return error_response(error)
@@ -72,20 +93,32 @@ class ResearchCalendarView(View):
                 raise BindingFailure('origin_not_allowed',403)
             if body.get('action')=='policy':
                 group_ids={g['id'] for g in calendar(request.user,base,'groups/')}
+                binding_subject=credentials(request.user,base)['binding']['subject']
                 detail,busy=body.get('detail'),body.get('busy')
+                default_busy = body.get('default_busy', False)
+                if type(default_busy) is not bool:
+                    raise BindingFailure('invalid_policy',400)
                 if not isinstance(detail,list) or not isinstance(busy,list) or any(type(i) is not int for i in detail+busy) or not set(detail+busy)<=group_ids or set(detail)&set(busy):
                     raise BindingFailure('invalid_policy',400)
-                # Renew before locking the project; refresh uncertainty must commit independently.
+                # A global privacy change must revoke this owner's projections in every project.
+                projects = list(ResearchProject.objects.filter(chat__chat_members__user=request.user,
+                    chat__chat_members__status=ChatMemberStatusChoice.ACTIVE).distinct().order_by('pk'))
                 tokens={}
-                for item in project.calendar_displays:
-                    if item['until']>timezone.now().timestamp():
-                        tokens[item['owner']]=revocation_credentials(project.chat.chat_members.get(user_id=item['owner']).user,base)
+                if any(item['owner']==request.user.pk and item['until']>timezone.now().timestamp() for p in projects for item in p.calendar_displays):
+                    tokens[request.user.pk]=revocation_credentials(request.user,base)
                 with transaction.atomic():
-                    project=ResearchProject.objects.select_for_update().get(pk=project.pk)
+                    projects = list(ResearchProject.objects.select_for_update().filter(pk__in=[p.pk for p in projects]).order_by('pk'))
                     project_for(request.user,project.pk)
-                    revoke_displays(project,base,tokens)
-                    project.calendar_policies[str(request.user.pk)]={'detail':sorted(set(detail)),'busy':sorted(set(busy))}
-                    project.save(update_fields=['calendar_policies','calendar_displays'])
+                    for item in projects:
+                        others = [d for d in item.calendar_displays if d['owner']!=request.user.pk]
+                        item.calendar_displays = [d for d in item.calendar_displays if d['owner']==request.user.pk]
+                        revoke_displays(item,base,tokens)
+                        item.calendar_displays = others
+                        item.save(update_fields=['calendar_displays'])
+                    ResearchCalendarPreference.objects.update_or_create(user=request.user, defaults={
+                        'default_busy':default_busy,
+                        'binding_subject':binding_subject,
+                        'overrides':{str(i):'detail' if i in detail else 'busy' if i in busy else 'hidden' for i in group_ids}})
                 return {'status':'saved'}
             if body.get('action')!='display':
                 raise BindingFailure('invalid_request',400)
@@ -99,7 +132,7 @@ class ResearchCalendarView(View):
             tokens={uid:credentials(active[uid],base) for uid in selected}
             # Only the viewer's own new groups are automatically visible. Peers
             # retain their explicit saved group policy; never expand it on read.
-            groups={request.user.pk:{g['id'] for g in calendar(request.user,base,'groups/')}} if request.user.pk in selected else {}
+            groups={uid:{g['id'] for g in calendar(active[uid],base,'groups/')} for uid in selected}
             with transaction.atomic():
                 project=ResearchProject.objects.select_for_update().get(pk=project.pk)
                 project_for(request.user,project.pk)
@@ -113,13 +146,13 @@ class ResearchCalendarView(View):
                 # Preflight all policies before issuing anything. No partial merge fallback.
                 policies={}
                 for uid in selected:
-                    policy={'detail':list(groups[uid]),'busy':[]} if uid==request.user.pk else project.calendar_policies.get(str(uid),{'detail':[],'busy':[]})
+                    policy={'detail':list(groups[uid]),'busy':[]} if uid==request.user.pk else shared_policy(active[uid],project,groups[uid])
                     if uid!=request.user.pk and not (policy['detail'] or policy['busy']):
                         raise BindingFailure('member_calendar_not_shared',403)
                     policies[uid]=policy
                 for uid in selected:
                     policy=policies[uid]
-                    allowed=groups[uid] if uid==request.user.pk else set(policy['detail']+policy['busy'])
+                    allowed=groups[uid]
                     result=remote(base,'/api/account-bindings/v1/calendar/display-sessions/',
                         token=tokens[uid]['access_token'],key=str(uuid.uuid4()),body={
                             'calendar_subject':tokens[uid]['binding']['subject'],'viewer_subject':viewer['binding']['subject'],

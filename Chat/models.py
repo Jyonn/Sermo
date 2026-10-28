@@ -1106,10 +1106,22 @@ class SubmissionInvite(models.Model):
             status=ChatMemberStatusChoice.ACTIVE,
         ).only('submission_role').first()
         if member is not None:
+            if self.chat.purpose == ChatPurposeChoice.RESEARCH:
+                return 'accepted'
             return 'accepted' if member.submission_role == self.role else 'conflict'
         return 'pending'
 
     def jsonl(self, viewer: User = None):
+        if self.chat.purpose == ChatPurposeChoice.RESEARCH:
+            project = self.chat.research_project
+            status = self.effective_status
+            return dict(invite_id=self.id, chat_id=self.chat_id, role='author', status=status,
+                        project=dict(id=project.pk, title=self.chat.title),
+                        inviter=self.inviter.tiny_json(), invitee=self.invitee.tiny_json(),
+                        created_at=self.created_at.timestamp(), expires_at=self.expires_at.timestamp(),
+                        accepted_at=self.accepted_at.timestamp() if self.accepted_at else None,
+                        can_accept=bool(viewer and viewer.pk == self.invitee_id and status == 'pending' and not self.chat.is_deleted and self.chat.space.research_enabled and project.status != 'completed' and self.chat.is_owner(self.inviter)),
+                        submission=dict(title=self.chat.title, status='draft', authors=[self.inviter.tiny_json()], reviewers=[]))
         submission = self.chat.submission_record.jsonl()
         status = self.effective_status
         return dict(
@@ -1167,10 +1179,19 @@ class SubmissionInvite(models.Model):
     def accept(self, user: User):
         now = timezone.now()
         with transaction.atomic():
-            invitation = type(self).objects.select_for_update().select_related('chat', 'invitee').get(id=self.id)
+            invitation = type(self).objects.select_related('chat', 'invitee').get(id=self.id)
+            research = invitation.chat.purpose == ChatPurposeChoice.RESEARCH
+            if research:
+                project = ResearchProject.objects.select_for_update().get(chat=invitation.chat)
             Chat.objects.select_for_update().get(id=invitation.chat_id)
+            invitation = type(self).objects.select_for_update().select_related('chat', 'invitee').get(id=self.id)
             if invitation.invitee_id != user.id:
                 raise ChatErrors.SUBMISSION_INVITE_FORBIDDEN
+            if research:
+                if (invitation.chat.is_deleted or not user.space.research_enabled or user.space_id != invitation.chat.space_id
+                        or project.status == 'completed' or not invitation.chat.is_owner(invitation.inviter)):
+                    raise ChatErrors.SUBMISSION_INVITE_CLOSED
+                user.space.require_group_join_allowed(user)
             if invitation.status != SubmissionInviteStatusChoice.PENDING:
                 raise ChatErrors.SUBMISSION_INVITE_CLOSED
             if invitation.expires_at <= now:
@@ -1184,12 +1205,15 @@ class SubmissionInvite(models.Model):
             if member is None:
                 member = ChatMember(chat=invitation.chat, user=user)
             member.role = ChatMemberRoleChoice.MEMBER
-            member.submission_role = invitation.role
+            member.submission_role = None if research else invitation.role
             member.status = ChatMemberStatusChoice.ACTIVE
             member.invited_by = invitation.inviter
             member.joined_at = invitation.chat.created_at
             member.left_at = None
             member.save()
+            if research:
+                project.revision += 1
+                project.save(update_fields=['revision', 'updated_at'])
 
             invitation.status = SubmissionInviteStatusChoice.ACCEPTED
             invitation.accepted_at = now
@@ -1610,6 +1634,13 @@ class ResearchProject(models.Model):
     calendar_policies = models.JSONField(default=dict)
     calendar_displays = models.JSONField(default=list)
     updated_at = models.DateTimeField(auto_now=True)
+
+
+class ResearchCalendarPreference(models.Model):
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='research_calendar_preference')
+    default_busy = models.BooleanField(default=True)
+    overrides = models.JSONField(default=dict)
+    binding_subject = models.CharField(max_length=128, blank=True)
 
 
 class ResearchMeeting(models.Model):

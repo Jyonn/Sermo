@@ -40,6 +40,42 @@ class ResearchTests(TestCase):
         for response in [self.call(self.owner),self.call(self.owner,id=p['id']),self.update(p,{'action':'settings','status':'active'})]:
             self.assertEqual(response.status_code,403)
 
+    @patch.object(Chat, '_require_friendship')
+    @patch.object(Chat, '_require_friend_of')
+    def test_invitation_card_requires_recipient_consent_and_current_owner(self,*unused):
+        from Chat.models import SubmissionInvite
+        from Message.models import Message, MessageTypeChoice
+        p=self.create()
+        sent=self.update(p,{'action':'invite','user_id':self.student.pk})
+        self.assertEqual(sent.status_code,200,sent.content)
+        self.assertFalse(ChatMember.objects.filter(chat_id=p['chat_id'],user=self.student,status=1).exists())
+        self.assertEqual(self.call(self.student,id=p['id']).status_code,404)
+        invite=SubmissionInvite.objects.get(chat_id=p['chat_id'])
+        self.assertEqual(Message.objects.filter(type=MessageTypeChoice.SUBMISSION_INVITE).count(),1)
+        card=invite.jsonl(self.student)
+        self.assertTrue(card['can_accept'])
+        self.assertEqual(card['project']['id'],p['id'])
+        self.assertFalse(invite.jsonl(self.other)['can_accept'])
+        invite.accept(self.student)
+        self.assertEqual(self.call(self.student,id=p['id']).status_code,200)
+        self.assertIsNone(ChatMember.objects.get(chat_id=p['chat_id'],user=self.student).submission_role)
+        self.assertEqual(SubmissionInvite.objects.get(pk=invite.pk).effective_status,'accepted')
+
+    @patch.object(Chat, '_require_friendship')
+    @patch.object(Chat, '_require_friend_of')
+    def test_pending_invites_expire_on_owner_transfer(self,*unused):
+        from Chat.models import SubmissionInvite
+        p=self.create();self.member(p,self.student)
+        p=self.update(p,{'action':'invite','user_id':self.other.pk}).json()['body']
+        self.assertIn(self.other.pk,p['pending_invitee_ids'])
+        response=self.update(p,{'action':'transfer','user_id':self.student.pk})
+        self.assertEqual(response.status_code,200,response.content)
+        invite=SubmissionInvite.objects.get(chat_id=p['chat_id'])
+        self.assertFalse(invite.jsonl(self.other)['can_accept'])
+        with self.assertRaises(Exception):
+            invite.accept(self.other)
+        self.assertFalse(ChatMember.objects.filter(chat_id=p['chat_id'],user=self.other,status=1).exists())
+
     def test_real_group_and_member_read_isolation(self):
         p=self.create()
         self.assertEqual(Chat.objects.get(pk=p['chat_id']).purpose,2)

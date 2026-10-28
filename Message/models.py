@@ -991,7 +991,7 @@ class Message(models.Model):
     def create_submission_invite(cls, invitation):
         chat = Chat.get_or_create_direct(invitation.inviter, invitation.invitee)
         content = json.dumps(
-            {'kind': 'submission_invite', 'invitation_id': invitation.id},
+            {'kind': 'submission_invite', 'invitation_id': invitation.id, 'research': invitation.chat.purpose == ChatPurposeChoice.RESEARCH},
             separators=(',', ':'),
         )
         message = cls.objects.create(
@@ -1666,6 +1666,8 @@ class Message(models.Model):
             return self.readable_text()
         if self.type == MessageTypeChoice.OFFICIAL_NOTICE:
             return self.system_message_text()
+        if self.type == MessageTypeChoice.SUBMISSION_INVITE and self._parse_payload(self.content).get('research'):
+            return '[课题邀请]'
         return self.PREVIEW_TEXT_BY_TYPE.get(self.type, self.content)
 
     def _dictify_user(self):
