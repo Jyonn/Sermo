@@ -66,7 +66,10 @@ class ResearchCalendarView(View):
             project = project_for(request.user,project_id)
             config()
             base,_ = authorization_site(request)
+            subject = credentials(request.user,base)['binding']['subject']
             groups = calendar(request.user,base,'groups/')
+            if credentials(request.user,base)['binding']['subject'] != subject:
+                raise BindingFailure('binding_superseded')
             configured = ResearchCalendarPreference.objects.filter(user=request.user).first()
             if configured and configured.binding_subject != credentials(request.user,base)['binding']['subject']:
                 configured = None
@@ -92,16 +95,21 @@ class ResearchCalendarView(View):
             if request.headers.get('Origin') not in APP_ORIGINS:
                 raise BindingFailure('origin_not_allowed',403)
             if body.get('action')=='policy':
-                group_ids={g['id'] for g in calendar(request.user,base,'groups/')}
                 binding_subject=credentials(request.user,base)['binding']['subject']
+                group_ids={g['id'] for g in calendar(request.user,base,'groups/')}
+                if credentials(request.user,base)['binding']['subject'] != binding_subject:
+                    raise BindingFailure('binding_superseded')
                 detail,busy=body.get('detail'),body.get('busy')
+                legacy = 'default_busy' not in body
+                if legacy and ResearchCalendarPreference.objects.filter(user=request.user).exists():
+                    raise BindingFailure('global_policy_update_required',400)
                 default_busy = body.get('default_busy', False)
                 if type(default_busy) is not bool:
                     raise BindingFailure('invalid_policy',400)
                 if not isinstance(detail,list) or not isinstance(busy,list) or any(type(i) is not int for i in detail+busy) or not set(detail+busy)<=group_ids or set(detail)&set(busy):
                     raise BindingFailure('invalid_policy',400)
                 # A global privacy change must revoke this owner's projections in every project.
-                projects = list(ResearchProject.objects.filter(chat__chat_members__user=request.user,
+                projects = [project] if legacy else list(ResearchProject.objects.filter(chat__chat_members__user=request.user,
                     chat__chat_members__status=ChatMemberStatusChoice.ACTIVE).distinct().order_by('pk'))
                 tokens={}
                 if any(item['owner']==request.user.pk and item['until']>timezone.now().timestamp() for p in projects for item in p.calendar_displays):
@@ -115,10 +123,15 @@ class ResearchCalendarView(View):
                         revoke_displays(item,base,tokens)
                         item.calendar_displays = others
                         item.save(update_fields=['calendar_displays'])
-                    ResearchCalendarPreference.objects.update_or_create(user=request.user, defaults={
-                        'default_busy':default_busy,
-                        'binding_subject':binding_subject,
-                        'overrides':{str(i):'detail' if i in detail else 'busy' if i in busy else 'hidden' for i in group_ids}})
+                    if legacy:
+                        locked = next(item for item in projects if item.pk==project.pk)
+                        locked.calendar_policies[str(request.user.pk)]={'detail':sorted(set(detail)),'busy':sorted(set(busy))}
+                        locked.save(update_fields=['calendar_policies'])
+                    else:
+                        ResearchCalendarPreference.objects.update_or_create(user=request.user, defaults={
+                            'default_busy':default_busy,
+                            'binding_subject':binding_subject,
+                            'overrides':{str(i):'detail' if i in detail else 'busy' if i in busy else 'hidden' for i in group_ids}})
                 return {'status':'saved'}
             if body.get('action')!='display':
                 raise BindingFailure('invalid_request',400)

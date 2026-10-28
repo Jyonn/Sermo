@@ -134,9 +134,8 @@ class ChronelleAccountTests(TestCase):
         self.assertEqual(self.call({'action':'policy','detail':[],'busy':[7]},path).status_code,200)
         self.project.refresh_from_db()
         from Chat.models import ResearchCalendarPreference
-        preference = ResearchCalendarPreference.objects.get(user=self.user)
-        self.assertEqual(preference.overrides, {'7':'busy'})
-        self.assertFalse(preference.default_busy)
+        self.assertFalse(ResearchCalendarPreference.objects.filter(user=self.user).exists())
+        self.assertEqual(self.project.calendar_policies,{str(self.user.pk):{'detail':[],'busy':[7]}})
 
     @patch('User.chronelle_account.remote')
     def test_global_busy_default_requires_confirmation_and_applies_to_new_groups(self,remote):
@@ -153,6 +152,7 @@ class ChronelleAccountTests(TestCase):
         self.assertEqual(response.status_code,200,response.content)
         other_project=ResearchProject.objects.create(chat=Chat.objects.create(space=self.space,created_by=self.user,chat_type=1,purpose=2),start='2026-10-28')
         self.assertEqual(shared_policy(self.user,other_project,[7,8]),{'detail':[],'busy':[7,8]})
+        self.assertEqual(self.call({'action':'policy','detail':[7],'busy':[]},path).status_code,400)
         self.assertEqual(self.call({'action':'policy','default_busy':True,'detail':[],'busy':[]},path).status_code,200)
         self.assertEqual(shared_policy(self.user,other_project,[7,8]),{'detail':[],'busy':[8]})
         row=ChronelleAccount.objects.get(user=self.user)
