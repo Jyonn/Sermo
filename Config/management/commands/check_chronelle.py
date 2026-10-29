@@ -17,6 +17,9 @@ class Command(BaseCommand):
                 result=remote(base,'/api/oauth/introspect/',body={'subject':str(UUID(int=0))})
                 if result.get('active') is not False:
                     raise CommandError('Unexpected introspection result')
+                embed=requests.get(base+'/oauth/embed/'+client+'/',allow_redirects=False,timeout=15)
+                if embed.status_code!=200 or any(origin not in embed.headers.get('Content-Security-Policy','') for origin in APP_ORIGINS):
+                    raise CommandError('Chronelle embed or registered display origins are unavailable')
             for origin in sorted(APP_ORIGINS):
                 base=MIRROR_BASE if origin.endswith('.6-79.cn') else BASE
                 challenge=base64.urlsafe_b64encode(hashlib.sha256(secrets.token_urlsafe(48).encode()).digest()).rstrip(b'=').decode()
@@ -28,4 +31,4 @@ class Command(BaseCommand):
                     raise CommandError('Chronelle rejected a registered callback; no user authorization performed')
         except (BindingFailure,requests.RequestException):
             raise CommandError('Chronelle application validation failed; credential values are hidden')
-        self.stdout.write('Chronelle credentials and all four callbacks verified. No user data accessed.')
+        self.stdout.write('Chronelle credentials, embed origins and all four callbacks verified. No user data accessed.')
