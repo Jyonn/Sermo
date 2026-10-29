@@ -349,6 +349,8 @@ class SquareStatusView(View):
             return True
         if activity.get('starry_night', {}).get('reward_claimable'):
             return True
+        if any(reward.get('claimable') for reward in activity.get('explorer', {}).get('rewards', [])):
+            return True
         if activity['personal_reward_claimable'] or activity['space_reward_claimable']:
             return True
         has_locked_space_reward = any(not milestone['unlocked'] for milestone in activity['milestones'])

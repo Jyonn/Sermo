@@ -651,7 +651,7 @@ class User(models.Model):
                         raise UserErrors.PERSONALIZATION_NOT_OWNED
                     if normalized == 'vip' and not self.is_permanent_vip:
                         raise UserErrors.PERSONALIZATION_NOT_OWNED
-                    if normalized == 'spider-city' and not UserResourceInventory.owns(self, 'profile', normalized):
+                    if normalized in {'spider-city', 'explorer-romance'} and not UserResourceInventory.owns(self, 'profile', normalized):
                         raise UserErrors.PERSONALIZATION_NOT_OWNED
                 if capability_group:
                     self.require_capability(f'menu.personalization.{capability_group}.use.{normalized}')
@@ -1296,6 +1296,7 @@ class User(models.Model):
         payload['chronelle_calendar_id'] = self.chronelle_calendar_id
         payload['growth_level_name'] = self._dictify_growth_level_name()
         payload['founder_medal_years'] = self.founder_medal_years()
+        payload['explorer_badge_years'] = self.explorer_badge_years()
         payload['growth_honor'] = self.growth_honor()
         payload['plaza_greeting'] = self.display_plaza_greeting()
         payload['permanent_vip_slot'] = self.permanent_vip_slot()
@@ -1322,6 +1323,7 @@ class User(models.Model):
         payload['growth_level'] = self.growth_level
         payload['growth_level_name'] = self._dictify_growth_level_name()
         payload['founder_medal_years'] = self.founder_medal_years()
+        payload['explorer_badge_years'] = self.explorer_badge_years()
         payload['growth_honor'] = self.growth_honor()
         payload['permanent_vip_slot'] = self.permanent_vip_slot()
         return payload
@@ -1336,6 +1338,16 @@ class User(models.Model):
                        and not (item.metadata or {}).get('revoked_at')
                        and (not pending_only or not (item.metadata or {}).get('acknowledged_at'))
                        and re.fullmatch(r'identity\.founder\.\d{4}', item.reward_id)}, reverse=True)
+
+    def explorer_badge_years(self):
+        prefetched = getattr(self, '_prefetched_objects_cache', {}).get('resource_inventory')
+        inventory = prefetched if prefetched is not None else self.resource_inventory.filter(
+            resource_type=UserResourceTypeChoice.IDENTITY, reward_id__startswith='identity.explorer.'
+        ).only('reward_id', 'resource_type', 'metadata')
+        return sorted({int(item.reward_id.rsplit('.', 1)[-1]) for item in inventory
+                       if item.resource_type == UserResourceTypeChoice.IDENTITY
+                       and not (item.metadata or {}).get('revoked_at')
+                       and re.fullmatch(r'identity\.explorer\.\d{4}', item.reward_id)}, reverse=True)
 
     def growth_honor(self):
         prefetched = getattr(self, '_prefetched_objects_cache', {}).get('resource_inventory')
@@ -1415,6 +1427,7 @@ class User(models.Model):
         payload['resource_inventory'] = UserResourceInventory.payload_for(self)
         payload['growth_honor'] = self.growth_honor()
         payload['founder_medal_years'] = self.founder_medal_years()
+        payload['explorer_badge_years'] = self.explorer_badge_years()
         payload['growth_level_name'] = self._dictify_growth_level_name()
         from TravelMap.unlocks import unlocked_city_bubble_styles
         payload['city_bubble_styles'] = unlocked_city_bubble_styles(self)

@@ -88,6 +88,20 @@ class ActivityDetailView(View):
         return ActivityService.payload(campaign, request.user, space_activity)
 
 
+class ExplorerRewardClaimView(View):
+    @auth.require_user
+    def post(self, request: Request, key: str, tier: int):
+        from Activity.explorer import ExplorerErrors, ExplorerService
+        campaign = ActivityCampaign.objects.filter(key=key, enabled=True, config__mode=ExplorerService.MODE).first()
+        if campaign is None:
+            raise ExplorerErrors.INVALID
+        ActivityService.ensure_automatic_for_space(request.user.space)
+        run = campaign.space_runs.filter(space=request.user.space).first()
+        if run is None:
+            raise ExplorerErrors.INVALID
+        return ExplorerService.claim(campaign, request.user, run, tier)
+
+
 class ActivitySeenView(View):
     @auth.require_user
     def post(self, request: Request, key: str):

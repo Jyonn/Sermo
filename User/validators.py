@@ -153,23 +153,23 @@ class UserValidator:
     AVATAR_PRESET_MAX_ID = 36
     CHAT_BACKGROUND_THEMES = {
         'default', 'paper', 'mint', 'comic', 'bauhaus', 'dragon', 'zen', 'mosaic', 'newsprint',
-        'aurora-sky', 'hologram', 'frienden-night', 'frienden-garden', 'starry-night', 'noir-film', 'custom',
+        'aurora-sky', 'hologram', 'frienden-night', 'frienden-garden', 'starry-night', 'noir-film', 'custom', 'explorer-duality',
     }
     PERSONALIZATION_OPTIONS = {
         'chat_bubble_style': {
             'default', 'comic', 'vip', 'zen', 'hero', 'dragon', 'bauhaus', 'mosaic',
             'typewriter', 'newspaper', 'receipt', 'niko', 'fufu', 'xiaobai',
             'baxian-lv', 'baxian-zhongli', 'baxian-he',
-            'city-jdz', 'city-shanghai', 'city-nyc', 'city-beijing',
+            'city-jdz', 'city-shanghai', 'city-nyc', 'city-beijing', 'explorer-ai',
         },
         'avatar_frame_style': {
             'none', 'orbit', 'aurora', 'polaroid', 'papercut', 'mechanical',
-            'niko-run', 'fufu-wave', 'xiaobai-run', 'vip', 'spider-web',
+            'niko-run', 'fufu-wave', 'xiaobai-run', 'vip', 'spider-web', 'explorer-conan',
         },
         'statement_card_style': {
             'default', 'editorial', 'mosaic', 'hero', 'comic', 'receipt', 'vip', 'niko', 'fufu',
         },
-        'profile_card_theme': {'default', 'level-12', 'vip', 'spider-city'},
+        'profile_card_theme': {'default', 'level-12', 'vip', 'spider-city', 'explorer-romance'},
     }
     GESTURE_LOCK_MIN_MINUTES = 1
     GESTURE_LOCK_MAX_MINUTES = 30

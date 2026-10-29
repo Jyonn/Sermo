@@ -244,6 +244,9 @@ class ActivityService:
             claimed_at + timedelta(seconds=campaign.duration_seconds)
             if campaign.duration_seconds else None
         )
+        if campaign.config.get('mode') == 'annual_explorer':
+            from Activity.explorer import ExplorerService
+            claimed_at, ends_at = ExplorerService.START, ExplorerService.END
         space_activity, created = SpaceActivity.objects.get_or_create(
             campaign=campaign,
             space=space,
@@ -562,6 +565,9 @@ class ActivityService:
 
     @classmethod
     def claim(cls, campaign, user):
+        if campaign.config.get('mode') == 'annual_explorer':
+            from Activity.explorer import ExplorerErrors
+            raise ExplorerErrors.INVALID
         with transaction.atomic():
             _, progress = cls._progress(campaign, user)
             progress = UserActivityProgress.objects.select_for_update().get(id=progress.id)
@@ -739,6 +745,9 @@ class ActivityService:
     def payload(cls, campaign, user, space_activity=None):
         if space_activity is None:
             space_activity = SpaceActivity.objects.get(campaign=campaign, space=user.space)
+        if campaign.config.get('mode') == 'annual_explorer':
+            from Activity.explorer import ExplorerService
+            return ExplorerService.payload(campaign, user, space_activity)
         if campaign.config.get('mode') == 'bgm_collection':
             from Activity.bgm import BgmService
             return BgmService.payload(campaign, user, space_activity)
