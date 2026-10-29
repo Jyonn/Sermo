@@ -68,7 +68,7 @@ def store(row, value):
     row.save(update_fields=['sealed'])
 
 
-def remote(base, path, *, method='POST', body=None, token=None, key=None):
+def remote(base, path, *, method='POST', body=None, token=None, key=None, params=None, origin=None):
     if base not in (BASE, MIRROR_BASE) or not path.startswith('/api/oauth/'):
         raise BindingFailure('integration_not_configured', 503)
     client, secret, _ = config()
@@ -77,9 +77,13 @@ def remote(base, path, *, method='POST', body=None, token=None, key=None):
         headers['Authorization'] = 'Bearer ' + token
     if key:
         headers['Idempotency-Key'] = key
+    if origin:
+        if origin not in APP_ORIGINS:
+            raise BindingFailure('origin_not_allowed',403)
+        headers['Origin'] = origin
     try:
         response = requests.request(method, base + path, json=body, headers=headers,
-            auth=None if token else (client, secret), timeout=15, allow_redirects=False)
+            auth=None if token else (client, secret), params=params, timeout=15, allow_redirects=False)
         value = response.json() if response.content else {}
     except (requests.RequestException, ValueError):
         raise BindingFailure('chronelle_unavailable', 503)

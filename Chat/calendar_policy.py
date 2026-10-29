@@ -57,7 +57,7 @@ def effective(audiences, tier, group_id):
     return entry['overrides'].get(str(group_id), entry['default']) if group_id is not None else entry['default']
 
 
-def projection(owner, viewer, group_ids):
+def projection(owner, viewer, group_ids, *, preview_tier=None):
     from User.models import ChronelleAccount
     from User.chronelle_account import unpack
     pref = ResearchCalendarPreference.objects.filter(user=owner).first()
@@ -74,6 +74,8 @@ def projection(owner, viewer, group_ids):
         if Friendship.objects.filter(space_id=owner.space_id, user_low_id=low, user_high_id=high, status=FriendshipStatusChoice.ACCEPTED).exists():
             tier = 'friends'
     audiences = modes(pref)
+    if preview_tier in TIERS and viewer and viewer.pk == owner.pk:
+        tier = preview_tier
     result = {'detail': [], 'busy': []}
     for group_id in group_ids:
         mode = effective(audiences, tier, group_id)
