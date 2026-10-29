@@ -64,3 +64,15 @@ class ResearchMeetingTests(fixtures.ChronelleAccountTests):
         remote.reset_mock()
         self.assertEqual(self.call(body,path).status_code,409)
         remote.assert_not_called()
+
+    @patch('Chat.research_meetings.remote')
+    def test_old_protocol_unknown_delivery_is_not_resent_through_new_oauth_client(self,remote):
+        self.bound();self.bound(self.other)
+        remote.side_effect=BindingFailure('chronelle_unavailable',503)
+        body=self.meeting();path=f'/research/{self.project.pk}/meetings/'
+        self.assertEqual(self.call(body,path).status_code,503)
+        row=ResearchMeeting.objects.get(pk=body['command_id'])
+        row.payload.pop('_protocol');row.payload.pop('_oauth_client');row.save(update_fields=['payload'])
+        remote.reset_mock()
+        self.assertEqual(self.call(body,path).status_code,409)
+        remote.assert_not_called()

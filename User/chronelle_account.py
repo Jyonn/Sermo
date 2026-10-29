@@ -145,7 +145,7 @@ def claim(user, origin, base, body):
         row = ChronelleAccount.objects.select_for_update().get(pk=row.pk)
         value = unpack(row)
         pending = value.get('pending', {})
-        if pending.get('until',0) <= timezone.now().timestamp() or pending.get('origin') != origin:
+        if pending.get('protocol') != 'oauth-v1' or pending.get('until',0) <= timezone.now().timestamp() or pending.get('origin') != origin:
             return {'status':'expired'}
         if not isinstance(body.get('state'),str) or not secrets.compare_digest(body['state'],pending['state']):
             raise BindingFailure('invalid_state',403)

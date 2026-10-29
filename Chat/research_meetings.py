@@ -10,7 +10,7 @@ from django.views import View
 from Chat.models import ResearchMeeting, ResearchProject, ChatMemberStatusChoice
 from Chat.research import fail
 from Chat.research_calendar import project_for
-from User.chronelle_account import BindingFailure, credentials, remote
+from User.chronelle_account import BindingFailure, credentials, remote, config
 from User.chronelle_views import authorization_site, APP_ORIGINS
 from utils import auth
 from utils.content_safety import check_user_text, ContentSafetyScene
@@ -71,14 +71,14 @@ class ResearchMeetingView(View):
                 ResearchProject.objects.select_for_update().get(pk=project.pk)
                 if ResearchMeeting.objects.filter(project=project,creator=request.user,status__in=['pending','unknown']).exclude(pk=command).exists():
                     raise BindingFailure('meeting_unresolved',409)
-                row,created=ResearchMeeting.objects.get_or_create(pk=command,defaults={'project':project,'creator':request.user,'payload':{**payload,'_authority':authority}})
+                row,created=ResearchMeeting.objects.get_or_create(pk=command,defaults={'project':project,'creator':request.user,'payload':{**payload,'_authority':authority,'_oauth_client':config()[0],'_protocol':'oauth-v1'}})
                 row=ResearchMeeting.objects.select_for_update().get(pk=command)
                 original={key:value for key,value in row.payload.items() if not key.startswith('_')}
                 if row.project_id!=project.pk or row.creator_id!=request.user.pk or original!=payload:raise BindingFailure('meeting_command_conflict',409)
                 if row.status=='invited':return meeting_json(row)
                 # Retrying after switching a linked account must never send the
                 # old uncertain operation as a different organizer or recipient.
-                if row.payload.get('_authority')!=authority:raise BindingFailure('meeting_unresolved',409)
+                if row.payload.get('_authority')!=authority or row.payload.get('_oauth_client')!=config()[0] or row.payload.get('_protocol')!='oauth-v1':raise BindingFailure('meeting_unresolved',409)
                 if row.lease_until and row.lease_until>timezone.now():raise BindingFailure('meeting_processing',409)
                 row.status='pending';row.lease_until=timezone.now()+timedelta(seconds=60)
                 row.save(update_fields=['status','lease_until'])
