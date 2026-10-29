@@ -1214,6 +1214,8 @@ class SubmissionInvite(models.Model):
             if research:
                 project.revision += 1
                 project.save(update_fields=['revision', 'updated_at'])
+                from Chat.research_notifications import notify_research
+                notify_research(project,user,'join',{})
 
             invitation.status = SubmissionInviteStatusChoice.ACCEPTED
             invitation.accepted_at = now

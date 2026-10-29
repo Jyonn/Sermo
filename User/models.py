@@ -2319,6 +2319,11 @@ class NotificationTopicChoice(Choice):
     SQUARE_COMMENT_LIKE = 4
     SQUARE_COMMENT_REPLY = 5
     ONLINE = 6
+    SUBMISSION = 7
+    RESEARCH_TASK = 8
+    RESEARCH_PROGRESS = 9
+    RESEARCH_UPDATE = 10
+    SQUARE_POST = 11
 
 
 class NotificationAudienceChoice(Choice):
@@ -2596,27 +2601,25 @@ class NotificationTopicPreference(models.Model):
             return True
         if not cls.supports_channel(topic, channel):
             return False
-        audience = event.audience()
-        pref = cls.objects.filter(user=event.user, channel=channel, topic=topic, audience=audience).first()
-        if pref is None and audience != NotificationAudienceChoice.ANY:
-            pref = cls.objects.filter(
-                user=event.user, channel=channel, topic=topic, audience=NotificationAudienceChoice.ANY,
-            ).first()
-        return pref.enabled if pref else cls.default_enabled(channel, topic)
+        return cls.effective_enabled(event.user,channel,topic)
+
+    @classmethod
+    def effective_enabled(cls,user,channel,topic,existing=None):
+        if existing is None:
+            existing={(p.channel,p.topic,p.audience):p.enabled for p in cls.objects.filter(user=user,channel=channel,topic=topic)}
+        if (channel,topic,0) in existing:
+            return existing[channel,topic,0]
+        if topic in (2,3,4,5) and (channel,topic,1) in existing:
+            return existing[channel,topic,1]
+        return cls.default_enabled(channel,topic)
 
     @classmethod
     def matrix(cls, user):
         existing = {(item.channel, item.topic, item.audience): item.enabled for item in cls.objects.filter(user=user)}
-        square_topics = {
-            NotificationTopicChoice.SQUARE_STATEMENT_LIKE,
-            NotificationTopicChoice.SQUARE_STATEMENT_COMMENT,
-            NotificationTopicChoice.SQUARE_COMMENT_LIKE,
-            NotificationTopicChoice.SQUARE_COMMENT_REPLY,
-        }
         rows = []
         for channel in range(4):
-            for topic in range(1, 7):
-                audiences = (NotificationAudienceChoice.FRIEND, NotificationAudienceChoice.OTHER) if topic in square_topics else (NotificationAudienceChoice.ANY,)
+            for topic in range(1, 12):
+                audiences = (NotificationAudienceChoice.ANY,)
                 for audience in audiences:
                     supported = cls.supports_channel(topic, channel)
                     rows.append(dict(
@@ -2624,15 +2627,13 @@ class NotificationTopicPreference(models.Model):
                         topic=topic,
                         audience=audience,
                         supported=supported,
-                        enabled=supported and existing.get(
-                            (channel, topic, audience),
-                            cls.default_enabled(channel, topic),
-                        ),
+                        enabled=supported and cls.effective_enabled(user,channel,topic,existing),
                     ))
         return rows
 
     @classmethod
     def set_enabled(cls, user, channel, topic, audience, enabled):
+        audience = NotificationAudienceChoice.ANY
         enabled = bool(enabled) and cls.supports_channel(topic, channel)
         pref, _ = cls.objects.update_or_create(
             user=user, channel=channel, topic=topic, audience=audience, defaults=dict(enabled=enabled),
@@ -2808,6 +2809,25 @@ class NotificationEvent(models.Model):
         return self.created_at.timestamp()
 
     def topic(self):
+        payload = self.payload or {}
+        category=payload.get('notification_category')
+        if category is None and self.event_type in (1,2) and payload.get('message_id'):
+            from Message.models import Message
+            from User.notification_routing import message_category
+            message=Message.objects.select_related('chat').filter(pk=payload['message_id']).first()
+            if message:category=message_category(message)
+        if category == 'submission':
+            return NotificationTopicChoice.SUBMISSION
+        if payload.get('kind') == 'research_task':
+            return NotificationTopicChoice.RESEARCH_TASK
+        if payload.get('kind') == 'research_progress':
+            return NotificationTopicChoice.RESEARCH_PROGRESS
+        if category == 'research' or payload.get('kind') == 'research_update':
+            return NotificationTopicChoice.RESEARCH_UPDATE
+        if payload.get('kind') == 'friend_statement':
+            return NotificationTopicChoice.SQUARE_POST
+        if payload.get('kind') in ('friend_request','friend_request_accepted','group_invite','group_invite_response'):
+            return NotificationTopicChoice.CHAT
         return {
             NotificationEventTypeChoice.DIRECT_MESSAGE: NotificationTopicChoice.CHAT,
             NotificationEventTypeChoice.GROUP_MESSAGE: NotificationTopicChoice.CHAT,
@@ -2819,24 +2839,7 @@ class NotificationEvent(models.Model):
         }.get(self.event_type, NotificationTopicChoice.ONLINE if (self.payload or {}).get('kind') == 'peer_online' else None)
 
     def audience(self):
-        if not self.actor_id:
-            return NotificationAudienceChoice.ANY
-        if self.topic() not in {
-            NotificationTopicChoice.SQUARE_STATEMENT_LIKE,
-            NotificationTopicChoice.SQUARE_STATEMENT_COMMENT,
-            NotificationTopicChoice.SQUARE_COMMENT_LIKE,
-            NotificationTopicChoice.SQUARE_COMMENT_REPLY,
-        }:
-            return NotificationAudienceChoice.ANY
-        from Friendship.models import Friendship, FriendshipStatusChoice
-        is_friend = Friendship.objects.filter(
-            space_id=self.space_id,
-            status=FriendshipStatusChoice.ACCEPTED,
-        ).filter(
-            Q(user_low_id=self.user_id, user_high_id=self.actor_id)
-            | Q(user_low_id=self.actor_id, user_high_id=self.user_id)
-        ).exists()
-        return NotificationAudienceChoice.FRIEND if is_friend else NotificationAudienceChoice.OTHER
+        return NotificationAudienceChoice.ANY
 
     def json(self):
         anonymous_actor = bool((self.payload or {}).get('anonymous_actor'))
@@ -2902,6 +2905,9 @@ class NotificationEvent(models.Model):
             return str(title), str(body)
 
         kind = payload.get('kind')
+        if kind in ('research_task','research_progress','research_update'):
+            title = {'research_task':_('Research task updated'),'research_progress':_('New research progress'),'research_update':_('Research project updated')}[kind]
+            return str(title), str(_('Open FRIENDEN to view it.')) if hide_message_content else str(payload.get('task_title') or payload.get('project_title') or title)
         if kind == 'friend_request':
             title = _('New friend request')
             body = _('You have received a new friend request.')
@@ -2988,6 +2994,8 @@ class NotificationEvent(models.Model):
             message_type=message.type,
             content=message.preview_text(),
         )
+        from User.notification_routing import message_category
+        payload['notification_category']=message_category(message)
         created_events = []
         for user in cls._message_recipients(message.chat, actor):
             for pref in NotificationPreference.ensure_defaults(user):
@@ -3530,6 +3538,8 @@ class NotificationDelivery(models.Model):
     def _instant_chat_url(self, pref: NotificationPreference):
         if not pref.open_chat_on_tap:
             return None
+        if (self.event.payload or {}).get('project_id'):
+            return self._email_event_action_url()
         if self.event.event_type not in (
             NotificationEventTypeChoice.DIRECT_MESSAGE,
             NotificationEventTypeChoice.GROUP_MESSAGE,
@@ -3591,6 +3601,9 @@ class NotificationDelivery(models.Model):
         if not space_slug:
             return None
         payload = self.event.payload or {}
+        if payload.get('project_id'):
+            url=f'{FRONTEND_BASE_URL}/{space_slug}/app/research?project={int(payload["project_id"])}'
+            return url+('&task='+str(payload['task_id']) if payload.get('task_id') else '')
         if self.event.event_type in self.MESSAGE_EVENT_TYPES and payload.get('chat_id'):
             return f'{FRONTEND_BASE_URL}/{space_slug}/app/chats/{payload["chat_id"]}'
         if payload.get('statement_id'):

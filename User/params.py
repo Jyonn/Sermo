@@ -226,7 +226,7 @@ class NotificationTopicPreferenceParams(metaclass=Params):
         lambda value: value in range(4), message=_('Invalid notification channel'),
     )
     topic = Validator('topic').to(int).bool(
-        lambda value: value in range(1, 7), message=_('Invalid notification topic'),
+        lambda value: value in range(1, 12), message=_('Invalid notification topic'),
     )
     audience = Validator('audience').to(int).bool(
         lambda value: value in (

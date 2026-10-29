@@ -1112,3 +1112,12 @@ msgstr "有人提到了你"
 
 msgid "{name} mentioned you in a comment."
 msgstr "{name} 在评论中提到了你。"
+
+msgid "Research task updated"
+msgstr "科研任务有更新"
+
+msgid "New research progress"
+msgstr "收到新的科研进度"
+
+msgid "Research project updated"
+msgstr "科研课题有更新"

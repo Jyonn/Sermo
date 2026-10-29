@@ -202,6 +202,8 @@ class ResearchView(View):
                         raise ValueError('Project content limit reached')
                     project.revision += 1
                     project.save()
+                    from Chat.research_notifications import notify_research
+                    notify_research(project,request.user,action,body)
                 if project_id is None or body.get('action') in ('invite', 'remove', 'leave', 'transfer', 'dissolve'):
                     previous_members = active if project_id else {request.user.pk}
                     transaction.on_commit(lambda: project.chat._emit_state_changed(previous_members))

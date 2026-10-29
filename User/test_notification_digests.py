@@ -500,10 +500,10 @@ class NotificationDigestTests(TestCase):
         body = mail.call_args.kwargs['body']
         self.assertLess(body.index('Pinned group'), body.index('Direct A'))
         self.assertLess(body.index('Direct A'), body.index('Direct B'))
-        self.assertIn('pinned\\-1', body)
-        self.assertIn('pinned\\-5', body)
-        self.assertNotIn('pinned\\-6', body)
-        self.assertNotIn('ordinary\\-group\\-omitted', body)
+        self.assertIn('pinned-1', body)
+        self.assertIn('pinned-5', body)
+        self.assertNotIn('pinned-6', body)
+        self.assertNotIn('ordinary-group-omitted', body)
         self.assertIn('And 2 more messages.', body)
         self.assertEqual(NotificationDelivery.objects.filter(status=1).count(), 9)
 
