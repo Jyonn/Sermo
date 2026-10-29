@@ -217,3 +217,14 @@ class ResearchTests(TestCase):
         self.assertEqual(self.call(self.owner,id=p['id']).status_code,404)
         self.assertEqual(self.update(p,dict(action='dissolve'),self.student).status_code,200)
         self.assertEqual(self.call(self.student,id=p['id']).status_code,404)
+
+    def test_archived_project_can_transfer_owner_without_reopening(self):
+        p=self.create();self.member(p,self.student)
+        p=self.update(p,dict(action='settings',status='archived')).json()['body']
+        result=self.update(p,dict(action='transfer',user_id=self.student.pk))
+        self.assertEqual(result.status_code,200,result.content)
+        updated=result.json()['body']
+        self.assertEqual(updated['status'],'archived')
+        self.assertEqual([m['id'] for m in updated['members'] if m['owner']],[self.student.pk])
+        self.assertEqual(self.update(updated,dict(action='transfer',user_id=self.owner.pk)).status_code,403)
+        self.assertEqual(self.call(self.student).json()['body'][0]['chat_id'],p['chat_id'])

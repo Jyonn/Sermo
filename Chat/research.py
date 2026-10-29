@@ -58,7 +58,7 @@ class ResearchView(View):
         if project_id:
             project = rows.filter(pk=project_id).first()
             return payload(project) if project else fail('Project unavailable', 404)
-        return [dict(id=p.pk, title=p.chat.title, status=research_status(p.status), start=p.start.isoformat(), end=p.end.isoformat() if p.end else None) for p in rows.order_by('-updated_at')[:200]]
+        return [dict(id=p.pk, chat_id=p.chat_id, title=p.chat.title, status=research_status(p.status), start=p.start.isoformat(), end=p.end.isoformat() if p.end else None) for p in rows.order_by('-updated_at')[:200]]
 
     @auth.require_user
     def post(self, request, project_id=None):
@@ -111,7 +111,7 @@ class ResearchView(View):
                     owner = project.chat.is_owner(request.user)
                     if action not in ('progress', 'leave') and not owner:
                         return fail('Only the project owner can manage this project', 403)
-                    if project.status == 'archived' and action not in ('settings', 'leave', 'dissolve'):
+                    if project.status == 'archived' and action not in ('settings', 'leave', 'dissolve', 'transfer'):
                         return fail('Archived projects are read-only', 403)
                     active = set(members(project).values_list('user_id', flat=True))
                     if calendar_revoke:
