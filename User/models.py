@@ -199,6 +199,7 @@ class User(models.Model):
 
     name = models.CharField(max_length=vldt.NAME_MAX_LENGTH, validators=[vldt.name])
     lower_name = models.CharField(max_length=vldt.NAME_MAX_LENGTH, db_index=True)
+    signature = models.CharField(max_length=80, blank=True, default='')
     name_pinyin = models.CharField(max_length=255, default='', db_index=True)
 
     password = models.CharField(
@@ -1274,6 +1275,7 @@ class User(models.Model):
     def jsonl(self):
         payload = self.dictify(
             'name',
+            'signature',
             'user_id',
             'official',
             'operator',
@@ -1302,6 +1304,7 @@ class User(models.Model):
     def json_friend(self):
         payload = self.dictify(
             'name',
+            'signature',
             'name_pinyin',
             'user_id',
             'official',
@@ -1372,6 +1375,7 @@ class User(models.Model):
     def json_me(self):
         payload = self.dictify(
             'name',
+            'signature',
             'user_id',
             'official',
             'operator',

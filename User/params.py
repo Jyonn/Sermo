@@ -21,6 +21,10 @@ class UserParams(metaclass=Params):
     user_id = Validator('user_id', final_name='user').to(int).to(User.index)
     admin_user_id = Validator('user_id', final_name='user').to(int).to(User.index_any)
     name: Validator
+    signature = Validator('signature').bool(
+        lambda value: isinstance(value, str) and len(value) <= 80 and not any(ord(char) < 32 or ord(char) == 127 for char in value),
+        message=_('Signature must be a single line of at most 80 characters'),
+    ).to(lambda value: value.strip())
     lower_name: Validator
     password: Validator
     welcome_message: Validator

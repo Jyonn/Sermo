@@ -1008,6 +1008,28 @@ class UserNameView(View):
         return request.user.json_me()
 
 
+class UserSignatureView(View):
+    @auth.require_user
+    @analyse.json(UserParams.signature)
+    def post(self, request: Request):
+        from Chat.models import Chat, ChatMemberStatusChoice, ChatTypeChoice
+        from User.models import User
+        _require_profile_edit_enabled(request.user)
+        signature = request.json.signature
+        if signature:
+            check_user_text(request, signature, ContentSafetyScene.PROFILE)
+        with transaction.atomic():
+            user = User.objects.select_for_update().get(pk=request.user.pk)
+            if user.signature != signature:
+                user.signature = signature
+                user.save(update_fields=['signature'])
+                chats = Chat.objects.filter(chat_members__user=user, chat_members__status=ChatMemberStatusChoice.ACTIVE,
+                    chat_type=ChatTypeChoice.DIRECT, is_deleted=False, space_id=user.space_id)
+                for chat in chats:
+                    chat._emit_state_changed()
+        return user.json_me()
+
+
 class AvatarPresetView(View):
     @auth.require_user
     @analyse.json(UserParams.avatar_preset_id)
