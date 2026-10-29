@@ -408,6 +408,11 @@ class WebPushRegistrationTests(TestCase):
         self.assertFalse(response.json()['body']['opted_in'])
         response = self.client.post('/users/me/web-push', json.dumps(dict(legacy, restore_only=False)), content_type='application/json', **headers)
         self.assertTrue(response.json()['body']['opted_in'])
+        other_headers = {'HTTP_AUTHORIZATION': 'Bearer '+auth.get_login_token(self.second_user)['auth']}
+        unknown = dict(legacy, endpoint='https://push.example.test/never-opted-in', restore_only=True)
+        response = self.client.post('/users/me/web-push', json.dumps(unknown), content_type='application/json', **other_headers)
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertIsNone(response.json()['body'])
 
     def test_all_four_application_origins_are_supported(self):
         for origin in WebPushSubscription.SUPPORTED_WEB_ORIGINS:

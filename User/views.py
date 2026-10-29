@@ -670,7 +670,7 @@ class WebPushSubscriptionView(View):
             restore_only=request.json.restore_only,
             previous_endpoint=request.json.previous_endpoint,
         )
-        return subscription.json() if subscription else None
+        return subscription.json() if subscription else OK
 
     @auth.require_user
     @analyse.json(WebPushSubscriptionParams.endpoint, WebPushSubscriptionParams.previous_endpoint)
