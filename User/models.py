@@ -4078,3 +4078,9 @@ class ChronelleAccount(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='chronelle_account')
     # Tokens and PKCE material are encrypted; never included in user serializers.
     sealed = models.TextField(blank=True)
+
+
+class ChronelleCredential(models.Model):
+    # One rotating credential pair per application/Chronelle subject, not per space.
+    id = models.CharField(max_length=64, primary_key=True)
+    sealed = models.TextField(blank=True)

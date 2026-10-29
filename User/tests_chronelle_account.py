@@ -7,7 +7,7 @@ from django.test import TestCase
 from django.utils import timezone
 from Space.models import Space
 from User.models import User, ChronelleAccount
-from User.chronelle_account import credentials, store, unpack, BindingFailure
+from User.chronelle_account import authority, credentials, store, unpack, BindingFailure
 from Chat.models import Chat, ChatMember, ResearchProject
 from utils import auth
 
@@ -151,12 +151,84 @@ class ChronelleAccountTests(TestCase):
     @patch('User.chronelle_account.remote')
     def test_uncertain_refresh_cannot_reuse_old_token(self,remote):
         row,_=self.bound(expired=True)
-        remote.side_effect=BindingFailure('chronelle_unavailable',503)
+        remote.side_effect=[{'active':True},BindingFailure('chronelle_unavailable',503)]
         with self.assertRaises(BindingFailure):credentials(self.user,'https://chronelle.jyonn.space')
-        row.refresh_from_db();self.assertTrue(unpack(row)['renewal_uncertain'])
+        self.assertTrue(unpack(authority(unpack(row)))['renewal_uncertain'])
         remote.reset_mock()
         with self.assertRaises(BindingFailure):credentials(self.user,'https://chronelle.jyonn.space')
         remote.assert_not_called()
+
+    @patch('User.chronelle_account.remote')
+    def test_same_subject_across_spaces_shares_latest_credentials_and_one_refresh(self,remote):
+        row,old=self.bound(expired=True)
+        other_space=Space.objects.create(slug='other-cal-space',name='Other',email='other@example.com')
+        other=User.create(other_space,'Same person',verified=True)
+        latest=dict(old,binding=dict(old['binding'],binding_version=2),access_token='new-access',refresh_token='new-refresh')
+        store(ChronelleAccount.objects.create(user=other),latest)
+        fresh={'authorization_type':'account_binding','subject':old['binding']['subject'],'grant_id':old['binding']['binding_id'],
+               'grant_version':2,'grant_expires_at':(timezone.now()+timezone.timedelta(days=180)).isoformat(),
+               'access_token':'rotated-access','refresh_token':'rotated-refresh','expires_in':900}
+        def rotate(base,path,**kwargs):
+            if path.endswith('/introspect/'):
+                self.assertEqual(kwargs['body'],{'token':'new-refresh'})
+                return {'active':True}
+            self.assertEqual(kwargs['body']['refresh_token'],'new-refresh')
+            # A request racing with rotation must not tell the user to rebind.
+            status=self.call().json()['body']
+            self.assertEqual(status,{'status':'chronelle_unavailable','rebind_required':False})
+            with self.assertRaises(BindingFailure) as concurrent:
+                credentials(other,base)
+            self.assertEqual(concurrent.exception.code,'chronelle_unavailable')
+            return fresh
+        remote.side_effect=rotate
+        self.assertEqual(credentials(self.user,'https://chronelle.jyonn.space')['access_token'],'rotated-access')
+        self.assertEqual(credentials(other,'https://chronelle.jyonn.space')['access_token'],'rotated-access')
+        self.assertEqual(remote.call_count,2)
+        self.assertEqual(unpack(authority(old))['refresh_token'],'rotated-refresh')
+
+    @patch('User.chronelle_account.remote')
+    def test_malformed_introspection_is_not_treated_as_revoked(self,remote):
+        self.bound();remote.return_value={}
+        self.assertEqual(self.call().json()['body'],{'status':'chronelle_unavailable','rebind_required':False})
+
+    @patch('User.chronelle_account.remote')
+    def test_different_subjects_do_not_share_credentials(self,remote):
+        _,left=self.bound();_,right=self.bound(self.other)
+        self.assertNotEqual(authority(left).pk,authority(right).pk)
+        self.assertEqual(credentials(self.user,'https://chronelle.jyonn.space')['binding']['subject'],left['binding']['subject'])
+        remote.assert_not_called()
+
+    @patch('User.chronelle_account.remote')
+    def test_stale_refresh_is_never_submitted_to_rotation(self,remote):
+        self.bound(expired=True);remote.return_value={'active':False}
+        with self.assertRaises(BindingFailure):credentials(self.user,'https://chronelle.jyonn.space')
+        remote.assert_called_once()
+        self.assertTrue(remote.call_args.args[1].endswith('/introspect/'))
+
+    @patch('User.chronelle_account.remote')
+    def test_preflight_network_failure_preserves_usable_credentials(self,remote):
+        row,value=self.bound(expired=True)
+        remote.side_effect=BindingFailure('chronelle_unavailable',503)
+        with self.assertRaises(BindingFailure):credentials(self.user,'https://chronelle.jyonn.space')
+        self.assertFalse(unpack(authority(value)).get('renewal_uncertain',False))
+
+    @patch('User.chronelle_account.remote')
+    def test_rebinding_repairs_shared_authority_without_changing_other_accounts_policy(self,remote):
+        from Chat.models import ResearchCalendarPreference
+        row,value=self.bound(expired=True)
+        store(ChronelleAccount.objects.create(user=self.other),value)
+        shared=authority(value)
+        store(shared,dict(value,renewal_uncertain=True))
+        pref=ResearchCalendarPreference.objects.create(user=self.other,binding_subject=value['binding']['subject'],default_busy=False)
+        self.call({'action':'authorize','confirmed':True})
+        state=unpack(ChronelleAccount.objects.get(user=self.user))['pending']['state']
+        remote.return_value={'authorization_type':'account_binding','subject':value['binding']['subject'],'grant_id':value['binding']['binding_id'],
+            'grant_version':2,'grant_expires_at':(timezone.now()+timezone.timedelta(days=180)).isoformat(),
+            'access_token':'rebound-access','refresh_token':'rebound-refresh','expires_in':900}
+        self.assertEqual(self.call({'action':'claim','code':'coc_test','state':state}).json()['body']['status'],'active')
+        self.assertEqual(credentials(self.other,'https://chronelle.jyonn.space')['access_token'],'rebound-access')
+        pref.refresh_from_db();self.assertFalse(pref.default_busy)
+        self.assertFalse(unpack(authority(value)).get('renewal_uncertain',False))
 
     @patch('User.chronelle_account.remote')
     def test_explicitly_hidden_member_calendar_and_nonmembers_denied(self,remote):

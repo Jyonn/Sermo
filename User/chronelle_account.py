@@ -13,7 +13,7 @@ import requests
 from django.db import transaction
 from django.utils import timezone
 from django.views import View
-from User.models import ChronelleAccount
+from User.models import ChronelleAccount, ChronelleCredential
 from Config.models import Config, CI
 from User.chronelle_views import authorization_site, APP_ORIGINS, BASE, MIRROR_BASE
 from Chat.research import fail
@@ -94,6 +94,37 @@ def remote(base, path, *, method='POST', body=None, token=None, key=None):
     return value
 
 
+def authority(value):
+    binding = value['binding']
+    key = hashlib.sha256((binding['client_id']+'\0'+binding['subject']).encode()).hexdigest()
+    row = ChronelleCredential.objects.filter(pk=key).first()
+    if row is not None:
+        return row
+    # Bootstrap existing accounts from the newest verified grant, never an older
+    # space's refresh token. No identity is inferred from names or email addresses.
+    candidates = [value]
+    for account in ChronelleAccount.objects.all().iterator():
+        try:
+            candidate = unpack(account)
+        except BindingFailure:
+            continue
+        other = candidate.get('binding', {})
+        if candidate.get('protocol') == 'oauth-v1' and other.get('client_id') == binding['client_id'] and other.get('subject') == binding['subject']:
+            candidates.append(candidate)
+    latest = max(candidates, key=lambda item: (item['binding'].get('binding_version', 0), item.get('access_until', 0)))
+    sealed = config()[2].encrypt(json.dumps(latest).encode()).decode()
+    return ChronelleCredential.objects.get_or_create(pk=key, defaults={'sealed': sealed})[0]
+
+
+def require_ready(value):
+    if value.get('renewal_uncertain'):
+        if value.get('renewal_pending_until', 0) > timezone.now().timestamp():
+            raise BindingFailure('chronelle_unavailable', 503)
+        raise BindingFailure('binding_required')
+    if value.get('revoked'):
+        raise BindingFailure('binding_required')
+
+
 def credentials(user, base):
     """Serialize rotating refresh. A lost response is not retried with the old pair."""
     renewal = None
@@ -101,29 +132,49 @@ def credentials(user, base):
         row, _ = ChronelleAccount.objects.get_or_create(user=user)
         row = ChronelleAccount.objects.select_for_update().get(pk=row.pk)
         value = unpack(row)
-        if value.get('protocol') != 'oauth-v1' or not value.get('binding') or value['binding'].get('client_id')!=config()[0] or value.get('renewal_uncertain'):
+        if value.get('protocol') != 'oauth-v1' or not value.get('binding') or value['binding'].get('client_id')!=config()[0]:
             raise BindingFailure('binding_required')
+        shared = authority(value)
+        shared = ChronelleCredential.objects.select_for_update().get(pk=shared.pk)
+        value = unpack(shared)
+        require_ready(value)
         if value.get('access_until', 0) <= timezone.now().timestamp() + 30:
+            # Check this exact refresh credential before consuming it. A stale
+            # space must never replay an old pair and revoke a newer grant.
+            status = remote(base, '/api/oauth/introspect/', body={'token': value['refresh_token']})
+            if type(status.get('active')) is not bool:
+                raise BindingFailure('chronelle_unavailable', 503)
+            if not status['active']:
+                raise BindingFailure('binding_required')
             # Commit uncertainty before the one-shot request, including process crashes.
             value['renewal_uncertain'] = True
-            store(row, value)
+            value['renewal_pending_until'] = timezone.now().timestamp() + 60
+            store(shared, value)
             renewal = value['refresh_token']
     if renewal:
         try:
             fresh = remote(base, '/api/oauth/token/', body={'grant_type':'refresh_token','refresh_token':renewal})
             with transaction.atomic():
-                row = ChronelleAccount.objects.select_for_update().get(user=user)
-                current = unpack(row)
+                shared = ChronelleCredential.objects.select_for_update().get(pk=shared.pk)
+                current = unpack(shared)
                 if current.get('refresh_token') != renewal:
-                    raise BindingFailure('binding_required')
+                    raise BindingFailure('binding_superseded')
                 binding=validated_binding(fresh)
                 if binding['subject']!=current['binding']['subject'] or binding['binding_id']!=current['binding']['binding_id']:
                     raise BindingFailure('binding_required')
                 value=current
                 value.update(binding=binding,access_token=fresh['access_token'], refresh_token=fresh['refresh_token'],
-                    access_until=timezone.now().timestamp()+fresh['expires_in'], renewal_uncertain=False)
-                store(row,value)
-        except (BindingFailure, KeyError, TypeError):
+                    access_until=timezone.now().timestamp()+fresh['expires_in'], renewal_uncertain=False, renewal_pending_until=0)
+                store(shared,value)
+        except (BindingFailure, KeyError, TypeError) as error:
+            with transaction.atomic():
+                shared = ChronelleCredential.objects.select_for_update().get(pk=shared.pk)
+                current = unpack(shared)
+                if current.get('refresh_token') == renewal:
+                    current['renewal_pending_until'] = 0
+                    store(shared, current)
+            if isinstance(error, BindingFailure) and error.code in ('chronelle_unavailable', 'binding_superseded'):
+                raise
             raise BindingFailure('binding_required')
     return value
 
@@ -165,7 +216,12 @@ def claim(user, origin, base, body):
         row = ChronelleAccount.objects.select_for_update().get(user=user)
         if unpack(row).get('claim_id') != pending['state']:
             raise BindingFailure('binding_required')
-        store(row,{'protocol':'oauth-v1','binding':binding,'access_token':fresh['access_token'],'refresh_token':fresh['refresh_token'],'access_until':timezone.now().timestamp()+fresh['expires_in']})
+        value = {'protocol':'oauth-v1','binding':binding,'access_token':fresh['access_token'],'refresh_token':fresh['refresh_token'],'access_until':timezone.now().timestamp()+fresh['expires_in']}
+        store(row,value)
+        shared = authority(value)
+        shared = ChronelleCredential.objects.select_for_update().get(pk=shared.pk)
+        if unpack(shared).get('binding', {}).get('binding_version', 0) <= binding['binding_version']:
+            store(shared, value)
         from Chat.calendar_policy import initialize
         initialize(user, binding['subject'])
         user.chronelle_calendar_id='';user.chronelle_authorization={}
@@ -210,9 +266,13 @@ class FullChronelleView(View):
             value = unpack(row) if row else {}
             if value.get('pending',{}).get('protocol')=='oauth-v1' and value['pending'].get('until',0)>timezone.now().timestamp():
                 return {'status':'pending'}
-            if value.get('protocol') != 'oauth-v1' or not value.get('binding') or value['binding'].get('client_id')!=config()[0] or value.get('renewal_uncertain'):
+            if value.get('protocol') != 'oauth-v1' or not value.get('binding') or value['binding'].get('client_id')!=config()[0]:
                 return {'status':'binding_required','rebind_required':not value.get('revoked') and bool(row and row.sealed or request.user.chronelle_calendar_id or request.user.chronelle_authorization)}
+            value = unpack(authority(value))
+            require_ready(value)
             result = remote(base, '/api/oauth/introspect/', body={'subject':value['binding']['subject']})
+            if type(result.get('active')) is not bool:
+                raise BindingFailure('chronelle_unavailable',503)
             from Chat.calendar_policy import review_required
             return {'status':'active' if result.get('active') else 'binding_required','rebind_required':not result.get('active'),
                     'permissions_review_required':bool(result.get('active')) and review_required(request.user,value['binding']['subject'])}
@@ -263,7 +323,11 @@ class FullChronelleView(View):
                         raise BindingFailure('confirmation_required',400)
                     if value.get('binding'):
                         if value.get('protocol')=='oauth-v1':
-                            remote(base,'/api/oauth/revoke/',body={'token':value['refresh_token']})
+                            shared = authority(value)
+                            shared = ChronelleCredential.objects.select_for_update().get(pk=shared.pk)
+                            current = unpack(shared)
+                            remote(base,'/api/oauth/revoke/',body={'token':current['refresh_token']})
+                            store(shared,{'revoked':True})
                     store(row,{'revoked':True})
                     request.user.chronelle_calendar_id='';request.user.chronelle_authorization={}
                     request.user.save(update_fields=['chronelle_calendar_id','chronelle_authorization'])
