@@ -88,6 +88,17 @@ class ChronelleAccountTests(TestCase):
         self.assertEqual(config()[0],'coapp_config_application_123456')
         self.assertNotIn('server-only-test-secret',self.call().content.decode())
 
+    def test_upstream_auth_failure_never_becomes_a_frienden_login_failure(self):
+        from User.chronelle_account import remote
+        with patch('User.chronelle_account.requests.request') as send:
+            send.return_value.status_code=401
+            send.return_value.content=b'error'
+            send.return_value.json.return_value={'code':'authorization_expired','detail':'never relay upstream prose'}
+            with self.assertRaises(BindingFailure) as caught:
+                remote('https://chronelle.jyonn.space','/api/oauth/introspect/',body={'subject':str(uuid.uuid4())})
+            self.assertEqual(caught.exception.code,'binding_expired')
+            self.assertEqual(caught.exception.status,409)
+
     @patch('User.chronelle_account.remote')
     def test_authorize_requires_confirmation_and_seals_pkce(self,remote):
         self.assertEqual(self.call({'action':'authorize'}).status_code,400)
