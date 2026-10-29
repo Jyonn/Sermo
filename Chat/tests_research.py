@@ -33,6 +33,26 @@ class ResearchTests(TestCase):
     def update(self,p,body,user=None):
         return self.call(user or self.owner,dict(body,revision=p['revision']),p['id'])
 
+    def test_project_and_task_dates_are_owner_only_validated_and_versioned(self):
+        p=self.create();self.member(p,self.student)
+        change=dict(action='settings',start='2026-11-01',end='2026-12-01')
+        self.assertEqual(self.update(p,change,self.student).status_code,403)
+        updated=self.update(p,change).json()['body']
+        self.assertEqual((updated['start'],updated['end']),('2026-11-01','2026-12-01'))
+        self.assertEqual(self.update(p,change).status_code,409)
+        self.assertEqual(self.update(updated,dict(action='settings',end='2026-10-01')).status_code,400)
+        p=self.update(updated,dict(action='settings',end=None)).json()['body']
+        self.assertIsNone(p['end'])
+        p=self.update(p,dict(action='task',title='Task',body='Body',start='2026-11-01',assignees=[self.owner.pk])).json()['body']
+        change=dict(action='task_dates',task_id=p['tasks'][0]['id'],start='2026-11-02',end='2026-11-03')
+        self.assertEqual(self.update(p,change,self.student).status_code,403)
+        self.assertEqual(self.update(p,dict(change,end='2026-10-01')).status_code,400)
+        p=self.update(p,change).json()['body']
+        self.assertEqual(p['tasks'][0]['start'],'2026-11-02')
+        self.assertEqual(p['tasks'][0]['body'],'Body')
+        p=self.update(p,dict(change,end=None)).json()['body']
+        self.assertIsNone(p['tasks'][0]['end'])
+
     def test_default_off_and_gate_all_endpoints(self):
         self.assertFalse(Space._meta.get_field('research_enabled').default)
         p=self.create()

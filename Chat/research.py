@@ -154,7 +154,7 @@ class ResearchView(View):
                         project.chat.is_deleted = True
                         project.chat.save(update_fields=['is_deleted'])
                     elif action == 'settings':
-                        if 'status' not in body and 'description' not in body:
+                        if not any(key in body for key in ('status', 'description', 'start', 'end')):
                             raise ValueError('No settings provided')
                         if 'status' in body:
                             project.status = research_status(body['status'])
@@ -162,6 +162,8 @@ class ResearchView(View):
                             description = text(body, 'description', 20000, False)
                             check_user_text(request, description, ContentSafetyScene.PROFILE)
                             project.description = description
+                        if 'start' in body or 'end' in body:
+                            project.start, project.end = period(dict(start=body.get('start', project.start.isoformat()), end=body.get('end', project.end.isoformat() if project.end else None)))
                     elif action == 'task':
                         if len(project.tasks) >= 100:
                             raise ValueError('Task limit reached')
@@ -173,12 +175,16 @@ class ResearchView(View):
                             raise ValueError('Choose active members')
                         check_user_text(request, title+'\n'+content, ContentSafetyScene.PROFILE)
                         project.tasks.append(dict(id=str(uuid.uuid4()), title=title, body=content, start=start.isoformat(), end=end.isoformat() if end else None, assignees=list(set(assignees)), status='active', progress=[]))
-                    elif action in ('task_status', 'progress'):
+                    elif action in ('task_status', 'task_dates', 'progress'):
                         task = next((t for t in project.tasks if t['id'] == body.get('task_id')), None)
                         if not task:
                             return fail('Task unavailable', 404)
                         if action == 'task_status':
                             task['status'] = research_status(body.get('status'))
+                        elif action == 'task_dates':
+                            start, end = period(body)
+                            task['start'] = start.isoformat()
+                            task['end'] = end.isoformat() if end else None
                         else:
                             if task['status'] == 'archived':
                                 return fail('Archived tasks are read-only', 403)
