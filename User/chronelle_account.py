@@ -166,8 +166,8 @@ def claim(user, origin, base, body):
         if unpack(row).get('claim_id') != pending['state']:
             raise BindingFailure('binding_required')
         store(row,{'protocol':'oauth-v1','binding':binding,'access_token':fresh['access_token'],'refresh_token':fresh['refresh_token'],'access_until':timezone.now().timestamp()+fresh['expires_in']})
-        from Chat.models import ResearchCalendarPreference
-        ResearchCalendarPreference.objects.filter(user=user).update(binding_subject='')
+        from Chat.calendar_policy import initialize
+        initialize(user, binding['subject'])
         user.chronelle_calendar_id='';user.chronelle_authorization={}
         user.save(update_fields=['chronelle_calendar_id','chronelle_authorization'])
     return {'status':'active'}
@@ -213,7 +213,9 @@ class FullChronelleView(View):
             if value.get('protocol') != 'oauth-v1' or not value.get('binding') or value['binding'].get('client_id')!=config()[0] or value.get('renewal_uncertain'):
                 return {'status':'binding_required','rebind_required':not value.get('revoked') and bool(row and row.sealed or request.user.chronelle_calendar_id or request.user.chronelle_authorization)}
             result = remote(base, '/api/oauth/introspect/', body={'subject':value['binding']['subject']})
-            return {'status':'active' if result.get('active') else 'binding_required','rebind_required':not result.get('active')}
+            from Chat.calendar_policy import review_required
+            return {'status':'active' if result.get('active') else 'binding_required','rebind_required':not result.get('active'),
+                    'permissions_review_required':bool(result.get('active')) and review_required(request.user,value['binding']['subject'])}
         except BindingFailure as error:
             return {'status':error.code,'rebind_required':error.code=='binding_required'}
 

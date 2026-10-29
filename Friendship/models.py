@@ -351,10 +351,13 @@ class Friendship(models.Model):
         if self.status != FriendshipStatusChoice.ACCEPTED:
             raise FriendshipErrors.NOT_FRIENDS
 
-        self.status = FriendshipStatusChoice.DELETED
-        self.responded_at = timezone.now()
-        self.save(update_fields=['status', 'responded_at', 'updated_at'])
-        self._emit_state_changes(chats=True, friends=True)
+        from Chat.calendar_policy import revoke_friend_displays
+        with transaction.atomic():
+            revoke_friend_displays(self.user_low, self.user_high)
+            self.status = FriendshipStatusChoice.DELETED
+            self.responded_at = timezone.now()
+            self.save(update_fields=['status', 'responded_at', 'updated_at'])
+            self._emit_state_changes(chats=True, friends=True)
         return self
 
     @classmethod

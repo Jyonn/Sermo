@@ -135,7 +135,12 @@ class FriendshipRemoveView(View):
         item = Friendship.between(request.user, request.query.target_user)
         if item is None:
             raise FriendshipErrors.NOT_FRIENDS
-        item.remove(request.user)
+        from User.chronelle_account import BindingFailure
+        from Chat.research import fail
+        try:
+            item.remove(request.user)
+        except BindingFailure as error:
+            return fail(error.code, error.status)
         return OK
 
 

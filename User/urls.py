@@ -1,6 +1,7 @@
 from django.urls import path
 from User.chronelle_views import ChronelleBindingView, ChronelleAuthorizationView, ChronelleClaimView
 from User.chronelle_account import FullChronelleView
+from User.chronelle_permissions import ChronellePermissionsView
 from User.oauth_views import OAuthAuthorizeView, OAuthTokenView, OAuthUserinfoView, OAuthRevokeView, OAuthEligibilityView
 from User.oauth_avatar import OAuthAvatarView
 from User.oauth_views import OAuthRequestsView, OAuthRequestCancelView
@@ -68,6 +69,7 @@ from User.views import (
 )
 
 urlpatterns = [
+    path('me/chronelle/permissions', ChronellePermissionsView.as_view()),
     path('me/chronelle/account', FullChronelleView.as_view()),
     path('oauth/chat/direct', OAuthDirectChatView.as_view()),
     path('oauth/chat/capabilities', OAuthChatCapabilitiesView.as_view()),

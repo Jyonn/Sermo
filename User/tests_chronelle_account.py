@@ -159,8 +159,10 @@ class ChronelleAccountTests(TestCase):
         remote.assert_not_called()
 
     @patch('User.chronelle_account.remote')
-    def test_member_calendar_hidden_by_default_and_nonmembers_denied(self,remote):
-        self.bound();self.bound(self.other)
+    def test_explicitly_hidden_member_calendar_and_nonmembers_denied(self,remote):
+        from Chat.models import ResearchCalendarPreference
+        self.bound();_,other=self.bound(self.other)
+        ResearchCalendarPreference.objects.create(user=self.other,binding_subject=other['binding']['subject'],default_busy=False)
         remote.return_value=[{'id':7,'name':'Private'}]
         path=f'/research/{self.project.pk}/calendar/'
         self.assertEqual(self.call({'action':'display','members':[self.user.pk,self.other.pk]},path).json()['message'],'member_calendar_not_shared')
@@ -198,7 +200,7 @@ class ChronelleAccountTests(TestCase):
         self.assertEqual(self.project.calendar_policies,{str(self.user.pk):{'detail':[],'busy':[7]}})
 
     @patch('User.chronelle_account.remote')
-    def test_global_busy_default_requires_confirmation_and_applies_to_new_groups(self,remote):
+    def test_global_busy_default_applies_before_review_and_to_new_groups(self,remote):
         from Chat.models import ResearchCalendarPreference
         from Chat.research_calendar import shared_policy
         self.bound();remote.return_value=[{'id':7,'name':'Private'}]
@@ -207,7 +209,7 @@ class ChronelleAccountTests(TestCase):
         self.assertFalse(setup['policy_configured'])
         self.assertEqual(setup['policy'],{'detail':[],'busy':[7]})
         self.assertFalse(ResearchCalendarPreference.objects.filter(user=self.user).exists())
-        self.assertEqual(shared_policy(self.user,self.project,[7]),{'detail':[],'busy':[]})
+        self.assertEqual(shared_policy(self.user,self.project,[7]),{'detail':[],'busy':[7]})
         response=self.call({'action':'policy','default_busy':True,'detail':[],'busy':[7]},path)
         self.assertEqual(response.status_code,200,response.content)
         other_project=ResearchProject.objects.create(chat=Chat.objects.create(space=self.space,created_by=self.user,chat_type=1,purpose=2),start='2026-10-28')

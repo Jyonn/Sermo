@@ -27,19 +27,9 @@ def error_response(error):
     return fail(error.code,error.status)
 
 
-def shared_policy(user, project, group_ids):
-    preference = ResearchCalendarPreference.objects.filter(user=user).first()
-    if preference is None:
-        return {'detail': [], 'busy': []}
-    account = ChronelleAccount.objects.filter(user=user).first()
-    if account is None or preference.binding_subject != unpack(account).get('binding',{}).get('subject'):
-        return {'detail': [], 'busy': []}
-    result = {'detail': [], 'busy': []}
-    for group_id in group_ids:
-        mode = preference.overrides.get(str(group_id), 'busy' if preference.default_busy else 'hidden')
-        if mode in result:
-            result[mode].append(group_id)
-    return result
+def shared_policy(user, project, group_ids, viewer=None):
+    from Chat.calendar_policy import projection
+    return projection(user, viewer, group_ids)
 
 
 def revoke_displays(project, base, tokens):
@@ -103,6 +93,9 @@ class ResearchCalendarView(View):
             if request.headers.get('Origin') not in APP_ORIGINS:
                 raise BindingFailure('origin_not_allowed',403)
             if body.get('action')=='policy':
+                existing=ResearchCalendarPreference.objects.filter(user=request.user).first()
+                if existing and existing.overrides.get('version') == 2:
+                    raise BindingFailure('global_policy_update_required',400)
                 binding_subject=credentials(request.user,base)['binding']['subject']
                 group_ids={g['id'] for g in calendar(request.user,base,'groups/')}
                 if credentials(request.user,base)['binding']['subject'] != binding_subject:
@@ -167,7 +160,7 @@ class ResearchCalendarView(View):
                 # Preflight all policies before issuing anything. No partial merge fallback.
                 policies={}
                 for uid in selected:
-                    policy={'detail':list(groups[uid]),'busy':[]} if uid==request.user.pk else shared_policy(active[uid],project,groups[uid])
+                    policy={'detail':list(groups[uid]),'busy':[]} if uid==request.user.pk else shared_policy(active[uid],project,groups[uid],request.user)
                     if uid!=request.user.pk and not (policy['detail'] or policy['busy']):
                         raise BindingFailure('member_calendar_not_shared',403)
                     policies[uid]=policy
@@ -192,7 +185,7 @@ class ResearchCalendarView(View):
                         'aud':'chronelle-display-api','iat':now,'exp':until,'jti':display_id},secret,
                         algorithm='HS256',headers={'typ':'chronelle-display+jwt'})
                     results.append({'member_id':uid,'id':display_id,'token':token,'url':base+'/oauth/embed/'+client+'/'})
-                    project.calendar_displays.append({'protocol':'oauth-v1','id':display_id,'owner':uid,'viewer':request.user.pk,'until':until})
+                    project.calendar_displays.append({'protocol':'oauth-v1','id':display_id,'owner':uid,'viewer':request.user.pk,'until':until,'base':base})
                 project.save(update_fields=['calendar_displays'])
             return {'displays':results,'renew_after':240}
         except BindingFailure as error:
