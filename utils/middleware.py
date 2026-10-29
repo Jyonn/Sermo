@@ -68,9 +68,11 @@ class APIPacker:
 
     def __call__(self, request, *args, **kwargs):
         response = self.get_response(request, *args, **kwargs)
-        if isinstance(response, HttpResponse):
-            return response
-        return self.pack(response, getattr(request, 'wechat_content_safety', None))
+        if not isinstance(response, HttpResponse):
+            response = self.pack(response, getattr(request, 'wechat_content_safety', None))
+        if request.path.startswith('/users/me/chronelle') or (request.path.startswith('/research/') and request.path.endswith('/calendar/')):
+            response['Cache-Control'] = 'no-store, private'
+        return response
 
     @classmethod
     def process_exception(cls, request, error):

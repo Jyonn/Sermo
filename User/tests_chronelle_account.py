@@ -14,7 +14,7 @@ from utils import auth
 
 class ChronelleAccountTests(TestCase):
     def setUp(self):
-        self.client_id=str(uuid.uuid4())
+        self.client_id='coapp_test_application_123456789'
         self.env=patch.dict(os.environ,CHRONELLE_BINDING_CLIENT_ID=self.client_id,CHRONELLE_BINDING_CLIENT_SECRET='test-confidential-secret',CHRONELLE_BINDING_STORAGE_KEY=Fernet.generate_key().decode())
         self.env.start();self.addCleanup(self.env.stop)
         network=patch('User.chronelle_account.requests.request',side_effect=AssertionError('Unexpected network in unit tests'))
@@ -33,7 +33,7 @@ class ChronelleAccountTests(TestCase):
 
     def bound(self,user=None,expired=False):
         row=ChronelleAccount.objects.create(user=user or self.user)
-        value={'binding':{'subject':str(uuid.uuid4()),'binding_id':str(uuid.uuid4()),'client_id':self.client_id,'binding_version':1},'access_token':'cba_test-secret','refresh_token':'cbr_test-secret','access_until':timezone.now().timestamp()+(-1 if expired else 900)}
+        value={'protocol':'oauth-v1','binding':{'subject':str(uuid.uuid4()),'binding_id':str(uuid.uuid4()),'client_id':self.client_id,'binding_version':1},'access_token':'cba_test-secret','refresh_token':'cbr_test-secret','access_until':timezone.now().timestamp()+(-1 if expired else 900)}
         store(row,value)
         return row,value
 
@@ -41,6 +41,44 @@ class ChronelleAccountTests(TestCase):
         self.assertEqual(self.call().json()['body']['status'],'binding_required')
         with patch.dict(os.environ,CHRONELLE_BINDING_CLIENT_SECRET=''):
             self.assertEqual(self.call().json()['body']['status'],'integration_not_configured')
+
+    def test_legacy_authority_requires_rebinding_without_network(self):
+        row,value=self.bound();value.pop('protocol');store(row,value)
+        response=self.call().json()['body']
+        self.assertEqual(response,{'status':'binding_required','rebind_required':True})
+        with self.assertRaises(BindingFailure):credentials(self.user,'https://chronelle.jyonn.space')
+
+    def test_all_four_callback_origins_and_unknown_origin_rejected(self):
+        from User.chronelle_views import APP_ORIGINS
+        for origin in APP_ORIGINS:
+            self.headers['HTTP_ORIGIN']=origin
+            self.call({'action':'authorize','confirmed':True})
+            pending=unpack(ChronelleAccount.objects.get(user=self.user))['pending']
+            self.assertEqual(pending['redirect'],origin+'/app/research')
+            self.assertEqual(pending['base'],'https://chronelle.6-79.cn' if origin.endswith('.6-79.cn') else 'https://chronelle.jyonn.space')
+        self.headers['HTTP_ORIGIN']='https://evil.example'
+        self.assertEqual(self.call({'action':'authorize','confirmed':True}).status_code,403)
+
+    @patch('User.chronelle_account.remote')
+    def test_invalid_state_does_not_consume_callback_or_exchange(self,remote):
+        self.call({'action':'authorize','confirmed':True})
+        self.assertEqual(self.call({'action':'claim','code':'coc_test','state':'wrong-state'}).status_code,403)
+        remote.assert_not_called()
+        self.assertIn('pending',unpack(ChronelleAccount.objects.get(user=self.user)))
+
+    def test_explicit_unbind_does_not_trigger_migration_prompt(self):
+        row,value=self.bound();value.pop('protocol');store(row,value)
+        self.assertEqual(self.call({'action':'revoke','confirmed':True}).status_code,200)
+        self.assertFalse(self.call().json()['body']['rebind_required'])
+
+    def test_config_model_is_server_only_and_preferred(self):
+        from Config.models import Config,CI
+        from User.chronelle_account import config
+        Config.update_value(CI.CHRONELLE_CLIENT_ID,'coapp_config_application_123456')
+        Config.update_value(CI.CHRONELLE_CLIENT_SECRET,'server-only-test-secret-12345678901234')
+        Config.update_value(CI.CHRONELLE_STORAGE_KEY,Fernet.generate_key().decode())
+        self.assertEqual(config()[0],'coapp_config_application_123456')
+        self.assertNotIn('server-only-test-secret',self.call().content.decode())
 
     @patch('User.chronelle_account.remote')
     def test_authorize_requires_confirmation_and_seals_pkce(self,remote):
@@ -52,15 +90,17 @@ class ChronelleAccountTests(TestCase):
         pending=unpack(row)['pending']
         self.assertNotIn(pending['verifier'],row.sealed)
         self.assertNotIn(pending['verifier'],response.content.decode())
-        self.assertEqual(remote.call_args.kwargs['body']['redirect_uri'],'https://frienden.jyonn.space/app/research')
-        self.assertIn('/#/bind-calendar/',response.json()['body']['authorize_url'])
+        self.assertEqual(pending['redirect'],'https://frienden.jyonn.space/app/research')
+        self.assertIn('/oauth/authorize/',response.json()['body']['authorize_url'])
+        remote.assert_not_called()
 
     @patch('User.chronelle_account.remote')
     def test_lost_claim_is_not_replayed(self,remote):
         remote.return_value={'request_id':str(uuid.uuid4()),'expires_in':600}
         self.call({'action':'authorize','confirmed':True})
+        state=unpack(ChronelleAccount.objects.get(user=self.user))['pending']['state']
         remote.side_effect=BindingFailure('chronelle_unavailable',503)
-        self.assertEqual(self.call({'action':'claim'}).status_code,503)
+        self.assertEqual(self.call({'action':'claim','code':'coc_test','state':state}).status_code,503)
         remote.reset_mock()
         self.assertEqual(self.call({'action':'claim'}).json()['body']['status'],'expired')
         remote.assert_not_called()
@@ -78,16 +118,15 @@ class ChronelleAccountTests(TestCase):
         remote.return_value={'request_id':str(uuid.uuid4()),'expires_in':600}
         self.call({'action':'authorize','confirmed':True})
         state=unpack(ChronelleAccount.objects.get(user=self.user))['pending']['state']
-        remote.side_effect=[{'state':state,'authorization_code':'cbcode_secret'},
-            {'binding':{'subject':str(uuid.uuid4()),'binding_id':str(uuid.uuid4()),'client_id':self.client_id,'binding_version':1},'access_token':'cba_secret','refresh_token':'cbr_secret','expires_in':900}]
-        response=self.call({'action':'claim'})
+        remote.return_value={'authorization_type':'account_binding','subject':str(uuid.uuid4()),'grant_id':str(uuid.uuid4()),'grant_version':1,'grant_expires_at':(timezone.now()+timezone.timedelta(days=180)).isoformat(),'access_token':'cba_secret','refresh_token':'cbr_secret','expires_in':900}
+        response=self.call({'action':'claim','state':state,'code':'coc_test'})
         self.assertEqual(response.json()['body'],{'status':'active'})
         row=ChronelleAccount.objects.get(user=self.user)
         self.assertNotIn('cba_secret',row.sealed)
         self.assertNotIn('cbr_secret',response.content.decode())
         self.assertEqual(unpack(row)['access_token'],'cba_secret')
         remote.side_effect=None;remote.return_value={'active':True}
-        self.assertEqual(self.call({'action':'claim'}).json()['body']['status'],'active')
+        self.assertEqual(self.call().json()['body']['status'],'active')
         self.assertTrue(remote.call_args.args[1].endswith('/introspect/'))
 
     @patch('User.chronelle_account.remote')
@@ -115,12 +154,14 @@ class ChronelleAccountTests(TestCase):
         _,value=self.bound()
         display=str(uuid.uuid4())
         remote.return_value=[{'id':7,'name':'Private'}]
-        display_remote.return_value={'display_id':display}
+        display_remote.return_value={'active':True,'grant':{'id':value['binding']['binding_id'],'authorization_type':'account_binding','version':1,'expires_at':(timezone.now()+timezone.timedelta(days=180)).isoformat()}}
         response=self.call({'action':'display','members':[self.user.pk]},f'/research/{self.project.pk}/calendar/')
         self.assertEqual(response.status_code,200,response.content)
-        self.assertEqual(response.json()['body']['displays'][0]['url'],f'https://chronelle.jyonn.space/binding-embed/{display}/')
-        body=display_remote.call_args.kwargs['body']
-        self.assertEqual(body['viewer_subject'],value['binding']['subject'])
+        self.assertEqual(response['Cache-Control'],'no-store, private')
+        self.assertEqual(response.json()['body']['displays'][0]['url'],f'https://chronelle.jyonn.space/oauth/embed/{self.client_id}/')
+        import jwt
+        body=jwt.decode(response.json()['body']['displays'][0]['token'],'test-confidential-secret',algorithms=['HS256'],audience='chronelle-display-api')
+        self.assertEqual(body['viewer_ref'],'frienden:'+str(self.user.pk))
         self.assertEqual(body['detail_group_ids'],[7])
         self.assertEqual(body['origins'],['https://frienden.jyonn.space'])
         self.assertNotIn('cba_',response.content.decode())
@@ -166,7 +207,7 @@ class ChronelleAccountTests(TestCase):
         second=ResearchProject.objects.create(chat=Chat.objects.create(space=self.space,created_by=self.user,chat_type=1,purpose=2),start='2026-10-28')
         ChatMember.objects.create(chat=second.chat,user=self.user,role=1,status=1)
         for project in [self.project,second]:
-            project.calendar_displays=[{'id':str(uuid.uuid4()),'owner':self.user.pk,'viewer':self.other.pk,'until':timezone.now().timestamp()+300}]
+            project.calendar_displays=[{'protocol':'oauth-v1','id':str(uuid.uuid4()),'owner':self.user.pk,'viewer':self.other.pk,'until':timezone.now().timestamp()+300}]
             project.save()
         response=self.call({'action':'policy','default_busy':False,'detail':[],'busy':[]},f'/research/{self.project.pk}/calendar/')
         self.assertEqual(response.status_code,200,response.content)

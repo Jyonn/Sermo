@@ -88,7 +88,7 @@ class ResearchMeetingView(View):
                     project_for(request.user,project.pk)
                     current=set(project.chat.chat_members.filter(status=ChatMemberStatusChoice.ACTIVE).values_list('user_id',flat=True))
                     if project.status=='completed' or not set(payload['members'])<=current:raise BindingFailure('member_unavailable',403)
-                    result=remote(base,'/api/account-bindings/v1/calendar/invitations/',token=viewer['access_token'],key='research-'+str(command),body={
+                    result=remote(base,'/api/oauth/calendar/invitations/',token=viewer['access_token'],key='research-'+str(command),body={
                         **{key:payload[key] for key in ('title','description','location','start','end','timezone','all_day','group_id')},
                         'subjects':subjects,'client_id':str(command)})
                     invitation=uuid.UUID(result['id'])

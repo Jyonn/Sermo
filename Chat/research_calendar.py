@@ -1,6 +1,7 @@
 """Member-scoped restricted projections. The browser never selects a relationship tier."""
 import json
 import uuid
+import jwt
 from django.db import transaction
 from django.utils import timezone
 from django.views import View
@@ -29,7 +30,7 @@ def error_response(error):
 def shared_policy(user, project, group_ids):
     preference = ResearchCalendarPreference.objects.filter(user=user).first()
     if preference is None:
-        return project.calendar_policies.get(str(user.pk), {'detail': [], 'busy': []})
+        return {'detail': [], 'busy': []}
     account = ChronelleAccount.objects.filter(user=user).first()
     if account is None or preference.binding_subject != unpack(account).get('binding',{}).get('subject'):
         return {'detail': [], 'busy': []}
@@ -42,6 +43,7 @@ def shared_policy(user, project, group_ids):
 
 
 def revoke_displays(project, base, tokens):
+    revoked=set()
     for item in project.calendar_displays:
         if item['until'] <= timezone.now().timestamp():
             continue
@@ -50,9 +52,15 @@ def revoke_displays(project, base, tokens):
             raise BindingFailure('binding_required')
         if value.get('revoked'):
             continue
+        if item.get('protocol') != 'oauth-v1':
+            continue
+        if item['owner'] in revoked:
+            continue
         try:
-            remote(base,'/api/account-bindings/v1/calendar/display-session/'+item['id']+'/',
-                method='DELETE',token=value['access_token'],key=str(uuid.uuid4()))
+            # Stateless child JWTs cannot be revoked individually. Revoke the
+            # parent grant when a privacy/membership change requires immediate removal.
+            remote(base,'/api/oauth/revoke/',body={'token':value['refresh_token']})
+            revoked.add(item['owner'])
         except BindingFailure as error:
             if error.code not in ('binding_revoked','binding_expired','binding_superseded','calendar_resource_unavailable'):
                 raise
@@ -166,14 +174,25 @@ class ResearchCalendarView(View):
                 for uid in selected:
                     policy=policies[uid]
                     allowed=groups[uid]
-                    result=remote(base,'/api/account-bindings/v1/calendar/display-sessions/',
-                        token=tokens[uid]['access_token'],key=str(uuid.uuid4()),body={
-                            'calendar_subject':tokens[uid]['binding']['subject'],'viewer_subject':viewer['binding']['subject'],
-                            'detail_group_ids':list(set(policy['detail'])&allowed),'busy_group_ids':list(set(policy['busy'])&allowed),
-                            'purpose':'research-'+str(project.pk),'origins':[origin],'expires_in':300})
-                    display_id=str(uuid.UUID(result['display_id']))
-                    results.append({'member_id':uid,'id':display_id,'url':base+'/binding-embed/'+display_id+'/'})
-                    project.calendar_displays.append({'id':display_id,'owner':uid,'viewer':request.user.pk,'until':timezone.now().timestamp()+300})
+                    binding=tokens[uid]['binding']
+                    status=remote(base,'/api/oauth/introspect/',body={'subject':binding['subject']})
+                    grant=status.get('grant',{})
+                    if not status.get('active') or grant.get('id')!=binding['binding_id'] or grant.get('authorization_type')!='account_binding':
+                        raise BindingFailure('binding_required')
+                    from django.utils.dateparse import parse_datetime
+                    expiry=parse_datetime(grant['expires_at'])
+                    if expiry is None or timezone.is_naive(expiry):raise BindingFailure('invalid_binding')
+                    now=int(timezone.now().timestamp());until=min(now+300,int(expiry.timestamp()))
+                    if until<=now:raise BindingFailure('binding_required')
+                    display_id=str(uuid.uuid4());client,secret,_=config()
+                    token=jwt.encode({'key':client,'sub':binding['subject'],'grant_id':binding['binding_id'],
+                        'grant_version':grant['version'],'purpose':'calendar-display','viewer_ref':'frienden:'+str(request.user.pk),
+                        'origins':[origin],'detail_group_ids':sorted(set(policy['detail'])&allowed),
+                        'busy_group_ids':sorted(set(policy['busy'])&allowed),'task_group_ids':[],
+                        'aud':'chronelle-display-api','iat':now,'exp':until,'jti':display_id},secret,
+                        algorithm='HS256',headers={'typ':'chronelle-display+jwt'})
+                    results.append({'member_id':uid,'id':display_id,'token':token,'url':base+'/oauth/embed/'+client+'/'})
+                    project.calendar_displays.append({'protocol':'oauth-v1','id':display_id,'owner':uid,'viewer':request.user.pk,'until':until})
                 project.save(update_fields=['calendar_displays'])
             return {'displays':results,'renew_after':240}
         except BindingFailure as error:

@@ -1,5 +1,7 @@
 # Chronelle research integration
 
+> Historical protocol below is retired. See [OAuth v1](OAUTH_V1.md) for the current implementation and deployment instructions.
+
 Full authorization is separate from the legacy read-only authorization. Existing
 read-only links are preserved; they never become full credentials automatically.
 Users must explicitly approve the fixed Chronelle full-binding v1 permission set.

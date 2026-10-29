@@ -4,6 +4,8 @@ import hashlib
 import json
 import os
 import secrets
+import re
+from urllib.parse import urlencode
 from pathlib import Path
 from uuid import UUID
 from cryptography.fernet import Fernet, InvalidToken
@@ -12,6 +14,7 @@ from django.db import transaction
 from django.utils import timezone
 from django.views import View
 from User.models import ChronelleAccount
+from Config.models import Config, CI
 from User.chronelle_views import authorization_site, APP_ORIGINS, BASE, MIRROR_BASE
 from Chat.research import fail
 from utils import auth
@@ -19,7 +22,13 @@ from utils import auth
 
 class BindingFailure(Exception):
     def __init__(self, code, status=409):
-        self.code, self.status = code, status
+        self.code = {'authorization_revoked':'binding_revoked','authorization_expired':'binding_expired',
+            'authorization_required':'binding_required','invalid_grant':'binding_required','refresh_replayed':'binding_required',
+            'refresh_expired':'binding_required','invalid_refresh_token':'binding_required','access_denied':'authorization_denied',
+            'application_approval_required':'application_not_allowed','application_approval_revoked':'application_not_allowed',
+            'invalid_client':'integration_not_configured','application_disabled':'application_not_allowed',
+            'invalid_display_token':'calendar_permission_denied','display_origin_not_allowed':'calendar_permission_denied'}.get(code,code)
+        self.status = status
 
 
 def config():
@@ -32,13 +41,14 @@ def config():
             saved = json.loads(path.read_text())
         except (OSError,ValueError):
             raise BindingFailure('integration_not_configured',503)
-    client = os.environ.get('CHRONELLE_BINDING_CLIENT_ID', saved.get('client_id',''))
-    secret = os.environ.get('CHRONELLE_BINDING_CLIENT_SECRET', saved.get('client_secret',''))
-    key = os.environ.get('CHRONELLE_BINDING_STORAGE_KEY', saved.get('storage_key',''))
+    client = Config.get_value_by_key(CI.CHRONELLE_CLIENT_ID) or os.environ.get('CHRONELLE_BINDING_CLIENT_ID', saved.get('client_id',''))
+    secret = Config.get_value_by_key(CI.CHRONELLE_CLIENT_SECRET) or os.environ.get('CHRONELLE_BINDING_CLIENT_SECRET', saved.get('client_secret',''))
+    key = Config.get_value_by_key(CI.CHRONELLE_STORAGE_KEY) or os.environ.get('CHRONELLE_BINDING_STORAGE_KEY', saved.get('storage_key',''))
     if not all((client, secret, key)):
         raise BindingFailure('integration_not_configured', 503)
     try:
-        UUID(client)
+        if not re.fullmatch(r'coapp_[A-Za-z0-9_-]{16,80}',client):
+            raise ValueError()
         return client, secret, Fernet(key.encode())
     except (ValueError, TypeError, AttributeError):
         raise BindingFailure('integration_not_configured', 503)
@@ -59,7 +69,7 @@ def store(row, value):
 
 
 def remote(base, path, *, method='POST', body=None, token=None, key=None):
-    if base not in (BASE, MIRROR_BASE) or not path.startswith('/api/account-bindings/v1/'):
+    if base not in (BASE, MIRROR_BASE) or not path.startswith('/api/oauth/'):
         raise BindingFailure('integration_not_configured', 503)
     client, secret, _ = config()
     headers = {'Accept': 'application/json'}
@@ -77,6 +87,8 @@ def remote(base, path, *, method='POST', body=None, token=None, key=None):
         code = value.get('code', 'chronelle_unavailable') if isinstance(value, dict) else 'chronelle_unavailable'
         # Only protocol codes, never upstream bodies, tokens or translated prose.
         raise BindingFailure(code if isinstance(code, str) and code.replace('_', '').isalnum() else 'chronelle_unavailable', response.status_code if response.status_code in (400,401,403,409,410,429) else 503)
+    if path.endswith(('/token/','/introspect/')) and not isinstance(value,dict):
+        raise BindingFailure('chronelle_unavailable',503)
     return value
 
 
@@ -87,7 +99,7 @@ def credentials(user, base):
         row, _ = ChronelleAccount.objects.get_or_create(user=user)
         row = ChronelleAccount.objects.select_for_update().get(pk=row.pk)
         value = unpack(row)
-        if not value.get('binding') or value.get('renewal_uncertain'):
+        if value.get('protocol') != 'oauth-v1' or not value.get('binding') or value['binding'].get('client_id')!=config()[0] or value.get('renewal_uncertain'):
             raise BindingFailure('binding_required')
         if value.get('access_until', 0) <= timezone.now().timestamp() + 30:
             # Commit uncertainty before the one-shot request, including process crashes.
@@ -96,13 +108,17 @@ def credentials(user, base):
             renewal = value['refresh_token']
     if renewal:
         try:
-            fresh = remote(base, '/api/account-bindings/v1/token/', body={'grant_type':'refresh_token','refresh_token':renewal})
+            fresh = remote(base, '/api/oauth/token/', body={'grant_type':'refresh_token','refresh_token':renewal})
             with transaction.atomic():
                 row = ChronelleAccount.objects.select_for_update().get(user=user)
                 current = unpack(row)
                 if current.get('refresh_token') != renewal:
                     raise BindingFailure('binding_required')
-                value.update(access_token=fresh['access_token'], refresh_token=fresh['refresh_token'],
+                binding=validated_binding(fresh)
+                if binding['subject']!=current['binding']['subject'] or binding['binding_id']!=current['binding']['binding_id']:
+                    raise BindingFailure('binding_required')
+                value=current
+                value.update(binding=binding,access_token=fresh['access_token'], refresh_token=fresh['refresh_token'],
                     access_until=timezone.now().timestamp()+fresh['expires_in'], renewal_uncertain=False)
                 store(row,value)
         except (BindingFailure, KeyError, TypeError):
@@ -110,55 +126,65 @@ def credentials(user, base):
     return value
 
 
-def claim(user, origin, base):
+def validated_binding(fresh):
+    if not isinstance(fresh,dict) or fresh.get('authorization_type') != 'account_binding' or type(fresh.get('grant_version')) is not int or fresh['grant_version'] < 1:
+        raise BindingFailure('invalid_binding',403)
+    if any(not isinstance(fresh.get(key),str) or not 1<=len(fresh[key])<=512 for key in ('access_token','refresh_token')) or type(fresh.get('expires_in')) is not int or not 1<=fresh['expires_in']<=900:
+        raise BindingFailure('invalid_binding',403)
+    from django.utils.dateparse import parse_datetime
+    expiry=parse_datetime(fresh.get('grant_expires_at',''))
+    if expiry is None or timezone.is_naive(expiry) or expiry <= timezone.now():
+        raise BindingFailure('invalid_binding',403)
+    return {'subject':str(UUID(fresh['subject'])),'binding_id':str(UUID(fresh['grant_id'])),
+        'client_id':config()[0],'binding_version':fresh['grant_version'],'expires_at':expiry.timestamp()}
+
+
+def claim(user, origin, base, body):
     with transaction.atomic():
         row, _ = ChronelleAccount.objects.get_or_create(user=user)
         row = ChronelleAccount.objects.select_for_update().get(pk=row.pk)
         value = unpack(row)
         pending = value.get('pending', {})
-        if not pending and value.get('binding') and not value.get('claim_id') and not value.get('renewal_uncertain'):
-            status=remote(base,'/api/account-bindings/v1/introspect/',body={'binding_id':value['binding']['binding_id']})
-            return {'status':'active' if status.get('active') else 'expired'}
         if pending.get('until',0) <= timezone.now().timestamp() or pending.get('origin') != origin:
             return {'status':'expired'}
-        if pending.get('after',0) > timezone.now().timestamp():
-            return {'status':'pending'}
+        if not isinstance(body.get('state'),str) or not secrets.compare_digest(body['state'],pending['state']):
+            raise BindingFailure('invalid_state',403)
+        if body.get('error'):
+            value.pop('pending',None);store(row,value)
+            return {'status':'access_denied'}
+        if not isinstance(body.get('code'),str) or not 1 <= len(body['code']) <= 200:
+            raise BindingFailure('invalid_request',400)
         value.pop('pending',None)
-        value['claim_id'] = pending['request_id']
+        value['claim_id'] = pending['state']
         store(row,value)
-    result = remote(pending['base'], '/api/account-bindings/v1/requests/'+pending['request_id']+'/code/', body={'code_verifier':pending['verifier']})
-    if result.get('status') == 'pending':
-        with transaction.atomic():
-            row = ChronelleAccount.objects.select_for_update().get(user=user)
-            value = unpack(row)
-            if value.get('claim_id') != pending['request_id']:
-                raise BindingFailure('binding_required')
-            pending['after'] = timezone.now().timestamp()+max(3,result.get('retry_after',3))
-            value['pending'] = pending;store(row,value)
-        return {'status':'pending'}
-    if not secrets.compare_digest(result.get('state',''),pending['state']):
-        raise BindingFailure('invalid_state',403)
-    fresh = remote(pending['base'], '/api/account-bindings/v1/token/', body={'grant_type':'authorization_code','request_id':pending['request_id'],'code':result['authorization_code'],'code_verifier':pending['verifier'],'redirect_uri':pending['redirect']})
-    binding = fresh['binding']
-    if binding.get('binding_version') != 1 or binding.get('client_id') != config()[0]:
-        raise BindingFailure('invalid_binding',403)
-    UUID(binding['subject']);UUID(binding['binding_id'])
+    fresh = remote(pending['base'], '/api/oauth/token/', body={'grant_type':'authorization_code','code':body['code'],'code_verifier':pending['verifier'],'redirect_uri':pending['redirect']})
+    binding = validated_binding(fresh)
     with transaction.atomic():
         row = ChronelleAccount.objects.select_for_update().get(user=user)
-        if unpack(row).get('claim_id') != pending['request_id']:
+        if unpack(row).get('claim_id') != pending['state']:
             raise BindingFailure('binding_required')
-        store(row,{'binding':binding,'access_token':fresh['access_token'],'refresh_token':fresh['refresh_token'],'access_until':timezone.now().timestamp()+fresh['expires_in']})
+        store(row,{'protocol':'oauth-v1','binding':binding,'access_token':fresh['access_token'],'refresh_token':fresh['refresh_token'],'access_until':timezone.now().timestamp()+fresh['expires_in']})
+        from Chat.models import ResearchCalendarPreference
+        ResearchCalendarPreference.objects.filter(user=user).update(binding_subject='')
+        user.chronelle_calendar_id='';user.chronelle_authorization={}
+        user.save(update_fields=['chronelle_calendar_id','chronelle_authorization'])
     return {'status':'active'}
 
 
 def calendar(user, base, resource, *, method='GET', body=None, key=None):
-    if resource not in ('groups/', 'identity/', 'display-sessions/', 'invitations/') and not resource.startswith('display-session/'):
+    if resource not in ('groups/', 'identity/', 'invitations/'):
         raise BindingFailure('calendar_permission_denied', 403)
     value = credentials(user, base)
-    return remote(base, '/api/account-bindings/v1/calendar/'+resource, method=method, body=body, token=value['access_token'], key=key)
+    result=remote(base, '/api/oauth/calendar/'+resource, method=method, body=body, token=value['access_token'], key=key)
+    if resource=='groups/' and (not isinstance(result,list) or any(not isinstance(g,dict) or type(g.get('id')) is not int or not isinstance(g.get('name'),str) for g in result)):
+        raise BindingFailure('chronelle_unavailable',503)
+    return result
 
 
 def revocation_credentials(user,base):
+    row=ChronelleAccount.objects.filter(user=user).first()
+    if row and unpack(row).get('protocol') != 'oauth-v1':
+        return {'revoked':True}
     try:
         return credentials(user,base)
     except BindingFailure:
@@ -167,7 +193,7 @@ def revocation_credentials(user,base):
         if value.get('revoked'):
             return {'revoked':True}
         if value.get('binding'):
-            status=remote(base,'/api/account-bindings/v1/introspect/',body={'binding_id':value['binding']['binding_id']})
+            status=remote(base,'/api/oauth/introspect/',body={'subject':value['binding']['subject']})
             if status.get('active') is False:return {'revoked':True}
         raise
 
@@ -180,12 +206,14 @@ class FullChronelleView(View):
             config()
             row = ChronelleAccount.objects.filter(user=request.user).first()
             value = unpack(row) if row else {}
-            if not value.get('binding') or value.get('renewal_uncertain'):
-                return {'status':'binding_required'}
-            result = remote(base, '/api/account-bindings/v1/introspect/', body={'binding_id':value['binding']['binding_id']})
-            return {'status':'active' if result.get('active') else 'binding_required'}
+            if value.get('pending',{}).get('protocol')=='oauth-v1' and value['pending'].get('until',0)>timezone.now().timestamp():
+                return {'status':'pending'}
+            if value.get('protocol') != 'oauth-v1' or not value.get('binding') or value['binding'].get('client_id')!=config()[0] or value.get('renewal_uncertain'):
+                return {'status':'binding_required','rebind_required':not value.get('revoked') and bool(row and row.sealed or request.user.chronelle_calendar_id or request.user.chronelle_authorization)}
+            result = remote(base, '/api/oauth/introspect/', body={'subject':value['binding']['subject']})
+            return {'status':'active' if result.get('active') else 'binding_required','rebind_required':not result.get('active')}
         except BindingFailure as error:
-            return {'status':error.code}
+            return {'status':error.code,'rebind_required':error.code=='binding_required'}
 
     @auth.require_user
     def post(self, request):
@@ -200,7 +228,7 @@ class FullChronelleView(View):
                 raise BindingFailure('origin_not_allowed', 403)
             config()
             if body.get('action') == 'claim':
-                return claim(request.user,origin,base)
+                return claim(request.user,origin,base,body)
             with transaction.atomic():
                 row, _ = ChronelleAccount.objects.get_or_create(user=request.user)
                 row = ChronelleAccount.objects.select_for_update().get(pk=row.pk)
@@ -216,24 +244,25 @@ class FullChronelleView(View):
                     if body.get('confirmed') is not True:
                         raise BindingFailure('confirmation_required', 400)
                     pending = value.get('pending', {})
-                    if pending.get('until', 0) > timezone.now().timestamp() and pending.get('origin') == origin:
+                    if pending.get('protocol')=='oauth-v1' and pending.get('until', 0) > timezone.now().timestamp() and pending.get('origin') == origin:
                         return {'authorize_url':pending['url']}
                     verifier, state = secrets.token_urlsafe(48), secrets.token_urlsafe(32)
                     challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b'=').decode()
                     redirect = origin+'/app/research'
-                    result = remote(base, '/api/account-bindings/v1/requests/', body={'state':state,'code_challenge':challenge,'code_challenge_method':'S256','redirect_uri':redirect,'binding_version':1})
-                    uid = str(UUID(result['request_id']))
-                    url = base+'/#/bind-calendar/'+uid
+                    url = base+'/oauth/authorize/?'+urlencode({'client_id':config()[0],'response_type':'code','authorization_type':'account_binding','state':state,'code_challenge':challenge,'code_challenge_method':'S256','redirect_uri':redirect})
                     value.pop('claim_id',None)
-                    value['pending'] = {'request_id':uid,'verifier':verifier,'state':state,'redirect':redirect,'origin':origin,'base':base,'url':url,'until':timezone.now().timestamp()+min(result['expires_in'],600),'after':0}
+                    value['pending'] = {'protocol':'oauth-v1','verifier':verifier,'state':state,'redirect':redirect,'origin':origin,'base':base,'url':url,'until':timezone.now().timestamp()+600}
                     store(row, value)
                     return {'authorize_url':url}
                 if body.get('action') == 'revoke':
                     if body.get('confirmed') is not True:
                         raise BindingFailure('confirmation_required',400)
                     if value.get('binding'):
-                        remote(base,'/api/account-bindings/v1/revoke/',body={'binding_id':value['binding']['binding_id'],'confirmed':True})
+                        if value.get('protocol')=='oauth-v1':
+                            remote(base,'/api/oauth/revoke/',body={'token':value['refresh_token']})
                     store(row,{'revoked':True})
+                    request.user.chronelle_calendar_id='';request.user.chronelle_authorization={}
+                    request.user.save(update_fields=['chronelle_calendar_id','chronelle_authorization'])
                     return {'status':'binding_required'}
                 raise BindingFailure('invalid_request',400)
         except BindingFailure as error:
