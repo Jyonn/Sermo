@@ -2343,12 +2343,13 @@ class NotificationDeliveryStatusChoice(Choice):
 class WebPushSubscription(models.Model):
     ACTIVE_LEASE_DAYS = 45
     CANONICAL_WEB_ORIGIN = 'https://sermo.jyonn.space'
-    SUPPORTED_WEB_ORIGINS = frozenset({CANONICAL_WEB_ORIGIN, 'https://sermo.6-79.cn'})
+    SUPPORTED_WEB_ORIGINS = frozenset({CANONICAL_WEB_ORIGIN, 'https://sermo.6-79.cn', 'https://frienden.jyonn.space', 'https://frienden.6-79.cn'})
 
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='web_push_subscriptions', db_index=True)
     space = models.ForeignKey('Space.Space', on_delete=models.CASCADE, related_name='web_push_subscriptions', db_index=True)
     endpoint = models.TextField()
     endpoint_digest = models.CharField(max_length=64, db_index=True)
+    opted_in = models.BooleanField(default=True)
     p256dh = models.CharField(max_length=255)
     auth = models.CharField(max_length=255)
     origin = models.CharField(max_length=255)
@@ -2373,6 +2374,8 @@ class WebPushSubscription(models.Model):
         auth: str,
         origin: str,
         user_agent: str = '',
+        restore_only: bool = False,
+        previous_endpoint: str = '',
     ):
         normalized_endpoint = (endpoint or '').strip()
         if not normalized_endpoint or not p256dh or not auth or not origin:
@@ -2384,20 +2387,35 @@ class WebPushSubscription(models.Model):
             normalized_origin.lower() in cls.SUPPORTED_WEB_ORIGINS
             or origin_host in {'localhost', '127.0.0.1'}
         )
-        subscription, _created = cls.objects.update_or_create(
-            user=user,
-            endpoint_digest=endpoint_digest,
-            defaults=dict(
-                space_id=user.space_id,
-                endpoint=normalized_endpoint,
-                p256dh=p256dh.strip(),
-                auth=auth.strip(),
-                origin=normalized_origin,
-                user_agent=(user_agent or '')[:255],
-                enabled=is_supported_origin,
-            ),
-        )
+        with transaction.atomic():
+            User.objects.select_for_update().get(pk=user.pk)
+            current = cls.objects.filter(user=user, endpoint_digest=endpoint_digest).first()
+            previous = cls.objects.filter(user=user, endpoint=previous_endpoint).first() if previous_endpoint else None
+            if restore_only and ((current and not current.opted_in) or not (current or (previous and previous.opted_in))):
+                return current
+            subscription, _created = cls.objects.update_or_create(
+                user=user,
+                endpoint_digest=endpoint_digest,
+                defaults=dict(
+                    space_id=user.space_id,
+                    endpoint=normalized_endpoint,
+                    p256dh=p256dh.strip(),
+                    auth=auth.strip(),
+                    origin=normalized_origin,
+                    user_agent=(user_agent or '')[:255],
+                    enabled=is_supported_origin,
+                    opted_in=True,
+                ),
+            )
+            if previous and previous.pk != subscription.pk:
+                cls.objects.filter(pk=previous.pk).update(enabled=False, opted_in=False)
         return subscription
+
+    @classmethod
+    def disable_for_user(cls, user, endpoint, previous_endpoint=''):
+        with transaction.atomic():
+            User.objects.select_for_update().get(pk=user.pk)
+            cls.objects.filter(user=user, endpoint__in=[endpoint, previous_endpoint]).update(enabled=False, opted_in=False)
 
     @classmethod
     def active_for_user(cls, user: User):
@@ -2412,6 +2430,7 @@ class WebPushSubscription(models.Model):
             user=user,
             space_id=user.space_id,
             enabled=True,
+            opted_in=True,
             last_seen_at__gte=stale_before,
         )
 
@@ -2420,6 +2439,7 @@ class WebPushSubscription(models.Model):
             'endpoint',
             'origin',
             'enabled',
+            'opted_in',
             'last_seen_at',
         )
 

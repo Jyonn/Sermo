@@ -307,6 +307,9 @@ class QQIdentityParams(metaclass=Params):
 
 class WebPushSubscriptionParams(metaclass=Params):
     model_class = WebPushSubscription
+    # Older clients cannot distinguish passive restoration from explicit consent.
+    restore_only = Validator('restore_only').null().default(True).bool(lambda value: type(value) is bool)
+    previous_endpoint = Validator('previous_endpoint').null().default('').to(str).bool(lambda value: len(value) <= 2048)
 
     endpoint = Validator('endpoint') \
         .to(str) \

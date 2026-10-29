@@ -309,13 +309,14 @@ class WebPushRegistrationTests(TestCase):
         self.first_user = User.create(space=self.space, name='First Device User')
         self.second_user = User.create(space=self.space, name='Second Device User')
 
-    def register(self, user):
+    def register(self, user, endpoint='https://push.example.test/shared-endpoint', **options):
         return WebPushSubscription.register(
             user=user,
-            endpoint='https://push.example.test/shared-endpoint',
+            endpoint=endpoint,
             p256dh='p256dh-key',
             auth='auth-key',
             origin='https://sermo.jyonn.space',
+            **options,
         )
 
     def test_same_browser_endpoint_can_serve_multiple_accounts(self):
@@ -345,6 +346,73 @@ class WebPushRegistrationTests(TestCase):
         )
 
         self.assertTrue(subscription.enabled)
+
+    def test_account_opt_out_does_not_affect_shared_endpoint_in_another_space(self):
+        other_space = Space.objects.create(name='Second', slug='second-push', email='second@example.com')
+        other_user = User.create(space=other_space, name='Other space account')
+        first = self.register(self.first_user)
+        second = self.register(other_user)
+        WebPushSubscription.disable_for_user(self.first_user, first.endpoint)
+        self.assertFalse(WebPushSubscription.active_for_user(self.first_user).exists())
+        self.assertTrue(WebPushSubscription.active_for_user(other_user).filter(pk=second.pk).exists())
+        restored = self.register(self.first_user, restore_only=True)
+        self.assertFalse(restored.opted_in)
+        self.assertFalse(restored.enabled)
+        self.assertTrue(self.register(self.first_user).opted_in)
+
+    def test_passive_restore_never_subscribes_a_new_account(self):
+        first = self.register(self.first_user)
+        self.assertIsNone(self.register(self.second_user, restore_only=True))
+        self.assertIsNone(self.register(self.second_user, endpoint='https://push.example.test/new', previous_endpoint=first.endpoint, restore_only=True))
+        self.assertEqual(WebPushSubscription.objects.count(), 1)
+
+    def test_rotation_preserves_only_the_current_accounts_consent(self):
+        first = self.register(self.first_user)
+        peer = self.register(self.second_user)
+        rotated = self.register(self.first_user, endpoint='https://push.example.test/rotated', previous_endpoint=first.endpoint, restore_only=True)
+        self.assertTrue(rotated.opted_in)
+        first.refresh_from_db(); peer.refresh_from_db()
+        self.assertFalse(first.opted_in)
+        self.assertTrue(peer.opted_in)
+        WebPushSubscription.disable_for_user(self.first_user, rotated.endpoint)
+        self.assertFalse(self.register(self.first_user, endpoint=rotated.endpoint, previous_endpoint=peer.endpoint, restore_only=True).opted_in)
+
+    def test_lease_expiry_is_not_an_explicit_opt_out(self):
+        first = self.register(self.first_user)
+        WebPushSubscription.objects.filter(pk=first.pk).update(last_seen_at=timezone.now()-timedelta(days=46))
+        self.assertFalse(WebPushSubscription.active_for_user(self.first_user).exists())
+        self.assertTrue(self.register(self.first_user, restore_only=True).enabled)
+
+    def test_disabling_a_rotating_endpoint_blocks_late_restore(self):
+        first = self.register(self.first_user)
+        rotated = 'https://push.example.test/pending-rotation'
+        WebPushSubscription.disable_for_user(self.first_user, rotated, first.endpoint)
+        self.assertIsNone(self.register(self.first_user, endpoint=rotated, previous_endpoint=first.endpoint, restore_only=True))
+
+    def test_api_disable_is_scoped_and_persistent(self):
+        import json
+        first = self.register(self.first_user)
+        peer = self.register(self.second_user)
+        headers = {'HTTP_AUTHORIZATION': 'Bearer '+auth.get_login_token(self.first_user)['auth']}
+        response = self.client.delete('/users/me/web-push', json.dumps({'endpoint':first.endpoint}), content_type='application/json', **headers)
+        self.assertEqual(response.status_code, 200, response.content)
+        result = self.client.get('/users/me/web-push', **headers).json()['body']
+        self.assertEqual(result['subscriptions'], [])
+        self.assertFalse(result['bindings'][0]['opted_in'])
+        peer.refresh_from_db(); self.assertTrue(peer.enabled)
+        response = self.client.post('/users/me/web-push', json.dumps(dict(endpoint=first.endpoint, p256dh='key', auth='key', origin='https://frienden.jyonn.space', restore_only=True)), content_type='application/json', **headers)
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertFalse(response.json()['body']['opted_in'])
+        legacy = dict(endpoint=first.endpoint, p256dh='key', auth='key', origin='https://frienden.jyonn.space')
+        response = self.client.post('/users/me/web-push', json.dumps(legacy), content_type='application/json', **headers)
+        self.assertFalse(response.json()['body']['opted_in'])
+        response = self.client.post('/users/me/web-push', json.dumps(dict(legacy, restore_only=False)), content_type='application/json', **headers)
+        self.assertTrue(response.json()['body']['opted_in'])
+
+    def test_all_four_application_origins_are_supported(self):
+        for origin in WebPushSubscription.SUPPORTED_WEB_ORIGINS:
+            result = WebPushSubscription.register(self.first_user, 'https://push.example.test/origin', 'key', 'auth', origin)
+            self.assertTrue(result.enabled, origin)
 
 class AccountSwitchPhoneNormalizationTests(SimpleTestCase):
     def test_mainland_phone_variants_include_country_code(self):

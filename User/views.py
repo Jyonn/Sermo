@@ -647,6 +647,7 @@ class WebPushSubscriptionView(View):
         return dict(
             public_key=vapid_public_key(),
             subscriptions=[item.json() for item in WebPushSubscription.active_for_user(request.user)],
+            bindings=[item.json() for item in WebPushSubscription.objects.filter(user=request.user, space_id=request.user.space_id)],
         )
 
     @auth.require_user
@@ -655,6 +656,8 @@ class WebPushSubscriptionView(View):
         WebPushSubscriptionParams.p256dh,
         WebPushSubscriptionParams.auth,
         WebPushSubscriptionParams.origin,
+        WebPushSubscriptionParams.restore_only,
+        WebPushSubscriptionParams.previous_endpoint,
     )
     def post(self, request: Request):
         subscription = WebPushSubscription.register(
@@ -664,13 +667,15 @@ class WebPushSubscriptionView(View):
             auth=request.json.auth,
             origin=request.json.origin,
             user_agent=request.META.get('HTTP_USER_AGENT', ''),
+            restore_only=request.json.restore_only,
+            previous_endpoint=request.json.previous_endpoint,
         )
-        return subscription.json()
+        return subscription.json() if subscription else None
 
     @auth.require_user
-    @analyse.json(WebPushSubscriptionParams.endpoint)
+    @analyse.json(WebPushSubscriptionParams.endpoint, WebPushSubscriptionParams.previous_endpoint)
     def delete(self, request: Request):
-        WebPushSubscription.objects.filter(user=request.user, endpoint=request.json.endpoint).delete()
+        WebPushSubscription.disable_for_user(request.user, request.json.endpoint, request.json.previous_endpoint)
         return OK
 
 
