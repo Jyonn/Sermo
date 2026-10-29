@@ -47,12 +47,12 @@ def revoke_displays(project, base, tokens):
     for item in project.calendar_displays:
         if item['until'] <= timezone.now().timestamp():
             continue
+        if item.get('protocol') != 'oauth-v1':
+            continue
         value = tokens.get(item['owner'])
         if value is None:
             raise BindingFailure('binding_required')
         if value.get('revoked'):
-            continue
-        if item.get('protocol') != 'oauth-v1':
             continue
         if item['owner'] in revoked:
             continue

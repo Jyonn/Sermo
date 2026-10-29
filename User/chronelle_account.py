@@ -183,7 +183,7 @@ def calendar(user, base, resource, *, method='GET', body=None, key=None):
 
 def revocation_credentials(user,base):
     row=ChronelleAccount.objects.filter(user=user).first()
-    if row and unpack(row).get('protocol') != 'oauth-v1':
+    if row is None or unpack(row).get('protocol') != 'oauth-v1':
         return {'revoked':True}
     try:
         return credentials(user,base)

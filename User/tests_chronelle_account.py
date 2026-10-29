@@ -48,6 +48,14 @@ class ChronelleAccountTests(TestCase):
         self.assertEqual(response,{'status':'binding_required','rebind_required':True})
         with self.assertRaises(BindingFailure):credentials(self.user,'https://chronelle.jyonn.space')
 
+    def test_retired_display_metadata_does_not_require_an_unbound_owner_to_reconnect(self):
+        from User.chronelle_account import revocation_credentials
+        from Chat.research_calendar import revoke_displays
+        self.assertEqual(revocation_credentials(self.other,'https://chronelle.jyonn.space'),{'revoked':True})
+        self.project.calendar_displays=[{'id':str(uuid.uuid4()),'owner':self.other.pk,'viewer':self.user.pk,'until':timezone.now().timestamp()+300}]
+        revoke_displays(self.project,'https://chronelle.jyonn.space',{})
+        self.assertEqual(self.project.calendar_displays,[])
+
     def test_all_four_callback_origins_and_unknown_origin_rejected(self):
         from User.chronelle_views import APP_ORIGINS
         for origin in APP_ORIGINS:
