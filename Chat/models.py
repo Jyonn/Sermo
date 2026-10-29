@@ -1638,6 +1638,18 @@ class ResearchProject(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
 
+class ResearchResource(models.Model):
+    project = models.ForeignKey(ResearchProject, on_delete=models.CASCADE, related_name='resources')
+    task_id = models.CharField(max_length=64, blank=True, default='')
+    parent = models.ForeignKey('self', on_delete=models.RESTRICT, null=True, blank=True, related_name='children')
+    creator = models.ForeignKey(User, on_delete=models.PROTECT, related_name='+')
+    kind = models.CharField(max_length=8)
+    name = models.CharField(max_length=180)
+    url = models.URLField(max_length=2048, blank=True)
+    media = models.ForeignKey('Message.MediaResource', on_delete=models.PROTECT, null=True, blank=True, related_name='research_resources')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
 class ResearchCalendarPreference(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='research_calendar_preference')
     default_busy = models.BooleanField(default=True)

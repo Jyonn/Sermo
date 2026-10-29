@@ -2659,6 +2659,7 @@ class MediaResource(models.Model):
         count = self.messages.filter(is_deleted=False).count()
         count += self.forward_items.filter(bundle__messages__is_deleted=False).count()
         count += self.welcome_templates.count()
+        count += self.research_resources.count()
         if self.reference_count != count:
             type(self).objects.filter(id=self.id).update(reference_count=count)
             self.reference_count = count
