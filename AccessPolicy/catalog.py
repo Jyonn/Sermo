@@ -92,7 +92,7 @@ register('menu.profile.avatar', '头像', 'Avatar', 'menu.profile', 'account_cir
 register('menu.profile.avatar.preset', '预设头像', 'Preset avatar', 'menu.profile.avatar', 'face')
 register('menu.profile.avatar.custom', '自定义头像', 'Custom avatar', 'menu.profile.avatar', 'add_a_photo')
 register('menu.profile.nickname', '修改昵称', 'Change nickname', 'menu.profile', 'edit')
-register('menu.profile.welcome', '欢迎语', 'Welcome message', 'menu.profile', 'waving_hand')
+register('menu.profile.welcome', '欢迎消息', 'Welcome messages', 'menu.profile', 'waving_hand')
 register('menu.sticker', '表情包管理', 'Sticker management', 'menu', 'mood')
 register('menu.sticker.create', '制作表情包', 'Create stickers', 'menu.sticker', 'add_reaction')
 register('menu.security', '账号与安全', 'Account and security', 'menu', 'shield')

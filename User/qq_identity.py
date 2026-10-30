@@ -75,7 +75,6 @@ def ensure_qzone_placeholder(space, qq, nickname=''):
         account_kind=UserAccountKindChoice.IMPORTED_PLACEHOLDER,
         avatar_type=UserAvatarTypeChoice.PRESET,
         avatar_uri=_qzone_avatar_uri(qq),
-        welcome_message='',
         is_deleted=True,
         last_heartbeat=timezone.now() - datetime.timedelta(days=36500),
     )

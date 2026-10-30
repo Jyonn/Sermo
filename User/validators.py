@@ -242,6 +242,7 @@ class UserValidator:
 
     @classmethod
     def welcome_message(cls, value):
+        # Kept for historical migration 0004 and validation of the archive only.
         message = (value or '').strip()
         if not message:
             raise UserErrors.WELCOME_MESSAGE_EMPTY

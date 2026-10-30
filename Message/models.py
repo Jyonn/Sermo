@@ -2813,11 +2813,8 @@ class WelcomeMessageTemplate(models.Model):
                 )
                 for position, item in enumerate(normalized)
             ]
-            first_text = next((item.content for item in created if item.type == MessageTypeChoice.TEXT), '')
-            if user.welcome_message != first_text:
-                user.welcome_message = first_text
-                user.save(update_fields=['welcome_message'])
-            user.award_growth('explore:welcome')
+            if cls.has_custom_for(user):
+                user.award_growth('explore:welcome')
             new_resources = {item.media_resource_id for item in created if item.media_resource_id}
             for resource_id in old_resources | new_resources:
                 MediaResource.objects.get(id=resource_id).recalculate_reference_count()
@@ -2841,18 +2838,35 @@ class WelcomeMessageTemplate(models.Model):
         )
 
     @classmethod
+    def ensure_default_for(cls, user):
+        # A default is setup, not customization, and must not award growth.
+        from User.models import User
+
+        with transaction.atomic():
+            User.objects.select_for_update().get(pk=user.pk)
+            if not cls.objects.filter(user=user).exists():
+                cls.objects.create(user=user, position=0, type=MessageTypeChoice.TEXT,
+                                   content=User.default_welcome_message(user.space, user.role, user.language))
+
+    @classmethod
+    def first_text_for(cls, user):
+        return cls.objects.filter(user=user, type=MessageTypeChoice.TEXT).values_list('content', flat=True).first() or ''
+
+    @classmethod
+    def has_custom_for(cls, user):
+        from User.models import User
+
+        defaults = {User.default_welcome_message(user.space, user.role, language).strip()
+                    for language in ('zh-CN', 'en')}
+        return any(kind != MessageTypeChoice.TEXT or bool(content.strip()) and content.strip() not in defaults
+                   for kind, content in cls.objects.filter(user=user).values_list('type', 'content'))
+
+    @classmethod
     def payload_for(cls, user, request=None):
         items = list(cls.objects.filter(user=user).select_related('user', 'media_resource__asset'))
-        if not items and (user.welcome_message or '').strip():
-            items = [cls.objects.create(
-                user=user,
-                position=0,
-                type=MessageTypeChoice.TEXT,
-                content=(user.welcome_message or '').strip(),
-            )]
         limit = cls.limit_for(user)
         return dict(
-            welcome_message=user.welcome_message,
+            welcome_message=next((item.content for item in items if item.type == MessageTypeChoice.TEXT), ''),
             messages=[item.jsonl(request=request) for item in items],
             max_messages=limit,
             can_add=len(items) < limit,
@@ -2862,13 +2876,6 @@ class WelcomeMessageTemplate(models.Model):
     @classmethod
     def materialize_for(cls, sender, chat, event_key=None):
         templates = list(cls.objects.filter(user=sender).select_related('media_resource__asset'))
-        if not templates and (sender.welcome_message or '').strip():
-            templates = [cls(
-                user=sender,
-                position=0,
-                type=MessageTypeChoice.TEXT,
-                content=(sender.welcome_message or '').strip(),
-            )]
         messages = []
         for template in templates:
             resource = template.media_resource.clone_for(sender) if template.media_resource_id else None

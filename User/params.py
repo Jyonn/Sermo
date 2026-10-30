@@ -27,7 +27,6 @@ class UserParams(metaclass=Params):
     ).to(lambda value: value.strip())
     lower_name: Validator
     password: Validator
-    welcome_message: Validator
     welcome_messages = Validator('messages').to(
         lambda value: value if isinstance(value, list) else (_ for _ in ()).throw(UserErrors.WELCOME_MESSAGES_INVALID)
     )

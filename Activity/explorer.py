@@ -103,9 +103,9 @@ class ExplorerService:
     def evidence(cls, user, campaign):
         from Chat.models import Submission
         from Square.models import Statement
-        defaults = {User.default_welcome_message(user.space, user.role, language).strip() for language in ('zh-CN', 'en')}
+        from Message.models import WelcomeMessageTemplate
         return {
-            'basic': [('welcome', bool((user.welcome_message or '').strip()) and user.welcome_message.strip() not in defaults), ('signature', bool((user.signature or '').strip()))],
+            'basic': [('welcome', WelcomeMessageTemplate.has_custom_for(user)), ('signature', bool((user.signature or '').strip()))],
             'security': [('phone', bool(user.phone and user.phone_verified_at)), ('email', bool(user.email and user.email_verified_at))],
             'apps': [('chronelle', cls.chronelle_bound(user)), ('checkin', user.map_checkins.exists())],
             'square': [('publish', Statement.objects.filter(user=user, space_id=user.space_id, is_deleted=False, created_at__gte=cls.START, created_at__lt=cls.END).exists() or Submission.objects.filter(author=user, chat__space_id=user.space_id, submitted_at__gte=cls.START, submitted_at__lt=cls.END).exists())],

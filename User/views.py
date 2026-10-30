@@ -974,7 +974,7 @@ class ContactUnbindView(View):
         return request.user.json_me()
 
 
-class WelcomeMessageView(View):
+class WelcomeMessagesView(View):
     @auth.require_user
     def get(self, request: Request):
         from Message.models import WelcomeMessageTemplate

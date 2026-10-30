@@ -177,11 +177,6 @@ class UserNormalizers:
     def language(value):
         return UserValidator.normalize_language(value)
 
-    @staticmethod
-    def welcome_message(value):
-        return (value or '').strip()
-
-
 class User(models.Model):
     normalizers = UserNormalizers
     validators = UserValidator
@@ -262,6 +257,8 @@ class User(models.Model):
     email_unbound_at = models.DateTimeField(null=True, blank=True)
     phone_unbound_at = models.DateTimeField(null=True, blank=True)
     is_private_account = models.BooleanField(default=False)
+    # Archived pre-template value, retained for data recovery and old migrations.
+    # Runtime welcome messages live exclusively in WelcomeMessageTemplate.
     welcome_message = models.CharField(
         max_length=vldt.WELCOME_MESSAGE_MAX_LENGTH,
         default='',
@@ -411,11 +408,6 @@ class User(models.Model):
         if role == UserRoleChoice.OFFICIAL:
             verified = True
         normalized_language = cls.vldt.language(language)
-        welcome_message = cls.default_welcome_message(
-            space=space,
-            role=role,
-            language=normalized_language,
-        )
         default_avatar_preset_id = cls._default_avatar_preset_id(salt)
         normalized_email = cls._normalize_email(email) or None
         email_verified_at = timezone.now() if verified and normalized_email else None
@@ -427,7 +419,6 @@ class User(models.Model):
             salt=salt,
             role=role,
             language=normalized_language,
-            welcome_message=welcome_message,
             email=normalized_email,
             email_verified_at=email_verified_at,
             account_level=UserAccountLevelChoice.VERIFIED if verified else UserAccountLevelChoice.BASIC,
@@ -437,6 +428,7 @@ class User(models.Model):
         )
         if password:
             user.set_password(password)
+        user.ensure_welcome_messages()
         cls._ensure_official_friendship(user)
         if space.space_group_enabled:
             from Chat.models import Chat
@@ -488,14 +480,14 @@ class User(models.Model):
             if not function.verify_password(password, user.salt, user.password):
                 raise UserErrors.PASSWORD_ERROR
             user.set_language(normalized_language)
-            user.ensure_welcome_message(language=normalized_language)
+            user.ensure_welcome_messages()
             cls._ensure_official_friendship(user)
             return user
 
         if password:
             user.set_password(password)
         user.set_language(normalized_language)
-        user.ensure_welcome_message(language=normalized_language)
+        user.ensure_welcome_messages()
         cls._ensure_official_friendship(user)
         return user
 
@@ -698,17 +690,10 @@ class User(models.Model):
             else cls.MEMBER_WELCOME_MESSAGE_EN
         )
 
-    def ensure_welcome_message(self, language=None, save=True):
-        if (self.welcome_message or '').strip():
-            return self
-        self.welcome_message = self.default_welcome_message(
-            space=self.space,
-            role=self.role,
-            language=language or self.language,
-        )
-        if save:
-            self.save(update_fields=['welcome_message'])
-            self.award_growth('explore:welcome')
+    def ensure_welcome_messages(self):
+        from Message.models import WelcomeMessageTemplate
+
+        WelcomeMessageTemplate.ensure_default_for(self)
         return self
 
     def display_plaza_greeting(self):
@@ -720,14 +705,6 @@ class User(models.Model):
             if self.vldt.normalize_language(self.language) in {'zh-CN', 'zh-TW'}
             else self.DEFAULT_PLAZA_GREETING_EN
         )
-
-    def set_welcome_message(self, welcome_message, save=True):
-        self.require_capability('menu.profile.welcome')
-        normalized = self.vldt.welcome_message(welcome_message)
-        self.welcome_message = normalized
-        if save:
-            self.save(update_fields=['welcome_message'])
-        return self
 
     def ensure_contact_available(self, channel: int, target: str):
         target = (target or '').strip()
@@ -1008,6 +985,12 @@ class User(models.Model):
     def _dictify_user_id(self):
         return self.id
 
+    def _dictify_welcome_message(self):
+        # Compatibility for older clients; never read the archived column.
+        from Message.models import WelcomeMessageTemplate
+
+        return WelcomeMessageTemplate.first_text_for(self)
+
     def _dictify_last_heartbeat(self):
         return self.last_heartbeat.timestamp()
 
@@ -1281,7 +1264,6 @@ class User(models.Model):
             'operator',
             'verified',
             'is_alive',
-            'welcome_message',
             'plaza_greeting',
             'growth_level',
             'is_permanent_vip',
@@ -1424,6 +1406,7 @@ class User(models.Model):
             else ''
         )
         payload['growth'] = self.calculate_growth()
+        payload['welcome_message_count'] = self.welcome_message_templates.count()
         payload['resource_inventory'] = UserResourceInventory.payload_for(self)
         payload['growth_honor'] = self.growth_honor()
         payload['founder_medal_years'] = self.founder_medal_years()

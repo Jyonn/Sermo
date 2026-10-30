@@ -260,7 +260,7 @@ class UserHeartbeatTests(TestCase):
         User.objects.filter(id=user.id).update(last_heartbeat=previous)
         user.refresh_from_db()
 
-        user.welcome_message = 'hello'
+        user.signature = 'hello'
         user.save()
         user.refresh_from_db()
 

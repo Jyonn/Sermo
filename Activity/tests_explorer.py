@@ -10,6 +10,7 @@ from Space.models import Space
 from Square.models import Statement
 from TravelMap.models import MapCheckIn
 from User.models import User, UserErrors, UserResourceInventory
+from Message.models import MediaAsset, MediaResource, MessageTypeChoice, WelcomeMessageTemplate
 from utils import auth
 
 
@@ -33,8 +34,49 @@ class ExplorerTests(TestCase):
                                 HTTP_AUTHORIZATION='Bearer '+auth.get_login_token(self.user)['auth'])
 
     def basic(self):
-        self.user.welcome_message='欢迎来到我的侦探事务所。';self.user.signature='真相只有一个。'
-        self.user.save(update_fields=['welcome_message', 'signature'])
+        with patch.object(User, 'require_capability', return_value=self.user):
+            WelcomeMessageTemplate.replace_for(self.user, [{'type': MessageTypeChoice.TEXT, 'content': '欢迎来到我的侦探事务所。'}])
+        self.user.signature='真相只有一个。'
+        self.user.save(update_fields=['signature'])
+
+    def test_welcome_uses_templates_and_ignores_archived_text(self):
+        self.user.welcome_message = 'An obsolete custom greeting'
+        self.user.save(update_fields=['welcome_message'])
+        self.assertFalse(ExplorerService.evidence(self.user, self.campaign)['basic'][0][1])
+        self.basic()
+        self.assertTrue(ExplorerService.evidence(self.user, self.campaign)['basic'][0][1])
+
+    def test_every_supported_non_text_welcome_counts(self):
+        from Sticker.models import StickerAsset
+        import json
+
+        for kind in WelcomeMessageTemplate.ALLOWED_TYPES - {MessageTypeChoice.TEXT}:
+            with self.subTest(kind=kind):
+                if kind == MessageTypeChoice.STICKER:
+                    sticker = StickerAsset.objects.create(content_hash='f' * 64, storage_key='welcome/sticker.webp')
+                    item = {'type': kind, 'content': json.dumps({'asset_id': sticker.id})}
+                else:
+                    from Message.models import Message
+                    media_kind = MediaAsset.kind_for_name(Message.MEDIA_KIND_BY_TYPE[kind])
+                    asset = MediaAsset.objects.create(source_key=f'welcome/{kind}', source_uri=f'https://example.test/{kind}',
+                                                     kind=media_kind, status=MediaAsset.STATUS_READY)
+                    resource = MediaResource.acquire(self.user, asset, media_kind)
+                    item = {'type': kind, 'resource_id': resource.id}
+                with patch.object(User, 'require_capability', return_value=self.user):
+                    WelcomeMessageTemplate.replace_for(self.user, [item])
+                self.assertTrue(ExplorerService.evidence(self.user, self.campaign)['basic'][0][1])
+                self.user.ensure_welcome_messages()
+                self.assertEqual(self.user.welcome_message_templates.get().type, kind)
+                self.assertEqual(self.user._dictify_welcome_message(), '')
+
+    def test_default_welcome_in_either_language_and_empty_lists_do_not_count(self):
+        template = self.user.welcome_message_templates.get()
+        for language in ('zh-CN', 'en'):
+            template.content = User.default_welcome_message(self.space, self.user.role, language)
+            template.save(update_fields=['content'])
+            self.assertFalse(ExplorerService.evidence(self.user, self.campaign)['basic'][0][1])
+        template.delete()
+        self.assertFalse(ExplorerService.evidence(self.user, self.campaign)['basic'][0][1])
 
     def security(self):
         self.user.phone='13800000001';self.user.phone_verified_at=ExplorerService.START
