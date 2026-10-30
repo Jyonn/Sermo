@@ -37,24 +37,15 @@ class ExplorerService:
     def chronelle_bound(user):
         # Inspect only the locally verified native binding; never refresh tokens
         # or call the provider from activity banners/status polling.
-        from User.chronelle_account import BindingFailure, config, unpack, require_ready
-        from User.models import ChronelleAccount, ChronelleCredential
-        import hashlib
+        from User.chronelle_account import BindingFailure, unpack, resolve_binding
+        from User.models import ChronelleAccount
         row = ChronelleAccount.objects.filter(user=user).first()
         if row is None:
             return False
         try:
-            value = unpack(row)
-            binding = value.get('binding') or {}
-            if value.get('protocol') != 'oauth-v1' or not binding.get('subject') or binding.get('client_id') != config()[0]:
-                return False
-            require_ready(value)
-            key = hashlib.sha256((binding['client_id']+'\0'+binding['subject']).encode()).hexdigest()
-            shared = ChronelleCredential.objects.filter(pk=key).first()
-            if shared is not None:
-                require_ready(unpack(shared))
+            resolve_binding(unpack(row))
             return True
-        except (BindingFailure, KeyError, TypeError):
+        except BindingFailure:
             return False
 
     @classmethod

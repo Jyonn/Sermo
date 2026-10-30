@@ -11,7 +11,7 @@ from Chat.models import ResearchMeeting, ResearchProject, ChatMemberStatusChoice
 from Chat.research import fail
 from Chat.research_calendar import project_for
 from User.chronelle_account import BindingFailure, credentials, remote, config
-from User.chronelle_views import authorization_site, APP_ORIGINS
+from User.chronelle_origins import authorization_site, APP_ORIGINS
 from utils import auth
 from utils.content_safety import check_user_text, ContentSafetyScene
 

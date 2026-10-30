@@ -9,7 +9,7 @@ from Chat.models import ResearchProject, ResearchCalendarPreference, ChatMemberS
 from Chat.research import fail
 from User.models import ChronelleAccount
 from User.chronelle_account import BindingFailure, calendar, config, credentials, remote, revocation_credentials, unpack
-from User.chronelle_views import authorization_site, APP_ORIGINS
+from User.chronelle_origins import authorization_site, APP_ORIGINS
 from utils import auth
 
 

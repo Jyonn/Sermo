@@ -284,6 +284,7 @@ class User(models.Model):
     chat_bubble_style = models.CharField(max_length=16, default='default')
     avatar_frame_style = models.CharField(max_length=16, default='none')
     profile_card_theme = models.CharField(max_length=16, default='default')
+    # Archived display-only integration metadata; not OAuth binding evidence.
     chronelle_calendar_id = models.CharField(max_length=36, default='', blank=True)
     chronelle_authorization = models.JSONField(default=dict, blank=True)
     statement_card_style = models.CharField(max_length=16, default='default')
@@ -1275,7 +1276,6 @@ class User(models.Model):
             'avatar_uri',
             'avatar_cache_key',
         )
-        payload['chronelle_calendar_id'] = self.chronelle_calendar_id
         payload['growth_level_name'] = self._dictify_growth_level_name()
         payload['founder_medal_years'] = self.founder_medal_years()
         payload['explorer_badge_years'] = self.explorer_badge_years()
@@ -1301,7 +1301,6 @@ class User(models.Model):
             'avatar_cache_key',
             'last_heartbeat',
         )
-        payload['chronelle_calendar_id'] = self.chronelle_calendar_id
         payload['growth_level'] = self.growth_level
         payload['growth_level_name'] = self._dictify_growth_level_name()
         payload['founder_medal_years'] = self.founder_medal_years()
@@ -1399,7 +1398,6 @@ class User(models.Model):
             'profile_card_theme',
             'show_self_avatar',
         )
-        payload['chronelle_calendar_id'] = self.chronelle_calendar_id
         payload['chat_background_uri'] = (
             sign_private_download_url(self.chat_background_uri)
             if self.chat_background_uri

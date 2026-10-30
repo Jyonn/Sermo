@@ -4,7 +4,7 @@ from uuid import UUID
 import requests
 from django.core.management.base import BaseCommand,CommandError
 from User.chronelle_account import config,remote,BindingFailure
-from User.chronelle_views import BASE,MIRROR_BASE,APP_ORIGINS
+from User.chronelle_origins import BASE,MIRROR_BASE,APP_ORIGINS
 
 
 class Command(BaseCommand):

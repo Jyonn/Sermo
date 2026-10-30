@@ -1,5 +1,4 @@
 from django.urls import path
-from User.chronelle_views import ChronelleBindingView, ChronelleAuthorizationView, ChronelleClaimView
 from User.chronelle_account import FullChronelleView
 from User.chronelle_permissions import ChronellePermissionsView
 from User.chronelle_profile import ChronelleProfileView
@@ -103,9 +102,6 @@ urlpatterns = [
     path('oauth/applications', OAuthDeveloperApplicationsView.as_view()),
     path('oauth/applications/<int:app_id>', OAuthDeveloperApplicationsView.as_view()),
     path('oauth/avatar/<str:token>', OAuthAvatarView.as_view(), name='oauth avatar'),
-    path('me/chronelle', ChronelleBindingView.as_view(), name='chronelle binding'),
-    path('me/chronelle/authorize', ChronelleAuthorizationView.as_view(), name='chronelle authorization'),
-    path('me/chronelle/claim', ChronelleClaimView.as_view(), name='chronelle claim'),
     path('oauth/authorize', OAuthAuthorizeView.as_view(), name='oauth authorize'),
     path('oauth/token', OAuthTokenView.as_view(), name='oauth token'),
     path('oauth/userinfo', OAuthUserinfoView.as_view(), name='oauth userinfo'),

@@ -10,7 +10,7 @@ from Chat.calendar_policy import projection
 from Chat.research import fail
 from User.models import User, ChronelleAccount
 from User.chronelle_account import BindingFailure, calendar, config, credentials, remote, unpack
-from User.chronelle_views import authorization_site
+from User.chronelle_origins import authorization_site
 from utils import auth
 
 

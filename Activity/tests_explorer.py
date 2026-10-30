@@ -227,18 +227,23 @@ class ExplorerTests(TestCase):
 
     def test_native_binding_evidence_is_local_and_rejects_revocation(self):
         import hashlib
+        import uuid
         from cryptography.fernet import Fernet
         from User.chronelle_account import store
         from User.models import ChronelleAccount, ChronelleCredential
         self.binding.stop()
         client = 'coapp_explorer_test_application'
         cipher = Fernet(Fernet.generate_key())
-        value = {'protocol': 'oauth-v1', 'binding': {'subject': 'explorer-subject', 'client_id': client}, 'access_until': 0}
+        subject = str(uuid.uuid4())
+        value = {'protocol': 'oauth-v1', 'binding': {'subject': subject, 'client_id': client,
+                 'binding_id': str(uuid.uuid4()), 'binding_version': 1,
+                 'expires_at': ExplorerService.END.timestamp()}, 'access_until': 0,
+                 'access_token': 'test-access', 'refresh_token': 'test-refresh'}
         with patch('User.chronelle_account.config', return_value=(client, 'test-only', cipher)), patch('User.chronelle_account.remote', side_effect=AssertionError('Activity polling must not call Chronelle')):
             row = ChronelleAccount.objects.create(user=self.user)
             store(row, value)
             self.assertTrue(ExplorerService.chronelle_bound(self.user))
-            key = hashlib.sha256((client+'\0explorer-subject').encode()).hexdigest()
+            key = hashlib.sha256((client+'\0'+subject).encode()).hexdigest()
             shared = ChronelleCredential.objects.create(pk=key)
             store(shared, {**value, 'revoked': True})
             self.assertFalse(ExplorerService.chronelle_bound(self.user))

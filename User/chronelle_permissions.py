@@ -4,7 +4,7 @@ from Chat.calendar_policy import defaults, modes, review_required, save
 from Chat.models import ResearchCalendarPreference
 from Chat.research import fail
 from User.chronelle_account import BindingFailure, calendar, credentials
-from User.chronelle_views import authorization_site, APP_ORIGINS
+from User.chronelle_origins import authorization_site, APP_ORIGINS
 from utils import auth
 
 

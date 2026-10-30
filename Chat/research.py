@@ -74,7 +74,7 @@ class ResearchView(View):
             if project_id and body.get('action') in ('leave','remove','dissolve'):
                 from Chat.research_calendar import project_for
                 from User.chronelle_account import revocation_credentials, BindingFailure
-                from User.chronelle_views import authorization_site
+                from User.chronelle_origins import authorization_site
                 try:
                     snapshot = project_for(request.user,project_id)
                     if body['action'] != 'leave' and not snapshot.chat.is_owner(request.user):

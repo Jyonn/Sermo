@@ -33,7 +33,7 @@ class ChronelleAccountTests(TestCase):
 
     def bound(self,user=None,expired=False):
         row=ChronelleAccount.objects.create(user=user or self.user)
-        value={'protocol':'oauth-v1','binding':{'subject':str(uuid.uuid4()),'binding_id':str(uuid.uuid4()),'client_id':self.client_id,'binding_version':1},'access_token':'cba_test-secret','refresh_token':'cbr_test-secret','access_until':timezone.now().timestamp()+(-1 if expired else 900)}
+        value={'protocol':'oauth-v1','binding':{'subject':str(uuid.uuid4()),'binding_id':str(uuid.uuid4()),'client_id':self.client_id,'binding_version':1,'expires_at':(timezone.now()+timezone.timedelta(days=180)).timestamp()},'access_token':'cba_test-secret','refresh_token':'cbr_test-secret','access_until':timezone.now().timestamp()+(-1 if expired else 900)}
         store(row,value)
         return row,value
 
@@ -57,7 +57,7 @@ class ChronelleAccountTests(TestCase):
         self.assertEqual(self.project.calendar_displays,[])
 
     def test_all_four_callback_origins_and_unknown_origin_rejected(self):
-        from User.chronelle_views import APP_ORIGINS
+        from User.chronelle_origins import APP_ORIGINS
         for origin in APP_ORIGINS:
             self.headers['HTTP_ORIGIN']=origin
             self.call({'action':'authorize','confirmed':True})
