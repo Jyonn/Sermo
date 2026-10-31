@@ -85,6 +85,57 @@ class FriendshipExactSearchTests(TestCase):
         self.assertEqual(rejected.status_code, 400)
 
 
+class FriendshipStatusTests(TestCase):
+    setUp = FriendshipExactSearchTests.setUp
+    authorization = staticmethod(FriendshipExactSearchTests.authorization)
+
+    def status(self, viewer, target):
+        return self.client.get('/friends/status', {'user_id': target.id}, **self.authorization(viewer))
+
+    def test_absent_relation_is_explicitly_resolved_without_writes(self):
+        before = Friendship.objects.count()
+        response = self.status(self.verified_user, self.unverified_target)
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json()['body'], dict(is_friend=False, relationship_resolved=True, relationship=None))
+        self.assertEqual(Friendship.objects.count(), before)
+
+    def test_all_relation_states_preserve_legacy_friendship_contract(self):
+        low, high = sorted([self.verified_user, self.unverified_target], key=lambda user: user.id)
+        relation = Friendship.objects.create(space=self.space, user_low=low, user_high=high, requested_by=high)
+        for state in (0, 1, 2, 3):
+            relation.status = state
+            relation.save(update_fields=['status'])
+            for viewer, peer in ((low, high), (high, low)):
+                body = self.status(viewer, peer).json()['body']
+                self.assertTrue(body['relationship_resolved'])
+                self.assertEqual(body['relationship']['request_id'], relation.id)
+                self.assertEqual(body['relationship']['status'], state)
+                self.assertEqual(body['is_friend'], state == 1)
+                self.assertEqual('friendship' in body, state == 1)
+        relation.refresh_from_db()
+        self.assertEqual(relation.status, 3)
+
+    def test_history_window_does_not_hide_exact_pending_relation(self):
+        low, high = sorted([self.verified_user, self.unverified_target], key=lambda user: user.id)
+        relation = Friendship.objects.create(space=self.space, user_low=low, user_high=high, requested_by=low)
+        for index in range(200):
+            peer = User.create(space=self.space, name=f'History peer {index}')
+            Friendship.objects.create(space=self.space, user_low=low, user_high=peer, requested_by=low)
+            Friendship.objects.create(space=self.space, user_low=high, user_high=peer, requested_by=peer)
+        self.assertNotIn(relation.id, [row.id for row in Friendship.request_history_outgoing(low)])
+        self.assertNotIn(relation.id, [row.id for row in Friendship.request_history_incoming(high)])
+        for viewer, peer in ((low, high), (high, low)):
+            body = self.status(viewer, peer).json()['body']
+            self.assertEqual(body['relationship']['request_id'], relation.id)
+            self.assertEqual(body['relationship']['status'], 0)
+
+    def test_status_requires_auth_and_rejects_cross_space_target(self):
+        self.assertNotEqual(self.client.get('/friends/status', {'user_id': self.verified_user.id}).status_code, 200)
+        other = Space.objects.create(name='Other status', slug='other-status', email='other-status@example.com')
+        peer = User.create(space=other, name='Other peer')
+        self.assertNotEqual(self.status(self.verified_user, peer).status_code, 200)
+
+
 class FriendshipStateEventTests(TestCase):
     def setUp(self):
         self.space = Space.objects.create(name='State Space', slug='state-space', email='owner@example.com')

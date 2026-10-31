@@ -27,12 +27,15 @@ class FriendshipStatusView(View):
     @analyse.query(FriendshipParams.user_id)
     def get(self, request: Request):
         item = Friendship.between(request.user, request.query.target_user)
-        if item is None or item.status != FriendshipStatusChoice.ACCEPTED:
-            return dict(is_friend=False)
-        return dict(
-            is_friend=True,
-            friendship=item.json(),
+        is_friend = item is not None and item.status == FriendshipStatusChoice.ACCEPTED
+        payload = dict(
+            is_friend=is_friend,
+            relationship_resolved=True,
+            relationship=item.json() if item is not None else None,
         )
+        if is_friend:
+            payload['friendship'] = payload['relationship']
+        return payload
 
 
 class FriendshipRequestView(View):
