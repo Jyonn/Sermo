@@ -1841,8 +1841,9 @@ class Message(models.Model):
     def clear_for_user(cls, chat: Chat, user: User):
         if not chat.has_active_member(user):
             raise MessageErrors.NOT_A_MEMBER
+        User.objects.select_for_update().get(id=user.id)
         messages = list(
-            cls.visible_for_user(chat, user)
+            cls.visible_for_user(chat, user).exclude(retention_marks__user=user)
             .select_for_update()
             .only('id', 'chat_id')
         )
@@ -1981,6 +1982,16 @@ class MessageUserState(models.Model):
         constraints = [
             models.UniqueConstraint(fields=['message', 'user'], name='message_user_hidden_unique'),
         ]
+
+
+class MessageRetention(models.Model):
+    """Private cleanup protection, independent of shared conversation pins."""
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    message = models.ForeignKey(Message, on_delete=models.CASCADE, related_name='retention_marks')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['user', 'message'], name='message_retention_user_unique')]
 
 
 class MessageHistoryRecovery(models.Model):

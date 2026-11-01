@@ -30,8 +30,21 @@ def validate_target_chat_ids(values):
     return normalized
 
 
+def validate_history_ids(values):
+    if not isinstance(values, list) or len(values) > 500 or any(type(value) is not int or value <= 0 for value in values) or len(set(values)) != len(values):
+        raise MessageErrors.PAYLOAD_INVALID
+    return values
+
+
 class MessageParams(metaclass=Params):
     model_class = Message
+    history_types = Validator('types').to(str).bool(lambda value: len(value) <= 64).default('')
+    history_start = Validator('start').to(float).bool(lambda value: 0 <= value <= 4133980800).null().default(None)
+    history_end = Validator('end').to(float).bool(lambda value: 0 <= value <= 4133980800).null().default(None)
+    history_snapshot = Validator('snapshot').to(int).bool(lambda value: value >= 0).null().default(None)
+    history_retained = Validator('retained').to(int).bool(lambda value: value in (0, 1)).default(0)
+    history_action = Validator('action').to(str).bool(lambda value: value in ('preview', 'delete', 'retain', 'release'))
+    history_ids = Validator('message_ids').to(validate_history_ids).default([])
 
     message_id = Validator('message_id', final_name='message').to(int).to(Message.index)
     message_ids = Validator('message_ids').to(validate_message_ids)

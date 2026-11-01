@@ -10,6 +10,7 @@ from Chat.models import Chat, SubmissionStatusChoice
 from Chat.validators import ChatErrors
 from Message.models import AudioTranscript, AudioTranscriptStatusChoice, ForwardBundle, LinkPreview, MediaAsset, MediaResource, Message, MessageEvent, MessageHistoryRecovery, MessageTypeChoice, PinnedMessage
 from Message.params import MessageParams
+from Message.models import MessageUserState
 from utils.content_safety import ContentSafetyScene, check_user_text
 from Message.validators import MessageErrors
 from utils.qiniu import ShortAudioTranscriptionError, issue_message_upload, build_message_image_thumbnail_uri, build_message_video_thumbnail_uri, sign_private_download_url, avatar_uri_for_key, transcribe_short_audio, validate_message_media_key, validate_message_media_size
@@ -171,6 +172,31 @@ class MessageSearchView(View):
         )
 
 
+class MessageHistoryManagementView(View):
+    @staticmethod
+    def filters(params):
+        return dict(keyword=params.keyword, types=params.types, start=params.start, end=params.end,
+                    snapshot=params.snapshot, retained=params.retained)
+
+    @auth.require_user
+    @analyse.query(MessageParams.chat_id, MessageParams.keyword, MessageParams.history_types,
+                   MessageParams.history_start, MessageParams.history_end, MessageParams.history_snapshot,
+                   MessageParams.history_retained, MessageParams.before)
+    @auth.require_chat_member()
+    def get(self, request: Request):
+        from Message.history_management import read_history
+        return read_history(request.query.chat, request.user, self.filters(request.query), request.query.before, request)
+
+    @auth.require_user
+    @analyse.json(MessageParams.chat_id, MessageParams.keyword, MessageParams.history_types,
+                  MessageParams.history_start, MessageParams.history_end, MessageParams.history_snapshot,
+                  MessageParams.history_retained, MessageParams.history_action, MessageParams.history_ids)
+    def post(self, request: Request):
+        from Message.history_management import manage_history
+        _require_message_feature(request.json.chat, request.user)
+        return manage_history(request.json.chat, request.user, self.filters(request.json), request.json.action, list(request.json.message_ids))
+
+
 class MessageSearchCalendarView(View):
     @auth.require_user
     @analyse.query(
@@ -194,6 +220,7 @@ class MessageBatchView(View):
     def delete(self, request: Request):
         message_ids = list(request.json.message_ids)
         with transaction.atomic():
+            User.objects.select_for_update().get(id=request.user.id)
             messages = list(
                 Message.objects.select_for_update().select_related('chat').filter(
                     id__in=message_ids,
@@ -208,8 +235,10 @@ class MessageBatchView(View):
                 if message.type in (MessageTypeChoice.SYSTEM, MessageTypeChoice.OFFICIAL_NOTICE, MessageTypeChoice.SUBMISSION_INVITE):
                     raise MessageErrors.SYSTEM_MESSAGE_FORBIDDEN
             for message in messages:
-                message.hide_for(request.user)
-        return dict(deleted_message_ids=message_ids)
+                if not message.retention_marks.filter(user=request.user).exists():
+                    message.hide_for(request.user)
+            deleted_ids = list(MessageUserState.objects.filter(user=request.user, message_id__in=message_ids).values_list('message_id', flat=True))
+        return dict(deleted_message_ids=deleted_ids)
 
 
 class MessageForwardView(View):
@@ -284,7 +313,8 @@ class MessageClearView(View):
             deleted_count = Message.clear_for_user(request.json.chat, request.user)
             from Chat.models import ChatReadState
             ChatReadState.mark_read(request.json.chat, request.user)
-        return dict(deleted_count=deleted_count)
+            retained_count = Message.visible_for_user(request.json.chat, request.user).filter(retention_marks__user=request.user).count()
+        return dict(deleted_count=deleted_count, retained_count=retained_count)
 
 
 class MessageHistoryRecoveryView(View):
