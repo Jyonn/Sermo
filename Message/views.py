@@ -176,11 +176,12 @@ class MessageHistoryManagementView(View):
     @staticmethod
     def filters(params):
         return dict(keyword=params.keyword, types=params.types, start=params.start, end=params.end,
-                    snapshot=params.snapshot, retained=params.retained)
+                    snapshot=params.snapshot, retained=params.retained, time_from=params.time_from, time_to=params.time_to)
 
     @auth.require_user
     @analyse.query(MessageParams.chat_id, MessageParams.keyword, MessageParams.history_types,
                    MessageParams.history_start, MessageParams.history_end, MessageParams.history_snapshot,
+                   MessageParams.history_time_from, MessageParams.history_time_to,
                    MessageParams.history_retained, MessageParams.before)
     @auth.require_chat_member()
     def get(self, request: Request):
@@ -190,6 +191,7 @@ class MessageHistoryManagementView(View):
     @auth.require_user
     @analyse.json(MessageParams.chat_id, MessageParams.keyword, MessageParams.history_types,
                   MessageParams.history_start, MessageParams.history_end, MessageParams.history_snapshot,
+                  MessageParams.history_time_from, MessageParams.history_time_to,
                   MessageParams.history_retained, MessageParams.history_action, MessageParams.history_ids)
     def post(self, request: Request):
         from Message.history_management import manage_history

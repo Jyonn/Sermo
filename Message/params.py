@@ -41,6 +41,8 @@ class MessageParams(metaclass=Params):
     history_types = Validator('types').to(str).bool(lambda value: len(value) <= 64).default('')
     history_start = Validator('start').to(float).bool(lambda value: 0 <= value <= 4133980800).null().default(None)
     history_end = Validator('end').to(float).bool(lambda value: 0 <= value <= 4133980800).null().default(None)
+    history_time_from = Validator('time_from').to(int).bool(lambda value: 0 <= value < 1440).null().default(None)
+    history_time_to = Validator('time_to').to(int).bool(lambda value: 0 <= value < 1440).null().default(None)
     history_snapshot = Validator('snapshot').to(int).bool(lambda value: value >= 0).null().default(None)
     history_retained = Validator('retained').to(int).bool(lambda value: value in (0, 1)).default(0)
     history_action = Validator('action').to(str).bool(lambda value: value in ('preview', 'delete', 'retain', 'release'))

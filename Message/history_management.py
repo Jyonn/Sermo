@@ -2,7 +2,8 @@
 import datetime
 
 from django.db import transaction
-from django.db.models import Max
+from django.db.models import Max, Q
+from django.db.models.functions import ExtractHour, ExtractMinute, Mod
 from django.utils import timezone
 
 from Message.models import Message, MessageEvent, MessageEventTypeChoice, MessageRetention, MessageUserState
@@ -10,7 +11,7 @@ from Message.validators import MessageErrors
 from User.models import User
 
 
-def matching_history(chat, user, *, keyword=None, types='', start=None, end=None, snapshot=None, retained=0):
+def matching_history(chat, user, *, keyword=None, types='', start=None, end=None, snapshot=None, retained=0, time_from=None, time_to=None):
     if not chat.has_active_member(user):
         raise MessageErrors.NOT_A_MEMBER
     query = Message.visible_for_user(chat, user)
@@ -30,6 +31,22 @@ def matching_history(chat, user, *, keyword=None, types='', start=None, end=None
         query = query.filter(created_at__lt=datetime.datetime.fromtimestamp(end, datetime.timezone.utc))
     if start is not None and end is not None and start >= end:
         raise MessageErrors.PAYLOAD_INVALID
+    if time_from is not None or time_to is not None:
+        if any(type(value) is not int or not 0 <= value < 1440 for value in (time_from, time_to) if value is not None):
+            raise MessageErrors.PAYLOAD_INVALID
+        if time_from is not None and time_from == time_to:
+            raise MessageErrors.PAYLOAD_INVALID
+        # Fixed UTC+8 arithmetic avoids relying on installed MySQL timezone tables.
+        query = query.annotate(history_minute=Mod(
+            ExtractHour('created_at', tzinfo=datetime.timezone.utc) * 60
+            + ExtractMinute('created_at', tzinfo=datetime.timezone.utc) + 480, 1440))
+        if time_from is not None and time_to is not None and time_from > time_to:
+            query = query.filter(Q(history_minute__gte=time_from) | Q(history_minute__lt=time_to))
+        else:
+            if time_from is not None:
+                query = query.filter(history_minute__gte=time_from)
+            if time_to is not None:
+                query = query.filter(history_minute__lt=time_to)
     if snapshot is not None:
         query = query.filter(id__lte=snapshot)
     if retained:

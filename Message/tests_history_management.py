@@ -1,4 +1,5 @@
 import json
+import datetime
 from django.test import TestCase
 from django.utils import timezone
 from Chat.models import Chat
@@ -93,3 +94,44 @@ class HistoryManagementTests(TestCase):
         self.assertEqual(response.status_code, 200, response.content)
         self.assertFalse(MessageUserState.objects.filter(user=self.user, message=self.one).exists())
         self.assertTrue(MessageUserState.objects.filter(user=self.user, message=self.two).exists())
+
+    def clock_fixture(self):
+        rows = []
+        for day, clock in [(1,'09:59:59'),(1,'10:00:00'),(1,'17:59:59'),(1,'18:00:00'),(2,'10:30:00'),(1,'23:00:00'),(2,'01:30:00'),(2,'02:00:00')]:
+            message = Message.create(self.chat, self.peer, MessageTypeChoice.TEXT, 'clock fixture')
+            moment = datetime.datetime.fromisoformat(f'2026-11-{day:02d}T{clock}+08:00')
+            Message.objects.filter(id=message.id).update(created_at=moment)
+            rows.append(message)
+        return rows
+
+    def test_daily_window_is_repeated_on_each_date_and_shared_by_cleanup(self):
+        rows = self.clock_fixture()
+        filters = dict(keyword='clock fixture', time_from=600, time_to=1080, snapshot=rows[-1].id)
+        ids = {row['message_id'] for row in read_history(self.chat, self.user, filters)['items']}
+        self.assertEqual(ids, {rows[1].id, rows[2].id, rows[4].id})
+        manage_history(self.chat, self.user, filters, 'retain', [rows[1].id])
+        self.assertEqual(manage_history(self.chat, self.user, filters, 'preview', [])['deletable_count'], 2)
+        self.assertEqual(set(manage_history(self.chat, self.user, filters, 'delete', [])['changed_ids']), {rows[2].id, rows[4].id})
+        self.assertFalse(MessageUserState.objects.filter(message=rows[3]).exists())
+
+    def test_overnight_window_midnight_and_one_sided_bounds(self):
+        rows = self.clock_fixture()
+        filters = dict(keyword='clock fixture', time_from=1320, time_to=120)
+        self.assertEqual({row['message_id'] for row in read_history(self.chat, self.user, filters)['items']}, {rows[5].id, rows[6].id})
+        self.assertEqual({row['message_id'] for row in read_history(self.chat, self.user, dict(keyword='clock fixture', time_to=0))['items']}, set())
+        self.assertEqual(read_history(self.chat, self.user, dict(keyword='clock fixture', time_from=0))['total_count'], 8)
+        day_start = datetime.datetime.fromisoformat('2026-11-02T00:00:00+08:00').timestamp()
+        page = read_history(self.chat, self.user, dict(filters, start=day_start, end=day_start+86400))
+        self.assertEqual([row['message_id'] for row in page['items']], [rows[6].id])
+
+    def test_daily_window_endpoint_and_invalid_bounds(self):
+        self.clock_fixture()
+        headers = {'HTTP_AUTHORIZATION': 'Bearer ' + auth.get_login_token(self.user)['auth']}
+        response = self.client.get('/messages/history', dict(chat_id=self.chat.id, keyword='clock fixture', time_from=600, time_to=1080), **headers)
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json()['body']['total_count'], 3)
+        response = self.client.post('/messages/history', data=json.dumps(dict(chat_id=self.chat.id, keyword='clock fixture', time_from=600, time_to=1080, snapshot=Message.objects.filter(chat=self.chat).latest('id').id, action='preview')), content_type='application/json', **headers)
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json()['body']['deletable_count'], 3)
+        for values in [dict(time_from=-1),dict(time_to=1440),dict(time_from=600,time_to=600)]:
+            with self.assertRaises(Exception): read_history(self.chat, self.user, values)
