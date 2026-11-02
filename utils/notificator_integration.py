@@ -158,6 +158,14 @@ def send_space_identity_review_mail(space):
     )
 
 
+def send_sticker_series_review_mail(series):
+    admin_email=Config.get_value_by_key(CI.ADMIN_EMAIL,default='')
+    if not admin_email:return None
+    return send_reviewable_mail(admin_email,format='markdown',title=f'表情包集合待审：{series.name}',
+        body=f'用户 {series.user.name} 提交了表情包集合申请（#{series.id}）。请到超级管理员后台的资源管理中审核。',
+        locale='zh-CN',recipient_name='FRIENDEN 管理员')
+
+
 def notificator_result_detail(result):
     request_id = result.get('request_id') if isinstance(result, dict) else None
     return f'request_id:{request_id}' if request_id else None

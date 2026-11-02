@@ -186,6 +186,11 @@ class ManagedResource(models.Model):
 class StickerSeries(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='sticker_series')
     name = models.CharField(max_length=10)
+    draft_assets = models.JSONField(default=list)
+    published_snapshot = models.JSONField(null=True, blank=True)
+    pending_snapshot = models.JSONField(null=True, blank=True)
+    review_note = models.CharField(max_length=300, blank=True, default='')
+    submitted_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -197,6 +202,8 @@ class UserSticker(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='stickers')
     asset = models.ForeignKey(StickerAsset, on_delete=models.PROTECT, related_name='owners')
     series = models.ForeignKey(StickerSeries, on_delete=models.SET_NULL, null=True, blank=True, related_name='stickers')
+    in_home = models.BooleanField(default=True)
+    is_uploaded = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -214,15 +221,19 @@ class UserSticker(models.Model):
         return row
 
     @classmethod
-    def collect(cls, user: User, asset: StickerAsset):
-        sticker, created = cls.objects.get_or_create(user=user, asset=asset)
+    def collect(cls, user: User, asset: StickerAsset, in_home=True, uploaded=False):
+        sticker, created = cls.objects.get_or_create(user=user, asset=asset, defaults=dict(in_home=in_home, is_uploaded=uploaded))
+        if not created and ((in_home and not sticker.in_home) or (uploaded and not sticker.is_uploaded)):
+            sticker.in_home = sticker.in_home or in_home
+            sticker.is_uploaded = sticker.is_uploaded or uploaded
+            sticker.save(update_fields=['in_home', 'is_uploaded'])
         if created:
             user.award_growth('explore:sticker_collect')
         return sticker, created
 
     def jsonl(self, request: HttpRequest = None):
         payload = self.asset.jsonl(request=request)
-        payload.update(sticker_id=self.id, created_at=self.created_at.timestamp(), series_id=self.series_id)
+        payload.update(sticker_id=self.id, created_at=self.created_at.timestamp(), series_id=self.series_id, in_home=self.in_home, is_uploaded=self.is_uploaded)
         return payload
 
 

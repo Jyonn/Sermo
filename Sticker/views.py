@@ -49,6 +49,9 @@ class StickerView(View):
         if sticker.user_id != request.user.id:
             raise StickerErrors.NOT_ACCESSIBLE
         asset = sticker.asset
+        if sticker.is_uploaded:
+            sticker.in_home=False;sticker.save(update_fields=['in_home'])
+            return OK
         sticker.delete()
         delete_unreferenced_sticker_asset(asset)
         return OK
@@ -82,7 +85,8 @@ class StickerPrepareView(View):
         asset = StickerAsset.objects.filter(content_hash=request.json.content_hash).first()
         if asset is not None:
             asset.queue_missing_dimensions()
-            sticker, _ = UserSticker.collect(request.user, asset)
+            from Sticker.series import collect_uploaded
+            sticker = collect_uploaded(request, asset)
             request.user.award_growth('explore:sticker_create')
             return dict(upload_required=False, sticker=sticker.jsonl(request=request))
         return dict(
@@ -118,7 +122,8 @@ class StickerCompleteView(View):
         )
         if created or not (asset.pixel_width and asset.pixel_height):
             asset.queue_missing_dimensions()
-        sticker, _ = UserSticker.collect(request.user, asset)
+        from Sticker.series import collect_uploaded
+        sticker = collect_uploaded(request, asset)
         request.user.award_growth('explore:sticker_create')
         return sticker.jsonl(request=request)
 

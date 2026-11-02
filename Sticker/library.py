@@ -5,19 +5,25 @@ from User.models import User
 
 def sticker_library_payload(user, offset, limit, request=None, series_id=None):
     query = UserSticker.objects.filter(user=user)
-    if series_id is not None:
-        query = query.filter(series_id=series_id or None)
+    if series_id is None:
+        query=query.filter(in_home=True)
+    elif series_id==0:
+        query=query.filter(is_uploaded=True)
+    else:
+        from Sticker.models import StickerSeries
+        group=StickerSeries.objects.filter(id=series_id,user=user).first()
+        query=query.filter(asset_id__in=group.draft_assets if group else [],is_uploaded=True)
     page = list(query.select_related('asset')[offset:offset + limit + 1])
     rows = page[:limit]
     return dict(items=[row.jsonl(request=request) for row in rows], has_more=len(page) > limit, next_offset=offset + len(rows))
 
 
 def sticker_explore_payload(user, offset, limit, request=None):
-    owned_asset_ids = UserSticker.objects.filter(user=user).values('asset_id')
+    owned_asset_ids = UserSticker.objects.filter(user=user,in_home=True).values('asset_id')
     source_user_id = UserSticker.objects.filter(asset_id=OuterRef('pk')).order_by(
         'created_at', 'id',
     ).values('user_id')[:1]
-    asset_queryset = StickerAsset.objects.filter(managed_resources__isnull=True).exclude(id__in=owned_asset_ids).annotate(
+    asset_queryset = StickerAsset.objects.filter(managed_resources__isnull=True,owners__in_home=True).distinct().exclude(id__in=owned_asset_ids).annotate(
         source_user_id=Subquery(source_user_id),
     )
     page = list(asset_queryset.order_by('-created_at', '-id')[offset:offset + limit + 1])

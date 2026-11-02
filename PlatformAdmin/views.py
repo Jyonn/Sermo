@@ -176,10 +176,12 @@ class DashboardView(View):
     @auth.require_platform_admin
     def get(self, request):
         pending = Space.objects.filter(identity_submitted_at__isnull=False, identity_verified_at__isnull=True).count()
+        from Sticker.models import StickerSeries
         return dict(
             spaces=Space.objects.count(),
             members=User.objects.filter(role=UserRoleChoice.MEMBER, is_deleted=False).count(),
             pending_identity_reviews=pending,
+            pending_sticker_reviews=StickerSeries.objects.filter(pending_snapshot__isnull=False).count(),
             mfa_enabled=PlatformAdminSecurity.primary().mfa_enabled,
             recent_audit=[_audit_payload(item) for item in PlatformAuditLog.objects.all()[:8]],
         )

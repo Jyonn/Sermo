@@ -43,11 +43,10 @@ Imports are repeatable. A slug cannot silently replace different artwork: use a 
 collection/version for a replacement set. Each import and admin mutation is audited.
 Original images are deployment input and do not need to be committed to the app repo.
 
-After publication, run `npm run assets:sync` in the frontend. It downloads this release's
-Haibara files via the public registry, verifies SHA-256, and updates the small checked-in
-mirror cache. Existing hashed files are preserved. Commit the manifest and optimized
-files, then publish all four frontend sites. Runtime collection changes refresh in the
-background; unknown/new hashes use the canonical asset endpoint and local device cache.
+After publication, run `npm run assets:sync` in the frontend. It verifies this release's
+Haibara files via the public registry and writes URL metadata only. Artwork no longer
+ships in new frontend distributions. Publish all four sites; browser caches reuse the
+stable resource API URLs. Keep old deployed files for stale clients.
 
 ## Activity migration
 
@@ -67,3 +66,12 @@ the underlying artwork. `/series/assign` atomically moves up to 200 owned sticke
 Names have a combined limit of 10 ASCII units (non-ASCII characters count as two).
 `GET /stickers/?series_id=0` selects Unsorted; a positive ID selects a series before
 pagination. All ownership checks are enforced by the server.
+
+Series now represent moderated public collections, separate from the user's home.
+Collection uploads record `is_uploaded` provenance and default to `in_home=False`.
+Historical provenance follows the existing earliest-source attribution and excludes
+platform artwork. Later collected copies are not upload sources. Published and pending
+snapshots are separate; drafts remain private, submissions are frozen, and publication,
+updates and deletion require platform review. Submission sends the configured admin an
+email and creates a durable queue entry. `/platform-admin/sticker-packs` reviews the
+queue. `/stickers/packs` lists approved snapshots; collecting is an explicit operation.
