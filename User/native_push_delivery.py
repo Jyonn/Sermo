@@ -85,7 +85,7 @@ class NativePushDelivery(models.Model):
     @classmethod
     def finish(cls, delivery_id, claim_id, outcome):
         # Never store provider exception text, device tokens or payloads in logs.
-        if outcome not in ('sent', 'failed', 'unknown', 'rejected'):
+        if outcome not in ('sent', 'failed', 'unknown', 'rejected', 'skipped'):
             raise ValueError('invalid delivery outcome')
         if not isinstance(claim_id, uuid.UUID):
             raise ValueError('invalid claim')

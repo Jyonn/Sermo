@@ -1,8 +1,9 @@
 # Native Push Binding Foundation
 
-Development only. Deployment requires separate user confirmation. The current
-change adds a model, migration and authenticated binding endpoints. None is live;
-it does not enqueue or deliver any notification.
+Development only. Deployment requires separate user confirmation. Models,
+authenticated binding endpoints, a queue and an explicitly invoked APNs adapter
+exist on the development branch. None is live or connected to automatic event
+dispatch; no real notification has been sent.
 
 ## Isolation And Consent
 
@@ -63,7 +64,7 @@ current restriction that online notices are supported only by the instant channe
 It does not add another topic matrix or change browser delivery.
 
 Both enqueue and claim require explicitly supplied configured environments; their
-default is empty. No event hook, scheduler, provider transport or credentials are
+default is empty. No event hook, scheduler or live provider credentials are
 connected yet. Claim rechecks the current account, space, topic policy, binding
 lease, opt-in, token digest and revision. Any registration revision change cancels
 the old queued row conservatively, even if its token bytes did not change. Event
@@ -82,6 +83,57 @@ passed (`/private/tmp/frienden-native-push-queue-regression.log`). System checks
 whitespace checks passed. SQLite test setup applies migration 0095. Migration dry
 run reports only the previously reproduced OAuthGrant drift, not queue drift.
 MySQL lock/concurrency behavior and real provider outcomes remain unverified.
+
+### Provider Adapter And Submission
+
+`utils.apns.APNsTransport` uses a reusable HTTP/2-only HTTPX client, fixed Apple
+hosts, TLS verification, bounded timeouts, no ambient proxy settings and no
+redirect following. There are no automatic network retries. ES256 authentication
+tokens are cached for 50 minutes; private signing keys are omitted from repr.
+The normal HTTPX request log is redacted because the URL contains a device token.
+Low-level HPACK debug output is suppressed because compressed header blocks may
+contain authentication material. Other HTTPX logs remain available with token
+paths and bearer strings redacted.
+
+`APNsConfiguration.from_environment` is available for a future worker, but is not
+called automatically. `FRIENDEN_APNS_ENABLED` must be exactly `1`; default is off.
+Additional server-only keys are `FRIENDEN_APNS_TEAM_ID`, `FRIENDEN_APNS_KEY_ID`,
+`FRIENDEN_APNS_TOPIC`, `FRIENDEN_APNS_ENVIRONMENTS` (comma-separated sandbox and/or
+production), and `FRIENDEN_APNS_PRIVATE_KEY` (PEM). No values were configured.
+Use keys authorized for the selected environment/topic. Key or team changes must
+replace the transport and close its old connection pool, not mutate a live client.
+No secret belongs in the iOS app, repository or notification payload.
+
+`dispatch_native_delivery` claims a single row and rechecks eligibility before
+submission. Chat events additionally require active membership, current message
+visibility, an undeleted chat/message and no group notification mute. It uses the
+existing localized notification text; the version-1 tap identity contains only
+canonical account ID, space slug and event ID, not arbitrary event fields or URLs.
+Alert text is bounded against actual UTF-8 JSON size. The receiver must still
+authenticate and resolve the event through access-checked APIs; this metadata does
+not grant access. Notifications use expiration 0 to avoid provider-side storage.
+
+Only HTTP/2 200 with a matching response identity (when supplied) is accepted.
+Queue state `sent` means provider acceptance, not device receipt. Timeouts and
+unrecognized outcomes become terminal `unknown`. Only typed 410 invalidation
+timestamps from Unregistered/ExpiredToken responses may invalidate a binding;
+they must not predate its last registration or lie implausibly in the future.
+Invalidation matches the submitted account/binding, token digest and revision.
+Old in-flight rejection cannot invalidate a rotated token or another account.
+Provider errors are persisted only as fixed outcomes, never raw response text.
+
+Adapter milestone: 31 new transport/payload/dispatch tests; 127 combined regression
+tests passed, including browser Web Push (`/private/tmp/frienden-apns-full-regression-final.log`).
+System checks passed. Tests used generated temporary P-256 keys and HTTPX mock
+transport, not real credentials or network delivery. They do not prove TLS/HTTP2
+negotiation with Apple, production configuration, MySQL concurrency or receipt on
+a signed physical device. HTTPX HTTP/2 dependencies were installed only in the
+temporary development virtual environment.
+
+Protocol references: [Apple requests](https://developer.apple.com/documentation/usernotifications/sending-notification-requests-to-apns),
+[Apple token authentication](https://developer.apple.com/documentation/usernotifications/establishing-a-token-based-connection-to-apns),
+[Apple responses](https://developer.apple.com/documentation/usernotifications/handling-notification-responses-from-apns),
+and [HTTPX HTTP/2](https://www.python-httpx.org/http2/).
 
 Secret-free SQLite settings and a dedicated temporary virtual environment were
 used. No production database or delivery credential was accessed.
@@ -104,9 +156,9 @@ used. No production database or delivery credential was accessed.
 
 1. Authenticated binding endpoints are implemented on the development branch;
    deployment and client integration remain pending. No endpoint is live yet.
-2. Connect the tested queue to a provider transport and event dispatch behind an
-   explicit disabled-by-default server gate. Add token failure handling and payload
-   privacy/routing validation; configure APNs credentials only after approval.
+2. Connect the tested adapter/queue to automatic event dispatch behind an explicit
+   disabled-by-default server gate. Configure credentials only after approval;
+   confirm operational monitoring and credential rotation before enabling it.
 3. iOS OS-permission/device-token lifecycle, account-specific opt-in, rotation,
    logout cleanup and canonical access-checked notification tap routing.
 4. MySQL concurrency, migration rehearsal and signed-device sandbox/production
