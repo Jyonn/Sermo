@@ -5,7 +5,7 @@ from utils.qiniu import delete_sticker_file, validate_message_media_key
 
 def delete_unreferenced_sticker_asset(asset):
     """Delete an asset when no collection or visible message still references it."""
-    if UserSticker.objects.filter(asset=asset).exists():
+    if asset.managed_resources.exists() or UserSticker.objects.filter(asset=asset).exists():
         return False
     if Message.objects.filter(
         type=MessageTypeChoice.STICKER,

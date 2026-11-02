@@ -1,4 +1,5 @@
 from django.urls import path
+from Sticker.resources import ResourceAdminView, ResourceAdminAssetView, ResourceAdminUploadView
 from User.oauth_application_views import OAuthAdminApplicationsView
 from PlatformAdmin.debug_reports import DebugReportDetailView, DebugReportListView, DebugReportUploadView
 
@@ -14,6 +15,9 @@ from AccessPolicy.views import (
 )
 
 urlpatterns = [
+    path('resources', ResourceAdminView.as_view()),
+    path('resources/upload', ResourceAdminUploadView.as_view()),
+    path('resources/<int:asset_id>', ResourceAdminAssetView.as_view()),
     path('oauth/applications', OAuthAdminApplicationsView.as_view()),
     path('oauth/applications/<int:app_id>', OAuthAdminApplicationsView.as_view()),
     path('debug-reports/upload', DebugReportUploadView.as_view()),

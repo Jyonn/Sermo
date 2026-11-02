@@ -28,11 +28,11 @@ QINIU_TOKEN_EXPIRE_SECONDS = 10 * 60
 AVATAR_MAX_FILE_SIZE = 5 * 1024 * 1024  # 5M
 CHAT_BACKGROUND_MAX_FILE_SIZE = 10 * 1024 * 1024  # 10M
 AVATAR_DOWNLOAD_EXPIRE_SECONDS = 30 * 24 * 60 * 60
-AVATAR_PREFIX = 'sermo/avatar/'
-CHAT_BACKGROUND_PREFIX = 'sermo/chat-background/'
-SPACE_IDENTITY_PREFIX = 'sermo/space-identity/'
+AVATAR_PREFIX = 'frienden/avatar/'
+CHAT_BACKGROUND_PREFIX = 'frienden/chat-background/'
+SPACE_IDENTITY_PREFIX = 'frienden/space-identity/'
 SPACE_IDENTITY_MAX_FILE_SIZE = 10 * 1024 * 1024
-MESSAGE_MEDIA_PREFIX = 'sermo/messages'
+MESSAGE_MEDIA_PREFIX = 'frienden/messages'
 MESSAGE_MEDIA_MAX_FILE_SIZE = {
     'image': 10 * 1024 * 1024,
     'video': 500 * 1024 * 1024,
@@ -57,9 +57,9 @@ ALLOWED_IMAGE_EXTENSIONS = {
     '.bmp',
     '.svg',
 }
-SAFE_KEY_PATTERN = re.compile(r'^sermo/avatar/[A-Za-z0-9][A-Za-z0-9._-]*$')
+SAFE_KEY_PATTERN = re.compile(r'^(?:frienden|sermo)/avatar/[A-Za-z0-9][A-Za-z0-9._-]*$')
 CHAT_BACKGROUND_SAFE_KEY_PATTERN = re.compile(
-    r'^sermo/chat-background/[A-Za-z0-9][A-Za-z0-9._-]*$'
+    r'^(?:frienden|sermo)/chat-background/[A-Za-z0-9][A-Za-z0-9._-]*$'
 )
 
 
@@ -327,7 +327,7 @@ def delete_file(key: str):
 
 def delete_message_media_file(key: str):
     normalized = str(key or '').strip().lstrip('/')
-    if not normalized.startswith(f'{MESSAGE_MEDIA_PREFIX}/'):
+    if not re.fullmatch(r'(?:frienden|sermo)/messages/(?:image|video|video-playback|audio|file|sticker)/[A-Za-z0-9][A-Za-z0-9._+-]*', normalized):
         raise UserErrors.AVATAR_DELETE_FAILED(details='invalid message media key')
     return _delete_file(normalized)
 
@@ -342,7 +342,7 @@ def key_from_avatar_uri(avatar_uri: str):
         return None
 
     path = (parsed.path or '').lstrip('/')
-    if not path.startswith(AVATAR_PREFIX):
+    if not path.startswith((AVATAR_PREFIX, 'sermo/avatar/')):
         return None
     return validate_avatar_key(path)
 
@@ -360,7 +360,7 @@ def key_from_chat_background_uri(uri: str):
         return None
     parsed = urlparse(normalized)
     path = (parsed.path or '').lstrip('/')
-    if not parsed.scheme or not parsed.netloc or not path.startswith(CHAT_BACKGROUND_PREFIX):
+    if not parsed.scheme or not parsed.netloc or not path.startswith((CHAT_BACKGROUND_PREFIX, 'sermo/chat-background/')):
         return None
     return validate_chat_background_key(path)
 
@@ -409,8 +409,9 @@ def validate_message_media_key(kind: str, key: str):
         raise MessageErrors.MEDIA_KIND_INVALID
 
     normalized_key = (key or '').strip()
-    prefix = f'{MESSAGE_MEDIA_PREFIX}/{normalized_kind}/'
-    if not normalized_key.startswith(prefix):
+    prefixes = (f'{MESSAGE_MEDIA_PREFIX}/{normalized_kind}/', f'sermo/messages/{normalized_kind}/')
+    prefix = next((item for item in prefixes if normalized_key.startswith(item)), None)
+    if prefix is None:
         raise MessageErrors.PAYLOAD_INVALID
 
     key_name = normalized_key[len(prefix):]
@@ -484,8 +485,8 @@ def issue_space_identity_upload(space_id, file_name, content_type=None):
 
 def validate_space_identity_key(space_id, key):
     normalized = str(key or '').strip()
-    prefix = f'{SPACE_IDENTITY_PREFIX}{int(space_id)}/'
-    if not normalized.startswith(prefix) or not normalized.endswith('.pdf'):
+    pattern = rf'(?:frienden|sermo)/space-identity/{int(space_id)}/[a-f0-9]{{32}}\.pdf'
+    if not re.fullmatch(pattern, normalized):
         from Space.validators import SpaceErrors
         raise SpaceErrors.IDENTITY_FILE_INVALID
     return normalized

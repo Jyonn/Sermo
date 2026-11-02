@@ -135,6 +135,52 @@ class StickerAsset(models.Model):
         return payload
 
 
+class ResourceCollection(models.Model):
+    slug = models.SlugField(max_length=64, unique=True)
+    title = models.CharField(max_length=80)
+    title_en = models.CharField(max_length=80, blank=True)
+    version = models.SlugField(max_length=32, default='v1')
+    category = models.CharField(max_length=24, default='emoji')
+    published = models.BooleanField(default=False)
+    updated_at = models.DateTimeField(auto_now=True)
+
+
+class ManagedResource(models.Model):
+    collection = models.ForeignKey(ResourceCollection, on_delete=models.PROTECT, related_name='resources')
+    slug = models.SlugField(max_length=80)
+    title = models.CharField(max_length=80)
+    title_en = models.CharField(max_length=80, blank=True)
+    content_hash = models.CharField(max_length=64)
+    storage_key = models.CharField(max_length=255)
+    thumbnail_key = models.CharField(max_length=255)
+    original_key = models.CharField(max_length=255)
+    file_size = models.PositiveIntegerField()
+    pixel_width = models.PositiveIntegerField()
+    pixel_height = models.PositiveIntegerField()
+    enabled = models.BooleanField(default=True)
+    position = models.PositiveIntegerField(default=0)
+    sticker_asset = models.ForeignKey(StickerAsset, on_delete=models.PROTECT, null=True, blank=True, related_name='managed_resources')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['position', 'id']
+        constraints = [models.UniqueConstraint(fields=['collection', 'slug'], name='managed_resource_unique_slug')]
+
+    def jsonl(self, request=None, admin=False):
+        def uri(variant):
+            path = f'/resources/assets/{self.id}/{variant}/{self.content_hash}'
+            return request.build_absolute_uri(path) if request else path
+        value = dict(resource_id=self.id, slug=self.slug, title=self.title, title_en=self.title_en,
+                     content_hash=self.content_hash, uri=uri('display'), thumbnail_uri=uri('thumbnail'),
+                     original_uri=uri('original'), thumbnail_hash=self.thumbnail_key.rsplit('/', 1)[-1].split('.')[0],
+                     file_size=self.file_size, pixel_width=self.pixel_width,
+                     pixel_height=self.pixel_height, mime_type='image/webp', position=self.position,
+                     sticker_asset_id=self.sticker_asset_id)
+        if admin:
+            value.update(enabled=self.enabled, storage_key=self.storage_key, created_at=self.created_at.timestamp())
+        return value
+
+
 class UserSticker(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='stickers')
     asset = models.ForeignKey(StickerAsset, on_delete=models.PROTECT, related_name='owners')

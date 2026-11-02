@@ -102,8 +102,8 @@ class StickerCompleteView(View):
     )
     def post(self, request: Request):
         request.user.require_capability('menu.sticker.create')
-        expected_prefix = f'sermo/messages/sticker/{request.json.content_hash}.'
-        if not request.json.storage_key.startswith(expected_prefix):
+        expected_prefixes = tuple(f'{root}/messages/sticker/{request.json.content_hash}.' for root in ('frienden', 'sermo'))
+        if not request.json.storage_key.startswith(expected_prefixes):
             raise StickerErrors.INVALID_HASH
         asset, created = StickerAsset.objects.get_or_create(
             content_hash=request.json.content_hash,

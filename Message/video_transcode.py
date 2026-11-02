@@ -28,7 +28,7 @@ def submit_video_transcode(asset_id):
         return asset
     original_key = asset.original_key or asset.source_key
     original_uri = asset.original_uri or asset.source_uri
-    playback_key = asset.playback_key or f'sermo/messages/video-playback/{uuid.uuid4().hex}.mp4'
+    playback_key = asset.playback_key or f'frienden/messages/video-playback/{uuid.uuid4().hex}.mp4'
     claimed = MediaAsset.objects.filter(id=asset.id, transcode_status__in=eligible).update(
         original_key=original_key, original_uri=original_uri,
         playback_key=playback_key, transcode_status=MediaAsset.TRANSCODE_PENDING,

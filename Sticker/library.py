@@ -14,7 +14,7 @@ def sticker_explore_payload(user, offset, limit, request=None):
     source_user_id = UserSticker.objects.filter(asset_id=OuterRef('pk')).order_by(
         'created_at', 'id',
     ).values('user_id')[:1]
-    asset_queryset = StickerAsset.objects.exclude(id__in=owned_asset_ids).annotate(
+    asset_queryset = StickerAsset.objects.filter(managed_resources__isnull=True).exclude(id__in=owned_asset_ids).annotate(
         source_user_id=Subquery(source_user_id),
     )
     page = list(asset_queryset.order_by('-created_at', '-id')[offset:offset + limit + 1])

@@ -714,14 +714,14 @@ class QZoneImporter:
         extension = Path(media.source_path).suffix.lower()
         if not re.fullmatch(r'\.[a-z0-9][a-z0-9._+-]{0,31}', extension):
             extension = mimetypes.guess_extension(media.mime_type or '') or '.bin'
-        return f'sermo/messages/{media.kind}/{content_hash[:32]}{extension}'
+        return f'frienden/messages/{media.kind}/{content_hash[:32]}{extension}'
 
     @staticmethod
     def _emoticon_key(emoticon, content_hash):
         extension = Path(emoticon.source_path).suffix.lower()
         if not re.fullmatch(r'\.[a-z0-9][a-z0-9._+-]{0,31}', extension):
             extension = mimetypes.guess_extension(emoticon.mime_type or '') or '.bin'
-        return f'sermo/qzone/emoticon/{content_hash[:32]}{extension}'
+        return f'frienden/qzone/emoticon/{content_hash[:32]}{extension}'
 
     def upload_media(self, limit=0, retry_failed=False):
         statuses = [QZoneMedia.STATUS_PENDING]
