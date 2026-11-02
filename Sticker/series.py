@@ -30,6 +30,20 @@ def owned(request,series_id,editable=True):
     return row
 
 
+def claim_membership(group, rows):
+    if any(row.series_id not in (None, group.id) for row in rows):
+        raise StickerErrors.SERIES_CONFLICT
+    UserSticker.objects.filter(id__in=[row.id for row in rows]).update(series=group)
+    for row in rows:row.series_id=group.id
+
+
+def release_unused_membership(group):
+    reserved=set(group.draft_assets)
+    for snapshot in (group.published_snapshot, group.pending_snapshot):
+        reserved.update((snapshot or {}).get('asset_ids', []))
+    UserSticker.objects.filter(user=group.user,series=group).exclude(asset_id__in=reserved).update(series=None)
+
+
 def payload(row,request=None,admin=False):
     value=dict(series_id=row.id,name=row.name,count=len(row.draft_assets),
         status='pending' if row.pending_snapshot else 'approved' if row.published_snapshot else 'rejected' if row.review_note else 'draft',
@@ -77,6 +91,7 @@ class StickerSeriesDetailView(View):
                 elif 'remove_asset_id' in value:
                     row.draft_assets=[i for i in row.draft_assets if i!=value['remove_asset_id']]
                     row.save(update_fields=['draft_assets'])
+                    release_unused_membership(row)
                 else:
                     row.name=series_name(value.get('name'));row.save(update_fields=['name'])
         except IntegrityError:raise StickerErrors.INVALID_HASH
@@ -101,6 +116,7 @@ class StickerSeriesAssignView(View):
             group=owned(request,series_id)
             rows=list(UserSticker.objects.select_for_update().filter(id__in=set(ids),user=request.user,is_uploaded=True))
             if len(rows)!=len(set(ids)):raise StickerErrors.NOT_ACCESSIBLE
+            claim_membership(group,rows)
             assets=list(dict.fromkeys([*group.draft_assets,*[r.asset_id for r in rows]]))
             if len(assets)>200:raise StickerErrors.INVALID_HASH
             group.draft_assets=assets;group.save(update_fields=['draft_assets'])
@@ -148,8 +164,10 @@ class StickerPackReviewView(View):
                 else:row.published_snapshot=dict(name=snapshot['name'],asset_ids=snapshot['asset_ids'])
             row.pending_snapshot=None;row.review_note=str(value.get('note',''))[:300]
             row.save(update_fields=['published_snapshot','pending_snapshot','review_note'])
+            release_unused_membership(row)
             PlatformAuditLog.objects.create(action='sticker.series.review',target_type='sticker_series',target_id=row.id,summary=row.name,
                 metadata={'actor':request.platform_admin_email,'approved':value['approved'],'action':snapshot['action']})
+            if value['approved'] and snapshot['action']=='delete':row.delete()
         return OK
 
 
@@ -160,6 +178,8 @@ def collect_uploaded(request,asset):
         group=owned(request,series_id) if series_id is not None else None
         if group and len(group.draft_assets)>=200 and asset.id not in group.draft_assets:raise StickerErrors.INVALID_HASH
         sticker,_=UserSticker.collect(request.user,asset,in_home=group is None,uploaded=True)
+        sticker=UserSticker.objects.select_for_update().get(id=sticker.id)
+        if group:claim_membership(group,[sticker])
         if group and asset.id not in group.draft_assets:
             group.draft_assets=[*group.draft_assets,asset.id];group.save(update_fields=['draft_assets'])
         return sticker

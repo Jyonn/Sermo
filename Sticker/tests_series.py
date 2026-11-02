@@ -60,6 +60,41 @@ class StickerSeriesTests(TestCase):
         self.row.is_uploaded=False;self.row.save()
         with self.assertRaises(Exception):self.invoke(StickerSeriesAssignView,{'sticker_ids':[self.row.id],'series_id':self.group.id})
 
+    def test_upload_can_only_belong_to_one_collection_and_draft_removal_frees_it(self):
+        second=StickerSeries.objects.create(user=self.user,name='Second')
+        self.invoke(StickerSeriesAssignView,{'sticker_ids':[self.row.id],'series_id':self.group.id})
+        with self.assertRaises(Exception):self.invoke(StickerSeriesAssignView,{'sticker_ids':[self.row.id],'series_id':second.id})
+        self.invoke(StickerSeriesDetailView,{'remove_asset_id':self.row.asset_id},series_id=self.group.id)
+        self.invoke(StickerSeriesAssignView,{'sticker_ids':[self.row.id],'series_id':second.id})
+        self.row.refresh_from_db();self.assertEqual(self.row.series_id,second.id)
+
+    def test_direct_upload_cannot_bypass_membership_and_batch_conflicts_are_atomic(self):
+        from Sticker.series import collect_uploaded
+        second=StickerSeries.objects.create(user=self.user,name='Second')
+        self.invoke(StickerSeriesAssignView,{'sticker_ids':[self.row.id],'series_id':self.group.id})
+        request=self.request({'series_id':second.id});request.user=self.user
+        with self.assertRaises(Exception):collect_uploaded(request,self.row.asset)
+        self.row.refresh_from_db();self.assertEqual(self.row.series_id,self.group.id)
+        new_asset=StickerAsset.objects.create(content_hash='a'*64,storage_key='frienden/messages/sticker/new.webp')
+        new_row=UserSticker.objects.create(user=self.user,asset=new_asset,is_uploaded=True)
+        with self.assertRaises(Exception):self.invoke(StickerSeriesAssignView,{'sticker_ids':[new_row.id,self.row.id],'series_id':second.id})
+        new_row.refresh_from_db();self.assertIsNone(new_row.series_id)
+
+    def test_published_membership_stays_reserved_until_removal_review_is_approved(self):
+        from Sticker.series import StickerPackReviewView
+        self.invoke(StickerSeriesAssignView,{'sticker_ids':[self.row.id],'series_id':self.group.id})
+        self.group.refresh_from_db();self.group.published_snapshot={'name':self.group.name,'asset_ids':self.group.draft_assets};self.group.save()
+        second=StickerSeries.objects.create(user=self.user,name='Second')
+        self.invoke(StickerSeriesDetailView,{'remove_asset_id':self.row.asset_id},series_id=self.group.id)
+        with self.assertRaises(Exception):self.invoke(StickerSeriesAssignView,{'sticker_ids':[self.row.id],'series_id':second.id})
+        # Deleting the approved collection is itself a reviewed operation.
+        with self.captureOnCommitCallbacks(execute=True),patch('utils.notificator_integration.send_sticker_series_review_mail'):
+            with patch('utils.auth.decrypt',return_value={'user_id':self.user.id}):
+                StickerSeriesDetailView.as_view()(RequestFactory().delete('/',HTTP_AUTHORIZATION='Bearer fixture'),series_id=self.group.id)
+        with patch('utils.auth.decrypt',return_value={'email':'admin@example.com'}):
+            StickerPackReviewView.as_view()(self.request({'approved':True}),series_id=self.group.id)
+        self.invoke(StickerSeriesAssignView,{'sticker_ids':[self.row.id],'series_id':second.id})
+
     def test_submission_is_frozen_and_review_preserves_published_snapshot(self):
         from Sticker.series import StickerPackReviewView
         self.group.draft_assets=[self.row.asset_id];self.group.save()

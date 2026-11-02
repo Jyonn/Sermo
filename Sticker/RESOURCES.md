@@ -75,3 +75,9 @@ snapshots are separate; drafts remain private, submissions are frozen, and publi
 updates and deletion require platform review. Submission sends the configured admin an
 email and creates a durable queue entry. `/platform-admin/sticker-packs` reviews the
 queue. `/stickers/packs` lists approved snapshots; collecting is an explicit operation.
+
+An uploaded sticker reserves one collection via its existing UserSticker.series FK.
+Assignment and upload claim that slot under a row lock. Removing an unpublished draft
+item frees it immediately; published items remain reserved until a removal/deletion is
+approved. Migration 0007 backfills the slot and refuses conflicting legacy memberships
+instead of rewriting approved artwork. A sticker may still independently appear on My home.
