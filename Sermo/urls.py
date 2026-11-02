@@ -19,10 +19,8 @@ from Chat.research import ResearchView
 from Chat.research_resources import ResearchResourceView
 from Chat.research_calendar import ResearchCalendarView
 from Chat.research_meetings import ResearchMeetingView
-from Chat.research_chat import ResearchChatView
 
 urlpatterns = [
-    path('research/<int:project_id>/chat/', ResearchChatView.as_view()),
     path('research/<int:project_id>/meetings/', ResearchMeetingView.as_view()),
     path('research/<int:project_id>/calendar/', ResearchCalendarView.as_view()),
     path('research/<int:project_id>/resources/', ResearchResourceView.as_view()),
