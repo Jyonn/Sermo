@@ -4115,3 +4115,7 @@ class ChronelleCredential(models.Model):
     # One rotating credential pair per application/Chronelle subject, not per space.
     id = models.CharField(max_length=64, primary_key=True)
     sealed = models.TextField(blank=True)
+
+
+# Register the separately maintained native push model with Django's model loader.
+from User.native_push_models import NativePushBinding
