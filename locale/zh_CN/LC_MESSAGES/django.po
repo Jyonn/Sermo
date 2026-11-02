@@ -1121,3 +1121,9 @@ msgstr "收到新的科研进度"
 
 msgid "Research project updated"
 msgstr "科研课题有更新"
+
+msgid "Native push settings changed; refresh before retrying"
+msgstr "原生推送设置已变更，请刷新后重试"
+
+msgid "Invalid native push request"
+msgstr "原生推送请求无效"

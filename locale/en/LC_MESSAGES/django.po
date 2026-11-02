@@ -950,3 +950,9 @@ msgstr "This activity is not available"
 
 msgid "Please verify your account first"
 msgstr "Please verify your account first"
+
+msgid "Native push settings changed; refresh before retrying"
+msgstr "Native push settings changed; refresh before retrying"
+
+msgid "Invalid native push request"
+msgstr "Invalid native push request"

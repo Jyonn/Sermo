@@ -43,7 +43,7 @@ class NativePushBinding(models.Model):
             raise ValueError('invalid installation') from None
         if value.lower() != str(installation) or installation.version != 4:
             raise ValueError('invalid installation')
-        if environment not in dict(cls.ENVIRONMENTS):
+        if not isinstance(environment, str) or environment not in dict(cls.ENVIRONMENTS):
             raise ValueError('invalid environment')
         if type(expected_revision) is not int or not 0 <= expected_revision < cls.MAX_REVISION:
             raise ValueError('invalid revision')

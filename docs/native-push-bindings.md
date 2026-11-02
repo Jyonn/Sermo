@@ -1,8 +1,8 @@
 # Native Push Binding Foundation
 
 Development only. Deployment requires separate user confirmation. The current
-change adds a model and migration; it exposes no endpoint, registers no device,
-and does not enqueue or deliver any notification.
+change adds a model, migration and authenticated binding endpoints. None is live;
+it does not enqueue or deliver any notification.
 
 ## Isolation And Consent
 
@@ -29,6 +29,31 @@ callback documentation](https://developer.apple.com/documentation/uikit/uiapplic
 
 ## Validation
 
+### Development API
+
+All routes require the current account's authentication. Responses use the existing
+API envelope and `Cache-Control: no-store, private`; tokens and token digests are
+never returned. `delivery_available` remains false until delivery is implemented.
+
+- `GET /users/me/native-push`: exactly `installation_id` and `environment` query
+  parameters. Missing bindings return revision 0 without creating consent.
+- `PUT /users/me/native-push`: JSON installation/environment, `expected_revision`,
+  `opted_in`, and optional `token`. This is the explicit preference operation.
+- `DELETE /users/me/native-push`: JSON installation/environment and revision;
+  records an opt-out tombstone rather than deleting consent history.
+- `POST /users/me/native-push/token`: JSON installation/environment, revision and
+  token. Background refresh preserves consent and cannot create a missing binding.
+
+Unknown or repeated fields, malformed JSON and invalid identities are rejected with
+400. Stale revisions return 409 (`NATIVE_PUSH@CONFLICT`). Client-supplied account or
+space IDs are rejected; ownership always comes from authentication. Errors are
+localized in Chinese and English.
+
+API milestone verification: 27 focused binding/API tests and 81 combined
+account/binding/API/topic regression tests passed. System checks and diff whitespace
+checks passed. Regression log: `/private/tmp/frienden-native-push-api-regression.log`.
+This does not validate MySQL concurrency or real APNs delivery.
+
 Secret-free SQLite settings and a dedicated temporary virtual environment were
 used. No production database or delivery credential was accessed.
 
@@ -48,8 +73,8 @@ used. No production database or delivery credential was accessed.
 
 ## Next Gates
 
-1. Authenticated status/preference/token-refresh endpoints with revision conflicts,
-   account ownership and provider-availability reporting. No endpoint is live yet.
+1. Authenticated binding endpoints are implemented on the development branch;
+   deployment and client integration remain pending. No endpoint is live yet.
 2. Native delivery route through the existing notification topic policy, not an
    independent topic matrix. Add deduplication, bounded attempts and token failure
    handling; configure APNs credentials only on the server after approval.
