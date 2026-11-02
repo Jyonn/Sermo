@@ -15,7 +15,9 @@ Resource files are public platform artwork, not a private-document storage servi
 
 New user uploads use `frienden/avatar`, `frienden/messages`, `frienden/chat-background`,
 and `frienden/space-identity`; existing `sermo/` references remain supported.
-Platform artwork is confined to `frienden/assets/{collection}/{version}/{sha256}.{ext}`.
+New platform artwork is grouped below `frienden/assets/emojis/{collection}`,
+`avatar-frames/{collection}`, `backgrounds/{collection}`, `illustrations/{collection}`,
+and `activities/{activity-name}`. Existing flat resource URLs/IDs remain valid.
 No listing, moving, or deletion of other applications' bucket objects is performed.
 Image files are decoded and verified, stripped of metadata, and re-encoded into an
 original PNG plus display/thumbnail WebP variants. Uploads are insert-only; existing
@@ -46,3 +48,22 @@ Haibara files via the public registry, verifies SHA-256, and updates the small c
 mirror cache. Existing hashed files are preserved. Commit the manifest and optimized
 files, then publish all four frontend sites. Runtime collection changes refresh in the
 background; unknown/new hashes use the canonical asset endpoint and local device cache.
+
+## Activity migration
+
+`python manage.py import_activity_resources manifest.json --output asset-map.json --update-references`
+imports trusted repository PNG/WebP/SVG/audio/catalog files byte-for-byte. The manifest
+contains local `file`, public legacy `alias`, and `activity` fields. Uploads are confined
+to the activity namespace. It updates activity configuration and BGM MediaAsset URIs
+without changing IDs, claims, rewards, transcripts, or existing bucket objects.
+Verify hashes before removing local source files. Old deployed files must remain for
+stale clients; new distributions resolve files through the stable resource API.
+
+## Personal sticker series
+
+Authenticated `/stickers/series` lists/creates a user's own series; `/series/{id}`
+renames/removes it. Removing a series moves its stickers to Unsorted, never deletes
+the underlying artwork. `/series/assign` atomically moves up to 200 owned stickers.
+Names have a combined limit of 10 ASCII units (non-ASCII characters count as two).
+`GET /stickers/?series_id=0` selects Unsorted; a positive ID selects a series before
+pagination. All ownership checks are enforced by the server.

@@ -20,7 +20,7 @@ from utils import auth
 from utils.qiniu import _required_config, avatar_uri_for_key, sign_private_download_url
 
 MAX_BYTES = 10 * 1024 * 1024
-CATEGORIES = {'emoji': 384, 'avatar-frame': 512, 'background': 1920, 'illustration': 1600}
+CATEGORIES = {'emoji': 384, 'avatar-frame': 512, 'background': 1920, 'illustration': 1600, 'activity': 1920}
 SLUG = re.compile(r'^[a-z0-9][a-z0-9_-]{0,63}$')
 
 
@@ -35,7 +35,14 @@ def collection_json(row, request, admin=False):
     assets = row.resources.all() if admin else row.resources.filter(enabled=True)
     return dict(collection_id=row.id, slug=row.slug, title=row.title, title_en=row.title_en,
                 version=row.version, category=row.category, published=row.published,
-                updated_at=row.updated_at.timestamp(), assets=[item.jsonl(request, admin) for item in assets])
+                directory=resource_directory(row), updated_at=row.updated_at.timestamp(), assets=[item.jsonl(request, admin) for item in assets])
+
+
+def resource_directory(collection):
+    value = collection.directory or f'{dict(emoji="emojis", **{"avatar-frame":"avatar-frames", "background":"backgrounds", "illustration":"illustrations", "activity":"activities"}).get(collection.category, "other")}/{collection.slug}'
+    if not re.fullmatch(r'[a-z0-9][a-z0-9_-]{0,63}(?:/[a-z0-9][a-z0-9_-]{0,63}){1,2}', value):
+        raise StickerErrors.INVALID_HASH
+    return value
 
 
 def image_variants(data, category):
@@ -68,7 +75,7 @@ def image_variants(data, category):
 
 
 def upload_object(key, data, mime):
-    if not re.fullmatch(r'frienden/assets/[a-z0-9][a-z0-9_-]{0,63}/[a-z0-9][a-z0-9_-]{0,31}/[a-f0-9]{64}\.(?:png|webp)', key):
+    if not re.fullmatch(r'frienden/assets/(?:[a-z0-9][a-z0-9_-]{0,63}/){2,4}[a-f0-9]{64}\.(?:png|webp|jpg|jpeg|svg|mp3|json)', key):
         raise StickerErrors.INVALID_HASH
     bucket = _required_config(CI.QINIU_BUCKET)
     client = Auth(_required_config(CI.QINIU_ACCESS_KEY), _required_config(CI.QINIU_SECRET_KEY))
@@ -93,7 +100,7 @@ def publish_resource(collection, slug, title, title_en, data, position=0, upload
         content = variants[variant]
         digest = hashlib.sha256(content).hexdigest()
         extension = 'png' if variant == 'original' else 'webp'
-        key = f'frienden/assets/{valid_slug(collection.slug)}/{valid_slug(collection.version)}/{digest}.{extension}'
+        key = f'frienden/assets/{resource_directory(collection)}/{valid_slug(collection.version)}/{digest}.{extension}'
         upload(key, content, 'image/png' if variant == 'original' else 'image/webp')
         keys[variant] = key
     digest = hashlib.sha256(variants['display']).hexdigest()
@@ -102,6 +109,8 @@ def publish_resource(collection, slug, title, title_en, data, position=0, upload
         if existing:
             if existing.content_hash != digest:
                 raise StickerErrors.INVALID_HASH
+            existing.storage_key, existing.thumbnail_key, existing.original_key = keys['display'], keys['thumbnail'], keys['original']
+            existing.save(update_fields=['storage_key', 'thumbnail_key', 'original_key'])
             return existing
         sticker = None
         if collection.category == 'emoji':
@@ -157,7 +166,7 @@ class ResourceAdminView(View):
         data = body(request)
         slug = valid_slug(data.get('slug'))
         category = data.get('category', 'emoji')
-        if category not in CATEGORIES or not str(data.get('title', '')).strip():
+        if category not in {*CATEGORIES, 'activity'} or not str(data.get('title', '')).strip():
             raise StickerErrors.INVALID_IMAGE
         with transaction.atomic():
             existing = ResourceCollection.objects.filter(slug=slug).first()
@@ -165,7 +174,7 @@ class ResourceAdminView(View):
                 raise StickerErrors.INVALID_HASH
             row, _ = ResourceCollection.objects.update_or_create(slug=slug, defaults=dict(
                 title=str(data['title']).strip()[:80], title_en=str(data.get('title_en', ''))[:80],
-                version=valid_slug(data.get('version', 'v1')), category=category, published=data.get('published') is True))
+                version=valid_slug(data.get('version', 'v1'))[:32], category=category, published=data.get('published') is True))
             PlatformAuditLog.objects.create(action='resource.collection.update', target_type='resource_collection',
                 target_id=row.id, summary=row.slug, metadata={'actor': request.platform_admin_email, 'published': row.published})
         return collection_json(row, request, True)

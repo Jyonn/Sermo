@@ -17,7 +17,10 @@ class StickerView(View):
     @auth.require_user
     @analyse.query(StickerParams.offset, StickerParams.limit)
     def get(self, request: Request):
-        return sticker_library_payload(request.user, request.query.offset, request.query.limit, request)
+        series = request.GET.get('series_id')
+        if series is not None and (not series.isdigit() or len(series) > 15):
+            raise StickerErrors.INVALID_HASH
+        return sticker_library_payload(request.user, request.query.offset, request.query.limit, request, int(series) if series is not None else None)
 
     @auth.require_user
     @analyse.json(StickerParams.message_id)

@@ -49,7 +49,7 @@ class ResourceTests(TestCase):
         row=self.resource();again=self.resource()
         self.assertEqual(row.id,again.id)
         self.assertEqual(ManagedResource.objects.count(),1)
-        self.assertTrue(row.storage_key.startswith('frienden/assets/haibara-v2/v2/'))
+        self.assertTrue(row.storage_key.startswith('frienden/assets/emojis/haibara-v2/v2/'))
         self.assertFalse(delete_unreferenced_sticker_asset(row.sticker_asset))
         other=ResourceCollection.objects.create(slug='second',title='Second')
         copy=publish_resource(other,'joy','Joy','Joy',self.data,upload=lambda *args:None)

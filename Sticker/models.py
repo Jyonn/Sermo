@@ -141,6 +141,7 @@ class ResourceCollection(models.Model):
     title_en = models.CharField(max_length=80, blank=True)
     version = models.SlugField(max_length=32, default='v1')
     category = models.CharField(max_length=24, default='emoji')
+    directory = models.CharField(max_length=160, blank=True, default='')
     published = models.BooleanField(default=False)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -151,6 +152,7 @@ class ManagedResource(models.Model):
     title = models.CharField(max_length=80)
     title_en = models.CharField(max_length=80, blank=True)
     content_hash = models.CharField(max_length=64)
+    mime_type = models.CharField(max_length=100, default='image/webp')
     storage_key = models.CharField(max_length=255)
     thumbnail_key = models.CharField(max_length=255)
     original_key = models.CharField(max_length=255)
@@ -174,16 +176,27 @@ class ManagedResource(models.Model):
                      content_hash=self.content_hash, uri=uri('display'), thumbnail_uri=uri('thumbnail'),
                      original_uri=uri('original'), thumbnail_hash=self.thumbnail_key.rsplit('/', 1)[-1].split('.')[0],
                      file_size=self.file_size, pixel_width=self.pixel_width,
-                     pixel_height=self.pixel_height, mime_type='image/webp', position=self.position,
+                     pixel_height=self.pixel_height, mime_type=self.mime_type, position=self.position,
                      sticker_asset_id=self.sticker_asset_id)
         if admin:
             value.update(enabled=self.enabled, storage_key=self.storage_key, created_at=self.created_at.timestamp())
         return value
 
 
+class StickerSeries(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='sticker_series')
+    name = models.CharField(max_length=10)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['created_at', 'id']
+        constraints = [models.UniqueConstraint(fields=['user', 'name'], name='sticker_series_unique_name')]
+
+
 class UserSticker(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='stickers')
     asset = models.ForeignKey(StickerAsset, on_delete=models.PROTECT, related_name='owners')
+    series = models.ForeignKey(StickerSeries, on_delete=models.SET_NULL, null=True, blank=True, related_name='stickers')
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -209,7 +222,7 @@ class UserSticker(models.Model):
 
     def jsonl(self, request: HttpRequest = None):
         payload = self.asset.jsonl(request=request)
-        payload.update(sticker_id=self.id, created_at=self.created_at.timestamp())
+        payload.update(sticker_id=self.id, created_at=self.created_at.timestamp(), series_id=self.series_id)
         return payload
 
 

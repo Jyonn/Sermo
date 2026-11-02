@@ -1,4 +1,5 @@
 from django.urls import path
+from Sticker.series import StickerSeriesView, StickerSeriesDetailView, StickerSeriesAssignView
 
 from Sticker.views import (
     StickerAssetView,
@@ -11,6 +12,9 @@ from Sticker.views import (
 
 
 urlpatterns = [
+    path('series', StickerSeriesView.as_view()),
+    path('series/assign', StickerSeriesAssignView.as_view()),
+    path('series/<int:series_id>', StickerSeriesDetailView.as_view()),
     path('assets/<int:asset_id>', StickerAssetView.as_view(), name='sticker asset'),
     path('explore', StickerExploreView.as_view(), name='sticker explore'),
     path('collect', StickerCollectView.as_view(), name='sticker collect'),

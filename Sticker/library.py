@@ -3,8 +3,11 @@ from Sticker.models import StickerAsset, UserSticker, UserStickerUsage
 from User.models import User
 
 
-def sticker_library_payload(user, offset, limit, request=None):
-    page = list(UserSticker.objects.filter(user=user).select_related('asset')[offset:offset + limit + 1])
+def sticker_library_payload(user, offset, limit, request=None, series_id=None):
+    query = UserSticker.objects.filter(user=user)
+    if series_id is not None:
+        query = query.filter(series_id=series_id or None)
+    page = list(query.select_related('asset')[offset:offset + limit + 1])
     rows = page[:limit]
     return dict(items=[row.jsonl(request=request) for row in rows], has_more=len(page) > limit, next_offset=offset + len(rows))
 
