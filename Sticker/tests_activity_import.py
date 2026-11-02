@@ -26,6 +26,17 @@ class ActivityResourceImportTests(TestCase):
             self.assertEqual(campaign.config['reward'],{'unchanged':True})
             self.assertIn('/resources/assets/',campaign.config['presentation']['artwork_url'])
 
+    def test_changed_artwork_gets_a_new_id_and_preserves_old_hash_urls(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);file=root/'title.svg';manifest=root/'manifest.json'
+            manifest.write_text(json.dumps([{'file':'title.svg','alias':'/activity/fixture/title.svg','activity':'fixture'}]))
+            with patch('Sticker.management.commands.import_activity_resources.upload_object'):
+                for size in [20,30]:
+                    file.write_text(f'<svg xmlns="http://www.w3.org/2000/svg" width="{size}"/>')
+                    call_command('import_activity_resources',str(manifest),output=str(root/'output.json'),verbosity=0)
+            self.assertEqual(ManagedResource.objects.count(),2)
+            self.assertEqual(len(set(ManagedResource.objects.values_list('content_hash',flat=True))),2)
+
     def test_directory_cannot_escape_shared_bucket_namespace(self):
         row=ResourceCollection(slug='fixture',category='activity',directory='../other-app')
         with self.assertRaises(Exception):resource_directory(row)

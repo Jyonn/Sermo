@@ -48,7 +48,11 @@ class Command(BaseCommand):
                 if mime.startswith('image/') and file.suffix != '.svg':
                     with Image.open(file) as image:
                         size = image.size
-                row, _ = ManagedResource.objects.update_or_create(collection=collection, slug=hashlib.sha256(item['alias'].encode()).hexdigest(), defaults=dict(
+                legacy_slug=hashlib.sha256(item['alias'].encode()).hexdigest()
+                version_slug=hashlib.sha256((item['alias']+'\0'+digest).encode()).hexdigest()
+                row=ManagedResource.objects.filter(collection=collection,slug__in=[legacy_slug,version_slug],content_hash=digest).first()
+                if row is None:
+                    row=ManagedResource.objects.create(collection=collection,slug=version_slug,**dict(
                     title=file.name[:80], title_en=file.name[:80], content_hash=digest, mime_type=mime,
                     storage_key=key, original_key=key, thumbnail_key=key, file_size=len(data), pixel_width=size[0], pixel_height=size[1]))
                 mapping[item['alias']] = f'https://api.sermo.jyonn.space/resources/assets/{row.id}/display/{digest}'

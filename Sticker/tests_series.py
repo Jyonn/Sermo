@@ -87,3 +87,24 @@ class StickerSeriesTests(TestCase):
         self.assertEqual(sticker_library_payload(self.user,0,30)['items'],[])
         UserSticker.collect(self.user,row.asset)
         self.assertEqual(len(sticker_library_payload(self.user,0,30)['items']),1)
+
+    def test_unadded_collection_uploads_do_not_leak_into_global_explore(self):
+        from Sticker.library import sticker_explore_payload
+        asset=StickerAsset.objects.create(content_hash='b'*64,storage_key='frienden/messages/sticker/private.webp')
+        UserSticker.objects.create(user=self.user,asset=asset,is_uploaded=True,in_home=False)
+        visible=sticker_explore_payload(self.other,0,30)['items']
+        self.assertNotIn(asset.id,[item['sticker_asset_id'] for item in visible])
+
+    def test_rejecting_update_preserves_live_version_and_review_requires_admin(self):
+        from Sticker.series import StickerPackReviewView
+        self.group.published_snapshot={'name':'Original','asset_ids':[self.row.asset_id]}
+        self.group.name='NewName';self.group.draft_assets=[self.row.asset_id];self.group.save()
+        with self.captureOnCommitCallbacks(execute=True),patch('utils.notificator_integration.send_sticker_series_review_mail'):
+            self.invoke(StickerSeriesDetailView,{'action':'submit'},series_id=self.group.id)
+        self.assertNotEqual(self.client.post(f'/platform-admin/sticker-packs/{self.group.id}',data='{}',content_type='application/json').status_code,200)
+        with patch('utils.auth.decrypt',return_value={'email':'admin@example.com'}):
+            StickerPackReviewView.as_view()(self.request({'approved':False,'note':'Please revise'}),series_id=self.group.id)
+        self.group.refresh_from_db()
+        self.assertEqual(self.group.published_snapshot['name'],'Original')
+        self.assertIsNone(self.group.pending_snapshot)
+        self.assertEqual(self.group.review_note,'Please revise')
