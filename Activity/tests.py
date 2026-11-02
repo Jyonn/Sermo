@@ -246,23 +246,24 @@ class ActivityServiceTests(TestCase):
         )
         beijing_evening = datetime(2026, 9, 1, 12, 30, tzinfo=datetime_timezone.utc)
 
-        self.assertEqual(ActivityService.record_starry_night_chat(self.user, 'before-claim', beijing_evening), [])
+        def record(reference, occurred_at):
+            with patch('Activity.models.timezone.now', return_value=occurred_at):
+                return ActivityService.record_starry_night_chat(self.user, reference, occurred_at)
+
+        self.assertEqual(record('before-claim', beijing_evening), [])
         self.assertFalse(campaign.events.exists())
         ActivityService.claim_for_space(campaign, self.space, claimed_at=beijing_evening - timedelta(hours=1))
-        self.assertEqual(ActivityService.record_starry_night_chat(
-            self.user, 'too-early', beijing_evening - timedelta(hours=1)), [])
+        self.assertEqual(record('too-early', beijing_evening - timedelta(hours=1)), [])
 
         for offset in range(3):
-            ActivityService.record_starry_night_chat(
-                self.user, f'first-{offset}', beijing_evening + timedelta(days=offset))
+            record(f'first-{offset}', beijing_evening + timedelta(days=offset))
         gap_day = beijing_evening + timedelta(days=4)
-        ActivityService.record_starry_night_chat(self.user, 'after-gap', gap_day)
+        record('after-gap', gap_day)
         progress = campaign.user_progress.get(user=self.user)
         self.assertEqual(ActivityService._consecutive_streak(progress, timezone.localtime(gap_day).date()), 1)
 
         for offset in range(5, 9):
-            ActivityService.record_starry_night_chat(
-                self.user, f'finish-{offset}', beijing_evening + timedelta(days=offset))
+            record(f'finish-{offset}', beijing_evening + timedelta(days=offset))
 
         self.assertFalse(UserResourceInventory.objects.filter(
             user=self.user,

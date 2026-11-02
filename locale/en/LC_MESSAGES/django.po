@@ -699,6 +699,9 @@ msgstr "Permanent VIP requirements are not met"
 msgid "Permanent VIP campaign is full"
 msgstr "Permanent VIP campaign is full"
 
+msgid "Permanent VIP campaign is not open in this space"
+msgstr "Permanent VIP campaign is not open in this space"
+
 #, python-brace-format
 msgid "Nickname can be changed again at {available_at}"
 msgstr "Nickname can be changed again at {available_at}"

@@ -1661,6 +1661,7 @@ class UserResourceInventory(models.Model):
 
 class PermanentVipCampaign(models.Model):
     LIMIT = 100
+    ACTIVITY_KEY = 'permanent-vip-founding-100'
     LEVEL_THRESHOLDS = (
         (20, 4),
         (50, 5),
@@ -1679,30 +1680,38 @@ class PermanentVipCampaign(models.Model):
         return cls.LEVEL_THRESHOLDS[-1][1]
 
     @classmethod
-    def status_for(cls, user):
-        from Activity.models import ActivityCampaign, ActivityService
+    def space_activity_open(cls, space, lock=False):
+        from Activity.models import ActivityCampaign, ActivityService, SpaceActivity
 
-        campaign, _ = cls.objects.get_or_create(key='founding-100')
-        activity_campaign = ActivityCampaign.objects.filter(
-            key='permanent-vip-founding-100',
-            enabled=True,
-        ).first()
-        space_activity_active = False
-        if activity_campaign is not None:
-            ActivityService.ensure_automatic_for_space(user.space)
-            space_activity_active = ActivityService.space_activity_for(
-                activity_campaign,
-                user.space,
-                active_only=True,
-            ).is_active()
-        claim = UserResourceInventory.objects.filter(user=user, reward_id='vip.permanent').first()
-        level = user.effective_growth_level()
-        required_level = cls.required_level_for_slot(min(campaign.claimed_count + 1, cls.LIMIT))
-        requirements = dict(
+        campaigns = ActivityCampaign.objects.filter(key=cls.ACTIVITY_KEY)
+        if lock:
+            campaigns = campaigns.select_for_update()
+        activity = campaigns.first()
+        if activity is None or not activity.enabled:
+            return False
+        if activity.assignment_mode == ActivityCampaign.AssignmentMode.AUTOMATIC:
+            ActivityService.claim_for_space(activity, space)
+        runs = SpaceActivity.objects.filter(campaign=activity, space=space)
+        if lock:
+            runs = runs.select_for_update()
+        run = runs.first()
+        return run is not None and run.is_active()
+
+    @classmethod
+    def claim_requirements(cls, user, claimed_count):
+        required_level = cls.required_level_for_slot(min(claimed_count + 1, cls.LIMIT))
+        return required_level, dict(
             email=bool(user.email_verified_at),
             phone=bool(user.phone_verified_at),
-            level=level >= required_level,
+            level=user.effective_growth_level() >= required_level,
         )
+
+    @classmethod
+    def status_for(cls, user):
+        campaign, _ = cls.objects.get_or_create(key='founding-100')
+        space_activity_active = cls.space_activity_open(user.space)
+        claim = UserResourceInventory.objects.filter(user=user, reward_id='vip.permanent').first()
+        required_level, requirements = cls.claim_requirements(user, campaign.claimed_count)
         return dict(
             limit=cls.LIMIT,
             claimed=campaign.claimed_count,
@@ -1724,29 +1733,35 @@ class PermanentVipCampaign(models.Model):
     def claim_for(cls, user):
         with transaction.atomic():
             campaign, _ = cls.objects.select_for_update().get_or_create(key='founding-100')
-            existing = UserResourceInventory.objects.filter(user=user, reward_id='vip.permanent').first()
+            current_user = User.objects.select_for_update().get(pk=user.pk)
+            if current_user.space_id != user.space_id or current_user.is_deleted:
+                raise UserErrors.USER_FORBIDDEN
+            existing = UserResourceInventory.objects.filter(user=current_user, reward_id='vip.permanent').first()
             if existing:
                 slot = (existing.metadata or {}).get('slot')
-                UserResourceInventory.grant_permanent_vip_resources(user, slot)
+                UserResourceInventory.grant_permanent_vip_resources(current_user, slot)
             else:
+                if not cls.space_activity_open(current_user.space, lock=True):
+                    raise UserErrors.PERMANENT_VIP_CAMPAIGN_INACTIVE
                 if campaign.claimed_count >= cls.LIMIT:
                     raise UserErrors.PERMANENT_VIP_CAMPAIGN_FULL
-                required_level = cls.required_level_for_slot(campaign.claimed_count + 1)
-                if (
-                    not user.email_verified_at
-                    or not user.phone_verified_at
-                    or user.effective_growth_level() < required_level
-                ):
+                _, requirements = cls.claim_requirements(current_user, campaign.claimed_count)
+                if not all(requirements.values()):
                     raise UserErrors.PERMANENT_VIP_NOT_ELIGIBLE
 
                 slot = campaign.claimed_count + 1
-                UserResourceInventory.grant_permanent_vip_resources(user, slot)
+                UserResourceInventory.grant_permanent_vip_resources(current_user, slot)
                 campaign.claimed_count = slot
                 campaign.save(update_fields=['claimed_count'])
-                User.objects.filter(id=user.id).update(is_permanent_vip=True)
-                user.is_permanent_vip = True
-        user.award_growth('vip:permanent')
-        return cls.status_for(user)
+                User.objects.filter(id=current_user.id).update(is_permanent_vip=True)
+                current_user.is_permanent_vip = True
+            awarded = current_user.award_growth('vip:permanent', notify=False)
+        if awarded:
+            record_growth_award(awarded)
+        user.is_permanent_vip = current_user.is_permanent_vip
+        user.growth_score = current_user.growth_score
+        user.growth_level = current_user.growth_level
+        return cls.status_for(current_user)
 class UserEmojiUsage(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='emoji_usages')
     emoji = models.CharField(max_length=64)

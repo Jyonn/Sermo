@@ -708,6 +708,9 @@ msgstr "尚未满足永久 VIP 领取条件"
 msgid "Permanent VIP campaign is full"
 msgstr "永久 VIP 名额已满"
 
+msgid "Permanent VIP campaign is not open in this space"
+msgstr "当前空间的永久 VIP 活动尚未开放"
+
 #, python-brace-format
 msgid "Nickname can be changed again at {available_at}"
 msgstr "昵称要到 {available_at} 后才能再次修改"

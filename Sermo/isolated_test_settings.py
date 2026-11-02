@@ -10,6 +10,7 @@ ALLOWED_HOSTS = ['testserver', 'localhost']
 DATABASES = {'default': {'ENGINE': 'django.db.backends.sqlite3', 'NAME': ':memory:'}}
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 USE_TZ = True
+TIME_ZONE = 'Asia/Shanghai'
 LANGUAGE_CODE = 'en'
 USE_I18N = True
 LOCALE_PATHS = [BASE_DIR / 'locale']
