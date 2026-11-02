@@ -1127,3 +1127,6 @@ msgstr "原生推送设置已变更，请刷新后重试"
 
 msgid "Invalid native push request"
 msgstr "原生推送请求无效"
+
+msgid "Notification unavailable"
+msgstr "通知不可用"

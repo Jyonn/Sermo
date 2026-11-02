@@ -152,6 +152,22 @@ used. No production database or delivery credential was accessed.
   GET_LOCK. These are not reported as passing or solved. MySQL concurrency and
   migration rehearsal remain necessary before deployment.
 
+## Canonical Notification Targets
+
+`GET /users/me/native-push/events/<event_id>` resolves only an event owned by the
+authenticated account in its current space. No query parameters are accepted.
+Missing/foreign events share a 404 response. Successful responses contain only
+canonical account/space/event identities and a typed navigation target, never
+message content or arbitrary URLs. Current membership, friendship, visibility,
+submission state and feature gates are checked; unavailable content returns an
+unavailable target. Reading does not mark the event read. Responses are private
+and no-store. Pages must independently authorize subsequent data requests.
+
+All 16 target tests and the combined 143-test native push/account/topic regression
+passed. `manage.py check --settings=Sermo.isolated_test_settings` passed with the
+existing initialization warning. No new migration. Endpoint is development-only;
+deployment requires separate confirmation.
+
 ## Next Gates
 
 1. Authenticated binding endpoints are implemented on the development branch;

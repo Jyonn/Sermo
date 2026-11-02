@@ -956,3 +956,6 @@ msgstr "Native push settings changed; refresh before retrying"
 
 msgid "Invalid native push request"
 msgstr "Invalid native push request"
+
+msgid "Notification unavailable"
+msgstr "Notification unavailable"
