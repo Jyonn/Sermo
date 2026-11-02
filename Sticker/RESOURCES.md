@@ -81,3 +81,12 @@ Assignment and upload claim that slot under a row lock. Removing an unpublished 
 item frees it immediately; published items remain reserved until a removal/deletion is
 approved. Migration 0007 backfills the slot and refuses conflicting legacy memberships
 instead of rewriting approved artwork. A sticker may still independently appear on My home.
+
+Each custom collection item needs an owner-authored short description before submission.
+Descriptions use a weighted budget of 16 (ASCII 1, other characters 2), with two Chinese
+characters recommended. They live in the draft and immutable review/publication snapshots;
+pending submissions cannot change, and approved labels remain stable until the next review.
+Legacy drafts are not given invented descriptions; owners must fill them in before publishing.
+The reviewed official labels are tracked in `Sticker/catalogs/` and can be applied using
+`manage.py label_resources`. Animation imports accept bounded animated WebP emoji only,
+preserve motion in display/original files, and produce a static thumbnail.

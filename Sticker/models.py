@@ -187,6 +187,7 @@ class StickerSeries(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='sticker_series')
     name = models.CharField(max_length=10)
     draft_assets = models.JSONField(default=list)
+    descriptions = models.JSONField(default=dict)
     published_snapshot = models.JSONField(null=True, blank=True)
     pending_snapshot = models.JSONField(null=True, blank=True)
     review_note = models.CharField(max_length=300, blank=True, default='')
@@ -234,6 +235,11 @@ class UserSticker(models.Model):
     def jsonl(self, request: HttpRequest = None):
         payload = self.asset.jsonl(request=request)
         payload.update(sticker_id=self.id, created_at=self.created_at.timestamp(), series_id=self.series_id, in_home=self.in_home, is_uploaded=self.is_uploaded)
+        payload['description'] = self.series.descriptions.get(str(self.asset_id), '') if self.series_id else ''
+        if not payload['description']:
+            resources=getattr(self.asset,'_prefetched_objects_cache',{}).get('managed_resources',[])
+            label=next((row for row in resources if row.enabled),None)
+            if label:payload.update(description=label.title,description_en=label.title_en)
         return payload
 
 

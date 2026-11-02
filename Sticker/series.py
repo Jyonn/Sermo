@@ -1,4 +1,5 @@
 import json
+import unicodedata
 from django.db import transaction, IntegrityError
 from django.utils import timezone
 from django.views import View
@@ -21,6 +22,31 @@ def data(request):
         if not isinstance(value,dict):raise ValueError
         return value
     except (ValueError,TypeError):raise StickerErrors.INVALID_HASH
+
+
+def sticker_description(value):
+    if not isinstance(value,str):raise StickerErrors.INVALID_DESCRIPTION
+    value=value.strip()
+    if not value or sum(1 if ord(c)<128 else 2 for c in value)>16 or any(unicodedata.category(c).startswith('C') for c in value):
+        raise StickerErrors.INVALID_DESCRIPTION
+    return value
+
+
+def snapshot_descriptions(asset_ids,descriptions,required=False):
+    if not isinstance(descriptions,dict):raise StickerErrors.INVALID_DESCRIPTION
+    result={}
+    for asset_id in asset_ids:
+        text=descriptions.get(str(asset_id),'')
+        if required or text:result[str(asset_id)]=sticker_description(text)
+    return result
+
+
+def draft_snapshot(row):
+    return dict(name=row.name,asset_ids=row.draft_assets,descriptions=snapshot_descriptions(row.draft_assets,row.descriptions))
+
+
+def described_assets(ids,descriptions,request):
+    return [dict(a.jsonl(request=request),description=descriptions.get(str(a.id),'')) for a in StickerAsset.objects.filter(id__in=ids)]
 
 
 def owned(request,series_id,editable=True):
@@ -48,8 +74,10 @@ def payload(row,request=None,admin=False):
     value=dict(series_id=row.id,name=row.name,count=len(row.draft_assets),
         status='pending' if row.pending_snapshot else 'approved' if row.published_snapshot else 'rejected' if row.review_note else 'draft',
         published=bool(row.published_snapshot),review_note=row.review_note,
-        has_changes=row.published_snapshot!=dict(name=row.name,asset_ids=row.draft_assets),
-        assets=[a.jsonl(request=request) for a in StickerAsset.objects.filter(id__in=row.draft_assets)],
+        has_changes=row.published_snapshot!=draft_snapshot(row),
+        descriptions=row.descriptions,
+        missing_descriptions=sum(not row.descriptions.get(str(i),'').strip() for i in row.draft_assets),
+        assets=described_assets(row.draft_assets,row.descriptions,request),
         published_snapshot=row.published_snapshot)
     if admin:value.update(pending_snapshot=row.pending_snapshot,owner=row.user.tiny_json(),submitted_at=row.submitted_at.timestamp() if row.submitted_at else None)
     return value
@@ -61,7 +89,8 @@ def submit(row,action='publish'):
         ids=row.draft_assets
         if not ids or len(ids)>200 or UserSticker.objects.filter(user=row.user,asset_id__in=ids,is_uploaded=True).count()!=len(set(ids)):
             raise StickerErrors.NOT_ACCESSIBLE
-    row.pending_snapshot=dict(action=action,name=row.name,asset_ids=list(row.draft_assets))
+        snapshot_descriptions(ids,row.descriptions,required=True)
+    row.pending_snapshot=dict(action=action,**draft_snapshot(row))
     row.submitted_at=timezone.now();row.review_note=''
     row.save(update_fields=['pending_snapshot','submitted_at','review_note'])
     from utils.notificator_integration import send_sticker_series_review_mail
@@ -92,6 +121,11 @@ class StickerSeriesDetailView(View):
                     row.draft_assets=[i for i in row.draft_assets if i!=value['remove_asset_id']]
                     row.save(update_fields=['draft_assets'])
                     release_unused_membership(row)
+                elif 'descriptions' in value:
+                    changes=value['descriptions']
+                    if not isinstance(changes,dict) or not changes or any(key not in {str(i) for i in row.draft_assets} for key in changes):raise StickerErrors.INVALID_DESCRIPTION
+                    row.descriptions={**row.descriptions,**{key:sticker_description(text) for key,text in changes.items()}}
+                    row.save(update_fields=['descriptions'])
                 else:
                     row.name=series_name(value.get('name'));row.save(update_fields=['name'])
         except IntegrityError:raise StickerErrors.INVALID_HASH
@@ -135,7 +169,7 @@ class StickerPackView(View):
     def get(self,request,series_id):
         row=StickerSeries.objects.filter(id=series_id,published_snapshot__isnull=False).first()
         if not row:raise StickerErrors.NOT_FOUND
-        return dict(series_id=row.id,name=row.published_snapshot['name'],assets=[a.jsonl(request=request) for a in StickerAsset.objects.filter(id__in=row.published_snapshot['asset_ids'])])
+        return dict(series_id=row.id,name=row.published_snapshot['name'],assets=described_assets(row.published_snapshot['asset_ids'],row.published_snapshot.get('descriptions',{}),request))
 
     @auth.require_user
     def post(self,request,series_id):
@@ -161,7 +195,7 @@ class StickerPackReviewView(View):
             snapshot=row.pending_snapshot
             if value['approved']:
                 if snapshot['action']=='delete':row.published_snapshot=None
-                else:row.published_snapshot=dict(name=snapshot['name'],asset_ids=snapshot['asset_ids'])
+                else:row.published_snapshot=dict(name=snapshot['name'],asset_ids=snapshot['asset_ids'],descriptions=snapshot_descriptions(snapshot['asset_ids'],snapshot.get('descriptions',{}),required=True))
             row.pending_snapshot=None;row.review_note=str(value.get('note',''))[:300]
             row.save(update_fields=['published_snapshot','pending_snapshot','review_note'])
             release_unused_membership(row)

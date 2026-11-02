@@ -10,3 +10,4 @@ class StickerErrors:
     NOT_ACCESSIBLE = Error(message=_('You cannot access this sticker'), code=Code.Forbidden)
     DOWNLOAD_FAILED = Error(message=_('Unable to collect this image'), code=Code.BadRequest)
     SERIES_CONFLICT = Error(message=_('Each uploaded sticker can belong to only one collection'), code=Code.Conflict)
+    INVALID_DESCRIPTION = Error(message=_('Add a short description to every sticker before submitting'), code=Code.BadRequest)

@@ -55,6 +55,19 @@ class ResourceTests(TestCase):
         copy=publish_resource(other,'joy','Joy','Joy',self.data,upload=lambda *args:None)
         self.assertEqual(row.sticker_asset_id,copy.sticker_asset_id)
 
+    def test_animated_emoji_preserves_frames_and_static_thumbnail(self):
+        frames=[Image.new('RGBA',(64,64),color) for color in [(255,0,0,128),(0,255,0,128),(0,0,255,128)]]
+        data=io.BytesIO();frames[0].save(data,'WEBP',save_all=True,append_images=frames[1:],duration=[100,200,300],loop=0)
+        variants=image_variants(data.getvalue(),'emoji')
+        with Image.open(io.BytesIO(variants['display'])) as image:
+            self.assertEqual(image.n_frames,3);self.assertEqual(image.info['loop'],0)
+        with Image.open(io.BytesIO(variants['thumbnail'])) as image:self.assertEqual(getattr(image,'n_frames',1),1)
+        uploads=[]
+        row=publish_resource(self.collection,'animated','眨眼','Wink',data.getvalue(),upload=lambda key,data,mime:uploads.append((key,mime)))
+        self.assertTrue(row.original_key.endswith('.webp'))
+        self.assertTrue(all(mime=='image/webp' for key,mime in uploads))
+        with self.assertRaises(Exception):image_variants(data.getvalue(),'background')
+
     def test_public_catalog_hides_disabled_resources_but_old_message_files_remain(self):
         row=self.resource()
         result=self.client.get('/resources/collections/haibara-v2')

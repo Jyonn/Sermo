@@ -1,0 +1,109 @@
+{
+  "slug": "haibara-v2",
+  "title": "小哀",
+  "title_en": "Ai Haibara",
+  "version": "v2",
+  "category": "emoji",
+  "assets": [
+    {
+      "slug": "joy",
+      "title": "开心",
+      "title_en": "Joy"
+    },
+    {
+      "slug": "laugh",
+      "title": "大笑",
+      "title_en": "Laugh"
+    },
+    {
+      "slug": "laugh-tears",
+      "title": "笑哭",
+      "title_en": "Joy tears"
+    },
+    {
+      "slug": "smirk",
+      "title": "得意",
+      "title_en": "Smirk"
+    },
+    {
+      "slug": "eye-roll",
+      "title": "白眼",
+      "title_en": "Eye roll"
+    },
+    {
+      "slug": "side-eye",
+      "title": "嫌弃",
+      "title_en": "Side-eye"
+    },
+    {
+      "slug": "grimace",
+      "title": "尴尬",
+      "title_en": "Awkward"
+    },
+    {
+      "slug": "sweat-smile",
+      "title": "汗颜",
+      "title_en": "Sweat smile"
+    },
+    {
+      "slug": "surprised",
+      "title": "震惊",
+      "title_en": "Surprise"
+    },
+    {
+      "slug": "blank",
+      "title": "无语",
+      "title_en": "Speechless"
+    },
+    {
+      "slug": "pleading",
+      "title": "委屈",
+      "title_en": "Pleading"
+    },
+    {
+      "slug": "cry",
+      "title": "大哭",
+      "title_en": "Crying"
+    },
+    {
+      "slug": "angry",
+      "title": "生气",
+      "title_en": "Angry"
+    },
+    {
+      "slug": "sleepy",
+      "title": "困困",
+      "title_en": "Sleepy"
+    },
+    {
+      "slug": "dizzy",
+      "title": "头晕",
+      "title_en": "Dizzy"
+    },
+    {
+      "slug": "love",
+      "title": "心动",
+      "title_en": "Love"
+    },
+    {
+      "slug": "shush",
+      "title": "保密",
+      "title_en": "Shush"
+    },
+    {
+      "slug": "giggle",
+      "title": "偷笑",
+      "title_en": "Giggle"
+    },
+    {
+      "slug": "cool",
+      "title": "耍酷",
+      "title_en": "Cool"
+    },
+    {
+      "slug": "sigh",
+      "title": "叹气",
+      "title_en": "Sigh"
+    }
+  ]
+}

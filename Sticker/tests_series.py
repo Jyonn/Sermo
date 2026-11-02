@@ -19,6 +19,7 @@ class StickerSeriesTests(TestCase):
         asset=StickerAsset.objects.create(content_hash='f'*64,storage_key='frienden/messages/sticker/fixture.webp')
         self.row=UserSticker.objects.create(user=self.user,asset=asset,is_uploaded=True)
         self.other_row=UserSticker.objects.create(user=self.other,asset=asset)
+        self.group.descriptions={str(asset.id):'开心'};self.group.save(update_fields=['descriptions'])
 
     def request(self,value):
         request=RequestFactory().post('/',data=json.dumps(value),content_type='application/json',HTTP_AUTHORIZATION='Bearer fixture')
@@ -33,6 +34,34 @@ class StickerSeriesTests(TestCase):
             self.assertEqual(series_name(name),name)
         for name in ['六个中文字啊','abcdefghijk','小哀abcdefg','','../foo','😃']:
             with self.assertRaises(Exception):series_name(name)
+
+    def test_description_validation_and_submit_requires_every_item(self):
+        from Sticker.series import sticker_description, submit
+        for value in ['开心','八个汉字描述上限','English label']:self.assertEqual(sticker_description(value),value)
+        for value in ['',None,' ', '九个汉字描述超过限额','a'*17,'bad\nline']:
+            with self.assertRaises(Exception):sticker_description(value)
+        self.group.draft_assets=[self.row.asset_id];self.group.descriptions={};self.group.save()
+        with self.assertRaises(Exception):submit(self.group)
+        with self.assertRaises(Exception):self.invoke(StickerSeriesDetailView,{'descriptions':{'999999':'开心'}},series_id=self.group.id)
+        self.invoke(StickerSeriesDetailView,{'descriptions':{str(self.row.asset_id):'开心'}},series_id=self.group.id)
+        with self.captureOnCommitCallbacks(execute=True),patch('utils.notificator_integration.send_sticker_series_review_mail'):
+            self.invoke(StickerSeriesDetailView,{'action':'submit'},series_id=self.group.id)
+        with self.assertRaises(Exception):self.invoke(StickerSeriesDetailView,{'descriptions':{str(self.row.asset_id):'难过'}},series_id=self.group.id)
+        self.group.refresh_from_db();self.assertEqual(self.group.pending_snapshot['descriptions'][str(self.row.asset_id)],'开心')
+
+    def test_draft_description_does_not_change_published_pack(self):
+        from Sticker.series import StickerPackView, StickerPackReviewView
+        self.group.draft_assets=[self.row.asset_id]
+        self.group.published_snapshot={'name':'小哀','asset_ids':[self.row.asset_id],'descriptions':{str(self.row.asset_id):'开心'}};self.group.save()
+        self.invoke(StickerSeriesDetailView,{'descriptions':{str(self.row.asset_id):'难过'}},series_id=self.group.id)
+        with patch('utils.auth.decrypt',return_value={'user_id':self.user.id}):
+            response=StickerPackView.as_view()(RequestFactory().get('/',HTTP_AUTHORIZATION='Bearer fixture'),series_id=self.group.id)
+        self.assertEqual(response['assets'][0]['description'],'开心')
+        with self.captureOnCommitCallbacks(execute=True),patch('utils.notificator_integration.send_sticker_series_review_mail'):
+            self.invoke(StickerSeriesDetailView,{'action':'submit'},series_id=self.group.id)
+        with patch('utils.auth.decrypt',return_value={'email':'admin@example.com'}):
+            StickerPackReviewView.as_view()(self.request({'approved':True}),series_id=self.group.id)
+        self.group.refresh_from_db();self.assertEqual(self.group.published_snapshot['descriptions'][str(self.row.asset_id)],'难过')
 
     def test_assign_is_atomic_and_cannot_cross_user_boundary(self):
         self.invoke(StickerSeriesAssignView,{'sticker_ids':[self.row.id],'series_id':self.group.id})

@@ -1,0 +1,129 @@
+{
+  "slug": "conan-v1",
+  "title": "柯南",
+  "title_en": "Conan",
+  "version": "v1",
+  "category": "emoji",
+  "assets": [
+    {
+      "slug": "glasses",
+      "title": "推镜",
+      "title_en": "Glasses",
+      "file": "glasses.webp"
+    },
+    {
+      "slug": "deadpan",
+      "title": "无语",
+      "title_en": "Unamused",
+      "file": "deadpan.webp"
+    },
+    {
+      "slug": "surprise",
+      "title": "震惊",
+      "title_en": "Surprise",
+      "file": "surprise.webp"
+    },
+    {
+      "slug": "laugh",
+      "title": "大笑",
+      "title_en": "Laugh",
+      "file": "laugh.webp"
+    },
+    {
+      "slug": "thinking",
+      "title": "思考",
+      "title_en": "Thinking",
+      "file": "thinking.webp"
+    },
+    {
+      "slug": "shush",
+      "title": "保密",
+      "title_en": "Shush",
+      "file": "shush.webp"
+    },
+    {
+      "slug": "wink",
+      "title": "眨眼",
+      "title_en": "Wink",
+      "file": "wink.webp"
+    },
+    {
+      "slug": "love",
+      "title": "心动",
+      "title_en": "Love",
+      "file": "love.webp"
+    },
+    {
+      "slug": "pleading",
+      "title": "委屈",
+      "title_en": "Pleading",
+      "file": "pleading.webp"
+    },
+    {
+      "slug": "sob",
+      "title": "大哭",
+      "title_en": "Crying",
+      "file": "sob.webp"
+    },
+    {
+      "slug": "angry",
+      "title": "生气",
+      "title_en": "Angry",
+      "file": "angry.webp"
+    },
+    {
+      "slug": "fear",
+      "title": "害怕",
+      "title_en": "Scared",
+      "file": "fear.webp"
+    },
+    {
+      "slug": "sleep",
+      "title": "睡觉",
+      "title_en": "Sleeping",
+      "file": "sleep.webp"
+    },
+    {
+      "slug": "yawn",
+      "title": "哈欠",
+      "title_en": "Yawn",
+      "file": "yawn.webp"
+    },
+    {
+      "slug": "blush",
+      "title": "害羞",
+      "title_en": "Blush",
+      "file": "blush.webp"
+    },
+    {
+      "slug": "giggle",
+      "title": "偷笑",
+      "title_en": "Giggle",
+      "file": "giggle.webp"
+    },
+    {
+      "slug": "skeptical",
+      "title": "怀疑",
+      "title_en": "Skeptical",
+      "file": "skeptical.webp"
+    },
+    {
+      "slug": "salute",
+      "title": "收到",
+      "title_en": "Salute",
+      "file": "salute.webp"
+    },
+    {
+      "slug": "dizzy",
+      "title": "头晕",
+      "title_en": "Dizzy",
+      "file": "dizzy.webp"
+    },
+    {
+      "slug": "excited",
+      "title": "期待",
+      "title_en": "Excited",
+      "file": "excited.webp"
+    }
+  ]
+}

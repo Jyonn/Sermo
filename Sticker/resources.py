@@ -52,8 +52,25 @@ def image_variants(data, category):
         with warnings.catch_warnings():
             warnings.simplefilter('error', Image.DecompressionBombWarning)
             with Image.open(io.BytesIO(data)) as source:
-                if source.format not in {'PNG', 'JPEG', 'WEBP'} or getattr(source, 'n_frames', 1) != 1:
+                frames=getattr(source,'n_frames',1)
+                if source.format not in {'PNG', 'JPEG', 'WEBP'}:
                     raise StickerErrors.INVALID_IMAGE
+                if frames>1:
+                    if source.format!='WEBP' or category!='emoji' or frames>60 or source.width*source.height*frames>20_000_000:raise StickerErrors.INVALID_IMAGE
+                    images=[];durations=[]
+                    for index in range(frames):
+                        source.seek(index)
+                        frame=source.convert('RGBA');frame.info.clear();images.append(frame)
+                        durations.append(max(40,min(2000,int(source.info.get('duration',100)))))
+                    if sum(durations)>15000:raise StickerErrors.INVALID_IMAGE
+                    original=io.BytesIO();images[0].save(original,'WEBP',save_all=True,append_images=images[1:],duration=durations,loop=0,lossless=True,method=6)
+                    display=[]
+                    for frame in images:
+                        frame.thumbnail((CATEGORIES[category],CATEGORIES[category]),Image.Resampling.LANCZOS);display.append(frame)
+                    output=io.BytesIO();display[0].save(output,'WEBP',save_all=True,append_images=display[1:],duration=durations,loop=0,quality=88,method=6)
+                    thumb=images[0].copy();thumb.thumbnail((96,96),Image.Resampling.LANCZOS)
+                    thumbnail=io.BytesIO();thumb.save(thumbnail,'WEBP',quality=88,method=6)
+                    return dict(original=original.getvalue(),display=output.getvalue(),thumbnail=thumbnail.getvalue(),size=display[0].size,original_extension='webp')
                 if source.width * source.height > 20_000_000:
                     raise StickerErrors.INVALID_IMAGE
                 image = ImageOps.exif_transpose(source).convert('RGBA')
@@ -99,9 +116,9 @@ def publish_resource(collection, slug, title, title_en, data, position=0, upload
     for variant in ('original', 'display', 'thumbnail'):
         content = variants[variant]
         digest = hashlib.sha256(content).hexdigest()
-        extension = 'png' if variant == 'original' else 'webp'
+        extension = variants.get('original_extension','png') if variant == 'original' else 'webp'
         key = f'frienden/assets/{resource_directory(collection)}/{valid_slug(collection.version)}/{digest}.{extension}'
-        upload(key, content, 'image/png' if variant == 'original' else 'image/webp')
+        upload(key, content, 'image/png' if extension=='png' else 'image/webp')
         keys[variant] = key
     digest = hashlib.sha256(variants['display']).hexdigest()
     with transaction.atomic():

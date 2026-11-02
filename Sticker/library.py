@@ -13,7 +13,7 @@ def sticker_library_payload(user, offset, limit, request=None, series_id=None):
         from Sticker.models import StickerSeries
         group=StickerSeries.objects.filter(id=series_id,user=user).first()
         query=query.filter(asset_id__in=group.draft_assets if group else [],is_uploaded=True)
-    page = list(query.select_related('asset')[offset:offset + limit + 1])
+    page = list(query.select_related('asset','series').prefetch_related('asset__managed_resources')[offset:offset + limit + 1])
     rows = page[:limit]
     return dict(items=[row.jsonl(request=request) for row in rows], has_more=len(page) > limit, next_offset=offset + len(rows))
 
