@@ -4119,3 +4119,4 @@ class ChronelleCredential(models.Model):
 
 # Register the separately maintained native push model with Django's model loader.
 from User.native_push_models import NativePushBinding
+from User.native_push_delivery import NativePushDelivery

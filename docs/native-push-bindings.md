@@ -54,6 +54,35 @@ account/binding/API/topic regression tests passed. System checks and diff whites
 checks passed. Regression log: `/private/tmp/frienden-native-push-api-regression.log`.
 This does not validate MySQL concurrency or real APNs delivery.
 
+### Durable Queue
+
+`NativePushDelivery` adds one unique row per event/binding, not per device token:
+two accounts sharing an installation still have independent notification consent.
+The queue reuses the existing WEB/system notification topic policy, including the
+current restriction that online notices are supported only by the instant channel.
+It does not add another topic matrix or change browser delivery.
+
+Both enqueue and claim require explicitly supplied configured environments; their
+default is empty. No event hook, scheduler, provider transport or credentials are
+connected yet. Claim rechecks the current account, space, topic policy, binding
+lease, opt-in, token digest and revision. Any registration revision change cancels
+the old queued row conservatively, even if its token bytes did not change. Event
+age is limited to 24 hours, including events enqueued late.
+
+Row-locked claims are single use. Completion must match the claim UUID and accepts
+only fixed outcome codes; raw provider exceptions are never persisted. A claim
+abandoned for 15 minutes becomes `unknown`, not retryable: the provider might have
+accepted it before the worker stopped. This prioritizes avoiding duplicate alerts
+over automatic retries of ambiguous sends. A future dispatcher must revalidate
+eligibility immediately before network submission; queue claiming alone cannot
+eliminate an opt-out racing with an already in-flight network request.
+
+Queue milestone: 15 new tests and 96 combined account/API/binding/queue/topic tests
+passed (`/private/tmp/frienden-native-push-queue-regression.log`). System checks and
+whitespace checks passed. SQLite test setup applies migration 0095. Migration dry
+run reports only the previously reproduced OAuthGrant drift, not queue drift.
+MySQL lock/concurrency behavior and real provider outcomes remain unverified.
+
 Secret-free SQLite settings and a dedicated temporary virtual environment were
 used. No production database or delivery credential was accessed.
 
@@ -75,9 +104,9 @@ used. No production database or delivery credential was accessed.
 
 1. Authenticated binding endpoints are implemented on the development branch;
    deployment and client integration remain pending. No endpoint is live yet.
-2. Native delivery route through the existing notification topic policy, not an
-   independent topic matrix. Add deduplication, bounded attempts and token failure
-   handling; configure APNs credentials only on the server after approval.
+2. Connect the tested queue to a provider transport and event dispatch behind an
+   explicit disabled-by-default server gate. Add token failure handling and payload
+   privacy/routing validation; configure APNs credentials only after approval.
 3. iOS OS-permission/device-token lifecycle, account-specific opt-in, rotation,
    logout cleanup and canonical access-checked notification tap routing.
 4. MySQL concurrency, migration rehearsal and signed-device sandbox/production
