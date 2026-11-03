@@ -169,7 +169,7 @@ class HeartbeatView(View):
 class UserMeView(View):
     @auth.require_user
     def get(self, request: Request):
-        return request.user.json_me()
+        return compact_response(request, request.user.json_me(), 'user-me')
 
     @auth.require_user
     @analyse.json(

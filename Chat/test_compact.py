@@ -118,5 +118,5 @@ class CompactChatListTests(TestCase):
             self.assertEqual(decode(json.loads(gzip.decompress(compressed.content))['body']), decode(normal.json()['body']))
             self.assertLess(len(compressed.content), len(normal.content))
             print(f'Chat endpoint {suffix or "legacy"}: {len(normal.content)} -> {len(compressed.content)} bytes over gzip')
-        other = self.client.get('/users/me', HTTP_ACCEPT_ENCODING='gzip', **self.headers)
+        other = self.client.get('/users/me/notification-prefs', HTTP_ACCEPT_ENCODING='gzip', **self.headers)
         self.assertNotIn('Content-Encoding', other.headers)

@@ -27,7 +27,7 @@ class ChatListCompression(GZipMiddleware):
 
     def process_response(self, request, response):
         match = getattr(request, 'resolver_match', None)
-        if request.method != 'GET' or getattr(match, 'url_name', None) not in {'chat_list', 'message', 'user growth acknowledgement'} or response.status_code != 200:
+        if request.method != 'GET' or getattr(match, 'url_name', None) not in {'chat_list', 'message', 'user growth acknowledgement', 'user me'} or response.status_code != 200:
             return response
         return super().process_response(request, response)
 
@@ -70,7 +70,7 @@ class APIPacker:
         response = self.get_response(request, *args, **kwargs)
         if not isinstance(response, HttpResponse):
             response = self.pack(response, getattr(request, 'wechat_content_safety', None))
-        if request.path.startswith('/users/me/chronelle') or (request.path.startswith('/research/') and request.path.endswith('/calendar/')):
+        if request.path.rstrip('/') == '/users/me' or request.path.startswith('/users/me/chronelle') or (request.path.startswith('/research/') and request.path.endswith('/calendar/')):
             response['Cache-Control'] = 'no-store, private'
         return response
 
