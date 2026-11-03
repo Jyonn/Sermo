@@ -13,6 +13,29 @@ URL = f'https://stillfolio.jyonn.space/share/{TOKEN}'
 
 
 class StillfolioProviderTests(SimpleTestCase):
+    def test_normalizes_public_photo_fields_without_local_identifiers(self):
+        metadata = StillfolioProvider.photo_metadata({'size': 1024, 'metadata': {
+            'width': 3000, 'height': 4000, 'place': '海边', 'fileName': '/private/photo.jpg',
+            'exif': {'make': 'SONY', 'lens': '24mm', 'iso': 200, 'fNumber': 2.8,
+                     'exposure': 0.004, 'takenAt': '2026:11:03 10:00:00', 'latitude': 91},
+        }})
+        self.assertEqual(metadata['status'], 1)
+        self.assertEqual(metadata['pixel_width'], 3000)
+        self.assertEqual(metadata['aperture'], 2.8)
+        self.assertEqual(metadata['exposure_seconds'], 0.004)
+        self.assertEqual(metadata['lens_model'], '24mm')
+        self.assertEqual(metadata['address'], '海边')
+        self.assertNotIn('latitude', metadata)
+        self.assertNotIn('fileName', str(metadata))
+        self.assertNotIn('/private', str(metadata))
+        from datetime import datetime, timezone as dt_timezone
+        self.assertEqual(datetime.fromtimestamp(metadata['taken_at'], dt_timezone.utc).isoformat(), '2026-11-03T02:00:00+00:00')
+
+    def test_rejects_malformed_photography_values(self):
+        self.assertEqual(StillfolioProvider.photo_metadata({'size': True, 'metadata': {
+            'width': float('inf'), 'height': -1, 'exif': {'iso': 'bad', 'model': {}, 'takenAt': 'invalid'},
+        }}), {'status': 0})
+
     def test_only_accepts_exact_share_host_and_uuid(self):
         self.assertEqual(StillfolioProvider.token(URL), TOKEN)
         self.assertIsNone(StillfolioProvider.token(f'https://stillfolio.jyonn.space.evil/share/{TOKEN}'))
@@ -50,20 +73,24 @@ class StillfolioProviderTests(SimpleTestCase):
                 self.assertEqual(preview['title'], '留幅 Stillfolio')
         get.assert_not_called()
 
+    @patch('Message.models.socket.getaddrinfo', return_value=[(2, 1, 6, '', ('93.184.216.34', 443))])
     @patch('Message.providers.stillfolio.requests.get')
-    def test_parses_public_collection_in_photo_order(self, get):
+    def test_parses_public_collection_in_photo_order(self, get, _dns):
         get.return_value = Mock(status_code=200, headers={'Content-Type': 'application/json'}, content=b'{}')
         get.return_value.json.return_value = {
             'name': '草原来信', 'description': '秋天的照片', 'owner': {'nickname': 'Jyonn'},
             'photo_order': ['second', 'first'],
             'photos': [
-                {'source_id': 'first', 'content_url': f'/api/v1/sync/share/{TOKEN}/assets/11111111-1111-1111-1111-111111111111'},
-                {'source_id': 'second', 'content_url': f'/api/v1/sync/share/{TOKEN}/assets/22222222-2222-2222-2222-222222222222'},
+                {'source_id': 'first', 'metadata': {'exif': {'iso': 100}}, 'content_url': f'/api/v1/sync/share/{TOKEN}/assets/11111111-1111-1111-1111-111111111111'},
+                {'source_id': 'second', 'metadata': {'exif': {'iso': 200}}, 'content_url': f'/api/v1/sync/share/{TOKEN}/assets/22222222-2222-2222-2222-222222222222'},
+                {'source_id': 'invalid', 'content_url': 'https://elsewhere.example/photo'},
             ],
         }
         preview = LinkPreview.fetch_preview_data(URL)
         self.assertEqual(preview['provider_data']['provider'], 'stillfolio_collection')
-        self.assertEqual(preview['provider_data']['photo_count'], 2)
+        self.assertEqual(preview['provider_data']['photo_count'], 3)
+        self.assertEqual([item['iso'] for item in preview['provider_data']['image_metadata']], [200, 100])
+        self.assertEqual(len(preview['provider_data']['images']), 2)
         self.assertIn('22222222', preview['image_url'])
         self.assertTrue(preview['image_url'].startswith('https://api.stillfolio.jyonn.space/'))
         self.assertEqual(get.call_args.args[0], f'https://api.stillfolio.jyonn.space/api/v1/sync/share/{TOKEN}')
