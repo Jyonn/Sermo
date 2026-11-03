@@ -93,7 +93,14 @@ def validate_location_keyword(value):
     return str(value or '').strip()[:80]
 
 
+def validate_statement_ids(values):
+    if not isinstance(values, list) or len(values) > 100 or any(type(value) is not int or value <= 0 or value > 2**53 - 1 for value in values):
+        raise SquareErrors.MEDIA_INVALID
+    return list(dict.fromkeys(values))
+
+
 class SquareParams(metaclass=Params):
+    statement_ids = Validator('statement_ids').to(validate_statement_ids)
     text = Validator('text').to(validate_text).null().default('')
     visibility = Validator('visibility').to(validate_visibility).default('public')
     media = Validator('media').to(validate_media).default([])

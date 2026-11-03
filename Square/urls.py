@@ -1,4 +1,5 @@
 from django.urls import path
+from Square.views import StatementSyncView
 
 from Square.views import AdminSquareMuteView, AdminStatementView, PinnedStatementView, SquareChatRecordStatementView, SquareQuotaView, SquareStatusView, StatementAuthorMuteView, StatementCalendarView, StatementCommentDetailView, StatementCommentLikeView, StatementCommentView, StatementDetailView, StatementEmoticonView, StatementLikeView, StatementLocationView, StatementMediaThumbnailView, StatementMediaView, StatementNearbyLocationView, StatementPinView, StatementUploadView, StatementView
 
@@ -13,6 +14,7 @@ urlpatterns = [
     path('location', StatementLocationView.as_view(), name='square location'),
     path('location/nearby', StatementNearbyLocationView.as_view(), name='square nearby locations'),
     path('statements', StatementView.as_view(), name='square statements'),
+    path('statements/sync', StatementSyncView.as_view(), name='square statement sync'),
     path('statements/calendar', StatementCalendarView.as_view(), name='square statement calendar'),
     path('statements/chat-record', SquareChatRecordStatementView.as_view(), name='square chat record statement'),
     path('admin/statements', AdminStatementView.as_view(), name='square admin statements'),

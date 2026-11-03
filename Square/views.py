@@ -428,6 +428,26 @@ class StatementUploadView(View):
         )
 
 
+class StatementSyncView(View):
+    @auth.require_user
+    @analyse.json(SquareParams.statement_ids)
+    def post(self, request: Request):
+        request.user.space.require_square_enabled()
+        ids = raw(request.json.statement_ids)
+        # Share the same visibility policy as feed/detail; inaccessible IDs are
+        # indistinguishable from deleted IDs, including IDs in other spaces.
+        from django.db.models import Count, Exists, OuterRef
+        rows = Statement.visible_for(request.user).filter(id__in=ids).select_related('user').annotate(
+            sync_comments=Count('comments', filter=Q(comments__is_deleted=False), distinct=True),
+            sync_likes=Count('likes', distinct=True),
+            sync_liked=Exists(StatementLike.objects.filter(statement_id=OuterRef('pk'), user=request.user)),
+        )
+        items = [dict(statement_id=row.id, comment_count=row.sync_comments, like_count=row.sync_likes,
+                      liked=row.sync_liked, is_pinned=bool(row.user.is_official and row.user.pinned_square_statement_id == row.id)) for row in rows]
+        found = {item['statement_id'] for item in items}
+        return dict(items=items, removed_ids=[item for item in ids if item not in found])
+
+
 class StatementDetailView(View):
     @auth.require_user
     def get(self, request: Request, statement_id: int):
