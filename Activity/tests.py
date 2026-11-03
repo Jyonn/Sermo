@@ -15,7 +15,7 @@ from User.models import User, UserResourceInventory
 
 class ActivityServiceTests(TestCase):
     def setUp(self):
-        self.space = Space.objects.create(name='Test', slug='activity-test', email='admin@example.com')
+        self.space = Space.objects.create(group_square_enabled=True, admin_phone_verified_at=timezone.now(), name='Test', slug='activity-test', email='admin@example.com')
         self.user = User.create(self.space, 'Member', email='member@example.com', verified=True)
         self.pool = [
             {'reward_id': 'bubble.one', 'resource_key': 'baxian-lv'},
@@ -226,7 +226,8 @@ class ActivityServiceTests(TestCase):
         self.assertEqual(self.user.avatar_frame_style, 'spider-web')
         self.assertEqual(self.user.profile_card_theme, 'spider-city')
 
-    def test_starry_night_requires_claim_evening_window_and_consecutive_days(self):
+    @patch('Activity.models.timezone.now', return_value=datetime(2026, 9, 10, 12, 30, tzinfo=datetime_timezone.utc))
+    def test_starry_night_requires_claim_evening_window_and_consecutive_days(self, _clock):
         campaign = ActivityCampaign.objects.create(
             key='starry-night-test',
             title='Five Nights',

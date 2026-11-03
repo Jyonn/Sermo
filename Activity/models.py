@@ -239,6 +239,9 @@ class ActivityService:
 
     @staticmethod
     def claim_for_space(campaign, space, claimed_at=None):
+        from Activity.eligibility import ActivityEligibilityErrors, missing_activity_requirements
+        if not SpaceActivity.objects.filter(campaign=campaign, space=space).exists() and missing_activity_requirements(campaign, space):
+            raise ActivityEligibilityErrors.UNAVAILABLE
         claimed_at = claimed_at or timezone.now()
         ends_at = (
             claimed_at + timedelta(seconds=campaign.duration_seconds)
@@ -319,11 +322,13 @@ class ActivityService:
 
     @classmethod
     def ensure_automatic_for_space(cls, space):
+        from Activity.eligibility import missing_activity_requirements
         for campaign in ActivityCampaign.objects.filter(
             enabled=True,
             assignment_mode=ActivityCampaign.AssignmentMode.AUTOMATIC,
         ):
-            cls.claim_for_space(campaign, space)
+            if not missing_activity_requirements(campaign, space):
+                cls.claim_for_space(campaign, space)
 
     @staticmethod
     def space_activities(space, active_only=False):
@@ -362,6 +367,7 @@ class ActivityService:
 
     @classmethod
     def admin_payloads(cls, space):
+        from Activity.eligibility import missing_activity_requirements
         cls.ensure_automatic_for_space(space)
         runs = {item.campaign_id: item for item in cls.space_activities(space)}
         payloads = []
@@ -370,7 +376,10 @@ class ActivityService:
             status = 'unclaimed'
             if run is not None:
                 status = 'active' if run.is_active() else 'ended'
+            missing = missing_activity_requirements(campaign, space)
             payloads.append(dict(
+                eligible=not missing,
+                missing_requirements=missing,
                 key=campaign.key,
                 title=campaign.title,
                 title_en=campaign.title_en,

@@ -14,7 +14,7 @@ from User.models import User
 
 class BgmTests(TestCase):
     def setUp(self):
-        self.space = Space.objects.create(name='BGM', slug='bgm-test', email='bgm@example.test')
+        self.space = Space.objects.create(group_square_enabled=True, admin_phone_verified_at=timezone.now(), name='BGM', slug='bgm-test', email='bgm@example.test')
         self.user = User.create(self.space, 'Collector', email='a@example.test', verified=True)
         self.peer = User.create(self.space, 'Peer', email='b@example.test', verified=True)
         tracks = []
@@ -99,7 +99,7 @@ class BgmTests(TestCase):
     def test_public_self_anonymous_unverified_and_other_space_rules(self):
         for target in [self.statement(self.user), self.statement(visibility=1), self.statement(is_anonymous=True)]:
             BgmService.record(self.user, 'like', target)
-        other = Space.objects.create(name='Other', slug='bgm-other', email='other@example.test')
+        other = Space.objects.create(group_square_enabled=True, admin_phone_verified_at=timezone.now(), name='Other', slug='bgm-other', email='other@example.test')
         target = Statement.objects.create(space=other, user=self.peer, text='Other space')
         BgmService.record(self.user, 'like', target)
         self.user.account_level = 0

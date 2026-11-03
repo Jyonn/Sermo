@@ -2,6 +2,7 @@ from datetime import timedelta
 from unittest.mock import patch
 
 from django.test import TestCase
+from django.utils import timezone
 
 from Activity.explorer import ExplorerService
 from Activity.models import ActivityCampaign, ActivityService, BgmParticipation, SpaceActivity, UserActivityProgress
@@ -20,7 +21,7 @@ class ExplorerTests(TestCase):
         self.clock.start();self.addCleanup(self.clock.stop)
         self.binding = patch.object(ExplorerService, 'chronelle_bound', return_value=False)
         self.bound = self.binding.start();self.addCleanup(self.binding.stop)
-        self.space = Space.objects.create(name='Explorer', slug='explorer-test', email='admin@example.com')
+        self.space = Space.objects.create(group_square_enabled=True, admin_phone_verified_at=timezone.now(), name='Explorer', slug='explorer-test', email='admin@example.com')
         self.user = User.create(self.space, 'Detective', email='detective@example.com', verified=True)
         self.campaign = ActivityCampaign.objects.get(key='explorer-2026')
         self.run = ActivityService.claim_for_space(self.campaign, self.space)
@@ -84,7 +85,7 @@ class ExplorerTests(TestCase):
 
     def test_fixed_window_does_not_extend_for_new_spaces(self):
         with patch('Activity.models.timezone.now', return_value=ExplorerService.END-timedelta(days=1)):
-            other=Space.objects.create(name='Late',slug='explorer-late',email='late@example.com')
+            other=Space.objects.create(group_square_enabled=True, admin_phone_verified_at=timezone.now(), name='Late',slug='explorer-late',email='late@example.com')
             run=ActivityService.claim_for_space(self.campaign,other)
         self.assertEqual(run.claimed_at,ExplorerService.START)
         self.assertEqual(run.ends_at,ExplorerService.END)
@@ -153,7 +154,7 @@ class ExplorerTests(TestCase):
                 self.assertEqual(self.claim(1).status_code,403)
 
     def test_cross_space_run_and_forged_tier_are_rejected(self):
-        other=Space.objects.create(name='Other',slug='explorer-other-space',email='other@example.com')
+        other=Space.objects.create(group_square_enabled=True, admin_phone_verified_at=timezone.now(), name='Other',slug='explorer-other-space',email='other@example.com')
         run=ActivityService.claim_for_space(self.campaign,other)
         with self.assertRaises(Exception):ExplorerService.payload(self.campaign,self.user,run)
         self.assertEqual(self.claim(6).status_code,400)
