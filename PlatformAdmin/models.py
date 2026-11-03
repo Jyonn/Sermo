@@ -8,6 +8,19 @@ from django.db import transaction
 from django.utils import timezone
 
 
+class FrontendRelease(models.Model):
+    version = models.CharField(max_length=32, unique=True)
+    notes = models.JSONField()
+    published_on = models.DateField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
+class FrontendDeployment(models.Model):
+    origin = models.URLField(unique=True)
+    release = models.ForeignKey(FrontendRelease,on_delete=models.PROTECT,related_name='deployments')
+    updated_at = models.DateTimeField(auto_now=True)
+
+
 class PlatformAdminSecurity(models.Model):
     singleton_key = models.CharField(max_length=16, unique=True, default='primary')
     totp_secret = models.CharField(max_length=64, blank=True, default='')
