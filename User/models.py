@@ -1688,13 +1688,17 @@ class PermanentVipCampaign(models.Model):
             enabled=True,
         ).first()
         space_activity_active = False
+        participation = None
         if activity_campaign is not None:
             ActivityService.ensure_automatic_for_space(user.space)
-            space_activity_active = ActivityService.space_activity_for(
+            run = ActivityService.space_activity_for(
                 activity_campaign,
                 user.space,
                 active_only=True,
-            ).is_active()
+            )
+            space_activity_active = run.is_active()
+            from Activity.participation import activity_participation
+            participation = activity_participation([run], user.space_id)[run.pk]
         claim = UserResourceInventory.objects.filter(user=user, reward_id='vip.permanent').first()
         level = user.effective_growth_level()
         required_level = cls.required_level_for_slot(min(campaign.claimed_count + 1, cls.LIMIT))
@@ -1718,6 +1722,7 @@ class PermanentVipCampaign(models.Model):
             slot=(claim.metadata or {}).get('slot') if claim else None,
             active=space_activity_active and claim is None and campaign.claimed_count < cls.LIMIT,
             space_activity_active=space_activity_active,
+            participation=participation,
         )
 
     @classmethod

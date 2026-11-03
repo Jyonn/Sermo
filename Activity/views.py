@@ -56,10 +56,14 @@ class BgmEntranceView(View):
 class ActiveActivityView(View):
     @auth.require_user
     def get(self, request: Request):
-        return [
+        from Activity.participation import activity_participation
+        runs = ActivityService.active_campaigns_for_space(request.user.space)
+        payloads = [
             ActivityService.payload(space_activity.campaign, request.user, space_activity)
-            for space_activity in ActivityService.active_campaigns_for_space(request.user.space)
+            for space_activity in runs
         ]
+        participants = activity_participation(runs, request.user.space_id)
+        return [{**payload, 'participation': participants[run.pk]} for payload, run in zip(payloads, runs)]
 
 
 class NumberDuelView(View):
@@ -85,7 +89,10 @@ class ActivityDetailView(View):
         campaign = ActivityCampaign.objects.get(key=key, enabled=True)
         ActivityService.ensure_automatic_for_space(request.user.space)
         space_activity = ActivityService.space_activity_for(campaign, request.user.space)
-        return ActivityService.payload(campaign, request.user, space_activity)
+        from Activity.participation import activity_participation
+        payload = ActivityService.payload(campaign, request.user, space_activity)
+        payload['participation'] = activity_participation([space_activity], request.user.space_id)[space_activity.pk]
+        return payload
 
 
 class ExplorerRewardClaimView(View):
