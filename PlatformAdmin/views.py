@@ -363,6 +363,9 @@ def _delivery_payload(delivery, channel):
         detail=delivery.detail or '',
         created_at=delivery.created_at.timestamp(),
         attempted_at=delivery.attempted_at.timestamp() if delivery.attempted_at else None,
+        client_received_at=delivery.client_received_at.timestamp() if delivery.client_received_at else None,
+        notification_submitted_at=delivery.notification_submitted_at.timestamp() if delivery.notification_submitted_at else None,
+        client_error=delivery.client_error or '',
     )
 
 

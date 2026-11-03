@@ -2358,6 +2358,7 @@ class WebPushSubscription(models.Model):
     origin = models.CharField(max_length=255)
     user_agent = models.CharField(max_length=255, blank=True, default='')
     enabled = models.BooleanField(default=True, db_index=True)
+    invalidated_at = models.DateTimeField(null=True, blank=True)
     last_seen_at = models.DateTimeField(auto_now=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -2394,8 +2395,11 @@ class WebPushSubscription(models.Model):
             User.objects.select_for_update().get(pk=user.pk)
             current = cls.objects.filter(user=user, endpoint_digest=endpoint_digest).first()
             previous = cls.objects.filter(user=user, endpoint=previous_endpoint).first() if previous_endpoint else None
+            if current and current.invalidated_at:
+                return current
             if restore_only and ((current and not current.opted_in) or not (current or (previous and previous.opted_in))):
                 return current
+            invalidated_at = cls.objects.filter(endpoint_digest=endpoint_digest, invalidated_at__isnull=False).values_list('invalidated_at', flat=True).first()
             subscription, _created = cls.objects.update_or_create(
                 user=user,
                 endpoint_digest=endpoint_digest,
@@ -2406,11 +2410,12 @@ class WebPushSubscription(models.Model):
                     auth=auth.strip(),
                     origin=normalized_origin,
                     user_agent=(user_agent or '')[:255],
-                    enabled=is_supported_origin,
+                    enabled=is_supported_origin and invalidated_at is None,
+                    invalidated_at=invalidated_at,
                     opted_in=True,
                 ),
             )
-            if previous and previous.pk != subscription.pk:
+            if previous and previous.pk != subscription.pk and subscription.enabled:
                 cls.objects.filter(pk=previous.pk).update(enabled=False, opted_in=False)
         return subscription
 
@@ -2434,8 +2439,18 @@ class WebPushSubscription(models.Model):
             space_id=user.space_id,
             enabled=True,
             opted_in=True,
+            invalidated_at__isnull=True,
             last_seen_at__gte=stale_before,
         )
+
+    @classmethod
+    def invalidate_endpoint(cls, endpoint_digest):
+        # One browser endpoint may serve several accounts; a terminal transport
+        # response invalidates the endpoint for all of them, without losing consent.
+        cls.objects.filter(endpoint_digest=endpoint_digest).update(enabled=False, invalidated_at=timezone.now())
+
+    def _dictify_invalidated_at(self):
+        return self.invalidated_at.timestamp() if self.invalidated_at else None
 
     def json(self):
         return self.dictify(
@@ -2444,6 +2459,7 @@ class WebPushSubscription(models.Model):
             'enabled',
             'opted_in',
             'last_seen_at',
+            'invalidated_at',
         )
 
 
@@ -3313,6 +3329,9 @@ class NotificationDelivery(models.Model):
         db_index=True,
     )
     detail = models.CharField(max_length=255, null=True, blank=True)
+    client_received_at = models.DateTimeField(null=True, blank=True)
+    notification_submitted_at = models.DateTimeField(null=True, blank=True)
+    client_error = models.CharField(max_length=64, null=True, blank=True, default='')
     attempted_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -3445,10 +3464,12 @@ class NotificationDelivery(models.Model):
             close_old_connections()
 
     def _web_payload(self):
+        from User.web_push_receipts import receipt_token
         payload = dict(self.event.payload or {})
         official_user = self.event.space.official_user
         payload.update(
             notification_event_id=self.event_id,
+            receipt_token=receipt_token(self),
             event_type=self.event.event_type,
             space_slug=self.event.space.slug,
             icon=official_user.tiny_json().get('avatar_uri') if official_user else '',
@@ -3510,8 +3531,7 @@ class NotificationDelivery(models.Model):
                 self.status = NotificationDeliveryStatusChoice.FAILED
                 self.detail = str(err)[:255]
                 if is_expired_subscription_error(err):
-                    subscription.enabled = False
-                    subscription.save(update_fields=['enabled'])
+                    WebPushSubscription.invalidate_endpoint(subscription.endpoint_digest)
         self.attempted_at = timezone.now()
         self.save(update_fields=['status', 'detail', 'attempted_at'])
         return self

@@ -1,4 +1,5 @@
 from django.urls import path
+from User.web_push_receipts import WebPushReceiptView
 from User.chronelle_account import FullChronelleView
 from User.chronelle_permissions import ChronellePermissionsView
 from User.chronelle_profile import ChronelleProfileView
@@ -135,6 +136,7 @@ urlpatterns = [
     path('me/web-reminder-prefs', UserWebReminderPreferenceView.as_view(), name='web reminder prefs'),
     path('me/gesture-lock', UserGestureLockPreferenceView.as_view(), name='gesture lock prefs'),
     path('me/web-push', WebPushSubscriptionView.as_view(), name='web push subscriptions'),
+    path('web-push/receipt', WebPushReceiptView.as_view(), name='web push receipt'),
     path('me/password', PasswordView.as_view(), name='password'),
     path('me/password/code', PasswordCodeView.as_view(), name='password code'),
     path('me/password/verify', PasswordVerifyView.as_view(), name='password verify'),
