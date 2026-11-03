@@ -20,7 +20,7 @@ from utils import auth
 from utils.qiniu import _required_config, avatar_uri_for_key, sign_private_download_url
 
 MAX_BYTES = 10 * 1024 * 1024
-CATEGORIES = {'emoji': 384, 'avatar-frame': 512, 'background': 1920, 'illustration': 1600, 'activity': 1920}
+CATEGORIES = {'emoji': 384, 'avatar-frame': 512, 'background': 1920, 'profile-card': 1600, 'bubble': 1600, 'illustration': 1600, 'activity': 1920}
 SLUG = re.compile(r'^[a-z0-9][a-z0-9_-]{0,63}$')
 
 
@@ -39,7 +39,7 @@ def collection_json(row, request, admin=False):
 
 
 def resource_directory(collection):
-    value = collection.directory or f'{dict(emoji="emojis", **{"avatar-frame":"avatar-frames", "background":"backgrounds", "illustration":"illustrations", "activity":"activities"}).get(collection.category, "other")}/{collection.slug}'
+    value = collection.directory or f'{dict(emoji="emojis", **{"avatar-frame":"avatar-frames", "background":"backgrounds", "profile-card":"profile-cards", "bubble":"bubbles", "illustration":"illustrations", "activity":"activities"}).get(collection.category, "other")}/{collection.slug}'
     if not re.fullmatch(r'[a-z0-9][a-z0-9_-]{0,63}(?:/[a-z0-9][a-z0-9_-]{0,63}){1,2}', value):
         raise StickerErrors.INVALID_HASH
     return value

@@ -13,6 +13,49 @@ from utils.qiniu import (build_avatar_key, build_chat_background_key, build_mess
 
 
 class ResourceTests(TestCase):
+    def test_appearance_categories_and_paths_share_upload_policy(self):
+        from Sticker.resources import resource_directory
+        for category, directory in [('profile-card', 'profile-cards'), ('bubble', 'bubbles'), ('avatar-frame', 'avatar-frames'), ('background', 'backgrounds')]:
+            collection=ResourceCollection(slug='sample',category=category)
+            self.assertEqual(resource_directory(collection),f'{directory}/sample')
+            self.assertIn('thumbnail',image_variants(self.data,category))
+
+    def test_classification_preserves_published_references_and_is_idempotent(self):
+        import tempfile
+        from pathlib import Path
+        from django.core.management import call_command
+        row=self.resource(); original=(row.id,row.content_hash,row.storage_key)
+        with tempfile.TemporaryDirectory() as folder:
+            manifest=Path(folder)/'classify.json'
+            manifest.write_text(json.dumps([dict(resource_id=row.id,category='bubble',collection='bubble-art',title='气泡',title_en='Bubbles',asset_title='微笑')]))
+            call_command('classify_resources',str(manifest));call_command('classify_resources',str(manifest))
+        row.refresh_from_db()
+        self.assertEqual((row.id,row.content_hash,row.storage_key),original)
+        self.assertEqual(row.collection.category,'bubble')
+        self.assertEqual(row.title,'微笑')
+
+    def test_trusted_appearance_import_preserves_bytes_and_rejects_path_escape(self):
+        import tempfile,hashlib
+        from pathlib import Path
+        from django.core.management import call_command
+        from django.core.management.base import CommandError
+        uploads=[]
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder);(root/'art.png').write_bytes(self.data)
+            item=dict(file='art.png',alias='/assets/art.png',category='bubble',collection='test-bubble',title='气泡',title_en='Bubble')
+            manifest=root/'manifest.json';manifest.write_text(json.dumps([item]))
+            with patch('Sticker.management.commands.import_appearance_resources.upload_object',side_effect=lambda key,data,mime:uploads.append((key,data,mime))):
+                call_command('import_appearance_resources',str(manifest),output=str(root/'output.json'))
+                call_command('import_appearance_resources',str(manifest),output=str(root/'output.json'))
+            row=ManagedResource.objects.get(collection__slug='test-bubble')
+            self.assertEqual(row.content_hash,hashlib.sha256(self.data).hexdigest())
+            self.assertEqual(uploads[0][1],self.data)
+            self.assertEqual(row.mime_type,'image/png')
+            self.assertTrue(row.storage_key.startswith('frienden/assets/bubbles/test-bubble/'))
+            self.assertNotEqual(row.storage_key,row.thumbnail_key)
+            item['file']='../escape.png';manifest.write_text(json.dumps([item]))
+            with self.assertRaises(CommandError):call_command('import_appearance_resources',str(manifest),output=str(root/'output.json'))
+
     def setUp(self):
         self.collection = ResourceCollection.objects.create(slug='haibara-v2', title='小哀', version='v2', published=True)
         image = Image.new('RGBA', (400, 400), (255, 50, 20, 128))
