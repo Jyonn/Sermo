@@ -117,7 +117,8 @@ class StatementApiTests(TestCase):
         self.assertEqual(statement.link_preview_id, preview.id)
         self.assertEqual(LinkPreview.objects.count(), 1)
 
-    def test_external_media_resolver_reuses_chat_link_preview_cache(self):
+    @patch('Message.models.socket.getaddrinfo', return_value=[(2, 1, 6, '', ('93.184.216.34', 443))])
+    def test_external_media_resolver_reuses_chat_link_preview_cache(self, _dns):
         preview = self.create_music_preview()
         response = self.client.post(
             '/messages/external-media-preview',
@@ -940,7 +941,7 @@ class StatementApiTests(TestCase):
         media = [
             {
                 'kind': 'image',
-                'key': f'sermo/messages/image/photo-{index}.jpg',
+                'key': f'frienden/messages/image/{index:032x}.jpg',
                 'mime_type': 'image/jpeg',
                 'location': {'latitude': 24.48, 'longitude': 118.08, 'address': '厦门'},
             }
@@ -1234,7 +1235,7 @@ class StatementApiTests(TestCase):
         response = self.post_statement(self.author, {
             'text': '好友圈图片发言',
             'visibility': 'friends',
-            'media': [{'kind': 'image', 'key': 'sermo/messages/image/growth.jpg'}],
+            'media': [{'kind': 'image', 'key': 'frienden/messages/image/0123456789abcdef0123456789abcdef.jpg'}],
         })
         self.assertEqual(response.status_code, 200, response.content)
         statement_id = response.json()['body']['statement_id']
