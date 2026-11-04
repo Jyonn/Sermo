@@ -70,9 +70,13 @@ class VideoTranscodeTests(TestCase):
         self.assertIn('/s/720x1280>/',client.execute.call_args.args[1][0])
         self.assertEqual(result.original_file_size,90_000_000)
         self.assertEqual(result.transcode_attempts,1)
+        MediaAsset.objects.filter(id=asset.id).update(transcode_status=MediaAsset.TRANSCODE_FAILED,transcode_error='playback exceeds 20 MB per minute')
+        retry=submit_video_transcode(asset.id)
+        self.assertNotEqual(retry.playback_key,result.playback_key)
+        self.assertIn('/vb/1000k/',client.execute.call_args.args[1][0])
         MediaAsset.objects.filter(id=asset.id).update(transcode_status=MediaAsset.TRANSCODE_FAILED,transcode_attempts=3)
         self.assertIsNone(submit_video_transcode(asset.id))
-        self.assertEqual(client.execute.call_count,1)
+        self.assertEqual(client.execute.call_count,2)
 
     @patch('Message.video_transcode._client', side_effect=OSError('temporary outage'))
     def test_poll_network_error_keeps_existing_job_pending(self, _):

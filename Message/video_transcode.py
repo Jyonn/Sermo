@@ -32,7 +32,7 @@ def submit_video_transcode(asset_id):
         return asset
     original_key = asset.original_key or asset.source_key
     original_uri = asset.original_uri or asset.source_uri
-    playback_key = asset.playback_key or f'frienden/messages/video-playback/{uuid.uuid4().hex}.mp4'
+    playback_key = f'frienden/messages/video-playback/{uuid.uuid4().hex}.mp4'
     claimed = MediaAsset.objects.filter(id=asset.id, transcode_status__in=eligible, transcode_attempts__lt=MAX_ATTEMPTS).update(
         original_key=original_key, original_uri=original_uri,
         playback_key=playback_key, transcode_status=MediaAsset.TRANSCODE_PENDING,
@@ -45,6 +45,8 @@ def submit_video_transcode(asset_id):
     try:
         bucket, client = _client()
         operations = VIDEO_TRANSCODE_FOPS
+        if 'exceeds 20 MB' in asset.transcode_error:
+            operations = operations.replace('vb/1400k', f'vb/{1000 if asset.transcode_attempts == 1 else 700}k')
         width, height = asset.pixel_width, asset.pixel_height
         if not width or not height:
             dimensions = parse_avinfo(fetch_qiniu_avinfo(original_uri))
