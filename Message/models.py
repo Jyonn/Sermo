@@ -1523,8 +1523,7 @@ class Message(models.Model):
         path = self._blob_path(thumbnail=thumbnail)
         if not path:
             return ''
-        if self.media_resource.asset.transcode_status == MediaAsset.TRANSCODE_READY:
-            path = f'{path}?variant=playback'
+        path = self.media_resource.asset.delivery_path(path, thumbnail=thumbnail)
         if request is None:
             return path
         return request.build_absolute_uri(path)
@@ -2349,6 +2348,8 @@ class MediaAsset(models.Model):
     source_uri = models.CharField(max_length=500)
     original_key = models.CharField(max_length=255, blank=True, default='')
     original_uri = models.CharField(max_length=500, blank=True, default='')
+    original_file_size = models.BigIntegerField(null=True, blank=True)
+    transcode_attempts = models.PositiveSmallIntegerField(default=0)
     playback_key = models.CharField(max_length=255, blank=True, default='')
     playback_uri = models.CharField(max_length=500, blank=True, default='')
     transcode_status = models.IntegerField(default=TRANSCODE_NONE, db_index=True)
@@ -2391,6 +2392,19 @@ class MediaAsset(models.Model):
     def kind_for_name(cls, kind):
         return {'image': cls.KIND_IMAGE, 'video': cls.KIND_VIDEO, 'audio': cls.KIND_AUDIO, 'file': cls.KIND_FILE}[kind]
 
+    def delivery_path(self, path, thumbnail=False):
+        if self.kind == self.KIND_IMAGE and not thumbnail:
+            return f'{path}/display'
+        if self.kind == self.KIND_VIDEO and self.transcode_status == self.TRANSCODE_READY:
+            return f'{path}?variant=playback'
+        return path
+
+    def delivery_uri(self):
+        from utils.qiniu import build_message_image_display_uri
+        if self.kind == self.KIND_IMAGE:
+            return build_message_image_display_uri(self.source_uri, self.mime_type)
+        return sign_private_download_url(self.source_uri)
+
     @classmethod
     def queue(cls, source_key, source_uri, kind, mime_type=None, duration_seconds=None, file_size=None, content_hash=None):
         normalized_uri = str(source_uri or '').strip()
@@ -2404,6 +2418,7 @@ class MediaAsset(models.Model):
             duplicate = cls.find_duplicate(normalized_hash, file_size=file_size)
             if duplicate is not None:
                 cls._promote_kind(duplicate, kind)
+                cls.ensure_video_transcode(duplicate)
                 return duplicate
         try:
             metadata, _created = cls.objects.get_or_create(
@@ -2452,6 +2467,11 @@ class MediaAsset(models.Model):
         threading.Thread(target=submit_video_transcode, args=(asset_id,), daemon=True).start()
 
     @classmethod
+    def ensure_video_transcode(cls, asset):
+        if asset.kind == cls.KIND_VIDEO and asset.transcode_status in {cls.TRANSCODE_NONE, cls.TRANSCODE_FAILED} and asset.transcode_attempts < 3:
+            transaction.on_commit(lambda: cls.queue_video_transcode(asset.id))
+
+    @classmethod
     def _promote_kind(cls, asset, requested_kind):
         """Keep one physical object while retaining the richest metadata parser."""
         priority = {
@@ -2481,7 +2501,8 @@ class MediaAsset(models.Model):
             return None
         queryset = cls.objects.filter(content_hash=normalized_hash)
         if file_size is not None:
-            queryset = queryset.filter(file_size=int(file_size))
+            queryset = queryset.filter(Q(file_size=int(file_size)) | Q(original_file_size=int(file_size))
+                | Q(transcode_status=cls.TRANSCODE_READY, original_file_size__isnull=True))
         return queryset.order_by('-id').first()
 
     @classmethod
@@ -2548,7 +2569,15 @@ class MediaAsset(models.Model):
                 metadata.geocoding_provider = ''
                 metadata.geocoding_status = cls.GEOCODING_UNAVAILABLE
             metadata.geocoding_error = ''
-            metadata.save()
+            # Metadata is fetched concurrently with transcoding. Never write a
+            # stale full model back over the job status or its playback source.
+            with transaction.atomic():
+                current = cls.objects.select_for_update().get(pk=metadata.pk)
+                if current.source_key != metadata.source_key:
+                    return current
+                metadata.save(update_fields=[*properties.keys(), 'raw_metadata', 'detail_metadata_checked_at',
+                    'detail_metadata_error', 'status', 'error', 'address', 'geocoding_provider',
+                    'geocoding_status', 'geocoding_error', 'updated_at'])
         except Exception as error:
             metadata.status = cls.STATUS_FAILED
             metadata.error = str(error)[:500]
@@ -2639,6 +2668,8 @@ class MediaResource(models.Model):
 
     @classmethod
     def acquire(cls, owner, asset, kind, file_name=None):
+        MediaAsset._promote_kind(asset, kind)
+        MediaAsset.ensure_video_transcode(asset)
         normalized_name = os.path.basename(str(file_name or '').strip())[:180]
         resource, _created = cls.objects.get_or_create(
             owner=owner,
@@ -2707,9 +2738,8 @@ class MediaResource(models.Model):
     def resource_jsonl(self, request=None):
         path = reverse('message blob', kwargs={'blob_slug': self.asset.blob_slug})
         thumbnail_path = reverse('message blob thumbnail', kwargs={'blob_slug': self.asset.blob_slug})
-        if self.asset.transcode_status == MediaAsset.TRANSCODE_READY:
-            path = f'{path}?variant=playback'
-            thumbnail_path = f'{thumbnail_path}?variant=playback'
+        path = self.asset.delivery_path(path)
+        thumbnail_path = self.asset.delivery_path(thumbnail_path, thumbnail=True)
         return dict(
             resource_id=self.id,
             kind={MediaAsset.KIND_IMAGE: 'image', MediaAsset.KIND_VIDEO: 'video', MediaAsset.KIND_AUDIO: 'audio', MediaAsset.KIND_FILE: 'file'}.get(self.kind),
@@ -3041,9 +3071,11 @@ class ForwardBundleItem(models.Model):
         if self.media_resource_id:
             asset = self.media_resource.asset
             path = reverse('message blob', kwargs={'blob_slug': asset.blob_slug})
+            path = asset.delivery_path(path)
             payload['uri'] = request.build_absolute_uri(path) if request is not None else path
             if self.message_type in (MessageTypeChoice.IMAGE, MessageTypeChoice.VIDEO):
                 thumbnail_path = reverse('message blob thumbnail', kwargs={'blob_slug': asset.blob_slug})
+                thumbnail_path = asset.delivery_path(thumbnail_path, thumbnail=True)
                 payload['thumbnail_uri'] = request.build_absolute_uri(thumbnail_path) if request is not None else thumbnail_path
             if self.message_type == MessageTypeChoice.IMAGE:
                 payload['image_metadata'] = asset.jsonl()

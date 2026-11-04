@@ -16,6 +16,8 @@ class Command(BaseCommand):
         if options['retry_failed']:
             statuses.append(MediaAsset.TRANSCODE_FAILED)
         ids = list(MediaAsset.objects.filter(kind=MediaAsset.KIND_VIDEO, transcode_status__in=statuses).order_by('id').values_list('id', flat=True)[:max(1, options['limit'])])
+        if options['retry_failed']:
+            MediaAsset.objects.filter(id__in=ids,transcode_status=MediaAsset.TRANSCODE_FAILED).update(transcode_attempts=0)
         for asset_id in ids:
             submit_video_transcode(asset_id)
         self.stdout.write(self.style.SUCCESS(f'submitted={len(ids)}'))

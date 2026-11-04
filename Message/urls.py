@@ -10,6 +10,8 @@ urlpatterns = [
     path('copies', MessageCopyView.as_view(), name='message copy suggestions'),
     path('blob/<slug:blob_slug>/thumbnail', MessageBlobThumbnailView.as_view(), name='message blob thumbnail'),
     path('blob/<slug:blob_slug>', MessageBlobView.as_view(), name='message blob'),
+    path('blob/<slug:blob_slug>/display', MessageBlobView.as_view()),
+    path('blob/<slug:blob_slug>/download', MessageBlobView.as_view()),
     path('link-preview', MessageLinkPreviewView.as_view(), name='message link preview'),
     path('external-media-preview', ExternalMediaPreviewView.as_view(), name='external media preview'),
     path('external-media-preview/refresh', ExternalMediaPreviewRefreshView.as_view(), name='external media preview refresh'),

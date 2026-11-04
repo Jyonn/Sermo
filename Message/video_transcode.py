@@ -2,16 +2,20 @@ import uuid
 from datetime import timedelta
 
 from django.db import transaction
+from django.db.models import F
 from django.utils import timezone
 from qiniu import Auth, PersistentFop, urlsafe_base64_encode
 
 from Config.models import Config, CI
 from Message.models import MediaAsset
 from utils.qiniu import avatar_uri_for_key, delete_message_media_file
+from Message.video_metadata import fetch_qiniu_avinfo, parse_avinfo
 
 
-VIDEO_TRANSCODE_FOPS = 'avthumb/mp4/vcodec/libx264/s/1280x720/autoscale/1/vb/1400k/r/30/acodec/aac/ab/96k'
+VIDEO_TRANSCODE_FOPS = 'avthumb/mp4/vcodec/libx264/s/1280x720>/autoscale/1/vb/1400k/r/30/acodec/aac/ab/96k/pixFmt/yuv420p'
 ORIGINAL_RETENTION = timedelta(days=7)
+VIDEO_MAX_BYTES_PER_MINUTE = 20_000_000
+MAX_ATTEMPTS = 3
 
 
 def _client():
@@ -23,22 +27,31 @@ def _client():
 
 def submit_video_transcode(asset_id):
     eligible = {MediaAsset.TRANSCODE_NONE, MediaAsset.TRANSCODE_FAILED}
-    asset = MediaAsset.objects.filter(id=asset_id, kind=MediaAsset.KIND_VIDEO, transcode_status__in=eligible).first()
+    asset = MediaAsset.objects.filter(id=asset_id, kind=MediaAsset.KIND_VIDEO, transcode_status__in=eligible, transcode_attempts__lt=MAX_ATTEMPTS).first()
     if asset is None:
         return asset
     original_key = asset.original_key or asset.source_key
     original_uri = asset.original_uri or asset.source_uri
     playback_key = asset.playback_key or f'frienden/messages/video-playback/{uuid.uuid4().hex}.mp4'
-    claimed = MediaAsset.objects.filter(id=asset.id, transcode_status__in=eligible).update(
+    claimed = MediaAsset.objects.filter(id=asset.id, transcode_status__in=eligible, transcode_attempts__lt=MAX_ATTEMPTS).update(
         original_key=original_key, original_uri=original_uri,
         playback_key=playback_key, transcode_status=MediaAsset.TRANSCODE_PENDING,
         transcode_error='',
+        original_file_size=asset.original_file_size or asset.file_size,
+        transcode_attempts=F('transcode_attempts') + 1,
     )
     if not claimed:
         return MediaAsset.objects.get(id=asset.id)
     try:
         bucket, client = _client()
-        operation = f'{VIDEO_TRANSCODE_FOPS}|saveas/{urlsafe_base64_encode(f"{bucket}:{playback_key}")}'
+        operations = VIDEO_TRANSCODE_FOPS
+        width, height = asset.pixel_width, asset.pixel_height
+        if not width or not height:
+            dimensions = parse_avinfo(fetch_qiniu_avinfo(original_uri))
+            width, height = dimensions['pixel_width'], dimensions['pixel_height']
+        if height > width:
+            operations = operations.replace('1280x720', '720x1280')
+        operation = f'{operations}|saveas/{urlsafe_base64_encode(f"{bucket}:{playback_key}")}'
         result, info = client.execute(original_key, [operation], 0)
         persistent_id = (result or {}).get('persistentId')
         if not persistent_id:
@@ -62,18 +75,34 @@ def refresh_video_transcode(asset_id):
     try:
         _bucket, client = _client()
         result, info = client.get_status(asset.transcode_persistent_id)
+    except Exception as error:
+        MediaAsset.objects.filter(id=asset.id).update(transcode_error=str(error)[:500])
+        return MediaAsset.objects.get(id=asset.id)
+    try:
         code = int((result or {}).get('code', -1))
         if code in {1, 2}:
             return asset
         if code != 0:
             raise RuntimeError((result or {}).get('desc') or getattr(info, 'text_body', None) or f'pfop code {code}')
         playback_uri = avatar_uri_for_key(asset.playback_key)
+        try:
+            properties = parse_avinfo(fetch_qiniu_avinfo(playback_uri))
+        except Exception as error:
+            MediaAsset.objects.filter(id=asset.id).update(transcode_error=str(error)[:500])
+            return MediaAsset.objects.get(id=asset.id)
+        duration = properties.get('duration_seconds')
+        size = properties.get('file_size')
+        if not duration or not size:
+            raise RuntimeError('playback size or duration unavailable')
+        if size > max(256_000, duration * VIDEO_MAX_BYTES_PER_MINUTE / 60):
+            raise RuntimeError('playback exceeds 20 MB per minute')
         with transaction.atomic():
             MediaAsset.objects.filter(id=asset.id).update(
                 source_key=asset.playback_key, source_uri=playback_uri,
                 playback_uri=playback_uri, mime_type='video/mp4',
                 transcode_status=MediaAsset.TRANSCODE_READY, transcoded_at=timezone.now(),
                 transcode_error='',
+                **{key: value for key, value in properties.items() if key in {'file_size', 'duration_seconds', 'pixel_width', 'pixel_height', 'frame_rate', 'bit_rate', 'video_codec', 'audio_codec'}},
             )
         MediaAsset.refresh(MediaAsset.objects.get(id=asset.id), geocode=False)
     except Exception as error:

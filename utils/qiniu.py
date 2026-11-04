@@ -166,6 +166,13 @@ def build_message_image_thumbnail_uri(uri: str, width: int = 120):
     return sign_private_processed_url(uri, f'imageView2/2/w/{normalized_width}/q/70')
 
 
+def build_message_image_display_uri(uri: str, mime_type: str = ''):
+    # Preserve animated formats; do not flatten GIF/WebP animations into a photo.
+    if mime_type.lower().split(';')[0] in {'image/gif', 'image/webp'}:
+        return sign_private_download_url(uri)
+    return sign_private_processed_url(uri, 'imageView2/2/w/1920/h/1920/q/78/format/webp')
+
+
 def build_sticker_display_uri(uri: str, width: int = 320):
     normalized_width = max(120, min(int(width), 480))
     return sign_private_processed_url(uri, f'imageView2/2/w/{normalized_width}/q/75')

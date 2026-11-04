@@ -823,14 +823,12 @@ class StatementCommentMedia(models.Model):
     def jsonl(self, request=None):
         asset = self.media_asset
         path = reverse('square media', kwargs={'blob_slug': asset.blob_slug})
-        if asset.transcode_status == asset.TRANSCODE_READY:
-            path = f'{path}?variant=playback'
+        path = asset.delivery_path(path)
         uri = request.build_absolute_uri(path) if request else path
         thumbnail_uri = None
         if asset.kind in (asset.KIND_IMAGE, asset.KIND_VIDEO):
             thumbnail_path = reverse('square media thumbnail', kwargs={'blob_slug': asset.blob_slug})
-            if asset.transcode_status == asset.TRANSCODE_READY:
-                thumbnail_path = f'{thumbnail_path}?variant=playback'
+            thumbnail_path = asset.delivery_path(thumbnail_path, thumbnail=True)
             thumbnail_uri = request.build_absolute_uri(thumbnail_path) if request else thumbnail_path
         return dict(
             media_id=self.id,

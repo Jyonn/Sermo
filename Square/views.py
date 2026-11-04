@@ -624,9 +624,8 @@ class StatementMediaView(View):
         asset = MediaAsset.objects.filter(blob_slug=str(blob_slug or '').strip().lower()).first()
         if asset is None or not asset.statement_media_items.filter(statement__is_deleted=False).exists():
             raise SquareErrors.NOT_EXISTS
-        response = HttpResponseRedirect(sign_private_download_url(asset.source_uri))
-        response['Cache-Control'] = 'private, max-age=86400'
-        return response
+        from Message.media_delivery import media_delivery_response
+        return media_delivery_response(asset, download=request.path.endswith('/download'))
 
 
 class StatementMediaThumbnailView(View):

@@ -9,6 +9,8 @@ urlpatterns = [
     path('status', SquareStatusView.as_view(), name='square status'),
     path('media/<slug:blob_slug>/thumbnail', StatementMediaThumbnailView.as_view(), name='square media thumbnail'),
     path('media/<slug:blob_slug>', StatementMediaView.as_view(), name='square media'),
+    path('media/<slug:blob_slug>/display', StatementMediaView.as_view()),
+    path('media/<slug:blob_slug>/download', StatementMediaView.as_view()),
     path('emoticons/<slug:blob_slug>', StatementEmoticonView.as_view(), name='square emoticon'),
     path('upload', StatementUploadView.as_view(), name='square upload'),
     path('location', StatementLocationView.as_view(), name='square location'),

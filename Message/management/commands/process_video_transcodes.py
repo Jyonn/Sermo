@@ -2,7 +2,7 @@ from django.core.management.base import BaseCommand
 from django.utils import timezone
 
 from Message.models import MediaAsset
-from Message.video_transcode import ORIGINAL_RETENTION, delete_expired_original, refresh_video_transcode
+from Message.video_transcode import ORIGINAL_RETENTION, MAX_ATTEMPTS, delete_expired_original, refresh_video_transcode, submit_video_transcode
 
 
 class Command(BaseCommand):
@@ -10,9 +10,13 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument('--limit', type=int, default=100)
+        parser.add_argument('--keep-originals', action='store_true')
 
     def handle(self, *args, **options):
         limit = max(1, options['limit'])
+        waiting = MediaAsset.objects.filter(kind=MediaAsset.KIND_VIDEO, transcode_status__in=[MediaAsset.TRANSCODE_NONE, MediaAsset.TRANSCODE_FAILED], transcode_attempts__lt=MAX_ATTEMPTS).order_by('id').values_list('id', flat=True)[:limit]
+        for asset_id in list(waiting):
+            submit_video_transcode(asset_id)
         pending_ids = list(MediaAsset.objects.filter(transcode_status=MediaAsset.TRANSCODE_PENDING).values_list('id', flat=True)[:limit])
         for asset_id in pending_ids:
             refresh_video_transcode(asset_id)
@@ -21,5 +25,5 @@ class Command(BaseCommand):
             original_deleted_at__isnull=True,
             transcoded_at__lte=timezone.now() - ORIGINAL_RETENTION,
         ).values_list('id', flat=True)[:limit])
-        deleted = sum(bool(delete_expired_original(asset_id)) for asset_id in cleanup_ids)
+        deleted = 0 if options['keep_originals'] else sum(bool(delete_expired_original(asset_id)) for asset_id in cleanup_ids)
         self.stdout.write(self.style.SUCCESS(f'polled={len(pending_ids)} originals_deleted={deleted}'))
