@@ -944,6 +944,7 @@ class Message(models.Model):
             'event': str(event).strip(),
             'actor_name': user.name,
             **{key: value for key, value in details.items() if value is not None},
+            'actor_user_id': user.id,
         }
         content = json.dumps(payload, separators=(',', ':'), ensure_ascii=False)
         if len(content) > cls.vldt.MAX_CONTENT_LENGTH:
@@ -1052,13 +1053,21 @@ class Message(models.Model):
         queryset = cls.visible_for_user(chat, user) if user is not None else cls.visible_in_chat(chat)
         return queryset.exclude(type=MessageTypeChoice.SYSTEM).order_by('-created_at').first()
 
-    def system_message_text(self, viewer: User = None):
+    def system_message_text(self, viewer: User = None, *, tokenize=False):
         payload = self._parse_payload(self.content)
         if payload.get('kind') not in {'system', 'official_notice'}:
             return _('System message')
 
         actor = str(payload.get('actor_name') or self.user.name or '').strip()
-        member_names = [str(name).strip() for name in payload.get('member_names') or [] if str(name).strip()]
+        def identity(user_id,name):
+            if tokenize and isinstance(user_id,int) and user_id>0:return f'<@{user_id}>'
+            if user_id is not None and user_id==getattr(viewer,'id',None):
+                with override(getattr(viewer,'language',None)):return _('Me')
+            return name
+        actor_id=payload.get('actor_user_id') if payload.get('kind')=='official_notice' else self.user_id
+        actor=identity(actor_id,actor)
+        member_ids=payload.get('member_user_ids') or []
+        member_names=[identity(member_ids[index] if index<len(member_ids) else None,str(name).strip()) for index,name in enumerate(payload.get('member_names') or []) if str(name).strip()]
         language = getattr(viewer, 'language', None)
         with override(language):
             names = _('、').join(member_names)
@@ -1093,7 +1102,7 @@ class Message(models.Model):
             if event == 'ownership_transferred':
                 return _('%(actor)s transferred group ownership to %(owner)s') % dict(
                     actor=actor,
-                    owner=str(payload.get('new_owner_name') or '').strip(),
+                    owner=identity(payload.get('new_owner_user_id'),str(payload.get('new_owner_name') or '').strip()),
                 )
             if event == 'group_member_muted':
                 duration = {
@@ -1108,13 +1117,13 @@ class Message(models.Model):
                 }.get(payload.get('duration'), _('temporarily'))
                 return _('%(actor)s muted %(member)s for %(duration)s') % dict(
                     actor=actor,
-                    member=str(payload.get('member_name') or '').strip(),
+                    member=identity(payload.get('member_user_id'),str(payload.get('member_name') or '').strip()),
                     duration=duration,
                 )
             if event == 'group_member_unmuted':
                 return _('%(actor)s lifted the group mute for %(member)s') % dict(
                     actor=actor,
-                    member=str(payload.get('member_name') or '').strip(),
+                    member=identity(payload.get('member_user_id'),str(payload.get('member_name') or '').strip()),
                 )
             if event == 'message_pinned':
                 return _('%(actor)s locked a message') % dict(actor=actor)
@@ -1128,7 +1137,7 @@ class Message(models.Model):
                 return _('Your space operator role has been removed. Operator permissions are no longer available.')
             if event == 'space_group_member_joined':
                 return _('Welcome %(member)s to %(space)s') % dict(
-                    member=str(payload.get('member_name') or '').strip(),
+                    member=identity(payload.get('member_user_id'),str(payload.get('member_name') or '').strip()),
                     space=str(payload.get('space_name') or '').strip(),
                 )
             if event == 'space_group_created':
@@ -1137,7 +1146,14 @@ class Message(models.Model):
                     title=str(payload.get('group_title') or '').strip(),
                 )
             if event == 'travel_map_shared':
-                return _('%(actor)s shared their footprint map with this chat') % dict(actor=actor)
+                target=_('this chat')
+                if self.chat_id:
+                    if self.chat.direct:
+                        from Chat.models import ChatMember
+                        peer=ChatMember.objects.filter(chat_id=self.chat_id).exclude(user_id=self.user_id).select_related('user').first()
+                        if peer:target=identity(peer.user_id,peer.user.name)
+                    else:target=self.chat.title or target
+                return _('%(actor)s shared footprints with %(target)s') % dict(actor=actor,target=target)
             if event == 'square_muted':
                 duration = {
                     '1d': _('1 day'),
@@ -1531,6 +1547,18 @@ class Message(models.Model):
                 payload['text'] = self.system_message_text(
                     self._viewer_from_request(request),
                 )
+                if payload.get('kind')=='system':
+                    payload['actor_user_id']=self.user_id
+                    payload['reference_text']=self.system_message_text(self._viewer_from_request(request),tokenize=True)
+                    references={self.user_id:self.user.name}
+                    ids=[*payload.get('member_user_ids',[]),payload.get('member_user_id'),payload.get('new_owner_user_id')]
+                    ids=[value for value in ids if isinstance(value,int) and value>0 and value!=self.user_id]
+                    if ids:
+                        references.update(User.objects.filter(id__in=ids,space_id=self.user.space_id).values_list('id','name'))
+                    if payload.get('event')=='travel_map_shared' and self.chat_id and self.chat.direct:
+                        from Chat.models import ChatMember
+                        references.update(ChatMember.objects.filter(chat_id=self.chat_id).select_related('user').values_list('user_id','user__name'))
+                    payload['reference_users']=[dict(user_id=user_id,name=name) for user_id,name in references.items()]
                 return payload
             return dict(kind='system', text=self.system_message_text())
         if self.type == MessageTypeChoice.SUBMISSION_INVITE:

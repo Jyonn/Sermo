@@ -23,7 +23,7 @@ class TravelMapMessageTests(SimpleTestCase):
 
         self.assertEqual(
             message._payload_for_type()['text'],
-            'Fly shared their footprint map with this chat',
+            'Fly shared footprints with this chat',
         )
 
     def test_map_access_message_is_normalized(self):

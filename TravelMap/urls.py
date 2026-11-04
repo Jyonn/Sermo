@@ -8,11 +8,13 @@ from TravelMap.views import (
     MapAccessView,
     MyTravelMapView,
     TravelMapCheckInView,
+    TravelMapHistoryView,
     UserTravelMapView,
 )
 
 
 urlpatterns = [
+    path('history',TravelMapHistoryView.as_view(),name='travel map history'),
     path('me', MyTravelMapView.as_view(), name='my travel map'),
     path('me/check-in', TravelMapCheckInView.as_view(), name='travel map check in'),
     path('users', UserTravelMapView.as_view(), name='user travel map'),

@@ -21,6 +21,27 @@ class MyTravelMapView(View):
             regions=[item.json() for item in regions],
         )
 
+
+class TravelMapHistoryView(View):
+    @auth.require_user
+    @analyse.query(TravelMapParams.history_chat,TravelMapParams.history_user,TravelMapParams.selected_ids)
+    def get(self,request:Request):
+        from oba import raw
+        chat=raw(request.query.history_chat)
+        other=raw(request.query.history_user)
+        owners={request.user.id}
+        if chat is not None:
+            status=MapChatGrant.status(chat,request.user)
+            if not status['authorized_by_me']:raise TravelMapErrors.ACCESS_DENIED
+            owners.update(member['user_id'] for member in status['shared_members'])
+        elif other is not None:
+            if not MapAccessGrant.has_access(other,request.user):raise TravelMapErrors.ACCESS_DENIED
+            owners.add(other.id)
+        selected={int(part) for part in request.query.selected_ids.split(',') if part}
+        if selected:owners.intersection_update(selected|{request.user.id})
+        rows=MapCheckIn.objects.filter(user_id__in=owners).order_by('-checked_at','-id')[:20]
+        return dict(items=[{**row.json(),'check_in_id':row.id,'user_id':row.user_id} for row in rows])
+
 class TravelMapCheckInView(View):
     MAX_ACCURACY_METERS = 5000
 

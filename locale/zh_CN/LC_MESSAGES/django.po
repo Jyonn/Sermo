@@ -952,6 +952,15 @@ msgstr "分享了足迹地图。"
 msgid "%(actor)s shared their footprint map with this chat"
 msgstr "%(actor)s 已向本会话公开足迹地图"
 
+msgid "Me"
+msgstr "我"
+
+msgid "this chat"
+msgstr "本会话"
+
+msgid "%(actor)s shared footprints with %(target)s"
+msgstr "%(actor)s 已向 %(target)s 公开足迹。"
+
 msgid "Shared a statement."
 msgstr "分享了一条发言。"
 

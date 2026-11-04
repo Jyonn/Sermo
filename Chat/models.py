@@ -276,6 +276,7 @@ class Chat(models.Model):
                 operator,
                 'group_member_muted',
                 member_name=target.name,
+                member_user_id=target.id,
                 duration=duration,
             )
             self._emit_state_changed()
@@ -300,7 +301,7 @@ class Chat(models.Model):
         member.save(update_fields=['chat_muted_permanently', 'chat_muted_until', 'chat_muted_by', 'updated_at'])
         if was_active:
             from Message.models import Message
-            Message.create_system(self, operator, 'group_member_unmuted', member_name=target.name)
+            Message.create_system(self, operator, 'group_member_unmuted', member_name=target.name,member_user_id=target.id)
             self._emit_state_changed()
         return member
 
@@ -438,6 +439,7 @@ class Chat(models.Model):
                 user=user.space.official_user,
                 event='space_group_member_joined',
                 member_name=user.name,
+                member_user_id=user.id,
                 space_name=user.space.name,
             )
         return member
@@ -607,6 +609,7 @@ class Chat(models.Model):
                 creator,
                 'group_created',
                 member_names=invited_names,
+                member_user_ids=[user.id for user in normalized.values() if user.id!=creator.id],
                 member_count=len(invited_names),
             )
             creator.award_growth('explore:create_group')
@@ -776,6 +779,7 @@ class Chat(models.Model):
                     inviter,
                     'members_invited',
                     member_names=[member.user.name for member in members],
+                    member_user_ids=[member.user_id for member in members],
                     member_count=len(members),
                 )
             return members
@@ -810,6 +814,7 @@ class Chat(models.Model):
                     operator,
                     'members_removed',
                     member_names=[member.user.name for member in members],
+                    member_user_ids=[member.user_id for member in members],
                     member_count=len(members),
                 )
             return members
@@ -853,6 +858,7 @@ class Chat(models.Model):
                 operator,
                 'ownership_transferred',
                 new_owner_name=target.name,
+                new_owner_user_id=target.id,
             )
             self._emit_state_changed()
         return target_member

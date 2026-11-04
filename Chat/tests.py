@@ -823,6 +823,9 @@ class ChatNotificationPreferenceTests(TestCase):
         notice = Message.objects.filter(chat=self.chat, type=MessageTypeChoice.SYSTEM).order_by('-id').first()
         self.assertEqual(notice._payload_for_type()['event'], 'message_recalled')
         self.assertEqual(notice.user_id, self.sender.id)
+        self.recipient.language='en'
+        self.assertIn('recalled a message',notice.system_message_text(self.recipient))
+        self.recipient.language='zh-CN'
         self.assertIn('撤回了一条消息', notice.system_message_text(self.recipient))
 
     def test_member_departure_creates_system_message_before_leaving(self):
