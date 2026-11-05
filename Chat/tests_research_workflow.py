@@ -127,8 +127,9 @@ class WorkflowTests(TestCase):
     def test_reimbursement_required_documents_private_access_and_retention(self):
         p=self.project()
         payment=self.evidence(self.student,'payment.pdf');invoice=self.evidence(self.student,'invoice.pdf')
-        body=dict(action='reimbursement',title='Conference',amount='100.25',evidence=[payment.pk,invoice.pk])
-        self.assertEqual(self.update(p,dict(body,evidence=[payment.pk]),self.student).status_code,400)
+        item=dict(title='Registration',amount='100.25',currency='CNY',payment_id=payment.pk,invoice_id=invoice.pk)
+        body=dict(action='reimbursement',title='Conference',start='2026-11-01',end='2026-11-05',items=[item])
+        self.assertEqual(self.update(p,dict(body,items=[dict(item,invoice_id=None)]),self.student).status_code,400)
         self.assertEqual(self.update(p,body,self.other).status_code,400)
         p=self.update(p,body,self.student).json()['body']
         row=p['workflow']['reimbursements'][0]
@@ -150,3 +151,25 @@ class WorkflowTests(TestCase):
         p=self.update(p,dict(action='settings',status='archived')).json()['body']
         with patch('utils.qiniu.sign_private_download_url',return_value='https://signed.example/document'):
             self.assertEqual(self.update(p,open_body,self.student).status_code,200)
+
+    def test_multi_item_fx_calculation_precision_and_period_validation(self):
+        p=self.project()
+        payment=self.evidence(self.student,'payment.pdf');invoice=self.evidence(self.student,'invoice.pdf')
+        item=dict(title='Train',amount='12.34',currency='CNY',payment_id=payment.pk,invoice_id=invoice.pk)
+        foreign=dict(item,title='Registration',amount='100.00',currency='USD',exchange_rate='712.34')
+        body=dict(action='reimbursement',title='Research trip',start='2026-11-01',end='2026-11-05',notes='Overall notes',items=[item,foreign],amount='999999.99')
+        for bad in [dict(foreign,exchange_rate=''),dict(foreign,exchange_rate='712.345'),dict(item,amount='1.234'),dict(foreign,currency='UNKNOWN')]:
+            self.assertEqual(self.update(p,dict(body,items=[bad]),self.student).status_code,400)
+        self.assertEqual(self.update(p,dict(body,start='2026-12-01'),self.student).status_code,400)
+        self.assertEqual(self.update(p,dict(body,items=[]),self.student).status_code,400)
+        p=self.update(p,body,self.student).json()['body']
+        row=p['workflow']['reimbursements'][0]
+        self.assertEqual(row['amount'],'724.68')
+        self.assertEqual(row['items'][1]['exchange_rate_basis'],100)
+        self.assertEqual(row['items'][1]['cny_amount'],'712.34')
+        self.assertEqual(row['items'][0]['exchange_rate'],'100.00')
+        self.assertEqual(row['notes'],'Overall notes')
+        self.assertEqual(ResearchEvidence.objects.filter(project_id=p['id']).count(),2)
+        half_up=dict(item,currency='USD',amount='1.00',exchange_rate='100.50')
+        p=self.update(p,dict(body,items=[half_up]),self.student).json()['body']
+        self.assertEqual(p['workflow']['reimbursements'][0]['amount'],'1.01')

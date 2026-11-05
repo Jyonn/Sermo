@@ -7,7 +7,6 @@ import copy
 import json
 import uuid
 from datetime import date, timedelta
-from decimal import Decimal, InvalidOperation
 from zoneinfo import ZoneInfo
 from django.utils import timezone
 
@@ -79,6 +78,8 @@ def serialize(project, viewer):
             todos += [dict(id=r['id'], title=r['title'], kind='reimbursement') for r in value['reimbursements'] if r['status'] == 'submitted']
         else:
             todos += [dict(id=r['id'], title=r['title'], kind='reimbursement') for r in value['reimbursements'] if r['status'] == 'needs_info']
+    from Chat.research_reimbursements import CURRENCIES
+    value['reimbursement_currencies'] = list(CURRENCIES)
     value['todos'] = todos
     return value
 
@@ -126,8 +127,6 @@ def progress_fields(project, task, actor, body, entry, active, owner):
 
 
 def mutate(project, actor, body, active, owner, clean_text):
-    from Chat.models import ResearchEvidence
-    from Message.models import MediaResource, MediaAsset
     action = body['action']
     value = state(project)
     if action == 'milestone':
@@ -193,26 +192,8 @@ def mutate(project, actor, body, active, owner, clean_text):
     elif action == 'reimbursement':
         if len(value['reimbursements']) >= 1000:
             raise ValueError('Reimbursement limit reached')
-        try:
-            amount = Decimal(str(body.get('amount')))
-            if not amount.is_finite() or amount <= 0 or amount > 10000000 or amount.as_tuple().exponent < -2:
-                raise ValueError('Invalid amount')
-        except InvalidOperation:
-            raise ValueError('Invalid amount')
-        evidence = body.get('evidence')
-        if not isinstance(evidence, list) or not 2 <= len(evidence) <= 8 or any(type(n) is not int for n in evidence):
-            raise ValueError('Payment record and invoice or receipt are required')
-        if len(set(evidence)) != len(evidence):
-            raise ValueError('Use separate documents for payment and invoice')
-        media = list(MediaResource.objects.filter(pk__in=evidence, owner=actor, library_active=True, asset__status=MediaAsset.STATUS_READY).select_related('asset'))
-        if len(media) != len(evidence):
-            raise ValueError('Uploaded documents unavailable')
-        identifier = str(uuid.uuid4())
-        row = dict(id=identifier, user_id=actor.pk, title=clean_text(body, 'title', 160), amount=str(amount), notes=clean_text(body, 'notes', 4000, False), evidence=evidence, status='submitted', created_at=timezone.now().isoformat())
-        for item in media:
-            ResearchEvidence.objects.create(project=project, reimbursement_id=identifier, media=item)
-            item.recalculate_reference_count()
-        value['reimbursements'].insert(0, row)
+        from Chat.research_reimbursements import create_reimbursement
+        value['reimbursements'].insert(0, create_reimbursement(project, actor, body, clean_text))
     elif action == 'reimbursement_resubmit':
         row = next((r for r in value['reimbursements'] if r['id'] == body.get('id')), None)
         if not row or row['user_id'] != actor.pk or row['status'] != 'needs_info':
