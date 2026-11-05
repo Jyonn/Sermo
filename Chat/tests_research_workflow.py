@@ -87,6 +87,34 @@ class WorkflowTests(TestCase):
         for reporting in ({'yearly':{}},{'daily':{'amount':-1}},{'daily':{'amount':1.5}},{'daily':{'amount':1,'reward_type':'missing'}}):
             self.assertEqual(self.update(p,dict(body,reporting=reporting)).status_code,400)
 
+    def test_comment_bonus_edit_audit_and_student_source_visibility(self):
+        p=self.project();task_id=p['tasks'][0]['id']
+        p=self.update(p,dict(action='progress',task_id=task_id,body='Useful observation'),self.student).json()['body']
+        source=p['tasks'][0]['progress'][0]['id']
+        p=self.update(p,dict(action='award',user_id=self.student.pk,source_id=source,reward_type='silver',amount=2,reason='Good evidence')).json()['body']
+        award=p['workflow']['ledger'][0]
+        edit=dict(action='award_edit',id=award['id'],reward_type='gold',amount=3,reason='Revised award')
+        self.assertEqual(self.update(p,edit,self.student).status_code,403)
+        self.assertEqual(self.update(p,dict(edit,amount=-1)).status_code,400)
+        p=self.update(p,edit).json()['body']
+        self.assertEqual(len(p['workflow']['ledger']),1)
+        self.assertEqual(p['workflow']['ledger'][0]['amount'],3)
+        self.assertEqual(len(ResearchProject.objects.get(pk=p['id']).workflow['ledger'][0]['history']),1)
+        student=self.call(self.student,id=p['id']).json()['body']['workflow']
+        self.assertEqual(student['ledger'][0]['source_id'],source)
+        self.assertEqual(student['ledger'][0]['task_id'],task_id)
+        self.assertFalse(student['ledger'][0]['editable'])
+        other=self.call(self.other,id=p['id']).json()['body']['workflow']
+        self.assertEqual(other['ledger'],[])
+        self.assertEqual(other['comment_awards'][0]['amount'],3)
+        self.assertNotIn('history',other['comment_awards'][0])
+
+    @patch('Chat.research_workflow.today', return_value=date(2026,11,5))
+    def test_report_rewards_cannot_be_manually_edited(self,_):
+        p=self.project();p=self.report(p).json()['body']
+        award=p['workflow']['ledger'][0]
+        self.assertEqual(self.update(p,dict(action='award_edit',id=award['id'],reward_type='silver',amount=9,reason='No')).status_code,400)
+
     def evidence(self, owner, key):
         asset=MediaAsset.objects.create(source_key='research-test/'+key,kind=MediaAsset.KIND_FILE,source_uri='https://example.com/'+key,file_size=500,status=MediaAsset.STATUS_READY)
         return MediaResource.acquire(owner,asset,MediaAsset.KIND_FILE,key)

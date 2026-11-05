@@ -49,6 +49,14 @@ def actionable(task, day):
 def serialize(project, viewer):
     value = state(project)
     owner = project.chat.is_owner(viewer)
+    sources = {p['id']: (task['id'], p) for task in project.tasks for p in task['progress']}
+    for row in value['ledger']:
+        source = sources.get(row.get('source_id'))
+        if source:
+            row['task_id'] = source[0]
+        row['origin'] = row.get('origin', 'report' if source and source[1].get('report_kind') else 'manual')
+        row['editable'] = owner and row['origin'] == 'manual'
+    value['comment_awards'] = [{key: row[key] for key in ('id', 'user_id', 'reward_type', 'amount', 'reason', 'source_id', 'task_id', 'origin', 'created_at', 'editable') if key in row} for row in value['ledger'] if row.get('source_id') in sources and row['origin'] == 'manual']
     value['reimbursements'] = [r for r in value['reimbursements'] if owner or r['user_id'] == viewer.pk]
     value['ledger'] = [r for r in value['ledger'] if owner or r['user_id'] == viewer.pk]
     todos = []
@@ -75,12 +83,12 @@ def serialize(project, viewer):
     return value
 
 
-def grant(value, actor, user_id, reward_type, amount, reason, source):
+def grant(value, actor, user_id, reward_type, amount, reason, source, origin='manual'):
     if reward_type not in {r['id'] for r in value['reward_types']} or type(amount) is not int or not 1 <= amount <= 10000:
         raise ValueError('Invalid reward')
     if len(value['ledger']) >= 10000:
         raise ValueError('Reward record limit reached')
-    value['ledger'].insert(0, dict(id=str(uuid.uuid4()), user_id=user_id, actor_id=actor.pk, reward_type=reward_type, amount=amount, reason=reason, source_id=source, created_at=timezone.now().isoformat()))
+    value['ledger'].insert(0, dict(id=str(uuid.uuid4()), user_id=user_id, actor_id=actor.pk, reward_type=reward_type, amount=amount, reason=reason, source_id=source, origin=origin, created_at=timezone.now().isoformat()))
 
 
 def progress_fields(project, task, actor, body, entry, active, owner):
@@ -102,7 +110,7 @@ def progress_fields(project, task, actor, body, entry, active, owner):
             entry.update(ai_slots=slots[0], thinking_slots=slots[1])
         rule = task.get('reporting', {}).get(kind, {})
         if not entry['waive_reward'] and rule.get('amount', 0):
-            grant(value, actor, actor.pk, rule.get('reward_type', 'silver'), rule['amount'], kind, entry['id'])
+            grant(value, actor, actor.pk, rule.get('reward_type', 'silver'), rule['amount'], kind, entry['id'], origin='report')
     target = body.get('response_to')
     if target is not None:
         # Role enum values are resolved from membership, rather than trusted input.
@@ -155,6 +163,20 @@ def mutate(project, actor, body, active, owner, clean_text):
         if len({r['id'] for r in clean}) != len(clean) or not required.issubset({r['id'] for r in clean}):
             raise ValueError('Reward types in use must be retained')
         value['reward_types'] = clean
+    elif action == 'award_edit':
+        row = next((r for r in value['ledger'] if r['id'] == body.get('id')), None)
+        source = next((p for task in project.tasks for p in task['progress'] if row and p['id'] == row.get('source_id')), None)
+        if not row or row.get('origin', 'report' if source and source.get('report_kind') else 'manual') != 'manual':
+            raise ValueError('Only manual awards can be edited')
+        amount, reward_type = body.get('amount'), body.get('reward_type')
+        if type(amount) is not int or not 1 <= amount <= 10000 or reward_type not in {r['id'] for r in value['reward_types']}:
+            raise ValueError('Invalid reward')
+        history = row.setdefault('history', [])
+        if len(history) >= 100:
+            raise ValueError('Award edit limit reached')
+        reason = clean_text(body, 'reason', 1000)
+        history.append({key: row.get(key) for key in ('amount', 'reward_type', 'reason', 'actor_id', 'updated_at')})
+        row.update(amount=amount, reward_type=reward_type, reason=reason, actor_id=actor.pk, updated_at=timezone.now().isoformat(), origin='manual')
     elif action == 'award':
         if type(body.get('user_id')) is not int or body['user_id'] not in active:
             raise ValueError('Member unavailable')

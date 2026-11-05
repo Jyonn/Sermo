@@ -122,7 +122,7 @@ class ResearchView(View):
                             revoke_displays(project,*calendar_revoke)
                         except BindingFailure as error:
                             return fail(error.code,error.status)
-                    if action in ('milestone', 'reward_types', 'award', 'resolve_request', 'reimbursement', 'reimbursement_review', 'reimbursement_open', 'reimbursement_resubmit'):
+                    if action in ('milestone', 'reward_types', 'award', 'award_edit', 'resolve_request', 'reimbursement', 'reimbursement_review', 'reimbursement_open', 'reimbursement_resubmit'):
                         from Chat.research_workflow import mutate
                         def clean_text(value, key, limit, required=True):
                             result = text(value, key, limit, required)
