@@ -101,6 +101,8 @@ def _space_payload(space):
         chat_enabled=space.chat_enabled,
         square_enabled=space.group_square_enabled,
         qq_binding_granted=space.qq_binding_granted,
+        qixi_theme_granted=space.qixi_theme_granted,
+        qixi_theme_enabled=space.site_theme == 'qixi-2026',
         qq_binding_enabled=space.qq_binding_enabled,
         oauth_developer_granted=space.oauth_developer_granted,
         oauth_developer_enabled=space.oauth_developer_enabled,

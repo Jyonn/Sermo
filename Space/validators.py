@@ -35,6 +35,7 @@ class SpaceErrors:
     IDENTITY_ALREADY_SUBMITTED = Error(message=_('Identity credential has already been submitted'), code=Code.BadRequest)
     TIER_FEATURE_RESTRICTED = Error(message=_('Verify the administrator phone to unlock this feature'), code=Code.Forbidden)
     QQ_BINDING_NOT_GRANTED = Error(message=_('QQ binding has not been granted to this space'), code=Code.Forbidden)
+    THEME_NOT_GRANTED = Error(message=_('This theme has not been granted to this space'), code=Code.Forbidden)
     QQ_BINDING_DISABLED = Error(message=_('QQ binding is disabled by the space administrator'), code=Code.Forbidden)
     LEVEL_NAMES_INVALID = Error(message=_('Space level names are invalid'), code=Code.BadRequest)
     ADMIN_ACCESS_FORBIDDEN = Error(message=_('Only the official account can access space administration'), code=Code.Forbidden)

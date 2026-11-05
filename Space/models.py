@@ -36,6 +36,7 @@ class SpaceNormalizers:
 class SpaceFeatureKeyChoice(Choice):
     QQ_IDENTITY_BINDING = 'qq_identity_binding'
     OAUTH_DEVELOPER = 'oauth_developer'
+    QIXI_THEME = 'qixi_theme'
 
 
 class Space(models.Model):
@@ -73,6 +74,7 @@ class Space(models.Model):
     square_free_post_enabled = models.BooleanField(default=True)
     submission_enabled = models.BooleanField(default=False)
     research_enabled = models.BooleanField(default=False)
+    qixi_theme_enabled = models.BooleanField(default=False)
     square_explore_enabled = models.BooleanField(default=True)
     qq_binding_enabled = models.BooleanField(default=False)
     oauth_developer_enabled = models.BooleanField(default=False)
@@ -261,10 +263,19 @@ class Space(models.Model):
             # Capacity notifications must never interrupt member creation.
             pass
 
+    @transaction.atomic
     def set_admin_settings(
             self, name, group_square_enabled, chat_enabled, square_explore_enabled,
             unverified_group_policy, member_limit, level_names=None, submission_enabled=None,
-            square_free_post_enabled=None, qq_binding_enabled=None, space_group_enabled=None, oauth_developer_enabled=None, research_enabled=None):
+            square_free_post_enabled=None, qq_binding_enabled=None, space_group_enabled=None, oauth_developer_enabled=None, research_enabled=None, qixi_theme_enabled=None):
+        # Serialize theme changes with platform grants/revocations.
+        locked = Space.objects.select_for_update().get(pk=self.pk)
+        self.qixi_theme_enabled = locked.qixi_theme_enabled
+        getattr(self, '_prefetched_objects_cache', {}).pop('feature_grants', None)
+        if qixi_theme_enabled is not None:
+            if qixi_theme_enabled and not self.qixi_theme_granted:
+                raise SpaceErrors.THEME_NOT_GRANTED
+            self.qixi_theme_enabled = bool(qixi_theme_enabled)
         was_space_group_enabled = self.space_group_enabled
         normalized_name = self.vldt.name(name)
         normalized_member_limit = self.vldt.member_limit(member_limit)
@@ -316,7 +327,7 @@ class Space(models.Model):
         self.level_names = normalized_level_names
         self.save(update_fields=[
             'name', 'group_square_enabled', 'chat_enabled', 'square_free_post_enabled',
-            'submission_enabled', 'research_enabled', 'square_explore_enabled', 'space_group_enabled',
+            'submission_enabled', 'research_enabled', 'qixi_theme_enabled', 'square_explore_enabled', 'space_group_enabled',
             'unverified_group_policy', 'member_limit', 'level_names', 'qq_binding_enabled', 'oauth_developer_enabled',
         ])
         from Chat.models import Chat
@@ -348,6 +359,14 @@ class Space(models.Model):
         if prefetched is not None:
             return any(item.feature_key == feature_key and item.revoked_at is None for item in prefetched)
         return self.feature_grants.filter(feature_key=feature_key, revoked_at__isnull=True).exists()
+
+    @property
+    def qixi_theme_granted(self):
+        return self.is_feature_granted(SpaceFeatureKeyChoice.QIXI_THEME)
+
+    @property
+    def site_theme(self):
+        return 'qixi-2026' if self.qixi_theme_enabled and self.qixi_theme_granted else 'default'
 
     @property
     def qq_binding_granted(self):
@@ -402,6 +421,7 @@ class Space(models.Model):
 
     def jsonl(self):
         return self.dictify(
+            'site_theme',
             'id->space_id',
             'name',
             'slug',
@@ -425,6 +445,9 @@ class Space(models.Model):
 
     def json_private(self):
         return self.dictify(
+            'site_theme',
+            'qixi_theme_granted',
+            'qixi_theme_enabled',
             'id->space_id',
             'name',
             'slug',
@@ -473,6 +496,7 @@ class SpaceFeatureGrant(models.Model):
         if feature_key not in dict(SpaceFeatureKeyChoice.to_choices()):
             raise ValueError('Unsupported space feature.')
         with transaction.atomic():
+            Space.objects.select_for_update().get(pk=space.pk)
             item, _created = cls.objects.select_for_update().get_or_create(
                 space=space,
                 feature_key=feature_key,
@@ -489,6 +513,7 @@ class SpaceFeatureGrant(models.Model):
             setting = {
                 SpaceFeatureKeyChoice.QQ_IDENTITY_BINDING: 'qq_binding_enabled',
                 SpaceFeatureKeyChoice.OAUTH_DEVELOPER: 'oauth_developer_enabled',
+                SpaceFeatureKeyChoice.QIXI_THEME: 'qixi_theme_enabled',
             }[feature_key]
             # A new grant never activates a legacy or stale space setting.
             if not granted or not was_granted:
