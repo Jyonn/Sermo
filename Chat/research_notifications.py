@@ -5,16 +5,25 @@ from Chat.research import members
 
 
 def notify_research(project,actor,action,body):
-    if action not in ('task','task_dates','task_status','progress','settings','transfer','leave','remove','join'):
+    if action not in ('task','task_edit','task_dates','task_status','progress','settings','transfer','leave','remove','join','milestone','award','reimbursement','reimbursement_review','reimbursement_resubmit'):
         return
     rows=list(members(project))
     task=project.tasks[-1] if action=='task' else next((t for t in project.tasks if t['id']==body.get('task_id')),None)
     recipients={row.user_id for row in rows}
     kind='research_update'
+    if action in ('reimbursement','reimbursement_resubmit'):
+        recipients={row.user_id for row in rows if row.role==ChatMemberRoleChoice.OWNER}
+    elif action == 'reimbursement_review':
+        record=next((r for r in project.workflow.get('reimbursements',[]) if r['id']==body.get('id')),None)
+        recipients={record['user_id']} if record else set()
+    elif action == 'award':
+        recipients={body.get('user_id')}
     if task:
         kind='research_progress' if action=='progress' else 'research_task'
         recipients=set(task['assignees'])
         recipients.update(row.user_id for row in rows if row.role==ChatMemberRoleChoice.OWNER)
+        if body.get('response_to'):
+            recipients.add(body['response_to'])
         if body.get('reply_to'):
             recipients.update(p['user_id'] for p in task['progress'] if p['id']==body['reply_to'])
     muted=set(ChatUserPreference.objects.filter(chat=project.chat,notifications_muted=True).values_list('user_id',flat=True))

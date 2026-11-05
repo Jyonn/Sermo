@@ -1639,9 +1639,16 @@ class ResearchProject(models.Model):
     status = models.CharField(max_length=16, default='active')
     revision = models.PositiveIntegerField(default=1)
     tasks = models.JSONField(default=list)
+    workflow = models.JSONField(default=dict)
     calendar_policies = models.JSONField(default=dict)
     calendar_displays = models.JSONField(default=list)
     updated_at = models.DateTimeField(auto_now=True)
+
+
+class ResearchEvidence(models.Model):
+    project = models.ForeignKey(ResearchProject, on_delete=models.CASCADE, related_name='evidence')
+    reimbursement_id = models.CharField(max_length=64)
+    media = models.ForeignKey('Message.MediaResource', on_delete=models.PROTECT, related_name='research_evidence')
 
 
 class ResearchResource(models.Model):

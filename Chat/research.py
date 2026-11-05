@@ -37,11 +37,13 @@ def members(project):
     return project.chat.chat_members.filter(status=ChatMemberStatusChoice.ACTIVE, user__is_deleted=False).select_related('user')
 
 
-def payload(project):
+def payload(project, viewer=None):
     from Chat.models import SubmissionInvite, SubmissionInviteStatusChoice
     rows = list(members(project))
+    from Chat.research_workflow import serialize
+    workflow = serialize(project, viewer) if viewer else {}
     return dict(id=project.pk, chat_id=project.chat_id, title=project.chat.title, description=project.description,
-                start=project.start.isoformat(), end=project.end.isoformat() if project.end else None,
+                workflow=workflow, start=project.start.isoformat(), end=project.end.isoformat() if project.end else None,
                 status=research_status(project.status), revision=project.revision, tasks=normalize_tasks(project.tasks),
                 pending_invitee_ids=list(SubmissionInvite.objects.filter(chat=project.chat,status=SubmissionInviteStatusChoice.PENDING,expires_at__gt=timezone.now()).values_list('invitee_id',flat=True)),
                 members=[dict(id=row.user_id, name=row.user.name, owner=row.role == ChatMemberRoleChoice.OWNER,
@@ -57,7 +59,7 @@ class ResearchView(View):
             chat__chat_members__user=request.user, chat__chat_members__status=ChatMemberStatusChoice.ACTIVE).select_related('chat')
         if project_id:
             project = rows.filter(pk=project_id).first()
-            return payload(project) if project else fail('Project unavailable', 404)
+            return payload(project, request.user) if project else fail('Project unavailable', 404)
         return [dict(id=p.pk, chat_id=p.chat_id, title=p.chat.title, status=research_status(p.status), start=p.start.isoformat(), end=p.end.isoformat() if p.end else None) for p in rows.order_by('-updated_at')[:200]]
 
     @auth.require_user
@@ -109,9 +111,9 @@ class ResearchView(View):
                     project.tasks = normalize_tasks(project.tasks)
                     action = body.get('action')
                     owner = project.chat.is_owner(request.user)
-                    if action not in ('progress', 'leave') and not owner:
+                    if action not in ('progress', 'leave', 'resolve_request', 'reimbursement', 'reimbursement_open', 'reimbursement_resubmit') and not owner:
                         return fail('Only the project owner can manage this project', 403)
-                    if project.status == 'archived' and action not in ('settings', 'leave', 'dissolve', 'transfer'):
+                    if project.status == 'archived' and action not in ('settings', 'leave', 'dissolve', 'transfer', 'reimbursement_open'):
                         return fail('Archived projects are read-only', 403)
                     active = set(members(project).values_list('user_id', flat=True))
                     if calendar_revoke:
@@ -120,7 +122,16 @@ class ResearchView(View):
                             revoke_displays(project,*calendar_revoke)
                         except BindingFailure as error:
                             return fail(error.code,error.status)
-                    if action == 'invite':
+                    if action in ('milestone', 'reward_types', 'award', 'resolve_request', 'reimbursement', 'reimbursement_review', 'reimbursement_open', 'reimbursement_resubmit'):
+                        from Chat.research_workflow import mutate
+                        def clean_text(value, key, limit, required=True):
+                            result = text(value, key, limit, required)
+                            check_user_text(request, result, ContentSafetyScene.PROFILE)
+                            return result
+                        result = mutate(project, request.user, body, active, owner, clean_text)
+                        if result is not None:
+                            return result
+                    elif action == 'invite':
                         user = User.objects.filter(pk=body.get('user_id'), space_id=request.user.space_id, is_deleted=False).first()
                         if not user:
                             return fail('Member unavailable', 404)
@@ -154,8 +165,12 @@ class ResearchView(View):
                         project.chat.is_deleted = True
                         project.chat.save(update_fields=['is_deleted'])
                     elif action == 'settings':
-                        if not any(key in body for key in ('status', 'description', 'start', 'end')):
+                        if not any(key in body for key in ('title', 'status', 'description', 'start', 'end')):
                             raise ValueError('No settings provided')
+                        if 'title' in body:
+                            project.chat.title = text(body, 'title', 50)
+                            check_user_text(request, project.chat.title, ContentSafetyScene.PROFILE)
+                            project.chat.save(update_fields=['title'])
                         if 'status' in body:
                             project.status = research_status(body['status'])
                         if 'description' in body:
@@ -164,8 +179,12 @@ class ResearchView(View):
                             project.description = description
                         if 'start' in body or 'end' in body:
                             project.start, project.end = period(dict(start=body.get('start', project.start.isoformat()), end=body.get('end', project.end.isoformat() if project.end else None)))
-                    elif action == 'task':
-                        if len(project.tasks) >= 100:
+                            for flag in project.workflow.get('milestones', []):
+                                flag_date = date.fromisoformat(flag['date'])
+                                if flag_date < project.start or (project.end and flag_date > project.end):
+                                    raise ValueError('Project dates must include existing milestones')
+                    elif action in ('task', 'task_edit'):
+                        if action == 'task' and len(project.tasks) >= 100:
                             raise ValueError('Task limit reached')
                         title = text(body, 'title', 160)
                         content = text(body, 'body', 20000)
@@ -174,7 +193,16 @@ class ResearchView(View):
                         if not isinstance(assignees, list) or not assignees or any(type(i) is not int or i not in active for i in assignees):
                             raise ValueError('Choose active members')
                         check_user_text(request, title+'\n'+content, ContentSafetyScene.PROFILE)
-                        project.tasks.append(dict(id=str(uuid.uuid4()), title=title, body=content, start=start.isoformat(), end=end.isoformat() if end else None, assignees=list(set(assignees)), status='active', progress=[]))
+                        from Chat.research_workflow import reporting, state
+                        rules = reporting(body, state(project)['reward_types'])
+                        fields = dict(title=title, body=content, start=start.isoformat(), end=end.isoformat() if end else None, assignees=list(set(assignees)), reporting=rules)
+                        if action == 'task_edit':
+                            task = next((t for t in project.tasks if t['id'] == body.get('task_id')), None)
+                            if not task:
+                                raise ValueError('Task unavailable')
+                            task.update(fields)
+                        else:
+                            project.tasks.append(dict(id=str(uuid.uuid4()), status='active', progress=[], **fields))
                     elif action in ('task_status', 'task_dates', 'progress'):
                         task = next((t for t in project.tasks if t['id'] == body.get('task_id')), None)
                         if not task:
@@ -195,7 +223,10 @@ class ResearchView(View):
                             if reply and not any(p['id'] == reply for p in task['progress']):
                                 raise ValueError('Reply unavailable')
                             check_user_text(request, content, ContentSafetyScene.PROFILE)
-                            task['progress'].insert(0, dict(id=str(uuid.uuid4()), user_id=request.user.pk, body=content, created_at=timezone.now().isoformat(), reply_to=reply))
+                            entry = dict(id=str(uuid.uuid4()), user_id=request.user.pk, body=content, created_at=timezone.now().isoformat(), reply_to=reply)
+                            from Chat.research_workflow import progress_fields
+                            progress_fields(project, task, request.user, body, entry, active, owner)
+                            task['progress'].insert(0, entry)
                     else:
                         raise ValueError('Unknown action')
                     if len(json.dumps(project.tasks)) > 2000000:
@@ -207,6 +238,6 @@ class ResearchView(View):
                 if project_id is None or body.get('action') in ('invite', 'remove', 'leave', 'transfer', 'dissolve'):
                     previous_members = active if project_id else {request.user.pk}
                     transaction.on_commit(lambda: project.chat._emit_state_changed(previous_members))
-                return payload(project)
+                return payload(project, request.user)
         except (ValueError, TypeError, KeyError):
             return fail('Invalid research request')
