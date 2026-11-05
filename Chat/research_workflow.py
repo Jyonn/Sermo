@@ -45,7 +45,29 @@ def actionable(task, day):
     return task['status'] == 'active' and date.fromisoformat(task['start']) <= day and (not task.get('end') or day <= date.fromisoformat(task['end']))
 
 
+def response_status(tasks):
+    """A request is answered only by an actual reply from its designated recipient."""
+    tasks = copy.deepcopy(tasks)
+    for task in tasks:
+        replies = {}
+        for entry in task.get('progress', []):
+            if entry.get('reply_to') and entry.get('body', '').strip():
+                replies.setdefault((entry['reply_to'], entry['user_id']), []).append(entry)
+        for entry in task.get('progress', []):
+            if not entry.get('response_to'):
+                continue
+            answers = replies.get((entry['id'], entry['response_to']), [])
+            if answers:
+                answer = min(answers, key=lambda row: row['created_at'])
+                entry.update(resolved_at=answer['created_at'], resolved_by=answer['user_id'], resolved_reply_id=answer['id'])
+            else:
+                for key in ('resolved_at', 'resolved_by', 'resolved_reply_id'):
+                    entry.pop(key, None)
+    return tasks
+
+
 def serialize(project, viewer):
+    project.tasks = response_status(project.tasks)
     value = state(project)
     owner = project.chat.is_owner(viewer)
     sources = {p['id']: (task['id'], p) for task in project.tasks for p in task['progress']}
@@ -122,7 +144,9 @@ def progress_fields(project, task, actor, body, entry, active, owner):
         entry['response_to'] = target
     reply = next((p for p in task['progress'] if p['id'] == entry.get('reply_to')), None)
     if reply and reply.get('response_to') == actor.pk:
-        reply['resolved_at'] = timezone.now().isoformat()
+        reply['resolved_at'] = entry['created_at']
+        reply['resolved_by'] = actor.pk
+        reply['resolved_reply_id'] = entry['id']
     project.workflow = value
 
 
@@ -185,10 +209,7 @@ def mutate(project, actor, body, active, owner, clean_text):
             raise ValueError('Comment unavailable')
         grant(value, actor, body['user_id'], body.get('reward_type'), body.get('amount'), reason, source)
     elif action == 'resolve_request':
-        entry = next((p for t in project.tasks for p in t['progress'] if p['id'] == body.get('id')), None)
-        if not entry or not entry.get('response_to') or (actor.pk != entry['response_to'] and not owner):
-            raise ValueError('Request unavailable')
-        entry['resolved_at'] = timezone.now().isoformat()
+        raise ValueError('Response requests are completed by replies, not manual actions')
     elif action == 'reimbursement':
         if len(value['reimbursements']) >= 1000:
             raise ValueError('Reimbursement limit reached')

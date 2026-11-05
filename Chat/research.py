@@ -109,6 +109,8 @@ class ResearchView(View):
                         return fail('Project changed. Refresh and try again.', 409)
                     project.status = research_status(project.status)
                     project.tasks = normalize_tasks(project.tasks)
+                    from Chat.research_workflow import response_status
+                    project.tasks = response_status(project.tasks)
                     action = body.get('action')
                     owner = project.chat.is_owner(request.user)
                     if action not in ('progress', 'leave', 'resolve_request', 'reimbursement', 'reimbursement_open', 'reimbursement_resubmit') and not owner:

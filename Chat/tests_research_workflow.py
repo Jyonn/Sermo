@@ -59,15 +59,34 @@ class WorkflowTests(TestCase):
         p=self.update(p,dict(action='progress',task_id=task_id,body='Question',response_to=self.owner.pk),self.student).json()['body']
         question=p['tasks'][0]['progress'][0]['id']
         self.assertEqual(self.update(p,dict(action='resolve_request',id=question),self.student).status_code,400)
+        self.assertEqual(self.update(p,dict(action='resolve_request',id=question)).status_code,400)
         self.assertFalse(ResearchProject.objects.get(pk=p['id']).tasks[0]['progress'][0].get('resolved_at'))
         self.assertEqual(self.call(self.owner,id=p['id']).json()['body']['workflow']['todos'][0]['id'],question)
         self.assertEqual(self.update(p,dict(action='resolve_request',id=question),self.other).status_code,400)
+        p=self.update(p,dict(action='progress',task_id=task_id,body='Unrelated update')).json()['body']
+        self.assertTrue(any(item['id']==question for item in p['workflow']['todos']))
+        p=self.update(p,dict(action='progress',task_id=task_id,body='More detail',reply_to=question),self.student).json()['body']
+        self.assertFalse(next(item for item in p['tasks'][0]['progress'] if item['id']==question).get('resolved_at'))
         p=self.update(p,dict(action='progress',task_id=task_id,body='Answer',reply_to=question)).json()['body']
+        answer=p['tasks'][0]['progress'][0]
+        resolved=next(item for item in p['tasks'][0]['progress'] if item['id']==question)
+        self.assertEqual(resolved['resolved_reply_id'],answer['id'])
+        self.assertEqual(resolved['resolved_by'],self.owner.pk)
         self.assertEqual(self.call(self.owner,id=p['id']).json()['body']['workflow']['todos'],[])
         self.assertEqual(self.update(p,dict(action='award',user_id=self.student.pk,reward_type='gold',amount=2,reason='Review'),self.student).status_code,403)
         p=self.update(p,dict(action='award',user_id=self.student.pk,reward_type='gold',amount=2,reason='Helpful comment')).json()['body']
         self.assertEqual(p['workflow']['ledger'][0]['reward_type'],'gold')
         self.assertEqual(self.call(self.other,id=p['id']).json()['body']['workflow']['ledger'],[])
+
+    def test_legacy_manual_resolution_does_not_count_as_an_answer(self):
+        p=self.project();task_id=p['tasks'][0]['id']
+        p=self.update(p,dict(action='progress',task_id=task_id,body='Needs actual reply',response_to=self.owner.pk),self.student).json()['body']
+        project=ResearchProject.objects.get(pk=p['id'])
+        project.tasks[0]['progress'][0]['resolved_at']='2026-11-05T10:00:00Z'
+        project.save(update_fields=['tasks'])
+        snapshot=self.call(self.owner,id=p['id']).json()['body']
+        self.assertFalse(snapshot['tasks'][0]['progress'][0].get('resolved_at'))
+        self.assertTrue(any(todo['kind']=='response' for todo in snapshot['workflow']['todos']))
 
     def test_task_edit_and_milestone_bounds(self):
         p=self.project();task=p['tasks'][0]
