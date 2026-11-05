@@ -1,4 +1,5 @@
 from django.urls import path
+from User.birthday_views import BirthdayView, BirthdaySeenView, BirthdayLetterOpenView, BirthdayLetterArchiveView
 from User.web_push_receipts import WebPushReceiptView
 from User.chronelle_account import FullChronelleView
 from User.chronelle_permissions import ChronellePermissionsView
@@ -112,6 +113,10 @@ urlpatterns = [
     path('me/wechat-miniprogram', WeChatMiniProgramBindingView.as_view(), name='wechat miniprogram binding'),
     path('heartbeat', HeartbeatView.as_view(), name='heartbeat'),
     path('me', UserMeView.as_view(), name='user me'),
+    path('me/birthday', BirthdayView.as_view()),
+    path('me/birthday/seen', BirthdaySeenView.as_view()),
+    path('me/birthday/letters', BirthdayLetterArchiveView.as_view()),
+    path('me/birthday/letters/<int:letter_id>/open', BirthdayLetterOpenView.as_view()),
     path('me/emoji-usage', UserEmojiUsageView.as_view(), name='user emoji usage'),
     path('me/growth-events', UserGrowthEventView.as_view(), name='user growth event'),
     path('me/growth', UserGrowthAcknowledgementView.as_view(), name='user growth acknowledgement'),

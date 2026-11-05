@@ -1,4 +1,5 @@
 from django.urls import path
+from User.birthday_views import PlatformBirthdayLetterView
 from Sticker.series import StickerPackReviewView
 from Sticker.resources import ResourceAdminView, ResourceAdminAssetView, ResourceAdminUploadView
 from User.oauth_application_views import OAuthAdminApplicationsView
@@ -16,6 +17,7 @@ from AccessPolicy.views import (
 )
 
 urlpatterns = [
+    path('members/<int:user_id>/birthday-letter', PlatformBirthdayLetterView.as_view()),
     path('sticker-packs', StickerPackReviewView.as_view()),
     path('sticker-packs/<int:series_id>', StickerPackReviewView.as_view()),
     path('resources', ResourceAdminView.as_view()),

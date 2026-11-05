@@ -177,6 +177,28 @@ class UserNormalizers:
     def language(value):
         return UserValidator.normalize_language(value)
 
+class BirthdayLetter(models.Model):
+    user = models.ForeignKey('User.User', on_delete=models.CASCADE, related_name='birthday_letters')
+    birthday_year = models.PositiveSmallIntegerField()
+    occasion_date = models.DateField()
+    source = models.CharField(max_length=16, choices=[('platform', 'platform'), ('space', 'space')])
+    sender_name = models.CharField(max_length=100)
+    written_by = models.CharField(max_length=254)
+    title = models.CharField(max_length=80)
+    body = models.TextField()
+    opened_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['user', 'birthday_year', 'source'], name='unique_birthday_letter_source')]
+
+    def envelope(self):
+        return dict(letter_id=self.id, source=self.source, sender_name=self.sender_name, title=self.title, occasion=self.occasion_date.isoformat(),
+                    opened_at=self.opened_at.timestamp() if self.opened_at else None,
+                    updated_at=self.updated_at.timestamp())
+
+
 class User(models.Model):
     normalizers = UserNormalizers
     validators = UserValidator
@@ -266,6 +288,10 @@ class User(models.Model):
     )
     plaza_greeting = models.CharField(max_length=vldt.PLAZA_GREETING_MAX_LENGTH, default='')
     name_changed_at = models.DateTimeField(null=True, blank=True)
+    birthday_month = models.PositiveSmallIntegerField(null=True, blank=True)
+    birthday_day = models.PositiveSmallIntegerField(null=True, blank=True)
+    birthday_set_at = models.DateTimeField(null=True, blank=True)
+    birthday_welcomed_year = models.PositiveSmallIntegerField(null=True, blank=True)
     avatar_type = models.CharField(
         max_length=16,
         choices=UserAvatarTypeChoice.to_choices(),
