@@ -17,7 +17,7 @@ class WorkflowTests(TestCase):
         p = self.create()
         self.member(p, self.student)
         self.member(p, self.other)
-        return self.update(p, dict(action='task', title='Research task', body='Evidence', start='2026-10-01', assignees=[self.student.pk], reporting={k:dict(amount=2, reward_type='silver') for k in ('daily', 'weekly', 'monthly')})).json()['body']
+        return self.update(p, dict(action='task', title='Research task', body='Evidence', start='2026-10-01', assignees=[self.student.pk], reporting={'daily':dict(amount=2, reward_type='silver')})).json()['body']
 
     def report(self, p, kind='daily', **fields):
         return self.update(p, dict(action='progress', task_id=p['tasks'][0]['id'], body='Report', report_kind=kind, **fields), self.student)
@@ -26,13 +26,16 @@ class WorkflowTests(TestCase):
     def test_required_reports_rewards_duplicate_and_waiver(self, _):
         p = self.project()
         snapshot = self.call(self.student, id=p['id']).json()['body']
-        self.assertEqual({r['kind'] for r in snapshot['workflow']['todos']}, {'daily', 'weekly', 'monthly'})
+        self.assertEqual({r['kind'] for r in snapshot['workflow']['todos']}, {'daily'})
         p = self.report(p, ai_slots=3, thinking_slots=5).json()['body']
         self.assertEqual(p['tasks'][0]['progress'][0]['thinking_slots'], 5)
-        self.assertEqual(len(p['workflow']['todos']), 2)
+        self.assertEqual(len(p['workflow']['todos']), 0)
         self.assertEqual(p['workflow']['ledger'][0]['amount'], 2)
         self.assertEqual(self.report(p).status_code, 400)
         self.assertEqual(len(ResearchProject.objects.get(pk=p['id']).workflow['ledger']), 1)
+        self.assertEqual(self.report(p, kind='weekly').status_code,400)
+        task=p['tasks'][0]
+        p=self.update(p,dict(action='task_edit',task_id=task['id'],title=task['title'],body=task['body'],start=task['start'],assignees=task['assignees'],reporting={'weekly':dict(amount=2,reward_type='silver')})).json()['body']
         p = self.report(p, kind='weekly', waive_reward=True).json()['body']
         self.assertEqual(len(p['workflow']['ledger']), 1)
         self.assertTrue(p['tasks'][0]['progress'][0]['waive_reward'])
@@ -84,7 +87,7 @@ class WorkflowTests(TestCase):
         self.assertEqual(period_start('monthly',date(2026,11,30)),date(2026,11,1))
         p=self.project();task=p['tasks'][0]
         body=dict(action='task_edit',task_id=task['id'],title=task['title'],body=task['body'],start=task['start'],assignees=task['assignees'])
-        for reporting in ({'yearly':{}},{'daily':{'amount':-1}},{'daily':{'amount':1.5}},{'daily':{'amount':1,'reward_type':'missing'}}):
+        for reporting in ({'daily':{'amount':0},'weekly':{'amount':0}},{'yearly':{}},{'daily':{'amount':-1}},{'daily':{'amount':1.5}},{'daily':{'amount':1,'reward_type':'missing'}}):
             self.assertEqual(self.update(p,dict(body,reporting=reporting)).status_code,400)
 
     def test_comment_bonus_edit_audit_and_student_source_visibility(self):

@@ -32,7 +32,7 @@ def state(project):
 
 def reporting(body, rewards):
     value = body.get('reporting', {})
-    if not isinstance(value, dict) or any(key not in KINDS for key in value):
+    if not isinstance(value, dict) or len(value) > 1 or any(key not in KINDS for key in value):
         raise ValueError('Invalid reporting schedule')
     for rule in value.values():
         if not isinstance(rule, dict) or type(rule.get('amount', 0)) is not int or not 0 <= rule.get('amount', 0) <= 10000:
@@ -95,7 +95,7 @@ def progress_fields(project, task, actor, body, entry, active, owner):
     value = state(project)
     kind = body.get('report_kind')
     if kind:
-        if kind not in KINDS or owner or actor.pk not in task['assignees'] or not actionable(task, today()):
+        if kind not in KINDS or kind not in task.get('reporting', {}) or owner or actor.pk not in task['assignees'] or not actionable(task, today()):
             raise ValueError('Only assigned students can submit current reports')
         start = period_start(kind, today()).isoformat()
         if any(p['user_id'] == actor.pk and p.get('report_kind') == kind and p.get('period_start') == start for p in task['progress']):
