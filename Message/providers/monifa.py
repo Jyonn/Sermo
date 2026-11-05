@@ -34,7 +34,7 @@ class MonifaProvider:
         if response.status_code!=200 or len(response.content)>8192 or 'application/json' not in response.headers.get('Content-Type',''):
             raise ValueError('share unavailable')
         data=response.json()
-        if not isinstance(data,dict) or not re.fullmatch(r'\d{6}|\d{8}',str(data.get('code',''))): raise ValueError('invalid otp')
+        if not isinstance(data,dict) or not isinstance(data.get('code'),str) or not re.fullmatch(r'\d{6}|\d{8}',data['code']): raise ValueError('invalid otp')
         period=data.get('period');remaining=data.get('remaining')
         if type(period)!=int or type(remaining)!=int or not 1<=period<=300 or not 0<=remaining<=period: raise ValueError('invalid validity')
         return {'status':'ready','code':data['code'],'period':period,'remaining':remaining,'issuer':str(data.get('issuer',''))[:100],'accountName':str(data.get('accountName',''))[:150]}
