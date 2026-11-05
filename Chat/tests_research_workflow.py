@@ -58,6 +58,8 @@ class WorkflowTests(TestCase):
         p=self.project(); task_id=p['tasks'][0]['id']
         p=self.update(p,dict(action='progress',task_id=task_id,body='Question',response_to=self.owner.pk),self.student).json()['body']
         question=p['tasks'][0]['progress'][0]['id']
+        self.assertEqual(self.update(p,dict(action='resolve_request',id=question),self.student).status_code,400)
+        self.assertFalse(ResearchProject.objects.get(pk=p['id']).tasks[0]['progress'][0].get('resolved_at'))
         self.assertEqual(self.call(self.owner,id=p['id']).json()['body']['workflow']['todos'][0]['id'],question)
         self.assertEqual(self.update(p,dict(action='resolve_request',id=question),self.other).status_code,400)
         p=self.update(p,dict(action='progress',task_id=task_id,body='Answer',reply_to=question)).json()['body']

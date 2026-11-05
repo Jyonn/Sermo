@@ -187,7 +187,7 @@ def mutate(project, actor, body, active, owner, clean_text):
         grant(value, actor, body['user_id'], body.get('reward_type'), body.get('amount'), reason, source)
     elif action == 'resolve_request':
         entry = next((p for t in project.tasks for p in t['progress'] if p['id'] == body.get('id')), None)
-        if not entry or actor.pk not in (entry['user_id'], entry.get('response_to')):
+        if not entry or not entry.get('response_to') or (actor.pk != entry['response_to'] and not owner):
             raise ValueError('Request unavailable')
         entry['resolved_at'] = timezone.now().isoformat()
     elif action == 'reimbursement':
