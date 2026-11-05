@@ -4,8 +4,10 @@ from Message.views import MessageCopyView
 from Message.views import ExternalMediaPreviewRefreshView, ExternalMediaPreviewView, MessageView, MessageAudioTranscriptView, MessageBatchView, MessageClearView, MessageEventSyncBaselineView, MessageEventSyncView, MessageForwardView, MessageHistoryRecoveryView, MessageReconcileView, MessageSearchCalendarView, MessageSearchView, MessageUploadView, MessageBlobView, MessageBlobThumbnailView, MessageMediaMetadataView, MessageLinkPreviewView, MessageResourceFinalizeView, MessageResourceView, PinnedMessageView
 
 from Message.views import MessageHistoryManagementView
+from Message.monifa import MonifaOtpView
 
 urlpatterns = [
+    path('monifa-otp', MonifaOtpView.as_view()),
     path('history', MessageHistoryManagementView.as_view(), name='history management'),
     path('copies', MessageCopyView.as_view(), name='message copy suggestions'),
     path('blob/<slug:blob_slug>/thumbnail', MessageBlobThumbnailView.as_view(), name='message blob thumbnail'),

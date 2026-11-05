@@ -26,6 +26,7 @@ from Message.providers.douyin import DouyinProvider
 from Message.providers.xiaohongshu import XiaohongshuProvider
 from Message.providers.music import MusicProvider
 from Message.providers.stillfolio import StillfolioProvider
+from Message.providers.monifa import MonifaProvider
 from Message.preview_queue import platform_slot, submit_preview
 from Message.validators import MessageErrors, MessageValidator
 from User.models import User, UserEmojiUsage
@@ -208,7 +209,7 @@ class LinkPreview(models.Model):
             parsed = urlparse(f'https://y.music.163.com/m/song?id={song_id}')
             hostname = parsed.hostname
         cls._require_public_host(hostname)
-        normalized = parsed._replace(fragment='')
+        normalized = parsed if MonifaProvider.token(url) else parsed._replace(fragment='')
         return urlunparse(normalized)
 
     @classmethod
@@ -397,6 +398,9 @@ class LinkPreview(models.Model):
         if not current_url:
             raise ValueError('invalid url')
         requested_url = current_url
+        monifa = MonifaProvider.preview(current_url)
+        if monifa:
+            return monifa
 
         if DouyinProvider.supports(current_url):
             douyin_data = DouyinProvider().parse(current_url)
