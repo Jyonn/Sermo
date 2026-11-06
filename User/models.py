@@ -1261,6 +1261,8 @@ class User(models.Model):
             'chat_bubble_style', 'avatar_frame_style', 'statement_card_style', 'growth_level',
             'profile_card_theme',
         )
+        from User.birthday import public_birthday_until
+        payload['birthday_until'] = public_birthday_until(self)
         payload['permanent_vip_slot'] = self.permanent_vip_slot()
         payload['growth_level_name'] = self._dictify_growth_level_name()
         if self.is_imported_placeholder:
@@ -1302,6 +1304,8 @@ class User(models.Model):
             'avatar_uri',
             'avatar_cache_key',
         )
+        from User.birthday import public_birthday_until
+        payload['birthday_until'] = public_birthday_until(self)
         payload['growth_level_name'] = self._dictify_growth_level_name()
         payload['founder_medal_years'] = self.founder_medal_years()
         payload['explorer_badge_years'] = self.explorer_badge_years()
@@ -1327,6 +1331,8 @@ class User(models.Model):
             'avatar_cache_key',
             'last_heartbeat',
         )
+        from User.birthday import public_birthday_until
+        payload['birthday_until'] = public_birthday_until(self)
         payload['growth_level'] = self.growth_level
         payload['growth_level_name'] = self._dictify_growth_level_name()
         payload['founder_medal_years'] = self.founder_medal_years()

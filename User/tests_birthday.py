@@ -17,6 +17,30 @@ class BirthdayTests(TestCase):
         self.me = User.create(self.space, 'Me')
         self.peer = User.create(self.space, 'Peer')
         self.other = User.create(self.other_space, 'Other')
+        for user in (self.me, self.peer, self.other):
+            user.account_level = 1
+            user.save(update_fields=['account_level'])
+
+    def test_unverified_cannot_set_birthday(self):
+        self.me.account_level = 0
+        self.me.save(update_fields=['account_level'])
+        self.assertFalse(birthday_status(self.me, NOW)['can_change'])
+        with self.assertRaises(type(BirthdayErrors.FORBIDDEN)):
+            set_birthday(self.me, 11, 6, NOW)
+        self.assertEqual(self.post('/users/me/birthday',dict(month=11,day=6)).status_code,403)
+
+    def test_public_birthday_is_day_scoped_without_date(self):
+        from User.birthday import public_birthday_until
+        self.birthday()
+        self.assertEqual(public_birthday_until(self.me, NOW), datetime.datetime(2026,11,7,tzinfo=ZONE).timestamp())
+        self.assertIsNone(public_birthday_until(self.me, NOW + datetime.timedelta(days=1)))
+        with patch('User.birthday.timezone.now', return_value=NOW):
+            for payload in (self.me.tiny_json(), self.me.jsonl(), self.me.json_friend()):
+                self.assertEqual(payload['birthday_until'], public_birthday_until(self.me, NOW))
+                self.assertNotIn('birthday_month', payload)
+                self.assertNotIn('birthday_day', payload)
+        self.me.account_level = 0
+        self.assertIsNone(public_birthday_until(self.me, NOW))
 
     def headers(self, user=None):
         return {'HTTP_AUTHORIZATION': 'Bearer ' + get_login_token(user or self.me)['auth']}
