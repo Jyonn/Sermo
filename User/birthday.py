@@ -12,6 +12,14 @@ ZONE = ZoneInfo('Asia/Shanghai')
 CHANGE_INTERVAL = datetime.timedelta(days=365)
 
 
+def public_birthday_until(user, now=None):
+    now = now or timezone.now()
+    today = now.astimezone(ZONE).date()
+    if not user.verified or observed_date(user, today.year) != today:
+        return None
+    return datetime.datetime.combine(today + datetime.timedelta(days=1), datetime.time(), ZONE).timestamp()
+
+
 @Error.register
 class BirthdayErrors:
     INVALID_DATE = Error(message=_('Choose a valid birthday month and day'), code=Code.BadRequest)
@@ -54,7 +62,7 @@ def birthday_status(user, now=None):
     letters = BirthdayLetter.objects.filter(user=user, birthday_year=today.year, occasion_date__lte=today).order_by('source', 'id') if active else []
     end = datetime.datetime.combine(today + datetime.timedelta(days=1), datetime.time(), ZONE) if active else None
     return dict(server_now=now.timestamp(), month=user.birthday_month, day=user.birthday_day,
-                can_change=available is None or now >= available,
+                can_change=user.verified and (available is None or now >= available),
                 available_at=available.timestamp() if available else None,
                 active=active, celebration_id=f'{user.id}:{today.year}' if active else None,
                 ends_at=end.timestamp() if end else None,
@@ -67,6 +75,8 @@ def set_birthday(user, month, day, now=None):
     now = now or timezone.now()
     valid_birthday(month, day)
     locked = User.objects.select_for_update().get(pk=user.pk)
+    if not locked.verified:
+        raise BirthdayErrors.FORBIDDEN
     if locked.birthday_set_at and now < locked.birthday_set_at + CHANGE_INTERVAL:
         raise BirthdayErrors.LOCKED
     locked.birthday_month, locked.birthday_day = month, day
