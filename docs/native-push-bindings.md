@@ -2,8 +2,8 @@
 
 Development only. Deployment requires separate user confirmation. Models,
 authenticated binding endpoints, a queue and an explicitly invoked APNs adapter
-exist on the development branch. None is live or connected to automatic event
-dispatch; no real notification has been sent.
+exist on the development branch. A default-off event hook and manual batch worker
+are implemented locally. None is live; no real notification has been sent.
 
 ## Isolation And Consent
 
@@ -34,7 +34,8 @@ callback documentation](https://developer.apple.com/documentation/uikit/uiapplic
 
 All routes require the current account's authentication. Responses use the existing
 API envelope and `Cache-Control: no-store, private`; tokens and token digests are
-never returned. `delivery_available` remains false until delivery is implemented.
+never returned. `delivery_available` remains false pending deployment approval,
+provider configuration and end-to-end device validation.
 
 - `GET /users/me/native-push`: exactly `installation_id` and `environment` query
   parameters. Missing bindings return revision 0 without creating consent.
@@ -55,6 +56,29 @@ account/binding/API/topic regression tests passed. System checks and diff whites
 checks passed. Regression log: `/private/tmp/frienden-native-push-api-regression.log`.
 This does not validate MySQL concurrency or real APNs delivery.
 
+### Manual Worker (Development Only)
+
+`python manage.py process_native_notifications --limit 50` is read-only by default.
+Both queue configuration and the exact boolean `NATIVE_PUSH_WORKER_ENABLED=True`
+are required even for the dry run. `--send` explicitly requests processing; it is
+not authorized for production by this implementation. The provider environment
+set must exactly match the configured queue environments. Batch limits are 1-500.
+The command prints fixed aggregate counts, never tokens, payloads or raw errors.
+Inspect its JSON `status`: process exit alone does not certify successful sends.
+`sent` means provider acceptance, not receipt or presentation on a device.
+
+Each item rechecks current consent and policy. Runtime gate changes stop the
+remaining batch. Stale claims become nonretryable `unknown` only in configured
+environments; a sandbox worker cannot expire production claims. Queue errors do
+not block existing browser/email delivery. There is no periodic job or automatic
+worker activation. App registration/tap handling and public availability remain
+disabled. No schema changes were added in this phase.
+
+Local validation: 15 focused runtime tests and 109 combined binding/API/queue/
+dispatch/payload/target/topic/transport tests passed using isolated SQLite and
+mock providers. No real account, provider request or notification was used. This
+does not certify production database concurrency or physical-device delivery.
+
 ### Durable Queue
 
 `NativePushDelivery` adds one unique row per event/binding, not per device token:
@@ -64,8 +88,10 @@ current restriction that online notices are supported only by the instant channe
 It does not add another topic matrix or change browser delivery.
 
 Both enqueue and claim require explicitly supplied configured environments; their
-default is empty. No event hook, scheduler or live provider credentials are
-connected yet. Claim rechecks the current account, space, topic policy, binding
+default is empty. The after-commit event hook requires the exact boolean setting
+`NATIVE_PUSH_QUEUE_ENABLED=True` and a nonempty `NATIVE_PUSH_ENVIRONMENTS` list
+containing only `sandbox` and/or `production`. No scheduler or live credentials
+are connected. Claim rechecks the current account, space, topic policy, binding
 lease, opt-in, token digest and revision. Any registration revision change cancels
 the old queued row conservatively, even if its token bytes did not change. Event
 age is limited to 24 hours, including events enqueued late.

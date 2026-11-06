@@ -3069,6 +3069,8 @@ class NotificationEvent(models.Model):
 
     @classmethod
     def _enqueue_deliveries(cls, event_ids):
+        from User.native_push_runtime import enqueue_native_event
+
         close_old_connections()
         try:
             events = cls.objects.filter(id__in=event_ids).select_related('user', 'actor', 'space')
@@ -3076,6 +3078,7 @@ class NotificationEvent(models.Model):
             for event_id in event_ids:
                 event = events_by_id.get(event_id)
                 if event is not None:
+                    enqueue_native_event(event)
                     if event.event_type in (
                         NotificationEventTypeChoice.DIRECT_MESSAGE,
                         NotificationEventTypeChoice.GROUP_MESSAGE,

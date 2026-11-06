@@ -95,8 +95,11 @@ class NativePushDelivery(models.Model):
         )
 
     @classmethod
-    def expire_claims(cls):
+    def expire_claims(cls, *, environments=None):
         # A worker may have sent before crashing. Do not retry an unknown outcome.
-        return cls.objects.filter(state='processing', claimed_at__lt=(
+        rows = cls.objects.filter(state='processing', claimed_at__lt=(
             timezone.now() - datetime.timedelta(minutes=cls.CLAIM_MINUTES)
-        )).update(state='unknown', reason='claim_expired', finished_at=timezone.now())
+        ))
+        if environments is not None:
+            rows = rows.filter(binding__environment__in=cls._environments(environments))
+        return rows.update(state='unknown', reason='claim_expired', finished_at=timezone.now())
