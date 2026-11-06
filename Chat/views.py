@@ -296,6 +296,14 @@ class SubmissionInviteDetailView(View):
             chat=ChatListView.build_chat_payload(invitation.chat, request.user, request),
         )
 
+    @auth.require_user
+    @analyse.query(ChatMemberParams.invite_id)
+    def delete(self, request):
+        invitation = self._get_invitation(request.query.invite_id, request.user)
+        invitation.decline(request.user)
+        invitation.refresh_from_db()
+        return invitation.jsonl(request.user)
+
 
 class GroupChatNameView(View):
     @auth.require_user
