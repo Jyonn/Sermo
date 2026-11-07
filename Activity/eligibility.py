@@ -30,4 +30,9 @@ def missing_activity_requirements(campaign, space):
     # BGM progression includes publishing a Square statement as well as chat entrances.
     if mode == 'bgm_collection':
         required.add('free_post')
-    return sorted(key for key in required if not capabilities.get(key, False))
+    # Report the unmet parent capability, not a child switch already enabled.
+    # This same result still gates assignment; it never enables a feature.
+    return sorted({
+        'square' if not square and key in {'free_post', 'publish', 'submission'} else key
+        for key in required if not capabilities.get(key, False)
+    })
