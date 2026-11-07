@@ -22,7 +22,7 @@ class NativePushDispatchTests(TestCase):
         self.binding = self.prefer(user)
         user = user or self.a
         event = NotificationEvent.objects.create(user=user, space=user.space,
-            event_type=NotificationEventTypeChoice.SYSTEM, payload={'kind': 'research_task'})
+            event_type=NotificationEventTypeChoice.SYSTEM, payload={'kind': 'friend_request'})
         row = Delivery.enqueue(event, environments=('sandbox',))[0]
         self.transport = Mock(configuration=SimpleNamespace(environments=('sandbox',)))
         self.transport.send.return_value = APNsResult('accepted')
@@ -140,8 +140,14 @@ class NativePushDispatchTests(TestCase):
 
         row = self.setup_delivery()
         sender = User.create(self.space, 'Sender', verified=True)
-        chat = Chat.objects.create(space=self.space, created_by=sender, chat_type=1 if group else 0)
-        member = ChatMember.objects.create(chat=chat, user=self.a, status=ChatMemberStatusChoice.ACTIVE)
+        if not group:
+            from Friendship.models import Friendship
+            Friendship.ensure_locked_friendship(self.a, sender)
+            chat = Chat.get_or_create_direct(self.a, sender)
+            member = ChatMember.objects.get(chat=chat, user=self.a)
+        else:
+            chat = Chat.objects.create(space=self.space, created_by=sender, chat_type=1)
+            member = ChatMember.objects.create(chat=chat, user=self.a, status=ChatMemberStatusChoice.ACTIVE)
         message = Message.objects.create(chat=chat, user=sender, type=0, content='Hello')
         row.event.event_type = 2 if group else 1
         row.event.payload = dict(chat_id=chat.pk, message_id=message.pk, content='Hello')

@@ -1,5 +1,30 @@
 # Native Push Binding Foundation
 
+## Pre-Submission Content Access
+
+Before provider submission, content-addressed chat, Square and Research events now
+reuse `notification_target` access checks, in addition to existing current topic,
+binding revision, message visibility and group-mute checks. A queued event is not
+permission to disclose a departed project's alert, a deleted task or a statement
+whose visibility changed. Unsupported content targets become skipped without
+calling the transport. This includes revocation observed after claiming a row.
+Non-content system events retain their existing routing; valid Research and public
+Square events have positive send coverage.
+
+The first six content cases reproduced five failures on the prior implementation.
+Transport-only fixtures now use a real generic contact event rather than a fake
+Research event without a project; private-chat fixtures use the existing direct
+chat/friendship factory instead of orphan membership rows. The access policy was
+not relaxed to make those old fixtures pass. Seven content cases, 52 focused
+dispatch/runtime/target cases and the final 172-case combined regression pass.
+Evidence: `/private/tmp/frienden-push-content-regression.log`; system and whitespace
+checks pass. Tests use only isolated SQLite and mocked provider calls.
+
+This narrows the time-of-check window; it cannot retract an already in-flight
+provider request or make network submission atomic with database changes. Runtime
+gates remain off, no schema change is added, and no deployment or actual APNs send
+is authorized by this development milestone.
+
 ## Current Backend Compatibility Rehearsal
 
 Development branch `codex/native-push-current` integrates `origin/master` at

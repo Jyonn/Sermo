@@ -26,7 +26,7 @@ class NativePushRuntimeTests(TestCase):
     def event(self, user=None):
         user = user or self.a
         return NotificationEvent.objects.create(user=user, space=user.space,
-            event_type=NotificationEventTypeChoice.SYSTEM, payload={'kind': 'research_task'})
+            event_type=NotificationEventTypeChoice.SYSTEM, payload={'kind': 'friend_request'})
 
     def queued(self, user=None, environment='sandbox'):
         return Delivery.enqueue(self.event(user), environments=(environment,))[0]
