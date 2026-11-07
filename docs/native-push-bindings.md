@@ -1,5 +1,27 @@
 # Native Push Binding Foundation
 
+## Research Mute Revalidation
+
+Research system alerts now re-read the recipient's current project chat mute
+before submission, after canonical content authorization. Event creation already
+respected this preference, but queued task/progress/update events did not recheck
+it later. The lookup is scoped to both the canonical project and recipient. Mute
+remains a delivery preference, not an access rule in notification_target: existing
+content can still be opened. A skipped queue row is not revived after unmuting.
+
+Two new negative cases reproduced sends after muting between enqueue/claim and
+submission (`/private/tmp/frienden-push-mute-before.log`, 9 cases, 2 failures).
+An intermediate reverse-relation lookup error was corrected before final testing;
+that run is not counted as a pass. Final focused tests pass 56 cases and combined
+tests pass 176 (`/private/tmp/frienden-push-mute-regression.log`). Positive coverage
+checks that another member's or another project's mute does not silence this
+recipient, and that unmuting does not replay an already skipped alert. System and
+whitespace checks pass. Tests use isolated SQLite and mocked transport only.
+
+No schema, client gate, production configuration or default branch changes.
+Real provider delivery, MySQL concurrency and the in-flight revocation boundary
+remain unverified; no request already in flight can be recalled by this check.
+
 ## Pre-Submission Content Access
 
 Before provider submission, content-addressed chat, Square and Research events now

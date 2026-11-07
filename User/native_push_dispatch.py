@@ -24,7 +24,12 @@ def _content_allowed(event):
     )
     if event.event_type in content_types or payload.get('kind') in ('friend_statement', 'research_task', 'research_progress', 'research_update'):
         # A queued event is not lasting permission to disclose its content.
-        if notification_target(event, event.user).get('kind') == 'unavailable':
+        target = notification_target(event, event.user)
+        if target.get('kind') == 'unavailable':
+            return False
+        if target.get('kind') == 'research' and ChatUserPreference.objects.filter(
+            chat__research_project__pk=target['project_id'], user=event.user, notifications_muted=True,
+        ).exists():
             return False
     if event.event_type not in (NotificationEventTypeChoice.DIRECT_MESSAGE, NotificationEventTypeChoice.GROUP_MESSAGE):
         return True

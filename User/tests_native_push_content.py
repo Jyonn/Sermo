@@ -1,7 +1,7 @@
 import datetime
 from unittest.mock import patch
 
-from Chat.models import Chat, ChatMember, ChatMemberStatusChoice, ResearchProject
+from Chat.models import Chat, ChatMember, ChatMemberStatusChoice, ChatUserPreference, ResearchProject
 from Square.models import Statement, StatementVisibilityChoice
 from User import tests_native_push_dispatch as fixtures
 from User.models import NotificationEventTypeChoice as Kind, User
@@ -62,6 +62,43 @@ class NativePushContentTests(TestCase):
             return result
         with patch.object(Delivery, 'claim', side_effect=claim):
             self.assert_not_sent(row)
+
+    def test_research_chat_muted_after_enqueue_blocks_task_alert(self):
+        row, _, project = self.project_delivery()
+        preference = ChatUserPreference.objects.create(chat=project.chat, user=self.a, notifications_muted=True)
+        from User.native_push_targets import notification_target
+        self.assertEqual(notification_target(row.event, self.a)['kind'], 'research')
+        self.assert_not_sent(row)
+        preference.notifications_muted = False; preference.save(update_fields=['notifications_muted'])
+        self.assertIsNone(dispatch_native_delivery(row.pk, self.transport))
+        self.transport.send.assert_not_called()
+
+    def test_research_chat_muted_after_claim_blocks_task_alert(self):
+        row, _, project = self.project_delivery()
+        original = Delivery.claim
+        def claim(*args, **kwargs):
+            result = original(*args, **kwargs)
+            ChatUserPreference.objects.create(chat=project.chat, user=self.a, notifications_muted=True)
+            return result
+        with patch.object(Delivery, 'claim', side_effect=claim):
+            self.assert_not_sent(row)
+
+    def test_another_members_research_mute_does_not_block_recipient(self):
+        row, _, project = self.project_delivery()
+        peer = project.chat.created_by
+        ChatMember.objects.create(chat=project.chat, user=peer, status=ChatMemberStatusChoice.ACTIVE)
+        ChatUserPreference.objects.create(chat=project.chat, user=peer, notifications_muted=True)
+        self.assertEqual(dispatch_native_delivery(row.pk, self.transport), 'sent')
+        self.transport.send.assert_called_once()
+
+    def test_another_project_mute_does_not_block_current_project(self):
+        row, _, project = self.project_delivery()
+        other = Chat.objects.create(space=self.space, created_by=project.chat.created_by, chat_type=1, purpose=2)
+        ChatMember.objects.create(chat=other, user=self.a, status=ChatMemberStatusChoice.ACTIVE)
+        ResearchProject.objects.create(chat=other, start=datetime.date(2026, 11, 7))
+        ChatUserPreference.objects.create(chat=other, user=self.a, notifications_muted=True)
+        self.assertEqual(dispatch_native_delivery(row.pk, self.transport), 'sent')
+        self.transport.send.assert_called_once()
 
     def test_private_square_statement_cannot_receive_queued_alert(self):
         row, statement = self.square_delivery()
