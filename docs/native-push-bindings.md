@@ -286,6 +286,36 @@ passed. `manage.py check --settings=Sermo.isolated_test_settings` passed with th
 existing initialization warning. No new migration. Endpoint is development-only;
 deployment requires separate confirmation.
 
+## Isolated MySQL Rehearsal (2026-11-07)
+
+An opt-in macOS harness is available as `Sermo.native_push_mysql_test_settings`.
+It imports isolated settings only, never deployment credentials. Set
+`FRIENDEN_MYSQL_TEST_SOCKET` to an actual `mysql.sock` in an owner-private
+`/private/tmp/frienden-native-mysql-*` directory. Relative paths, missing parents,
+regular files, symlinks and shared directories fail closed. The harness uses a
+dedicated test database and must only target a newly initialized disposable
+daemon with networking disabled, not an existing database service.
+
+Two fresh MySQL 9.6.0 instances were exercised without production access:
+
+- Default macOS `lower_case_table_names=2`: full migration stopped at
+  `Message.0039_mediaasset_transcode_safety`, error 3822, duplicate
+  `message_mediaasset_chk_1`. A minimal table with an explicitly mixed-case check
+  name followed by an unnamed check reproduced the conflict. A plain table and
+  rename alone did not reproduce it.
+- A separate fresh data directory with `lower_case_table_names=1`: full migration
+  stopped earlier at `Message.0018_mediaasset`, whose table existence check uses
+  mixed-case names against lower-case introspection results.
+
+Neither attempt reached the native-push test cases. Historical migrations were
+not rewritten, skipped or faked. Both owned database processes were stopped;
+failure logs and disposable data were retained locally. Production MySQL version
+and case mode have not been inspected. Full MySQL migration and row-lock
+concurrency acceptance remain open; SQLite results cannot prove those gates.
+
+The combined isolated SQLite regression, including six socket-harness safety
+tests, passed 182 tests with no failures. No push deployment or APNs activation.
+
 ## Next Gates
 
 1. Authenticated binding endpoints are implemented on the development branch;
