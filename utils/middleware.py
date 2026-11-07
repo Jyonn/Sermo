@@ -70,7 +70,7 @@ class APIPacker:
         response = self.get_response(request, *args, **kwargs)
         if not isinstance(response, HttpResponse):
             response = self.pack(response, getattr(request, 'wechat_content_safety', None))
-        if request.path.rstrip('/') == '/users/me' or request.path.startswith('/users/me/chronelle') or (request.path.startswith('/research/') and request.path.endswith('/calendar/')):
+        if request.path.rstrip('/') == '/users/me' or request.path.startswith(('/users/me/chronelle', '/users/me/native-push')) or (request.path.startswith('/research/') and request.path.endswith('/calendar/')):
             response['Cache-Control'] = 'no-store, private'
         return response
 

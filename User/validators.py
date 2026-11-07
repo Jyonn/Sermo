@@ -111,6 +111,7 @@ class UserErrors:
     PASSWORD_RECOVERY_ATTEMPTS_EXCEEDED = Error(message=_('Too many password recovery attempts'), code=Code.BadRequest)
     PASSWORD_RECOVERY_TOKEN_INVALID = Error(message=_('Invalid password reset token'), code=Code.BadRequest)
     PASSWORD_RECOVERY_TOKEN_EXPIRED = Error(message=_('Password reset token expired'), code=Code.BadRequest)
+    PERMANENT_VIP_CAMPAIGN_INACTIVE = Error(message=_('Permanent VIP campaign is not open in this space'), code=Code.Forbidden)
 
 
 class UserValidator:

@@ -699,6 +699,9 @@ msgstr "Permanent VIP requirements are not met"
 msgid "Permanent VIP campaign is full"
 msgstr "Permanent VIP campaign is full"
 
+msgid "Permanent VIP campaign is not open in this space"
+msgstr "Permanent VIP campaign is not open in this space"
+
 #, python-brace-format
 msgid "Nickname can be changed again at {available_at}"
 msgstr "Nickname can be changed again at {available_at}"
@@ -950,3 +953,12 @@ msgstr "This activity is not available"
 
 msgid "Please verify your account first"
 msgstr "Please verify your account first"
+
+msgid "Native push settings changed; refresh before retrying"
+msgstr "Native push settings changed; refresh before retrying"
+
+msgid "Invalid native push request"
+msgstr "Invalid native push request"
+
+msgid "Notification unavailable"
+msgstr "Notification unavailable"
