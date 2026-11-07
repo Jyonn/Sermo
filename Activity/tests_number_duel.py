@@ -262,6 +262,39 @@ class NumberDuelTests(TestCase):
         self.assertEqual(NumberDuelReward.objects.get(user=self.host).points, -10)
         self.assertEqual(self.win(self.person('NewOpponent'))['points'], 10)
 
+    def test_settlement_receipts_match_each_players_actual_ledger(self):
+        host_before = self.host.reconcile_growth()
+        guest_before = self.guest.reconcile_growth()
+        winner = self.win()
+        loser = Game.lobby(Game.KEY, self.guest, match_id=winner['id'])['match']
+        self.assertEqual(winner['returned'], 20)
+        self.assertEqual(loser['returned'], 0)
+        for receipt, person, before in [(winner, self.host, host_before), (loser, self.guest, guest_before)]:
+            self.assertEqual(receipt['returned'] - receipt['stake'], receipt['points'])
+            self.assertEqual(person.reconcile_growth() - before, receipt['points'])
+        # A repeated read must neither alter the receipt nor settle again.
+        self.assertEqual(Game.lobby(Game.KEY, self.guest, match_id=winner['id'])['match']['returned'], 0)
+
+    def test_practice_and_unjoined_rooms_report_no_return(self):
+        self.win()
+        practice = self.win()
+        self.assertFalse(practice['funded'])
+        self.assertEqual(practice['returned'], 0)
+        room = self.act(action='create')
+        self.assertEqual(room['returned'], 0)
+        cancelled = self.act(action='leave', id=room['id'])
+        self.assertFalse(cancelled['funded'])
+        self.assertEqual(cancelled['returned'], 0)
+
+    def test_paid_cancellation_reports_the_actual_refund(self):
+        match = self.start()
+        receipt = self.act(action='leave', id=match)
+        peer = Game.lobby(Game.KEY, self.guest, match_id=match)['match']
+        for result in [receipt, peer]:
+            self.assertTrue(result['funded'])
+            self.assertEqual(result['points'], 0)
+            self.assertEqual(result['returned'], result['stake'])
+
     def test_thirty_unsolved_rounds_draw(self):
         match = self.start()
         for round_no in range(1, 31):
