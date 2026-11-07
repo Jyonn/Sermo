@@ -14,7 +14,10 @@ from User.models import User
 
 class ActivityMessageReferenceTests(TestCase):
     def setUp(self):
-        self.space = Space.objects.create(name='Activity Space', slug='activity-space', email='owner@example.com')
+        self.space = Space.objects.create(
+            name='Activity Space', slug='activity-space', email='owner@example.com',
+            group_square_enabled=True, admin_phone_verified_at=timezone.now(),
+        )
         self.author = User.create(space=self.space, name='Author', verified=True)
         self.viewer = User.create(space=self.space, name='Viewer')
         self.chat = Chat.objects.create(
