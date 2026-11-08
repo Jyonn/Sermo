@@ -6,18 +6,19 @@ import os
 import re
 import secrets
 import time
-from urllib.parse import urlencode, urlsplit
+from urllib.parse import urlencode
 from pathlib import Path
 
 import requests
 from cryptography.fernet import Fernet, InvalidToken
 from django.db import transaction
-from django.http import HttpResponse, HttpResponseRedirect, JsonResponse
+from django.http import HttpResponseRedirect, JsonResponse
 from django.utils.crypto import salted_hmac
 from django.views import View
 
 from User.models import PockloConnection, PockloCredential, User
 from User.oauth import verified_mainland_phone
+from Message.providers import pocklo as public_shares
 from utils import auth
 
 
@@ -27,7 +28,7 @@ ORIGINS = {'https://frienden.jyonn.space', 'https://frienden.6-79.cn',
            'https://sermo.jyonn.space', 'https://sermo.6-79.cn'}
 RETURN_PATH = re.compile(r'/(?:[a-zA-Z0-9_-]+/)?app/(?:menu|chats)(?:/[0-9]+)?/?')
 RESOURCE_ID = re.compile(r'[a-zA-Z0-9_-]{1,128}')
-MAX_COPY_BYTES = 20 * 1024 * 1024
+SHARE_SCOPES = 'files.read shares.create'
 
 
 class PockloError(Exception):
@@ -85,18 +86,21 @@ def payload(request):
     raise PockloError('invalid_request', 400)
 
 
-def remote(path, *, data=None, access=None, params=None):
+def remote(path, *, data=None, access=None, params=None, idempotency_key=None):
     client, secret, _ = config()
+    headers = {'Authorization': f'Bearer {access}'} if access else {}
+    if idempotency_key:
+        headers['Idempotency-Key'] = idempotency_key
     try:
         response = requests.request(
             'POST' if data is not None else 'GET', API + path, json=data, params=params,
-            headers={'Authorization': f'Bearer {access}'} if access else None,
+            headers=headers,
             auth=None if access else (client, secret), timeout=(3, 8), allow_redirects=False,
         )
         value = response.json()
     except (requests.RequestException, ValueError):
         raise PockloError('unavailable', 503) from None
-    if response.status_code != 200:
+    if response.status_code not in (200, 201):
         code = value.get('error') if isinstance(value, dict) else None
         if code == 'account_mismatch':
             raise PockloError('account_mismatch')
@@ -114,9 +118,9 @@ def credential(value):
     access, refresh, expires = (value.get(key) for key in ('access_token', 'refresh_token', 'expires_in'))
     if not (isinstance(access, str) and access and isinstance(refresh, str) and refresh
             and type(expires) is int and 0 < expires <= 3600
-            and 'files.read' in str(value.get('scope', '')).split()):
+            and set(SHARE_SCOPES.split()) <= set(str(value.get('scope', '')).split())):
         raise PockloError('unavailable', 503)
-    return {'access': access, 'refresh': refresh, 'expires': time.time() + expires}
+    return {'access': access, 'refresh': refresh, 'expires': time.time() + expires, 'can_share': True}
 
 
 def prove_identity(access, phone):
@@ -132,7 +136,7 @@ def status(user):
     if not phone:
         return 'phone_required'
     row = PockloConnection.objects.filter(user=user, phone_digest=phone_key(phone)).select_related('credential').first()
-    if row and row.credential and row.credential.sealed:
+    if row and row.credential and row.credential.sealed and open_sealed(row.credential.sealed).get('can_share'):
         return 'connected'
     return 'connect_required'
 
@@ -153,7 +157,7 @@ def start(user, origin, path):
         row.save(update_fields=['pending'])
     challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b'=').decode()
     return API + 'authorize/?' + urlencode({
-        'response_type': 'code', 'client_id': client, 'redirect_uri': CALLBACK, 'scope': 'files.read',
+        'response_type': 'code', 'client_id': client, 'redirect_uri': CALLBACK, 'scope': SHARE_SCOPES,
         'state': f'{user.pk}.{state}', 'code_challenge': challenge, 'code_challenge_method': 'S256',
     })
 
@@ -214,6 +218,8 @@ def access_for(user):
         if not shared.sealed:
             raise PockloError('connect_required')
         tokens = open_sealed(shared.sealed)
+        if not tokens.get('can_share'):
+            raise PockloError('connect_required')
         try:
             if tokens['expires'] <= time.time() + 20:
                 updated = credential(remote('token/', data={'grant_type': 'refresh_token',
@@ -278,48 +284,47 @@ class PockloConnectionView(View):
             return result({'error': error.code}, error.status)
 
 
-def storage_copy(url):
-    try:
-        origin = os.environ.get('POCKLO_DOWNLOAD_ORIGIN') or stored_config().get('download_origin')
-        parsed = urlsplit(url)
-        if (parsed.scheme != 'https' or parsed.username or parsed.password or parsed.fragment
-                or not origin or f'https://{parsed.netloc}' != origin):
-            raise ValueError()
-        with requests.get(url, stream=True, timeout=(3, 8), allow_redirects=False) as response:
-            if response.status_code != 200:
-                raise PockloError('unavailable', 503)
-            declared = response.headers.get('Content-Length')
-            if declared and int(declared) > MAX_COPY_BYTES:
-                raise PockloError('file_too_large', 413)
-            content = bytearray()
-            deadline = time.monotonic() + 30
-            for chunk in response.iter_content(64 * 1024):
-                if len(content) + len(chunk) > MAX_COPY_BYTES:
-                    raise PockloError('file_too_large', 413)
-                if time.monotonic() > deadline:
-                    raise PockloError('unavailable', 503)
-                content.extend(chunk)
-    except (requests.RequestException, OSError, ValueError, TypeError, AttributeError):
-        raise PockloError('unavailable', 503) from None
-    response = HttpResponse(bytes(content), content_type='application/octet-stream')
-    response['Cache-Control'] = 'no-store'
-    return response
-
-
 class PockloFilesView(View):
     @auth.require_user
-    def get(self, request, resource_id='', download=False):
+    def get(self, request, resource_id=''):
         try:
             if resource_id and not RESOURCE_ID.fullmatch(resource_id):
                 raise PockloError('invalid_request', 400)
             access = access_for(request.user)
             path = 'files/' + (resource_id + '/' if resource_id else '')
-            if download:
-                item = remote(path + 'download/', access=access)
-                if item.get('kind') != 'download':
-                    raise PockloError('unsupported_file', 400)
-                return storage_copy(item.get('url', ''))
             value = remote(path, access=access, params={'offset': request.GET.get('offset', '0')})
             return result(value)
         except PockloError as error:
             return result({'error': error.code}, error.status)
+
+
+class PockloShareView(View):
+    @auth.require_user
+    def post(self, request):
+        try:
+            data = payload(request)
+            item, key = data.get('resource_id'), data.get('operation_id')
+            if not isinstance(item, str) or not RESOURCE_ID.fullmatch(item) or not isinstance(key, str) or not re.fullmatch(public_shares.TOKEN, key):
+                raise PockloError('invalid_request', 400)
+            response = remote('shares/', data={'resource_id': item}, access=access_for(request.user),
+                              idempotency_key=f'{request.user.pk}:{key}')
+            token = public_shares.share_token(response.get('url') or '')
+            if not token:
+                raise PockloError('unavailable', 503)
+            return result({'url': f'https://{public_shares.HOST}/share/{token}'})
+        except PockloError as error:
+            return result({'error': error.code}, error.status)
+
+
+class PockloShareDownloadView(View):
+    def get(self, request, token):
+        try:
+            target = public_shares.download_target(str(token))
+        except ValueError:
+            return result({'error': 'share_unavailable'}, 404)
+        except requests.RequestException:
+            return result({'error': 'unavailable'}, 503)
+        response = HttpResponseRedirect(target)
+        response['Cache-Control'] = 'no-store'
+        response['Referrer-Policy'] = 'no-referrer'
+        return response

@@ -7,7 +7,8 @@ from django.utils import timezone
 
 from Space.models import Space
 from User.models import PockloConnection, PockloCredential, User
-from User.pocklo import PockloError, access_for, consume, finish, start, status, storage_copy
+from User.pocklo import PockloError, access_for, consume, finish, start, status
+from Message.providers.pocklo import download_target, preview, share_token
 
 
 class PockloConnectionTests(TestCase):
@@ -35,7 +36,7 @@ class PockloConnectionTests(TestCase):
 
     def provider(self, path, *, data):
         if path == 'token/':
-            return {'access_token': 'access', 'refresh_token': 'refresh', 'expires_in': 900, 'scope': 'files.read'}
+            return {'access_token': 'access', 'refresh_token': 'refresh', 'expires_in': 900, 'scope': 'files.read shares.create'}
         self.assertEqual(path, 'frienden-account/')
         self.assertEqual(data, {'token': 'access', 'phone': '+8613812345678'})
         return {'sub': self.subject}
@@ -72,9 +73,23 @@ class PockloConnectionTests(TestCase):
             start(self.first, 'https://other.example', '/app/menu')
         with self.assertRaises(PockloError):
             start(self.first, 'https://frienden.jyonn.space', '//other.example/app/menu')
-        with patch('User.pocklo.requests.get') as fetch, self.assertRaises(PockloError):
-            storage_copy('https://storage.example@other.example/file')
-        fetch.assert_not_called()
+        token = '6269bb3c-29ef-423a-8197-60bd89b1e217'
+        self.assertIsNone(share_token(f'https://pocklo.jyonn.space@other.example/share/{token}'))
+        with patch('Message.providers.pocklo.public_body', side_effect=[
+            {'resource': {'id': 'file', 'name': 'File', 'folder': False}},
+            {'kind': 'download', 'url': 'https://res.6-79.cn@other.example/file'},
+        ]), self.assertRaises(ValueError):
+            download_target(token)
+
+    def test_public_folder_preview_has_no_download(self):
+        token = '6269bb3c-29ef-423a-8197-60bd89b1e217'
+        with patch('Message.providers.pocklo.public_body', return_value={
+            'resource': {'id': 'folder', 'name': 'Folder', 'folder': True},
+        }) as fetch:
+            self.assertEqual(preview(token)['provider_data']['kind'], 'folder')
+            with self.assertRaises(ValueError):
+                download_target(token)
+            self.assertEqual(fetch.call_count, 2)
 
     def test_changed_pocklo_phone_invalidates_local_connection(self):
         with patch('User.pocklo.remote', side_effect=self.provider):

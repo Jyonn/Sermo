@@ -26,6 +26,7 @@ from Message.providers.douyin import DouyinProvider
 from Message.providers.xiaohongshu import XiaohongshuProvider
 from Message.providers.music import MusicProvider
 from Message.providers.stillfolio import StillfolioProvider
+from Message.providers import pocklo
 from Message.providers.monifa import MonifaProvider
 from Message.preview_queue import platform_slot, submit_preview
 from Message.validators import MessageErrors, MessageValidator
@@ -365,7 +366,9 @@ class LinkPreview(models.Model):
         if preview.status == LinkPreviewStatusChoice.READY:
             provider_data = preview.provider_data or {}
             provider = provider_data.get('provider')
-            if provider == 'stillfolio_collection':
+            if provider == 'pocklo_share':
+                ttl = datetime.timedelta(minutes=5)
+            elif provider == 'stillfolio_collection':
                 ttl = datetime.timedelta(minutes=5 if provider_data.get('images') else 1)
             else:
                 ttl = datetime.timedelta(minutes=15) if provider in ('douyin_video', 'xiaohongshu_video') else datetime.timedelta(hours=1) if provider == 'douyin_gallery' else datetime.timedelta(minutes=30) if str(provider or '').endswith('_music') else cls.READY_TTL
@@ -375,7 +378,7 @@ class LinkPreview(models.Model):
             ) or (
                 XiaohongshuProvider.supports(preview.url) and 'xiaohongshu login redirect' in (preview.error or '')
             )
-            ttl = datetime.timedelta(minutes=1) if retry_social or StillfolioProvider.token(preview.url) else datetime.timedelta(minutes=5) if DouyinProvider.supports(preview.url) else cls.FAILED_TTL
+            ttl = datetime.timedelta(minutes=1) if retry_social or StillfolioProvider.token(preview.url) or pocklo.share_token(preview.url) else datetime.timedelta(minutes=5) if DouyinProvider.supports(preview.url) else cls.FAILED_TTL
         else:
             return False
         return preview.fetched_at is None or preview.fetched_at <= (now or timezone.now()) - ttl
@@ -401,6 +404,9 @@ class LinkPreview(models.Model):
         monifa = MonifaProvider.preview(current_url)
         if monifa:
             return monifa
+        pocklo_token = pocklo.share_token(current_url)
+        if pocklo_token:
+            return pocklo.preview(pocklo_token)
 
         if DouyinProvider.supports(current_url):
             douyin_data = DouyinProvider().parse(current_url)
@@ -536,7 +542,7 @@ class LinkPreview(models.Model):
         if (
             preview.status == LinkPreviewStatusChoice.READY
             and (preview_hostname in cls.NETEASE_HOSTS | DouyinProvider.HOSTS | MusicProvider.HOSTS | XiaohongshuProvider.HOSTS
-                 or StillfolioProvider.token(preview.url))
+                 or StillfolioProvider.token(preview.url) or pocklo.share_token(preview.url))
             and not preview.provider_data
         ):
             preview.status = LinkPreviewStatusChoice.PENDING
