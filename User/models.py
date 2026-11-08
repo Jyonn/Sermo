@@ -1711,6 +1711,34 @@ class PermanentVipCampaign(models.Model):
         return cls.LEVEL_THRESHOLDS[-1][1]
 
     @classmethod
+    def phone_claim_available(cls, user):
+        """LV9+ accounts are exempt; lower-level VIPs share one global phone quota."""
+        if user.effective_growth_level() >= 9:
+            return True
+        if not user.phone or not user.phone_verified_at:
+            return False
+        phone_variants = account_switch_phone_variants(user.phone)
+        phone_variants.update(value[1:] for value in tuple(phone_variants) if value.startswith('+86'))
+        peers = User.objects.filter(
+            phone__in=phone_variants,
+        ).exclude(pk=user.pk).filter(
+            Q(is_permanent_vip=True)
+            | Q(id__in=UserResourceInventory.objects.filter(
+                reward_id='vip.permanent',
+            ).values('user_id'))
+        )
+        return not any(peer.effective_growth_level() < 9 for peer in peers)
+
+    @classmethod
+    def requirements_for(cls, user, required_level):
+        return dict(
+            email=bool(user.email_verified_at),
+            phone=bool(user.phone and user.phone_verified_at),
+            level=user.effective_growth_level() >= required_level,
+            phone_claim_available=cls.phone_claim_available(user),
+        )
+
+    @classmethod
     def status_for(cls, user):
         from Activity.models import ActivityCampaign, ActivityService
 
@@ -1734,11 +1762,7 @@ class PermanentVipCampaign(models.Model):
         claim = UserResourceInventory.objects.filter(user=user, reward_id='vip.permanent').first()
         level = user.effective_growth_level()
         required_level = cls.required_level_for_slot(min(campaign.claimed_count + 1, cls.LIMIT))
-        requirements = dict(
-            email=bool(user.email_verified_at),
-            phone=bool(user.phone_verified_at),
-            level=level >= required_level,
-        )
+        requirements = cls.requirements_for(user, required_level)
         return dict(
             limit=cls.LIMIT,
             claimed=campaign.claimed_count,
@@ -1769,11 +1793,10 @@ class PermanentVipCampaign(models.Model):
                 if campaign.claimed_count >= cls.LIMIT:
                     raise UserErrors.PERMANENT_VIP_CAMPAIGN_FULL
                 required_level = cls.required_level_for_slot(campaign.claimed_count + 1)
-                if (
-                    not user.email_verified_at
-                    or not user.phone_verified_at
-                    or user.effective_growth_level() < required_level
-                ):
+                requirements = cls.requirements_for(user, required_level)
+                if requirements['phone'] and not requirements['phone_claim_available']:
+                    raise UserErrors.PERMANENT_VIP_PHONE_LIMIT
+                if not all(requirements.values()):
                     raise UserErrors.PERMANENT_VIP_NOT_ELIGIBLE
 
                 slot = campaign.claimed_count + 1

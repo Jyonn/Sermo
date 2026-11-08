@@ -101,6 +101,7 @@ class UserErrors:
     GROWTH_REPORT_LOCKED = Error(message=_('Growth report unlocks at level 16'), code=Code.Forbidden)
     FEATURE_DISCOVERY_INVALID = Error(message=_('Invalid feature discovery'), code=Code.BadRequest)
     PERMANENT_VIP_NOT_ELIGIBLE = Error(message=_('Permanent VIP requirements are not met'), code=Code.Forbidden)
+    PERMANENT_VIP_PHONE_LIMIT = Error(message=_('This phone number already has a permanent VIP account below LV9'), code=Code.Forbidden)
     PERMANENT_VIP_CAMPAIGN_FULL = Error(message=_('Permanent VIP campaign is full'), code=Code.BadRequest)
     NICKNAME_CHANGE_COOLDOWN = Error(message=_('Nickname can be changed again at {available_at}'), code=Code.BadRequest)
     PASSWORD_RECOVERY_UNAVAILABLE = Error(message=_('Password recovery is unavailable for this account'), code=Code.BadRequest)
