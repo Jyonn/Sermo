@@ -4,6 +4,7 @@ from User.web_push_receipts import WebPushReceiptView
 from User.chronelle_account import FullChronelleView
 from User.chronelle_permissions import ChronellePermissionsView
 from User.chronelle_profile import ChronelleProfileView
+from User.pocklo import PockloCallbackView, PockloConnectionView, PockloFilesView
 from User.oauth_views import OAuthAuthorizeView, OAuthTokenView, OAuthUserinfoView, OAuthRevokeView, OAuthEligibilityView
 from User.oauth_avatar import OAuthAvatarView
 from User.oauth_views import OAuthRequestsView, OAuthRequestCancelView
@@ -72,6 +73,11 @@ from User.views import (
 )
 
 urlpatterns = [
+    path('pocklo/callback', PockloCallbackView.as_view()),
+    path('me/pocklo', PockloConnectionView.as_view()),
+    path('me/pocklo/files', PockloFilesView.as_view()),
+    path('me/pocklo/files/<str:resource_id>', PockloFilesView.as_view()),
+    path('me/pocklo/files/<str:resource_id>/download', PockloFilesView.as_view(), {'download': True}),
     path('<int:user_id>/chronelle/calendar', ChronelleProfileView.as_view()),
     path('me/chronelle/permissions', ChronellePermissionsView.as_view()),
     path('me/chronelle/account', FullChronelleView.as_view()),

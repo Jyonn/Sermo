@@ -4195,3 +4195,15 @@ class ChronelleCredential(models.Model):
     # One rotating credential pair per application/Chronelle subject, not per space.
     id = models.CharField(max_length=64, primary_key=True)
     sealed = models.TextField(blank=True)
+
+
+class PockloCredential(models.Model):
+    phone_digest = models.CharField(max_length=64, primary_key=True)
+    sealed = models.TextField()
+
+
+class PockloConnection(models.Model):
+    user = models.OneToOneField(User, on_delete=models.CASCADE)
+    credential = models.ForeignKey(PockloCredential, on_delete=models.SET_NULL, null=True)
+    phone_digest = models.CharField(max_length=64, blank=True)
+    pending = models.TextField(blank=True)

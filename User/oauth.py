@@ -133,6 +133,12 @@ def grant_for_token(token, *, enforce_eligibility=True):
     return grant
 
 
+def verified_mainland_phone(user):
+    raw = (user.phone or '').strip()
+    digits = raw[3:] if raw.startswith('+86') else raw[2:] if raw.startswith('86') else raw
+    return f'+86{digits}' if user.phone_verified_at and MAINLAND_PHONE_RE.fullmatch(digits) else None
+
+
 def userinfo(token):
     grant = grant_for_token(token)
     user = grant.user
@@ -150,9 +156,7 @@ def userinfo(token):
         payload['email'] = (user.email or '').strip().lower() or None
         payload['email_verified'] = bool(payload['email'] and user.email_verified_at)
     if 'phone' in grant.scopes:
-        raw = (user.phone or '').strip()
-        digits = raw[3:] if raw.startswith('+86') else raw[2:] if raw.startswith('86') else raw
-        payload['phone'] = f'+86{digits}' if user.phone_verified_at and MAINLAND_PHONE_RE.fullmatch(digits) else None
+        payload['phone'] = verified_mainland_phone(user)
         payload['phone_verified'] = payload['phone'] is not None
     return payload
 
