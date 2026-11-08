@@ -67,11 +67,35 @@ def download_target(token):
     return url
 
 
+def media_thumbnail(item):
+    if item['folder'] or item.get('preview') not in ('image', 'video'):
+        return None
+    url = item.get('thumbnail')
+    if not isinstance(url, str) or any(char.isspace() for char in url):
+        return None
+    try:
+        parsed = urlsplit(url)
+    except ValueError:
+        return None
+    if parsed.scheme == 'https' and parsed.netloc == 'res.6-79.cn' and parsed.path and not parsed.fragment:
+        return url
+
+
+def thumbnail_target(token):
+    url = media_thumbnail(metadata(token))
+    if not url:
+        raise ValueError('pocklo thumbnail unavailable')
+    return url
+
+
 def preview(token):
     item = metadata(token)
     canonical = f'https://{HOST}/share/{token}'
     kind = 'folder' if item['folder'] else 'link' if item.get('preview') == 'link' else 'file'
     title = item['name'][:255] or 'Pocklo'
+    preview_type = item.get('preview')
     return dict(url=canonical, title=title, description='', image_url='', site_name='Pocklo',
                 favicon_url='', provider_data={'provider': 'pocklo_share', 'url': canonical,
-                                               'title': title, 'kind': kind})
+                                               'title': title, 'kind': kind,
+                                               'preview': preview_type if isinstance(preview_type, str) else '',
+                                               'has_thumbnail': bool(media_thumbnail(item))})

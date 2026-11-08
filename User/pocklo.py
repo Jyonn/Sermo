@@ -317,9 +317,11 @@ class PockloShareView(View):
 
 
 class PockloShareDownloadView(View):
+    resolve_target = staticmethod(public_shares.download_target)
+
     def get(self, request, token):
         try:
-            target = public_shares.download_target(str(token))
+            target = self.resolve_target(str(token))
         except ValueError:
             return result({'error': 'share_unavailable'}, 404)
         except requests.RequestException:
@@ -328,3 +330,7 @@ class PockloShareDownloadView(View):
         response['Cache-Control'] = 'no-store'
         response['Referrer-Policy'] = 'no-referrer'
         return response
+
+
+class PockloShareThumbnailView(PockloShareDownloadView):
+    resolve_target = staticmethod(public_shares.thumbnail_target)

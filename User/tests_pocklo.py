@@ -91,6 +91,21 @@ class PockloConnectionTests(TestCase):
                 download_target(token)
             self.assertEqual(fetch.call_count, 2)
 
+    def test_public_thumbnail_resolves_current_share_without_storing_signed_url(self):
+        token = '6269bb3c-29ef-423a-8197-60bd89b1e217'
+        url = 'https://res.6-79.cn/pocklo/cover?vframe/jpg&token=short-lived'
+        item = {'id': 'video', 'name': 'Video.mp4', 'folder': False, 'preview': 'video', 'thumbnail': url}
+        with patch('Message.providers.pocklo.public_body', return_value={'resource': item}):
+            data = preview(token)
+            self.assertTrue(data['provider_data']['has_thumbnail'])
+            self.assertNotIn(url, str(data))
+            response = self.client.get(f'/users/pocklo/shares/{token}/thumbnail')
+            self.assertRedirects(response, url, fetch_redirect_response=False)
+            self.assertEqual(response['Cache-Control'], 'no-store')
+            item['thumbnail'] = 'https://res.6-79.cn@other.example/video'
+            response = self.client.get(f'/users/pocklo/shares/{token}/thumbnail')
+            self.assertEqual(response.status_code, 404)
+
     def test_changed_pocklo_phone_invalidates_local_connection(self):
         with patch('User.pocklo.remote', side_effect=self.provider):
             finish(*consume(self.begin(self.first)), 'code')
