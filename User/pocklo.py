@@ -290,9 +290,13 @@ class PockloFilesView(View):
         try:
             if resource_id and not RESOURCE_ID.fullmatch(resource_id):
                 raise PockloError('invalid_request', 400)
+            search = request.GET.get('q', '').strip()
+            if len(search) > 256:
+                raise PockloError('invalid_request', 400)
             access = access_for(request.user)
             path = 'files/' + (resource_id + '/' if resource_id else '')
-            value = remote(path, access=access, params={'offset': request.GET.get('offset', '0')})
+            params = {'q': search} if search else {'offset': request.GET.get('offset', '0')}
+            value = remote(path, access=access, params=params)
             return result(value)
         except PockloError as error:
             return result({'error': error.code}, error.status)

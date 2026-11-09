@@ -7,6 +7,7 @@ from django.utils import timezone
 
 from Space.models import Space
 from User.models import PockloConnection, PockloCredential, User
+from utils import auth
 from User.pocklo import PockloError, access_for, consume, finish, start, status
 from Message.providers.pocklo import download_target, preview, share_token
 
@@ -112,3 +113,24 @@ class PockloConnectionTests(TestCase):
         with patch('User.pocklo.remote', side_effect=PockloError('account_mismatch')), self.assertRaises(PockloError):
             access_for(self.first)
         self.assertEqual(status(self.first), 'connect_required')
+
+    def test_directory_search_uses_the_connected_account_and_current_folder(self):
+        with patch('User.pocklo.remote', side_effect=self.provider):
+            finish(*consume(self.begin(self.first)), 'code')
+        headers = {'HTTP_AUTHORIZATION': 'Bearer ' + auth.get_login_token(self.first)['auth']}
+        def provider(path, **kwargs):
+            if path == 'frienden-account/':
+                return self.provider(path, **kwargs)
+            return {'entries': [], 'has_more': False}
+
+        with patch('User.pocklo.remote', side_effect=provider) as remote:
+            response = self.client.get('/users/me/pocklo/files/folder-1', {'q': ' 文件 ', 'offset': 100}, **headers)
+            self.assertEqual(response.status_code, 200)
+            remote.assert_called_with('files/folder-1/', access='access', params={'q': '文件'})
+            remote.reset_mock()
+            response = self.client.get('/users/me/pocklo/files', {'q': 'x' * 257}, **headers)
+            self.assertEqual(response.status_code, 400)
+            remote.assert_not_called()
+            response = self.client.get('/users/me/pocklo/files', {'offset': 100}, **headers)
+            self.assertEqual(response.status_code, 200)
+            remote.assert_called_with('files/', access='access', params={'offset': '100'})
