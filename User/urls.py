@@ -1,7 +1,7 @@
 from django.urls import path
 from User.birthday_views import BirthdayView, BirthdaySeenView, BirthdayLetterOpenView, BirthdayLetterArchiveView
 from User.web_push_receipts import WebPushReceiptView
-from User.chronelle_account import FullChronelleView
+from User.chronelle_account import ChronelleCallbackView, FullChronelleView
 from User.chronelle_permissions import ChronellePermissionsView
 from User.chronelle_profile import ChronelleProfileView
 from User.pocklo import PockloCallbackView, PockloConnectionView, PockloFilesView, PockloShareView, PockloShareDownloadView, PockloShareThumbnailView
@@ -83,6 +83,7 @@ urlpatterns = [
     path('<int:user_id>/chronelle/calendar', ChronelleProfileView.as_view()),
     path('me/chronelle/permissions', ChronellePermissionsView.as_view()),
     path('me/chronelle/account', FullChronelleView.as_view()),
+    path('chronelle/callback', ChronelleCallbackView.as_view()),
     path('oauth/chat/direct', OAuthDirectChatView.as_view()),
     path('oauth/chat/capabilities', OAuthChatCapabilitiesView.as_view()),
     path('oauth/chat/groups', OAuthGroupCreateView.as_view()),

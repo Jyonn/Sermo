@@ -2,6 +2,7 @@
 
 BASE = 'https://chronelle.jyonn.space'
 MIRROR_BASE = 'https://chronelle.6-79.cn'
+CALLBACK = 'https://api.sermo.jyonn.space/users/chronelle/callback'
 APP_ORIGINS = {'https://sermo.jyonn.space', 'https://frienden.jyonn.space',
                'https://sermo.6-79.cn', 'https://frienden.6-79.cn'}
 
