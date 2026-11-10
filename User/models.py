@@ -4207,3 +4207,15 @@ class PockloConnection(models.Model):
     credential = models.ForeignKey(PockloCredential, on_delete=models.SET_NULL, null=True)
     phone_digest = models.CharField(max_length=64, blank=True)
     pending = models.TextField(blank=True)
+
+
+class StillfolioCredential(models.Model):
+    phone_digest = models.CharField(max_length=64, primary_key=True)
+    sealed = models.TextField()
+
+
+class StillfolioConnection(models.Model):
+    user = models.OneToOneField(User, on_delete=models.CASCADE)
+    credential = models.ForeignKey(StillfolioCredential, on_delete=models.SET_NULL, null=True)
+    phone_digest = models.CharField(max_length=64, blank=True)
+    pending = models.TextField(blank=True)

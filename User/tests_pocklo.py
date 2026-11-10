@@ -43,7 +43,7 @@ class PockloConnectionTests(TestCase):
         return {'sub': self.subject}
 
     def test_shared_phone_reuses_credentials_but_each_space_connects_explicitly(self):
-        with patch('User.pocklo.remote', side_effect=self.provider):
+        with patch('User.pocklo.binding.remote', side_effect=self.provider):
             finish(*consume(self.begin(self.first)), 'code')
             self.assertEqual(status(self.first), 'connected')
             self.assertEqual(status(self.second), 'connect_required')
@@ -58,14 +58,14 @@ class PockloConnectionTests(TestCase):
         with self.assertRaises(PockloError):
             consume(state)
         self.begin(self.first)
-        with patch('User.pocklo.remote') as provider, self.assertRaises(PockloError):
+        with patch('User.pocklo.binding.remote') as provider, self.assertRaises(PockloError):
             finish(*operation, 'code')
         provider.assert_not_called()
 
     def test_phone_change_between_start_and_callback_blocks_provider_exchange(self):
         operation = consume(self.begin(self.first))
         User.objects.filter(pk=self.first.pk).update(phone='13912345678')
-        with patch('User.pocklo.remote') as provider, self.assertRaises(PockloError):
+        with patch('User.pocklo.binding.remote') as provider, self.assertRaises(PockloError):
             finish(*operation, 'code')
         provider.assert_not_called()
 
@@ -108,14 +108,14 @@ class PockloConnectionTests(TestCase):
             self.assertEqual(response.status_code, 404)
 
     def test_changed_pocklo_phone_invalidates_local_connection(self):
-        with patch('User.pocklo.remote', side_effect=self.provider):
+        with patch('User.pocklo.binding.remote', side_effect=self.provider):
             finish(*consume(self.begin(self.first)), 'code')
-        with patch('User.pocklo.remote', side_effect=PockloError('account_mismatch')), self.assertRaises(PockloError):
+        with patch('User.pocklo.binding.remote', side_effect=PockloError('account_mismatch')), self.assertRaises(PockloError):
             access_for(self.first)
         self.assertEqual(status(self.first), 'connect_required')
 
     def test_directory_search_uses_the_connected_account_and_current_folder(self):
-        with patch('User.pocklo.remote', side_effect=self.provider):
+        with patch('User.pocklo.binding.remote', side_effect=self.provider):
             finish(*consume(self.begin(self.first)), 'code')
         headers = {'HTTP_AUTHORIZATION': 'Bearer ' + auth.get_login_token(self.first)['auth']}
         def provider(path, **kwargs):
@@ -123,7 +123,7 @@ class PockloConnectionTests(TestCase):
                 return self.provider(path, **kwargs)
             return {'entries': [], 'has_more': False}
 
-        with patch('User.pocklo.remote', side_effect=provider) as remote:
+        with patch('User.pocklo.binding.remote', side_effect=provider) as remote:
             response = self.client.get('/users/me/pocklo/files/folder-1', {'q': ' 文件 ', 'offset': 100}, **headers)
             self.assertEqual(response.status_code, 200)
             remote.assert_called_with('files/folder-1/', access='access', params={'q': '文件'})
