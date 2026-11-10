@@ -904,7 +904,7 @@ class User(models.Model):
         now = timezone.now()
         with transaction.atomic():
             locked = User.objects.select_for_update().get(id=self.id)
-            was_alive = (now - locked.last_heartbeat).total_seconds() < self.vldt.OFFLINE_MIN_INTERVAL * 60
+            was_alive = locked.is_alive_at(now)
             User.objects.filter(id=self.id).update(last_heartbeat=now)
         self.last_heartbeat = now
         if not was_alive:
@@ -1006,8 +1006,14 @@ class User(models.Model):
 
     @property
     def is_alive(self):
-        current_time = timezone.now()
-        return (current_time - self.last_heartbeat).total_seconds() < self.vldt.OFFLINE_MIN_INTERVAL * 60
+        return self.is_alive_at(timezone.now())
+
+    def is_alive_at(self, current_time):
+        return self.last_heartbeat > self.online_heartbeat_cutoff(current_time)
+
+    @staticmethod
+    def online_heartbeat_cutoff(current_time):
+        return current_time - datetime.timedelta(minutes=2)
 
     def _dictify_user_id(self):
         return self.id

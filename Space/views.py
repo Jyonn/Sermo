@@ -1,4 +1,3 @@
-import datetime
 import logging
 import threading
 
@@ -309,7 +308,7 @@ class SpaceAdminDashboardView(View):
             is_deleted=False,
             role=UserRoleChoice.MEMBER,
         )
-        threshold = timezone.now() - datetime.timedelta(minutes=User.vldt.OFFLINE_MIN_INTERVAL)
+        threshold = User.online_heartbeat_cutoff(timezone.now())
         return dict(
             space=space.json_private(),
             operators=[item.json() for item in SpaceOperator.objects.filter(space=space).select_related('user')],
@@ -453,7 +452,7 @@ class SpaceUserListView(View):
         if self.force_online is not None:
             online = 1 if self.force_online else 0
         if online is not None:
-            threshold = timezone.now() - datetime.timedelta(minutes=User.vldt.OFFLINE_MIN_INTERVAL)
+            threshold = User.online_heartbeat_cutoff(timezone.now())
             if bool(online):
                 users = users.filter(Q(last_heartbeat__gt=threshold) | Q(role=UserRoleChoice.OFFICIAL))
             else:
@@ -536,7 +535,7 @@ class SpaceAdminUserListView(SpaceUserListView):
         if self.force_online is not None:
             online = 1 if self.force_online else 0
         if online is not None:
-            threshold = timezone.now() - datetime.timedelta(minutes=User.vldt.OFFLINE_MIN_INTERVAL)
+            threshold = User.online_heartbeat_cutoff(timezone.now())
             if bool(online):
                 active_users = active_users.filter(last_heartbeat__gt=threshold)
             else:
