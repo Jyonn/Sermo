@@ -1,6 +1,6 @@
 import json
 
-from django.http import JsonResponse
+from django.http import HttpResponse, JsonResponse
 from django.views import View
 
 from Chat import voice
@@ -61,13 +61,45 @@ class VoiceActionView(View):
                 with voice.locked_call(call_id, request.user) as call:
                     voice.expire_locked(call, voice.timezone.now())
                     if call.state not in ('connecting', 'active') or not configured():
-                        raise voice.CallError('expired')
-                    if not voice.owns(call, request.user, body.get('device_id')):
+                        result = None
+                    elif not voice.owns(call, request.user, body.get('device_id')):
                         raise voice.CallError('other_device')
-                    return dict(url=voice.settings.VOICE_LIVEKIT_URL, token=token(call, request.user))
+                    else:
+                        result = dict(url=voice.settings.VOICE_LIVEKIT_URL, token=token(call, request.user))
+                # Commit timeout settlement before reporting the expired credential.
+                if result is None:
+                    raise voice.CallError('expired')
+                return result
             call = voice.mutate(call_id, request.user, action, body.get('device_id'))
             return voice.serialize(call, request.user, body.get('device_id'))
         return response(execute)
+
+
+class VoiceMediaAdmissionView(View):
+    """Nginx auth_request gate: an old SFU token cannot recreate an ended room."""
+    def get(self, request):
+        import jwt
+        from django.conf import settings
+        allowed = False
+        try:
+            voice.require_enabled()
+            claims = jwt.decode(request.headers.get('X-Voice-Token', ''),
+                settings.VOICE_LIVEKIT_API_SECRET, algorithms=['HS256'],
+                issuer=settings.VOICE_LIVEKIT_API_KEY,
+                options={'require': ['exp', 'iss', 'sub']})
+            grant = claims.get('video', {})
+            room = grant.get('room', '')
+            if not grant.get('roomJoin') or not room.startswith('frienden-'):
+                raise voice.CallError('forbidden', 403)
+            with voice.locked_call(room.removeprefix('frienden-')) as call:
+                voice.expire_locked(call, voice.timezone.now())
+                allowed = (call.state in ('connecting', 'active') and
+                           claims['sub'] in (str(call.caller_id), str(call.callee_id)))
+        except (voice.CallError, jwt.PyJWTError, ValueError, TypeError, AttributeError):
+            pass
+        result = HttpResponse(status=204 if allowed else 403)
+        result['Cache-Control'] = 'no-store'
+        return result
 
 
 class VoiceWebhookView(View):

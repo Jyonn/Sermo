@@ -23,9 +23,9 @@ def rpc(method, call, extra=None):
     now = int(time.time())
     auth = jwt.encode(dict(iss=settings.VOICE_LIVEKIT_API_KEY, nbf=now-2, exp=now+30,
         video=dict(roomAdmin=True, room=f'frienden-{call.id}')), settings.VOICE_LIVEKIT_API_SECRET, algorithm='HS256')
-    parsed = urlparse(settings.VOICE_LIVEKIT_URL)
+    parsed = urlparse(getattr(settings, 'VOICE_LIVEKIT_INTERNAL_URL', '') or settings.VOICE_LIVEKIT_URL)
     origin = ('https' if parsed.scheme in ('wss', 'https') else 'http')+'://'+parsed.netloc
-    response = requests.post(f'{origin}/twirp/livekit.RoomService/{method}',
+    response = requests.post(f'{origin}{parsed.path.rstrip("/")}/twirp/livekit.RoomService/{method}',
         headers={'Authorization':f'Bearer {auth}'}, json=dict(room=f'frienden-{call.id}', **(extra or {})), timeout=3)
     response.raise_for_status()
     return response.json()

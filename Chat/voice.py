@@ -282,7 +282,7 @@ def current(user):
 def reconcile(limit=100):
     """A durable per-second worker owns timeout and media cleanup, not web clients."""
     from Chat.voice_media import close_room
-    ids = list(VoiceCall.objects.filter(state__in=ACTIVE).order_by('created_at').values_list('id', flat=True)[:limit])
+    ids = VoiceCall.objects.filter(state__in=ACTIVE).order_by('created_at').values_list('id', flat=True).iterator(chunk_size=limit)
     for call_id in ids:
         with locked_call(call_id) as call:
             expire_locked(call, timezone.now())

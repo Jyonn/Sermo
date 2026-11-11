@@ -34,6 +34,7 @@ VOICE_CALLS_ENABLED = os.environ.get('VOICE_CALLS_ENABLED') == '1'
 # Local work never sends real call notifications unless explicitly enabled.
 VOICE_CALL_NOTIFICATIONS_ENABLED = os.environ.get('VOICE_CALL_NOTIFICATIONS_ENABLED') == '1'
 VOICE_LIVEKIT_URL = os.environ.get('VOICE_LIVEKIT_URL', '')
+VOICE_LIVEKIT_INTERNAL_URL = os.environ.get('VOICE_LIVEKIT_INTERNAL_URL', '')
 VOICE_LIVEKIT_API_KEY = os.environ.get('VOICE_LIVEKIT_API_KEY', '')
 VOICE_LIVEKIT_API_SECRET = os.environ.get('VOICE_LIVEKIT_API_SECRET', '')
 

@@ -64,6 +64,35 @@ class VoiceCallTests(TestCase):
         self.assertFalse(VoiceCall.objects.exists())
         self.assertFalse(Message.objects.filter(type=14).exists())
 
+    def test_admission_rejects_reuse_after_end_and_foreign_identity(self):
+        from Chat.voice_media import token
+        call = self.create()
+        voice.mutate(call.id, self.callee, 'accept', self.peer_device)
+        credential = token(call, self.caller)
+        url = '/chats/voice/media-admission'
+        self.assertEqual(self.client.get(url, HTTP_X_VOICE_TOKEN=credential).status_code, 204)
+        foreign = self.user('Foreign', '+8613800000103')
+        self.assertEqual(self.client.get(url, HTTP_X_VOICE_TOKEN=token(call, foreign)).status_code, 403)
+        voice.mutate(call.id, self.caller, 'end', self.device)
+        self.assertEqual(self.client.get(url, HTTP_X_VOICE_TOKEN=credential).status_code, 403)
+        self.assertEqual(self.client.get(url, HTTP_X_VOICE_TOKEN='invalid').status_code, 403)
+
+    def test_expired_media_request_commits_settlement(self):
+        call = self.activate(self.create(), seconds=310)
+        result = self.client.post(f'/chats/voice/calls/{call.id}/media',
+            data=json.dumps({'device_id': str(self.device)}), content_type='application/json',
+            **self.authorize(self.caller))
+        self.assertEqual(result.status_code, 409)
+        call.refresh_from_db()
+        self.assertEqual((call.state, call.duration_seconds), ('ended', 300))
+
+    @override_settings(VOICE_LIVEKIT_INTERNAL_URL='http://127.0.0.1:7880')
+    def test_rpc_uses_private_origin(self):
+        from Chat.voice_media import rpc
+        with patch('Chat.voice_media.requests.post') as post:
+            rpc('ListParticipants', self.create())
+        self.assertEqual(post.call_args.args[0], 'http://127.0.0.1:7880/twirp/livekit.RoomService/ListParticipants')
+
     def test_recipient_without_balance_cannot_be_called(self):
         key = voice.identity_key(self.callee)
         VoiceIdentity.objects.create(digest=key)
