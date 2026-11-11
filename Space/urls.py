@@ -2,6 +2,7 @@ from django.urls import path
 from User.birthday_views import SpaceBirthdayLetterView
 
 from Space.views import (
+    AnnualRecapView,
     SpaceAdminSettingsView,
     SpaceAdminSessionView,
     SpaceAdminDashboardView,
@@ -29,6 +30,7 @@ from Space.views import (
 from AccessPolicy.views import SpacePolicyDetailView, SpacePolicyListView, SpacePolicySimulateView
 
 urlpatterns = [
+    path('annual-recap', AnnualRecapView.as_view(), name='space annual recap'),
     path('admin/users/<int:user_id>/birthday-letter', SpaceBirthdayLetterView.as_view()),
     path('email-code', SpaceEmailCodeRequestView.as_view(), name='space email verification code'),
     path('', SpaceView.as_view(), name='space create'),
