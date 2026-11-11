@@ -1704,7 +1704,7 @@ class Message(models.Model):
 
     def preview_text(self):
         if self.type == MessageTypeChoice.VOICE_CALL:
-            return str(_('Voice call'))
+            return str(_('Call'))
         if self.type == MessageTypeChoice.TEXT:
             return self.readable_text()
         if self.type == MessageTypeChoice.OFFICIAL_NOTICE:

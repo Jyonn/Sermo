@@ -180,7 +180,7 @@ def create(chat, user, client_key, device):
         event = NotificationEvent.objects.create(space=peer.space, user=peer, actor=user,
             event_type=NotificationEventTypeChoice.VOICE_CALL,
             payload=dict(kind='voice_call', call_id=str(call.id), chat_id=chat.id, message_id=call.message_id,
-                         message_type=14, content='Voice call', expires_at=call.expires_at.timestamp()))
+                         message_type=14, content='Call', expires_at=call.expires_at.timestamp()))
         if getattr(settings, 'VOICE_CALL_NOTIFICATIONS_ENABLED', False):
             NotificationEvent._enqueue_deliveries_after_commit([event.id])
         return call

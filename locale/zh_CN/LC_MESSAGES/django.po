@@ -1134,11 +1134,11 @@ msgstr "科研课题有更新"
 msgid "This phone number already has a permanent VIP account below LV9"
 msgstr "此手机号已有低于 LV9 的永久 VIP 账号"
 
-msgid "Voice call"
-msgstr "语音通话"
+msgid "Call"
+msgstr "通话"
 
-msgid "Incoming voice call."
-msgstr "收到语音来电。"
+msgid "Incoming call."
+msgstr "收到来电。"
 
 msgid "{name} is calling you."
-msgstr "{name} 邀请你语音通话。"
+msgstr "{name} 邀请你通话。"

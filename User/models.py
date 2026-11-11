@@ -2993,7 +2993,7 @@ class NotificationEvent(models.Model):
         actor_name = str(_('Anonymous user')) if payload.get('anonymous_actor') else self.actor.name if self.actor_id else None
 
         if payload.get('kind') == 'voice_call':
-            return str(_('Voice call')), str(_('Incoming voice call.')) if hide_message_content else str(_('{name} is calling you.').format(name=actor_name or _('Someone')))
+            return str(_('Call')), str(_('Incoming call.')) if hide_message_content else str(_('{name} is calling you.').format(name=actor_name or _('Someone')))
 
         if self.event_type == NotificationEventTypeChoice.DIRECT_MESSAGE:
             if hide_message_content:
