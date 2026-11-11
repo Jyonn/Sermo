@@ -246,7 +246,7 @@ class AnnualRecapView(View):
 
         if not request.user.space.annual_recap_available:
             raise SpaceErrors.ANNUAL_RECAP_NOT_GRANTED
-        return summarize(request.user)
+        return summarize(request.user, request=request)
 
 
 class SpaceAdminSettingsView(View):
