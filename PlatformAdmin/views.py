@@ -103,6 +103,8 @@ def _space_payload(space):
         qq_binding_granted=space.qq_binding_granted,
         qixi_theme_granted=space.qixi_theme_granted,
         qixi_theme_enabled=space.site_theme == 'qixi-2026',
+        annual_recap_granted=space.annual_recap_granted,
+        annual_recap_enabled=space.annual_recap_available,
         qq_binding_enabled=space.qq_binding_enabled,
         oauth_developer_granted=space.oauth_developer_granted,
         oauth_developer_enabled=space.oauth_developer_enabled,

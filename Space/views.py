@@ -239,6 +239,16 @@ class SpaceMeView(View):
         return request.user.space.json()
 
 
+class AnnualRecapView(View):
+    @auth.require_user
+    def get(self, request: Request):
+        from Space.annual_recap import summarize
+
+        if not request.user.space.annual_recap_available:
+            raise SpaceErrors.ANNUAL_RECAP_NOT_GRANTED
+        return summarize(request.user)
+
+
 class SpaceAdminSettingsView(View):
     @auth.require_space
     @analyse.json(
@@ -253,6 +263,7 @@ class SpaceAdminSettingsView(View):
         SpaceParams.oauth_developer_enabled,
         SpaceParams.research_enabled,
         SpaceParams.qixi_theme_enabled,
+        SpaceParams.annual_recap_enabled,
         SpaceParams.unverified_group_policy,
         SpaceParams.member_limit,
         SpaceParams.level_names,
@@ -270,6 +281,7 @@ class SpaceAdminSettingsView(View):
             oauth_developer_enabled=request.json.oauth_developer_enabled,
             research_enabled=request.json.research_enabled,
             qixi_theme_enabled=request.json.qixi_theme_enabled,
+            annual_recap_enabled=request.json.annual_recap_enabled,
             unverified_group_policy=request.json.unverified_group_policy,
             member_limit=request.json.member_limit,
             level_names=request.json.level_names() if request.json.level_names is not None else None,
