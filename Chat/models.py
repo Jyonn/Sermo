@@ -11,6 +11,8 @@ from smartdjango import models, Choice
 from Chat.validators import ChatErrors, ChatMemberErrors, ChatValidator, ChatMemberValidator
 from User.models import User
 
+from Chat.voice_models import VoiceCall, VoiceIdentity, VoiceWeeklyQuota
+
 
 class ChatTypeChoice(Choice):
     DIRECT = 0

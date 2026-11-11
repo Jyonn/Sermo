@@ -2357,6 +2357,7 @@ class UserPasswordRecoveryChallenge(models.Model):
 
 
 class NotificationEventTypeChoice(Choice):
+    VOICE_CALL = 11
     DIRECT_MESSAGE = 1
     GROUP_MESSAGE = 2
     GROUP_INVITE = 3
@@ -2696,6 +2697,10 @@ class NotificationTopicPreference(models.Model):
 
     @classmethod
     def is_enabled_for_event(cls, event, channel):
+        if (event.payload or {}).get('kind') == 'voice_call':
+            from Chat.models import ChatUserPreference
+            if ChatUserPreference.objects.filter(user=event.user, chat_id=event.payload.get('chat_id'), notifications_muted=True).exists():
+                return False
         topic = event.topic()
         if topic is None:
             return True
@@ -2929,6 +2934,7 @@ class NotificationEvent(models.Model):
         if payload.get('kind') in ('friend_request','friend_request_accepted','group_invite','group_invite_response'):
             return NotificationTopicChoice.CHAT
         return {
+            NotificationEventTypeChoice.VOICE_CALL: NotificationTopicChoice.CHAT,
             NotificationEventTypeChoice.DIRECT_MESSAGE: NotificationTopicChoice.CHAT,
             NotificationEventTypeChoice.GROUP_MESSAGE: NotificationTopicChoice.CHAT,
             NotificationEventTypeChoice.SQUARE_STATEMENT_LIKE: NotificationTopicChoice.SQUARE_STATEMENT_LIKE,
@@ -2985,6 +2991,9 @@ class NotificationEvent(models.Model):
     ):
         payload = self.payload or {}
         actor_name = str(_('Anonymous user')) if payload.get('anonymous_actor') else self.actor.name if self.actor_id else None
+
+        if payload.get('kind') == 'voice_call':
+            return str(_('Voice call')), str(_('Incoming voice call.')) if hide_message_content else str(_('{name} is calling you.').format(name=actor_name or _('Someone')))
 
         if self.event_type == NotificationEventTypeChoice.DIRECT_MESSAGE:
             if hide_message_content:
@@ -3568,6 +3577,12 @@ class NotificationDelivery(models.Model):
             return event.render_delivery_message()
 
     def _attempt_send_web(self):
+        from Chat.voice_notifications import invitation_expired
+        if invitation_expired(self.event):
+            self.status = NotificationDeliveryStatusChoice.SKIPPED
+            self.detail = 'call_expired'
+            self.save(update_fields=['status', 'detail'])
+            return self
         from utils.webpush import WebPushNotConfigured, is_expired_subscription_error, send_web_push
 
         subscription = self.web_subscription
@@ -3620,7 +3635,7 @@ class NotificationDelivery(models.Model):
         ), None)
         if (
             pref is None
-            or event.user.is_alive
+            or (event.user.is_alive and (event.payload or {}).get('kind') != 'voice_call')
             or not pref.enabled
             or not cls._channel_available(event.user, UserNotificationChoice.BARK)
             or not NotificationTopicPreference.is_enabled_for_event(event, UserNotificationChoice.BARK)
@@ -3645,6 +3660,7 @@ class NotificationDelivery(models.Model):
         if (self.event.payload or {}).get('project_id'):
             return self._email_event_action_url()
         if self.event.event_type not in (
+            NotificationEventTypeChoice.VOICE_CALL,
             NotificationEventTypeChoice.DIRECT_MESSAGE,
             NotificationEventTypeChoice.GROUP_MESSAGE,
         ):
@@ -3923,6 +3939,12 @@ class NotificationDelivery(models.Model):
         if not self._claim_pending([self]):
             self.refresh_from_db(fields=['status', 'detail', 'attempted_at'])
             return self
+        from Chat.voice_notifications import invitation_expired
+        if invitation_expired(self.event):
+            self.status = NotificationDeliveryStatusChoice.SKIPPED
+            self.detail = 'call_expired'
+            self.save(update_fields=['status', 'detail'])
+            return self
         target = self.instant_endpoint.target if self.instant_endpoint_id else self._channel_target(self.event.user, self.channel)
         if not target:
             self.status = NotificationDeliveryStatusChoice.SKIPPED
@@ -4013,6 +4035,8 @@ class NotificationDelivery(models.Model):
 
     @classmethod
     def enqueue_for_event(cls, event: NotificationEvent):
+        if (event.payload or {}).get('kind') == 'voice_call':
+            return cls.enqueue_voice_call(event)
         deliveries = []
         # Web Push and instant receivers are time-sensitive routes. Instant
         # notifications are sent per event while offline, never via digest.
@@ -4049,6 +4073,25 @@ class NotificationDelivery(models.Model):
                     cls._attempt_send_email_batch(event.user, pref)
                 else:
                     delivery._attempt_send(pref)
+            deliveries.append(delivery)
+        return deliveries
+
+    @classmethod
+    def enqueue_voice_call(cls, event):
+        from Chat.voice_models import VoiceCall
+        if not VoiceCall.objects.filter(pk=(event.payload or {}).get('call_id'), state='ringing', expires_at__gt=timezone.now()).exists():
+            return []
+        prefs = NotificationPreference.ensure_defaults(event.user)
+        deliveries = cls.enqueue_web_for_event(event)
+        deliveries.extend(cls.enqueue_instant_for_event(event, preferences=prefs))
+        for pref in prefs:
+            if pref.channel == UserNotificationChoice.BARK or not pref.enabled or not cls._channel_available(event.user, pref.channel):
+                continue
+            if not NotificationTopicPreference.is_enabled_for_event(event, pref.channel) or cls._email_cooldown_active(event.user, pref):
+                continue
+            delivery, created = cls.get_or_create_for_route(event, pref.channel)
+            if created:
+                delivery._attempt_send(pref)
             deliveries.append(delivery)
         return deliveries
 

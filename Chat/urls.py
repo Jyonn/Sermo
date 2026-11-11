@@ -1,4 +1,5 @@
 from django.urls import path
+from Chat.voice_views import VoiceCapabilityView, VoiceCurrentView, VoiceCreateView, VoiceActionView, VoiceWebhookView
 
 from Chat.views import (
     ChatListView,
@@ -25,6 +26,11 @@ from Chat.views import (
 )
 
 urlpatterns = [
+    path('voice/capability', VoiceCapabilityView.as_view()),
+    path('voice/current', VoiceCurrentView.as_view()),
+    path('voice/calls', VoiceCreateView.as_view()),
+    path('voice/calls/<uuid:call_id>/<str:action>', VoiceActionView.as_view()),
+    path('voice/webhook', VoiceWebhookView.as_view()),
     path('', ChatListView.as_view(), name='chat_list'),
     path('direct', DirectChatView.as_view(), name='direct_chat'),
     path('group', GroupChatView.as_view(), name='group_chat'),

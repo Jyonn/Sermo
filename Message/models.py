@@ -55,6 +55,7 @@ class MessageTypeChoice(Choice):
     ACTIVITY = 11
     OFFICIAL_NOTICE = 12
     SUBMISSION_INVITE = 13
+    VOICE_CALL = 14
 
 
 class MessageEventTypeChoice(Choice):
@@ -63,6 +64,7 @@ class MessageEventTypeChoice(Choice):
     RECALLED = 2
     RESTORED = 3
     RELEASED = 4
+    UPDATED = 5
 
 
 class LinkPreviewStatusChoice(Choice):
@@ -773,7 +775,7 @@ class Message(models.Model):
 
     @classmethod
     def create(cls, chat: Chat, user: User, message_type, content, reply_to=None, client_message_id=None, mention_user_ids=None, media_resource=None):
-        if message_type in (MessageTypeChoice.SYSTEM, MessageTypeChoice.FORWARD_BUNDLE, MessageTypeChoice.OFFICIAL_NOTICE, MessageTypeChoice.SUBMISSION_INVITE):
+        if message_type in (MessageTypeChoice.SYSTEM, MessageTypeChoice.FORWARD_BUNDLE, MessageTypeChoice.OFFICIAL_NOTICE, MessageTypeChoice.SUBMISSION_INVITE, MessageTypeChoice.VOICE_CALL):
             raise MessageErrors.SYSTEM_MESSAGE_FORBIDDEN
         if chat.has_active_member(user):
             chat.require_user_message_allowed(user)
@@ -1021,7 +1023,7 @@ class Message(models.Model):
         chat.require_user_message_allowed(user)
         if source.type == MessageTypeChoice.AUDIO:
             raise MessageErrors.FORWARD_AUDIO_BUNDLE_ONLY
-        if source.type in (MessageTypeChoice.SYSTEM, MessageTypeChoice.OFFICIAL_NOTICE, MessageTypeChoice.SUBMISSION_INVITE, MessageTypeChoice.MAP_ACCESS, MessageTypeChoice.FORWARD_BUNDLE):
+        if source.type in (MessageTypeChoice.SYSTEM, MessageTypeChoice.OFFICIAL_NOTICE, MessageTypeChoice.SUBMISSION_INVITE, MessageTypeChoice.MAP_ACCESS, MessageTypeChoice.FORWARD_BUNDLE, MessageTypeChoice.VOICE_CALL):
             raise MessageErrors.FORWARD_UNSUPPORTED
         if not chat.has_active_member(user):
             raise MessageErrors.NOT_A_MEMBER
@@ -1544,6 +1546,8 @@ class Message(models.Model):
         return viewer if isinstance(viewer, User) else None
 
     def _payload_for_type(self, request: HttpRequest = None):
+        if self.type == MessageTypeChoice.VOICE_CALL:
+            return self._parse_payload(self.content)
         if self.type == MessageTypeChoice.TEXT:
             payload = dict(kind='text', text=self.content)
             link_preview = LinkPreview.queue_for_text(self.content)
@@ -1699,6 +1703,8 @@ class Message(models.Model):
         return None
 
     def preview_text(self):
+        if self.type == MessageTypeChoice.VOICE_CALL:
+            return str(_('Voice call'))
         if self.type == MessageTypeChoice.TEXT:
             return self.readable_text()
         if self.type == MessageTypeChoice.OFFICIAL_NOTICE:
@@ -2160,11 +2166,12 @@ class MessageEvent(models.Model):
             MessageEventTypeChoice.RECALLED: 'message.recalled',
             MessageEventTypeChoice.RESTORED: 'message.restored',
             MessageEventTypeChoice.RELEASED: 'message.created',
+            MessageEventTypeChoice.UPDATED: 'message.updated',
         }
         visible_created_message_ids = set()
         created_rows_by_chat = {}
         for row in rows:
-            if row.type in (MessageEventTypeChoice.CREATED, MessageEventTypeChoice.RESTORED, MessageEventTypeChoice.RELEASED):
+            if row.type in (MessageEventTypeChoice.CREATED, MessageEventTypeChoice.RESTORED, MessageEventTypeChoice.RELEASED, MessageEventTypeChoice.UPDATED):
                 created_rows_by_chat.setdefault(row.chat_id, []).append(row.message_id)
         for chat_id, message_ids in created_rows_by_chat.items():
             chat = next(row.chat for row in rows if row.chat_id == chat_id)
@@ -2174,7 +2181,7 @@ class MessageEvent(models.Model):
 
         for row in rows:
             event = dict(event_id=row.id, type=names[row.type], chat_id=row.chat_id, message_id=row.message_id)
-            if row.type in (MessageEventTypeChoice.CREATED, MessageEventTypeChoice.RESTORED, MessageEventTypeChoice.RELEASED) and not row.message.is_deleted:
+            if row.type in (MessageEventTypeChoice.CREATED, MessageEventTypeChoice.RESTORED, MessageEventTypeChoice.RELEASED, MessageEventTypeChoice.UPDATED) and not row.message.is_deleted:
                 if row.message_id in visible_created_message_ids and not MessageUserState.objects.filter(message=row.message, user=user).exists():
                     event['message'] = row.message.jsonl(request=request)
                     event['message']['mentioned_me'] = row.message.chat_mentions.filter(user=user).exists()
@@ -2982,6 +2989,8 @@ class ForwardBundle(models.Model):
 
     @classmethod
     def create_from_messages(cls, messages, user, request=None):
+        if any(message.type == MessageTypeChoice.VOICE_CALL for message in messages):
+            raise MessageErrors.FORWARD_UNSUPPORTED
         ordered = sorted(messages, key=lambda message: (message.created_at, message.id))
         source_chat = ordered[0].chat if ordered else None
         bundle = cls.objects.create(created_by=user, source_chat=source_chat)

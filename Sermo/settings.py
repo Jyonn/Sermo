@@ -30,6 +30,12 @@ DEBUG = True
 PROJ_INIT = True
 OAUTH_SPACE_REQUESTS_ENABLED = os.environ.get('OAUTH_SPACE_REQUESTS_ENABLED') == '1'
 OAUTH_DELEGATED_ACTIONS_ENABLED = os.environ.get('OAUTH_DELEGATED_ACTIONS_ENABLED') == '1'
+VOICE_CALLS_ENABLED = os.environ.get('VOICE_CALLS_ENABLED') == '1'
+# Local work never sends real call notifications unless explicitly enabled.
+VOICE_CALL_NOTIFICATIONS_ENABLED = os.environ.get('VOICE_CALL_NOTIFICATIONS_ENABLED') == '1'
+VOICE_LIVEKIT_URL = os.environ.get('VOICE_LIVEKIT_URL', '')
+VOICE_LIVEKIT_API_KEY = os.environ.get('VOICE_LIVEKIT_API_KEY', '')
+VOICE_LIVEKIT_API_SECRET = os.environ.get('VOICE_LIVEKIT_API_SECRET', '')
 
 # ALLOWED_HOSTS = ['api.sermo.jyonn.space']
 ALLOWED_HOSTS = ['*']
