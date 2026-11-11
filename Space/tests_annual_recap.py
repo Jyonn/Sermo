@@ -1,3 +1,4 @@
+import json
 from datetime import timedelta
 
 from django.test import TestCase
@@ -6,6 +7,7 @@ from Chat.models import Chat, ChatMember, ChatMemberStatusChoice, ChatTypeChoice
 from Message.models import Message, MessageTypeChoice
 from Space.annual_recap import CUTOFF, START, summarize
 from Space.models import Space, SpaceFeatureGrant, SpaceFeatureKeyChoice
+from Sticker.models import StickerAsset, StickerSeries
 from User.models import User
 from utils.auth import get_login_token, get_space_login_token
 
@@ -52,5 +54,17 @@ class AnnualRecapTests(TestCase):
         result = summarize(self.user, now=CUTOFF + timedelta(days=1))
         self.assertEqual(result['space_message_count'], 2)
         self.assertEqual(result['personal_message_count'], 1)
-        self.assertEqual(result['favorite_chat'], {'chat_id': self.chat.id, 'count': 1})
+        self.assertEqual(result['favorite_chat'], {'chat_id': self.chat.id, 'count': 1, 'name': None})
         self.assertNotIn('Private text', str(result))
+
+    def test_only_published_stickers_can_appear_in_space_recap(self):
+        public = StickerAsset.objects.create(content_hash='a' * 64, storage_key='public.png')
+        private = StickerAsset.objects.create(content_hash='b' * 64, storage_key='private.png')
+        StickerSeries.objects.create(user=self.user, name='Published',
+                                     published_snapshot={'name': 'Published', 'asset_ids': [public.pk]})
+        for asset in (private, private, public):
+            message = Message.objects.create(chat=self.chat, user=self.user, type=MessageTypeChoice.STICKER,
+                                             content=json.dumps({'kind': 'sticker', 'asset_id': asset.pk}))
+            Message.objects.filter(pk=message.pk).update(created_at=CUTOFF - timedelta(hours=1))
+        result = summarize(self.user, now=CUTOFF)
+        self.assertEqual(result['favorite_public_sticker'], {'uri': public.resource_uri(), 'count': 1})
