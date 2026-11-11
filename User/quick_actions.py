@@ -58,6 +58,8 @@ class ChatQuickActionsView(View):
             value = dict(previous)
             if 'kind' in data:
                 value[data['kind']] = data['actions']
+                if data['kind'] == 'direct' and 'call' in data['actions']:
+                    value['call_hint_seen'] = True
             elif 'migrate' in data:
                 if not any(kind in value for kind in ALLOWED):
                     value.update(data['migrate'])

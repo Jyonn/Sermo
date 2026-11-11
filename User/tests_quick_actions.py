@@ -30,7 +30,16 @@ class ChatShortcutTests(TestCase):
         result = self.save({'kind': 'group', 'actions': ['status', 'search']}).json()['body']
         self.assertEqual(result['preferences'], {'direct': ['call'], 'group': ['status', 'search']})
         self.assertEqual(result['revision'], 2)
+        self.assertTrue(result['call_hint_seen'])
         self.assertEqual(UserStateEvent.objects.filter(user=self.user, kind='chat_shortcuts.changed').count(), 2)
+
+    def test_adding_or_reordering_call_acknowledges_guide_but_migration_does_not(self):
+        migrated = self.save({'migrate': {'direct': ['locked', 'call'], 'group': ['copy']}}).json()['body']
+        self.assertFalse(migrated['call_hint_seen'])
+        reordered = self.save({'kind': 'direct', 'actions': ['call', 'locked']}).json()['body']
+        self.assertTrue(reordered['call_hint_seen'])
+        self.assertEqual(reordered['preferences']['direct'], ['call', 'locked'])
+        self.assertEqual(reordered['preferences']['group'], ['copy'])
 
     def test_local_migration_never_overwrites_another_device(self):
         self.save({'acknowledge_call_hint': True})
