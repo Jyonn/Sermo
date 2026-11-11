@@ -24,7 +24,7 @@ from User.models import User
     VOICE_LIVEKIT_API_SECRET='isolated-mysql-test-secret-at-least-32-bytes')
 class VoiceCallConcurrencyTests(TransactionTestCase):
     def setUp(self):
-        space = Space.objects.create(name='Concurrency', slug='voice-concurrency', email='test@example.invalid')
+        space = Space.objects.create(name='Concurrency', slug='voice-race', email='test@example.invalid')
         self.users = []
         for index in range(2):
             user = User.create(space, f'RTC {index}', verified=True)
