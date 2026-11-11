@@ -16,16 +16,28 @@ class SpaceThemeTests(TestCase):
         self.other = Space.objects.create(name='Other', slug='other', email='other@example.test')
         self.user = User.create(self.space, 'Member')
 
-    def settings(self, enabled=None, token=None):
+    def settings(self, enabled=None, token=None, christmas=None):
         payload = dict(name=self.space.name, group_square_enabled=0, chat_enabled=1,
                        square_explore_enabled=0, member_limit=5, level_names=self.space.level_names)
         if enabled is not None:
             payload['qixi_theme_enabled'] = enabled
+        if christmas is not None:
+            payload['christmas_theme_enabled'] = christmas
         return self.client.post('/spaces/admin/settings', json.dumps(payload), content_type='application/json',
                                 HTTP_AUTHORIZATION='Bearer ' + (token or get_space_login_token(self.space)['auth']))
 
     def grant(self, granted=True):
         return SpaceFeatureGrant.set_granted(self.space, SpaceFeatureKeyChoice.QIXI_THEME, granted, 'admin@example.test')
+
+    def test_christmas_has_its_own_grant_and_replaces_qixi(self):
+        self.grant()
+        self.assertEqual(self.settings(1).json()['body']['site_theme'], 'qixi-2026')
+        self.assertEqual(self.settings(christmas=1).status_code, 403)
+        SpaceFeatureGrant.set_granted(self.space, SpaceFeatureKeyChoice.CHRISTMAS_THEME, True, 'admin@example.test')
+        self.assertEqual(self.settings(christmas=1).json()['body']['site_theme'], 'christmas-2026')
+        self.assertEqual(self.settings().json()['body']['site_theme'], 'christmas-2026')
+        SpaceFeatureGrant.set_granted(self.space, SpaceFeatureKeyChoice.CHRISTMAS_THEME, False, 'admin@example.test')
+        self.assertEqual(self.settings().json()['body']['site_theme'], 'default')
 
     def test_default_and_unauthorized_enable(self):
         self.assertEqual(self.space.jsonl()['site_theme'], 'default')
