@@ -2,6 +2,8 @@ import logging
 import threading
 
 from django.views import View
+from django.http import JsonResponse
+from django.utils.cache import add_never_cache_headers
 from django.utils import timezone, translation
 from django.db import transaction
 from django.db.models import Count, Q
@@ -246,7 +248,9 @@ class AnnualRecapView(View):
 
         if not request.user.space.annual_recap_available:
             raise SpaceErrors.ANNUAL_RECAP_NOT_GRANTED
-        return summarize(request.user, request=request)
+        response = JsonResponse({'identifier': 'OK', 'body': summarize(request.user, request=request)})
+        add_never_cache_headers(response)
+        return response
 
 
 class SpaceAdminSettingsView(View):

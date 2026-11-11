@@ -35,7 +35,11 @@ class AnnualRecapTests(TestCase):
         SpaceFeatureGrant.set_granted(self.space, SpaceFeatureKeyChoice.ANNUAL_RECAP, True, 'root@example.test')
         self.assertEqual(recap().status_code, 403)
         self.assertEqual(self.enable().status_code, 200)
-        self.assertEqual(recap().status_code, 200)
+        response = recap()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['body']['year'], 2026)
+        self.assertIn('no-store', response['Cache-Control'])
+        self.assertIn('private', response['Cache-Control'])
         SpaceFeatureGrant.set_granted(self.space, SpaceFeatureKeyChoice.ANNUAL_RECAP, False, 'root@example.test')
         self.assertEqual(recap().status_code, 403)
 
