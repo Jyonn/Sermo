@@ -71,6 +71,7 @@ class VoiceCallTests(TestCase):
         credential = token(call, self.caller)
         url = '/chats/voice/media-admission'
         self.assertEqual(self.client.get(url, HTTP_X_VOICE_TOKEN=credential).status_code, 204)
+        self.assertEqual(self.client.get(url, HTTP_X_VOICE_TOKEN='Bearer '+credential).status_code, 204)
         foreign = self.user('Foreign', '+8613800000103')
         self.assertEqual(self.client.get(url, HTTP_X_VOICE_TOKEN=token(call, foreign)).status_code, 403)
         voice.mutate(call.id, self.caller, 'end', self.device)
@@ -92,6 +93,14 @@ class VoiceCallTests(TestCase):
         with patch('Chat.voice_media.requests.post') as post:
             rpc('ListParticipants', self.create())
         self.assertEqual(post.call_args.args[0], 'http://127.0.0.1:7880/twirp/livekit.RoomService/ListParticipants')
+
+    def test_room_deletion_uses_required_server_grant(self):
+        from Chat.voice_media import rpc
+        with patch('Chat.voice_media.requests.post') as post:
+            rpc('DeleteRoom', self.create())
+        claims = jwt.decode(post.call_args.kwargs['headers']['Authorization'].removeprefix('Bearer '),
+            'test-only-secret', algorithms=['HS256'])
+        self.assertTrue(claims['video']['roomCreate'])
 
     def test_recipient_without_balance_cannot_be_called(self):
         key = voice.identity_key(self.callee)

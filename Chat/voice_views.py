@@ -83,7 +83,7 @@ class VoiceMediaAdmissionView(View):
         allowed = False
         try:
             voice.require_enabled()
-            claims = jwt.decode(request.headers.get('X-Voice-Token', ''),
+            claims = jwt.decode(request.headers.get('X-Voice-Token', '').removeprefix('Bearer '),
                 settings.VOICE_LIVEKIT_API_SECRET, algorithms=['HS256'],
                 issuer=settings.VOICE_LIVEKIT_API_KEY,
                 options={'require': ['exp', 'iss', 'sub']})
