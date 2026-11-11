@@ -306,6 +306,7 @@ class User(models.Model):
     growth_acknowledged_level = models.PositiveSmallIntegerField(default=0)
     is_permanent_vip = models.BooleanField(default=False, db_index=True)
     chat_background_theme = models.CharField(max_length=16, default='default')
+    chat_quick_actions = models.JSONField(default=dict, blank=True)
     chat_background_uri = models.CharField(max_length=255, default='')
     chat_bubble_style = models.CharField(max_length=16, default='default')
     avatar_frame_style = models.CharField(max_length=16, default='none')
@@ -2845,6 +2846,7 @@ class UserGestureLockPreference(models.Model):
 
 
 class UserStateEventKindChoice(Choice):
+    CHAT_SHORTCUTS_CHANGED = 'chat_shortcuts.changed'
     CHATS_CHANGED = 'chats.changed'
     FRIENDS_CHANGED = 'friends.changed'
     FRIEND_REQUESTS_CHANGED = 'friend_requests.changed'

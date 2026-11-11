@@ -1,4 +1,5 @@
 from django.urls import path
+from User.quick_actions import ChatQuickActionsView
 from User.birthday_views import BirthdayView, BirthdaySeenView, BirthdayLetterOpenView, BirthdayLetterArchiveView
 from User.web_push_receipts import WebPushReceiptView
 from User.chronelle_account import ChronelleCallbackView, FullChronelleView
@@ -178,5 +179,6 @@ urlpatterns = [
     path('me/chat-background/upload', ChatBackgroundUploadView.as_view(), name='chat background upload'),
     path('me/chat-background', ChatBackgroundView.as_view(), name='chat background'),
     path('me/personalization', UserPersonalizationView.as_view(), name='user personalization'),
+    path('me/chat-quick-actions', ChatQuickActionsView.as_view(), name='chat quick actions'),
     path('me/language', UserLanguagePreferenceView.as_view(), name='user language preference'),
 ]
