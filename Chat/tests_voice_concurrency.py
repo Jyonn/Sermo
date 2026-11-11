@@ -60,7 +60,7 @@ class VoiceCallConcurrencyTests(TransactionTestCase):
         self.assertEqual(sorted(result[0] for result in results), ['busy', 'created'])
         self.assertEqual(VoiceCall.objects.count(), 1)
         self.assertEqual(Message.objects.filter(type=14).count(), 1)
-        self.assertEqual(list(VoiceWeeklyQuota.objects.values_list('reserved_seconds', flat=True)), [300, 300])
+        self.assertEqual(list(VoiceWeeklyQuota.objects.values_list('reserved_seconds', flat=True)), [1800, 1800])
 
     def test_simultaneous_hangups_charge_each_identity_once(self):
         call = voice.create(self.chat, self.users[0], uuid.uuid4(), self.devices[0])

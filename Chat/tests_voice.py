@@ -79,13 +79,13 @@ class VoiceCallTests(TestCase):
         self.assertEqual(self.client.get(url, HTTP_X_VOICE_TOKEN='invalid').status_code, 403)
 
     def test_expired_media_request_commits_settlement(self):
-        call = self.activate(self.create(), seconds=310)
+        call = self.activate(self.create(), seconds=voice.WEEK_SECONDS + 10)
         result = self.client.post(f'/chats/voice/calls/{call.id}/media',
             data=json.dumps({'device_id': str(self.device)}), content_type='application/json',
             **self.authorize(self.caller))
         self.assertEqual(result.status_code, 409)
         call.refresh_from_db()
-        self.assertEqual((call.state, call.duration_seconds), ('ended', 300))
+        self.assertEqual((call.state, call.duration_seconds), ('ended', voice.WEEK_SECONDS))
 
     @override_settings(VOICE_LIVEKIT_INTERNAL_URL='http://127.0.0.1:7880')
     def test_rpc_uses_private_origin(self):
@@ -105,7 +105,7 @@ class VoiceCallTests(TestCase):
     def test_recipient_without_balance_cannot_be_called(self):
         key = voice.identity_key(self.callee)
         VoiceIdentity.objects.create(digest=key)
-        VoiceWeeklyQuota.objects.create(identity_id=key, week=voice.week_at(timezone.now()), used_seconds=300)
+        VoiceWeeklyQuota.objects.create(identity_id=key, week=voice.week_at(timezone.now()), used_seconds=voice.WEEK_SECONDS)
         self.assertEqual(voice.capability(self.chat, self.caller)['reason'], 'peer_quota_empty')
         with self.assertRaises(voice.CallError):
             self.create()
@@ -119,7 +119,7 @@ class VoiceCallTests(TestCase):
     def test_reserve_minimum_and_idempotent_create(self):
         key = voice.identity_key(self.callee)
         VoiceIdentity.objects.create(digest=key)
-        VoiceWeeklyQuota.objects.create(identity_id=key, week=voice.week_at(timezone.now()), used_seconds=215)
+        VoiceWeeklyQuota.objects.create(identity_id=key, week=voice.week_at(timezone.now()), used_seconds=voice.WEEK_SECONDS - 85)
         request_key = uuid.uuid4()
         call = self.create(request_key)
         self.assertEqual(call.max_seconds, 85)
@@ -146,11 +146,11 @@ class VoiceCallTests(TestCase):
         self.assertEqual(Message.objects.get(pk=call.message_id)._payload_for_type()['state'], 'ended')
 
     def test_timeout_and_quota_capped_on_recovery(self):
-        call = self.activate(self.create(), seconds=310)
+        call = self.activate(self.create(), seconds=voice.WEEK_SECONDS + 10)
         voice.reconcile()
         call.refresh_from_db()
-        self.assertEqual((call.reason, call.duration_seconds), ('quota', 300))
-        self.assertEqual(list(VoiceWeeklyQuota.objects.values_list('used_seconds', flat=True)), [300, 300])
+        self.assertEqual((call.reason, call.duration_seconds), ('quota', voice.WEEK_SECONDS))
+        self.assertEqual(list(VoiceWeeklyQuota.objects.values_list('used_seconds', flat=True)), [voice.WEEK_SECONDS] * 2)
 
     def test_week_reset_uses_shanghai_monday_not_server_timezone(self):
         sunday = datetime(2026, 11, 15, 15, 59, 59, tzinfo=dt_timezone.utc)
@@ -166,7 +166,7 @@ class VoiceCallTests(TestCase):
         alias = self.user('Alias', self.caller.phone, other_space)
         other = self.user('Other', '+8613800000103', other_space)
         chat = self.direct(alias, other)
-        self.assertEqual(voice.capability(chat, alias)['remaining_seconds'], 279)
+        self.assertEqual(voice.capability(chat, alias)['remaining_seconds'], voice.WEEK_SECONDS - 21)
         voice.create(chat, alias, uuid.uuid4(), uuid.uuid4())
         with self.assertRaises(voice.CallError):
             self.create()

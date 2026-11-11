@@ -14,11 +14,11 @@ from django.db.models import Q
 from django.utils import timezone
 
 from Chat.models import Chat, ChatMember, ChatMemberStatusChoice, ChatPurposeChoice
-from Chat.voice_models import VoiceCall, VoiceIdentity, VoiceWeeklyQuota
+from Chat.voice_models import GroupVoiceParticipant, VoiceCall, VoiceIdentity, VoiceWeeklyQuota
 
 ACTIVE = ('ringing', 'connecting', 'active')
 ZONE = ZoneInfo('Asia/Shanghai')
-WEEK_SECONDS = 300
+WEEK_SECONDS = 1800
 
 
 class CallError(Exception):
@@ -71,6 +71,11 @@ def remaining(key, week):
     return max(0, WEEK_SECONDS - row.used_seconds - row.reserved_seconds) if row else WEEK_SECONDS
 
 
+def identities_busy(keys):
+    return (VoiceIdentity.objects.filter(digest__in=keys, active_call__state__in=ACTIVE).exists()
+            or GroupVoiceParticipant.objects.filter(identity_id__in=keys, left_at__isnull=True).exists())
+
+
 @contextmanager
 def lock_identities(keys):
     # Creation order and lock order must agree for calls across different spaces.
@@ -96,7 +101,7 @@ def capability(chat, user):
         own, other = identity_key(user), identity_key(peer)
         if own == other:
             raise CallError('same_person')
-        if VoiceIdentity.objects.filter(digest__in=[own, other], active_call__state__in=ACTIVE).exists():
+        if identities_busy([own, other]):
             raise CallError('busy')
         result['remaining_seconds'] = remaining(own, week_at(now))
         if result['remaining_seconds'] <= 0:
@@ -131,9 +136,9 @@ def serialize(call, user, device=None):
                 server_now=timezone.now().timestamp(), message_id=call.message_id)
 
 
-def update_message(call, created=False):
+def update_message(call, created=False, record=None):
     from Message.models import Message, MessageEvent, MessageEventTypeChoice, MessageTypeChoice
-    content = json.dumps(payload(call), separators=(',', ':'))
+    content = json.dumps(record if record is not None else payload(call), separators=(',', ':'))
     if created:
         message = Message.objects.create(chat=call.chat, user=call.caller, type=MessageTypeChoice.VOICE_CALL,
                                          content=content, client_message_id=f'voice:{call.id}')
@@ -282,6 +287,8 @@ def current(user):
 def reconcile(limit=100):
     """A durable per-second worker owns timeout and media cleanup, not web clients."""
     from Chat.voice_media import close_room
+    from Chat.group_voice import reconcile as reconcile_group
+    reconcile_group(limit)
     ids = VoiceCall.objects.filter(state__in=ACTIVE).order_by('created_at').values_list('id', flat=True).iterator(chunk_size=limit)
     for call_id in ids:
         with locked_call(call_id) as call:

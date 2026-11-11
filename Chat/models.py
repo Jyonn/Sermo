@@ -11,7 +11,7 @@ from smartdjango import models, Choice
 from Chat.validators import ChatErrors, ChatMemberErrors, ChatValidator, ChatMemberValidator
 from User.models import User
 
-from Chat.voice_models import VoiceCall, VoiceIdentity, VoiceWeeklyQuota
+from Chat.voice_models import GroupVoiceCall, GroupVoiceParticipant, VoiceCall, VoiceIdentity, VoiceWeeklyQuota
 
 
 class ChatTypeChoice(Choice):

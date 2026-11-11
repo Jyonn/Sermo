@@ -3,8 +3,9 @@ import json
 from django.http import HttpResponse, JsonResponse
 from django.views import View
 
-from Chat import voice
+from Chat import group_voice, voice
 from Chat.models import Chat
+from Chat.voice_models import GroupVoiceCall
 from utils import auth
 
 
@@ -25,7 +26,7 @@ class VoiceCapabilityView(View):
     def get(self, request):
         def execute():
             chat = Chat.index(int(request.GET.get('chat_id', 0)))
-            return voice.capability(chat, request.user)
+            return (group_voice.capability if chat.group else voice.capability)(chat, request.user)
         return response(execute)
 
 
@@ -36,7 +37,8 @@ class VoiceCurrentView(View):
             if not voice.enabled():
                 return dict(enabled=False, call=None)
             call = voice.current(request.user)
-            return dict(enabled=True, call=voice.serialize(call, request.user, request.GET.get('device_id')) if call else None)
+            device = request.GET.get('device_id')
+            return dict(enabled=True, call=voice.serialize(call, request.user, device) if call else group_voice.current(request.user, device))
         return response(execute)
 
 
@@ -45,7 +47,10 @@ class VoiceCreateView(View):
     def post(self, request):
         def execute():
             body = json.loads(request.body)
-            call = voice.create(Chat.index(int(body['chat_id'])), request.user, body['client_key'], body['device_id'])
+            chat = Chat.index(int(body['chat_id']))
+            if chat.group:
+                return group_voice.serialize(group_voice.join(chat, request.user, body['client_key'], body['device_id']), body['device_id'])
+            call = voice.create(chat, request.user, body['client_key'], body['device_id'])
             return voice.serialize(call, request.user, body['device_id'])
         return response(execute)
 
@@ -56,6 +61,8 @@ class VoiceActionView(View):
         def execute():
             voice.require_enabled()
             body = json.loads(request.body)
+            if GroupVoiceCall.objects.filter(pk=call_id).exists():
+                return group_voice.action(call_id, request.user, action, body.get('device_id'))
             if action == 'media':
                 from Chat.voice_media import token, configured
                 with voice.locked_call(call_id, request.user) as call:
@@ -91,11 +98,14 @@ class VoiceMediaAdmissionView(View):
             room = grant.get('room', '')
             if not grant.get('roomJoin') or not room.startswith('frienden-'):
                 raise voice.CallError('forbidden', 403)
-            with voice.locked_call(room.removeprefix('frienden-')) as call:
-                voice.expire_locked(call, voice.timezone.now())
-                allowed = (call.state in ('connecting', 'active') and
-                           claims['sub'] in (str(call.caller_id), str(call.callee_id)))
-        except (voice.CallError, jwt.PyJWTError, ValueError, TypeError, AttributeError):
+            if room.startswith(group_voice.ROOM_PREFIX):
+                allowed = group_voice.admit(room.removeprefix(group_voice.ROOM_PREFIX), claims['sub'])
+            else:
+                with voice.locked_call(room.removeprefix('frienden-')) as call:
+                    voice.expire_locked(call, voice.timezone.now())
+                    allowed = (call.state in ('connecting', 'active') and
+                               claims['sub'] in (str(call.caller_id), str(call.callee_id)))
+        except (voice.CallError, GroupVoiceCall.DoesNotExist, jwt.PyJWTError, ValueError, TypeError, AttributeError):
             pass
         result = HttpResponse(status=204 if allowed else 403)
         result['Cache-Control'] = 'no-store'
@@ -125,6 +135,12 @@ class VoiceWebhookView(View):
             body = json.loads(request.body)
             room = body.get('room', {}).get('name', '')
             if not room.startswith('frienden-'):
+                return {}
+            if room.startswith(group_voice.ROOM_PREFIX):
+                try:
+                    group_voice.webhook(room.removeprefix(group_voice.ROOM_PREFIX), body)
+                except GroupVoiceCall.DoesNotExist:
+                    pass
                 return {}
             with voice.locked_call(room.removeprefix('frienden-')) as call:
                 now = timezone.now()
