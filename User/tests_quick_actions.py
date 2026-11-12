@@ -51,8 +51,14 @@ class ChatShortcutTests(TestCase):
         again = self.save({'acknowledge_call_hint': True}).json()['body']
         self.assertEqual(again, migrated)
 
+    def test_group_call_shortcut_is_saved_independently(self):
+        response = self.save({'kind': 'group', 'actions': ['copy', 'call']})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['body']['preferences'],
+                         {'direct': ['locked', 'calendar'], 'group': ['copy', 'call']})
+
     def test_invalid_actions_and_unknown_fields_are_rejected(self):
-        for body in [{'kind': 'group', 'actions': ['call']}, {'kind': 'direct', 'actions': []},
+        for body in [{'kind': 'group', 'actions': ['calendar']}, {'kind': 'direct', 'actions': []},
                      {'kind': 'direct', 'actions': ['call', 'call']}, {'kind': 'direct', 'actions': ['unknown']},
                      {'kind': [], 'actions': ['call']}, {'kind': 'direct', 'actions': ['call'], 'user_id': self.other.id},
                      {'migrate': {'direct': ['call']}}, {'acknowledge_call_hint': False}]:

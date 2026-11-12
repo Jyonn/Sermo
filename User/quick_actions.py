@@ -10,7 +10,7 @@ from utils import auth
 
 ALLOWED = {
     'direct': ['locked', 'calendar', 'search', 'call'],
-    'group': ['locked', 'copy', 'status', 'search'],
+    'group': ['locked', 'copy', 'status', 'search', 'call'],
 }
 DEFAULTS = {'direct': ['locked', 'calendar'], 'group': ['locked', 'copy', 'status']}
 
