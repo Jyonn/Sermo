@@ -1700,22 +1700,10 @@ class UserResourceInventory(models.Model):
 
 class PermanentVipCampaign(models.Model):
     LIMIT = 100
-    LEVEL_THRESHOLDS = (
-        (20, 4),
-        (50, 5),
-        (100, 6),
-    )
 
     key = models.CharField(max_length=32, primary_key=True, default='founding-100')
     claimed_count = models.PositiveSmallIntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
-
-    @classmethod
-    def required_level_for_slot(cls, slot):
-        for last_slot, required_level in cls.LEVEL_THRESHOLDS:
-            if slot <= last_slot:
-                return required_level
-        return cls.LEVEL_THRESHOLDS[-1][1]
 
     @classmethod
     def phone_claim_available(cls, user):
@@ -1737,11 +1725,12 @@ class PermanentVipCampaign(models.Model):
         return not any(peer.effective_growth_level() < 9 for peer in peers)
 
     @classmethod
-    def requirements_for(cls, user, required_level):
+    def requirements_for(cls, user):
         return dict(
             email=bool(user.email_verified_at),
             phone=bool(user.phone and user.phone_verified_at),
-            level=user.effective_growth_level() >= required_level,
+            # Kept for older clients; there is no minimum claim level.
+            level=True,
             phone_claim_available=cls.phone_claim_available(user),
         )
 
@@ -1767,20 +1756,15 @@ class PermanentVipCampaign(models.Model):
             from Activity.participation import activity_participation
             participation = activity_participation([run], user.space_id)[run.pk]
         claim = UserResourceInventory.objects.filter(user=user, reward_id='vip.permanent').first()
-        level = user.effective_growth_level()
-        required_level = cls.required_level_for_slot(min(campaign.claimed_count + 1, cls.LIMIT))
-        requirements = cls.requirements_for(user, required_level)
+        requirements = cls.requirements_for(user)
         return dict(
             limit=cls.LIMIT,
             claimed=campaign.claimed_count,
             remaining=max(0, cls.LIMIT - campaign.claimed_count),
             eligible=all(requirements.values()),
             requirements=requirements,
-            required_level=required_level,
-            level_thresholds=[
-                dict(last_slot=last_slot, required_level=tier_level)
-                for last_slot, tier_level in cls.LEVEL_THRESHOLDS
-            ],
+            required_level=1,
+            level_thresholds=[],
             claimed_by_user=claim is not None,
             slot=(claim.metadata or {}).get('slot') if claim else None,
             active=space_activity_active and claim is None and campaign.claimed_count < cls.LIMIT,
@@ -1799,8 +1783,7 @@ class PermanentVipCampaign(models.Model):
             else:
                 if campaign.claimed_count >= cls.LIMIT:
                     raise UserErrors.PERMANENT_VIP_CAMPAIGN_FULL
-                required_level = cls.required_level_for_slot(campaign.claimed_count + 1)
-                requirements = cls.requirements_for(user, required_level)
+                requirements = cls.requirements_for(user)
                 if requirements['phone'] and not requirements['phone_claim_available']:
                     raise UserErrors.PERMANENT_VIP_PHONE_LIMIT
                 if not all(requirements.values()):

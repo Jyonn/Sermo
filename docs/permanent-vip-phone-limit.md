@@ -3,8 +3,10 @@
 Across all spaces, an account below effective LV9 cannot claim permanent VIP
 while another permanent VIP account with the same phone is below effective LV9.
 LV9+ candidates are exempt. Existing claims remain idempotent and are not revoked.
-Verified phone, verified email, slot-level requirements and the campaign capacity
-still apply. Recognized Chinese phone representations share the quota.
+Verified phone, verified email and the campaign capacity still apply. There is no
+minimum claim level: an eligible LV1 account can claim. Recognized Chinese phone
+representations share the quota. The old slot-dependent LV4–6 tiers are removed;
+legacy API fields report `required_level=1`, `level=true`, and no level tiers.
 
 `requirements_for` is shared by status reporting and claim enforcement. Claims
 serialize through the existing campaign row lock before rechecking the quota;
