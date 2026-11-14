@@ -11,6 +11,8 @@ from smartdjango import models, Choice
 from Chat.validators import ChatErrors, ChatMemberErrors, ChatValidator, ChatMemberValidator
 from User.models import User
 
+from Chat.voice_models import GroupVoiceCall, GroupVoiceParticipant, VoiceCall, VoiceIdentity, VoiceWeeklyQuota
+
 
 class ChatTypeChoice(Choice):
     DIRECT = 0
@@ -45,6 +47,7 @@ class SubmissionInviteStatusChoice(Choice):
     PENDING = 0
     ACCEPTED = 1
     EXPIRED = 2
+    DECLINED = 3
 
 
 class SubmissionStatusChoice(Choice):
@@ -1102,6 +1105,8 @@ class SubmissionInvite(models.Model):
 
     @property
     def effective_status(self):
+        if self.status == SubmissionInviteStatusChoice.DECLINED:
+            return 'declined'
         if self.status == SubmissionInviteStatusChoice.ACCEPTED:
             return 'accepted'
         if self.status == SubmissionInviteStatusChoice.EXPIRED or self.expires_at <= timezone.now():
@@ -1117,6 +1122,11 @@ class SubmissionInvite(models.Model):
             return 'accepted' if member.submission_role == self.role else 'conflict'
         return 'pending'
 
+    def can_decline(self, user):
+        return bool(user and user.pk == self.invitee_id and user.space_id == self.chat.space_id
+                    and self.status == SubmissionInviteStatusChoice.PENDING
+                    and self.effective_status == 'pending')
+
     def jsonl(self, viewer: User = None):
         if self.chat.purpose == ChatPurposeChoice.RESEARCH:
             project = self.chat.research_project
@@ -1127,6 +1137,7 @@ class SubmissionInvite(models.Model):
                         created_at=self.created_at.timestamp(), expires_at=self.expires_at.timestamp(),
                         accepted_at=self.accepted_at.timestamp() if self.accepted_at else None,
                         can_accept=bool(viewer and viewer.pk == self.invitee_id and status == 'pending' and not self.chat.is_deleted and self.chat.space.research_enabled and project.status not in ('completed', 'archived') and self.chat.is_owner(self.inviter)),
+                        can_decline=self.can_decline(viewer),
                         submission=dict(title=self.chat.title, status='draft', authors=[self.inviter.tiny_json()], reviewers=[]))
         submission = self.chat.submission_record.jsonl()
         status = self.effective_status
@@ -1141,6 +1152,7 @@ class SubmissionInvite(models.Model):
             expires_at=self.expires_at.timestamp(),
             accepted_at=self.accepted_at.timestamp() if self.accepted_at else None,
             can_accept=bool(viewer and viewer.id == self.invitee_id and status == 'pending'),
+            can_decline=self.can_decline(viewer),
             submission=dict(
                 title=self.chat.title or '',
                 status=submission['status'],
@@ -1181,6 +1193,29 @@ class SubmissionInvite(models.Model):
                 role=role,
                 expires_at=now + timedelta(days=cls.EXPIRY_DAYS),
             )
+
+    def decline(self, user: User):
+        with transaction.atomic():
+            invitation = type(self).objects.select_related('chat').get(pk=self.pk)
+            project = None
+            if invitation.chat.purpose == ChatPurposeChoice.RESEARCH:
+                project = ResearchProject.objects.select_for_update().get(chat=invitation.chat)
+            Chat.objects.select_for_update().get(pk=invitation.chat_id)
+            invitation = type(self).objects.select_for_update().select_related('chat').get(pk=self.pk)
+            if user.pk != invitation.invitee_id or user.space_id != invitation.chat.space_id:
+                raise ChatErrors.SUBMISSION_INVITE_FORBIDDEN
+            if invitation.status == SubmissionInviteStatusChoice.DECLINED:
+                self.status = invitation.status
+                return
+            if not invitation.can_decline(user):
+                raise ChatErrors.SUBMISSION_INVITE_CLOSED
+            invitation.status = SubmissionInviteStatusChoice.DECLINED
+            invitation.save(update_fields=['status', 'updated_at'])
+            if project is not None:
+                project.revision += 1
+                project.save(update_fields=['revision', 'updated_at'])
+            invitation.chat._emit_state_changed([user.pk, invitation.inviter_id])
+            self.status = invitation.status
 
     def accept(self, user: User):
         now = timezone.now()

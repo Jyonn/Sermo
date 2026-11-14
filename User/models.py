@@ -306,6 +306,7 @@ class User(models.Model):
     growth_acknowledged_level = models.PositiveSmallIntegerField(default=0)
     is_permanent_vip = models.BooleanField(default=False, db_index=True)
     chat_background_theme = models.CharField(max_length=16, default='default')
+    chat_quick_actions = models.JSONField(default=dict, blank=True)
     chat_background_uri = models.CharField(max_length=255, default='')
     chat_bubble_style = models.CharField(max_length=16, default='default')
     avatar_frame_style = models.CharField(max_length=16, default='none')
@@ -904,7 +905,7 @@ class User(models.Model):
         now = timezone.now()
         with transaction.atomic():
             locked = User.objects.select_for_update().get(id=self.id)
-            was_alive = (now - locked.last_heartbeat).total_seconds() < self.vldt.OFFLINE_MIN_INTERVAL * 60
+            was_alive = locked.is_alive_at(now)
             User.objects.filter(id=self.id).update(last_heartbeat=now)
         self.last_heartbeat = now
         if not was_alive:
@@ -1006,8 +1007,14 @@ class User(models.Model):
 
     @property
     def is_alive(self):
-        current_time = timezone.now()
-        return (current_time - self.last_heartbeat).total_seconds() < self.vldt.OFFLINE_MIN_INTERVAL * 60
+        return self.is_alive_at(timezone.now())
+
+    def is_alive_at(self, current_time):
+        return self.last_heartbeat > self.online_heartbeat_cutoff(current_time)
+
+    @staticmethod
+    def online_heartbeat_cutoff(current_time):
+        return current_time - datetime.timedelta(minutes=2)
 
     def _dictify_user_id(self):
         return self.id
@@ -1694,22 +1701,39 @@ class UserResourceInventory(models.Model):
 class PermanentVipCampaign(models.Model):
     LIMIT = 100
     ACTIVITY_KEY = 'permanent-vip-founding-100'
-    LEVEL_THRESHOLDS = (
-        (20, 4),
-        (50, 5),
-        (100, 6),
-    )
 
     key = models.CharField(max_length=32, primary_key=True, default='founding-100')
     claimed_count = models.PositiveSmallIntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
 
     @classmethod
-    def required_level_for_slot(cls, slot):
-        for last_slot, required_level in cls.LEVEL_THRESHOLDS:
-            if slot <= last_slot:
-                return required_level
-        return cls.LEVEL_THRESHOLDS[-1][1]
+    def phone_claim_available(cls, user):
+        """LV9+ accounts are exempt; lower-level VIPs share one global phone quota."""
+        if user.effective_growth_level() >= 9:
+            return True
+        if not user.phone or not user.phone_verified_at:
+            return False
+        phone_variants = account_switch_phone_variants(user.phone)
+        phone_variants.update(value[1:] for value in tuple(phone_variants) if value.startswith('+86'))
+        peers = User.objects.filter(
+            phone__in=phone_variants,
+        ).exclude(pk=user.pk).filter(
+            Q(is_permanent_vip=True)
+            | Q(id__in=UserResourceInventory.objects.filter(
+                reward_id='vip.permanent',
+            ).values('user_id'))
+        )
+        return not any(peer.effective_growth_level() < 9 for peer in peers)
+
+    @classmethod
+    def requirements_for(cls, user):
+        return dict(
+            email=bool(user.email_verified_at),
+            phone=bool(user.phone and user.phone_verified_at),
+            # Kept for older clients; there is no minimum claim level.
+            level=True,
+            phone_claim_available=cls.phone_claim_available(user),
+        )
 
     @classmethod
     def space_activity_open(cls, space, lock=False):
@@ -1730,15 +1754,6 @@ class PermanentVipCampaign(models.Model):
         return run is not None and run.is_active()
 
     @classmethod
-    def claim_requirements(cls, user, claimed_count):
-        required_level = cls.required_level_for_slot(min(claimed_count + 1, cls.LIMIT))
-        return required_level, dict(
-            email=bool(user.email_verified_at),
-            phone=bool(user.phone_verified_at),
-            level=user.effective_growth_level() >= required_level,
-        )
-
-    @classmethod
     def status_for(cls, user):
         campaign, _ = cls.objects.get_or_create(key='founding-100')
         space_activity_active = cls.space_activity_open(user.space)
@@ -1750,18 +1765,15 @@ class PermanentVipCampaign(models.Model):
             if run is not None:
                 participation = activity_participation([run], user.space_id)[run.pk]
         claim = UserResourceInventory.objects.filter(user=user, reward_id='vip.permanent').first()
-        required_level, requirements = cls.claim_requirements(user, campaign.claimed_count)
+        requirements = cls.requirements_for(user)
         return dict(
             limit=cls.LIMIT,
             claimed=campaign.claimed_count,
             remaining=max(0, cls.LIMIT - campaign.claimed_count),
             eligible=all(requirements.values()),
             requirements=requirements,
-            required_level=required_level,
-            level_thresholds=[
-                dict(last_slot=last_slot, required_level=tier_level)
-                for last_slot, tier_level in cls.LEVEL_THRESHOLDS
-            ],
+            required_level=1,
+            level_thresholds=[],
             claimed_by_user=claim is not None,
             slot=(claim.metadata or {}).get('slot') if claim else None,
             active=space_activity_active and claim is None and campaign.claimed_count < cls.LIMIT,
@@ -1785,7 +1797,9 @@ class PermanentVipCampaign(models.Model):
                     raise UserErrors.PERMANENT_VIP_CAMPAIGN_INACTIVE
                 if campaign.claimed_count >= cls.LIMIT:
                     raise UserErrors.PERMANENT_VIP_CAMPAIGN_FULL
-                _, requirements = cls.claim_requirements(current_user, campaign.claimed_count)
+                requirements = cls.requirements_for(current_user)
+                if requirements['phone'] and not requirements['phone_claim_available']:
+                    raise UserErrors.PERMANENT_VIP_PHONE_LIMIT
                 if not all(requirements.values()):
                     raise UserErrors.PERMANENT_VIP_NOT_ELIGIBLE
 
@@ -2346,6 +2360,7 @@ class UserPasswordRecoveryChallenge(models.Model):
 
 
 class NotificationEventTypeChoice(Choice):
+    VOICE_CALL = 11
     DIRECT_MESSAGE = 1
     GROUP_MESSAGE = 2
     GROUP_INVITE = 3
@@ -2685,6 +2700,10 @@ class NotificationTopicPreference(models.Model):
 
     @classmethod
     def is_enabled_for_event(cls, event, channel):
+        if (event.payload or {}).get('kind') == 'voice_call':
+            from Chat.models import ChatUserPreference
+            if ChatUserPreference.objects.filter(user=event.user, chat_id=event.payload.get('chat_id'), notifications_muted=True).exists():
+                return False
         topic = event.topic()
         if topic is None:
             return True
@@ -2829,6 +2848,7 @@ class UserGestureLockPreference(models.Model):
 
 
 class UserStateEventKindChoice(Choice):
+    CHAT_SHORTCUTS_CHANGED = 'chat_shortcuts.changed'
     CHATS_CHANGED = 'chats.changed'
     FRIENDS_CHANGED = 'friends.changed'
     FRIEND_REQUESTS_CHANGED = 'friend_requests.changed'
@@ -2918,6 +2938,7 @@ class NotificationEvent(models.Model):
         if payload.get('kind') in ('friend_request','friend_request_accepted','group_invite','group_invite_response'):
             return NotificationTopicChoice.CHAT
         return {
+            NotificationEventTypeChoice.VOICE_CALL: NotificationTopicChoice.CHAT,
             NotificationEventTypeChoice.DIRECT_MESSAGE: NotificationTopicChoice.CHAT,
             NotificationEventTypeChoice.GROUP_MESSAGE: NotificationTopicChoice.CHAT,
             NotificationEventTypeChoice.SQUARE_STATEMENT_LIKE: NotificationTopicChoice.SQUARE_STATEMENT_LIKE,
@@ -2974,6 +2995,9 @@ class NotificationEvent(models.Model):
     ):
         payload = self.payload or {}
         actor_name = str(_('Anonymous user')) if payload.get('anonymous_actor') else self.actor.name if self.actor_id else None
+
+        if payload.get('kind') == 'voice_call':
+            return str(_('Call')), str(_('Incoming call.')) if hide_message_content else str(_('{name} is calling you.').format(name=actor_name or _('Someone')))
 
         if self.event_type == NotificationEventTypeChoice.DIRECT_MESSAGE:
             if hide_message_content:
@@ -3560,6 +3584,12 @@ class NotificationDelivery(models.Model):
             return event.render_delivery_message()
 
     def _attempt_send_web(self):
+        from Chat.voice_notifications import invitation_expired
+        if invitation_expired(self.event):
+            self.status = NotificationDeliveryStatusChoice.SKIPPED
+            self.detail = 'call_expired'
+            self.save(update_fields=['status', 'detail'])
+            return self
         from utils.webpush import WebPushNotConfigured, is_expired_subscription_error, send_web_push
 
         subscription = self.web_subscription
@@ -3612,7 +3642,7 @@ class NotificationDelivery(models.Model):
         ), None)
         if (
             pref is None
-            or event.user.is_alive
+            or (event.user.is_alive and (event.payload or {}).get('kind') != 'voice_call')
             or not pref.enabled
             or not cls._channel_available(event.user, UserNotificationChoice.BARK)
             or not NotificationTopicPreference.is_enabled_for_event(event, UserNotificationChoice.BARK)
@@ -3637,6 +3667,7 @@ class NotificationDelivery(models.Model):
         if (self.event.payload or {}).get('project_id'):
             return self._email_event_action_url()
         if self.event.event_type not in (
+            NotificationEventTypeChoice.VOICE_CALL,
             NotificationEventTypeChoice.DIRECT_MESSAGE,
             NotificationEventTypeChoice.GROUP_MESSAGE,
         ):
@@ -3915,6 +3946,12 @@ class NotificationDelivery(models.Model):
         if not self._claim_pending([self]):
             self.refresh_from_db(fields=['status', 'detail', 'attempted_at'])
             return self
+        from Chat.voice_notifications import invitation_expired
+        if invitation_expired(self.event):
+            self.status = NotificationDeliveryStatusChoice.SKIPPED
+            self.detail = 'call_expired'
+            self.save(update_fields=['status', 'detail'])
+            return self
         target = self.instant_endpoint.target if self.instant_endpoint_id else self._channel_target(self.event.user, self.channel)
         if not target:
             self.status = NotificationDeliveryStatusChoice.SKIPPED
@@ -4005,6 +4042,8 @@ class NotificationDelivery(models.Model):
 
     @classmethod
     def enqueue_for_event(cls, event: NotificationEvent):
+        if (event.payload or {}).get('kind') == 'voice_call':
+            return cls.enqueue_voice_call(event)
         deliveries = []
         # Web Push and instant receivers are time-sensitive routes. Instant
         # notifications are sent per event while offline, never via digest.
@@ -4041,6 +4080,25 @@ class NotificationDelivery(models.Model):
                     cls._attempt_send_email_batch(event.user, pref)
                 else:
                     delivery._attempt_send(pref)
+            deliveries.append(delivery)
+        return deliveries
+
+    @classmethod
+    def enqueue_voice_call(cls, event):
+        from Chat.voice_models import VoiceCall
+        if not VoiceCall.objects.filter(pk=(event.payload or {}).get('call_id'), state='ringing', expires_at__gt=timezone.now()).exists():
+            return []
+        prefs = NotificationPreference.ensure_defaults(event.user)
+        deliveries = cls.enqueue_web_for_event(event)
+        deliveries.extend(cls.enqueue_instant_for_event(event, preferences=prefs))
+        for pref in prefs:
+            if pref.channel == UserNotificationChoice.BARK or not pref.enabled or not cls._channel_available(event.user, pref.channel):
+                continue
+            if not NotificationTopicPreference.is_enabled_for_event(event, pref.channel) or cls._email_cooldown_active(event.user, pref):
+                continue
+            delivery, created = cls.get_or_create_for_route(event, pref.channel)
+            if created:
+                delivery._attempt_send(pref)
             deliveries.append(delivery)
         return deliveries
 
@@ -4198,3 +4256,27 @@ class ChronelleCredential(models.Model):
 # Register the separately maintained native push model with Django's model loader.
 from User.native_push_models import NativePushBinding
 from User.native_push_delivery import NativePushDelivery
+
+
+class PockloCredential(models.Model):
+    phone_digest = models.CharField(max_length=64, primary_key=True)
+    sealed = models.TextField()
+
+
+class PockloConnection(models.Model):
+    user = models.OneToOneField(User, on_delete=models.CASCADE)
+    credential = models.ForeignKey(PockloCredential, on_delete=models.SET_NULL, null=True)
+    phone_digest = models.CharField(max_length=64, blank=True)
+    pending = models.TextField(blank=True)
+
+
+class StillfolioCredential(models.Model):
+    phone_digest = models.CharField(max_length=64, primary_key=True)
+    sealed = models.TextField()
+
+
+class StillfolioConnection(models.Model):
+    user = models.OneToOneField(User, on_delete=models.CASCADE)
+    credential = models.ForeignKey(StillfolioCredential, on_delete=models.SET_NULL, null=True)
+    phone_digest = models.CharField(max_length=64, blank=True)
+    pending = models.TextField(blank=True)

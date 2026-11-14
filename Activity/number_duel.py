@@ -219,7 +219,8 @@ class NumberDuelService:
         return dict(id=str(duel.id), code=duel.code, status=duel.status, round=duel.round,
                     stake=duel.stake, funded=duel.funded, practice_reason=duel.practice_reason,
                     balance=User.objects.values_list('growth_score', flat=True).get(id=user.id),
-                    returned=(duel.stake * 2 if duel.winner_id == user.id else 0) if done and reward and reward.counted and duel.winner_id else duel.stake if done and duel.funded else 0,
+                    # Reward points are the net change after the entry charge.
+                    returned=duel.stake + reward.points if done and duel.funded and reward else 0,
                     tiers=sorted(set(cls.tiers(duel.host)) & set(cls.tiers(duel.guest))) if duel.guest else [],
                     own_tier=duel.host_stake if mine_host else duel.guest_stake,
                     opponent_tier=duel.guest_stake if mine_host else duel.host_stake,

@@ -1,11 +1,14 @@
 from django.urls import path
+from User.quick_actions import ChatQuickActionsView
 from User.birthday_views import BirthdayView, BirthdaySeenView, BirthdayLetterOpenView, BirthdayLetterArchiveView
 from User.web_push_receipts import WebPushReceiptView
 from User.native_push_views import NativePushBindingView, NativePushTokenView
 from User.native_push_targets import NativePushTargetView
-from User.chronelle_account import FullChronelleView
+from User.chronelle_account import ChronelleCallbackView, FullChronelleView
 from User.chronelle_permissions import ChronellePermissionsView
 from User.chronelle_profile import ChronelleProfileView
+from User.pocklo import PockloCallbackView, PockloConnectionView, PockloFilesView, PockloShareView, PockloShareDownloadView, PockloShareThumbnailView, PockloSongView, PockloSongPlaybackView
+from User.stillfolio import StillfolioCallbackView, StillfolioConnectionView, StillfolioAlbumsView, StillfolioShareView
 from User.oauth_views import OAuthAuthorizeView, OAuthTokenView, OAuthUserinfoView, OAuthRevokeView, OAuthEligibilityView
 from User.oauth_avatar import OAuthAvatarView
 from User.oauth_views import OAuthRequestsView, OAuthRequestCancelView
@@ -74,9 +77,23 @@ from User.views import (
 )
 
 urlpatterns = [
+    path('pocklo/callback', PockloCallbackView.as_view()),
+    path('me/pocklo', PockloConnectionView.as_view()),
+    path('me/pocklo/files', PockloFilesView.as_view()),
+    path('me/pocklo/files/<str:resource_id>', PockloFilesView.as_view()),
+    path('me/pocklo/shares', PockloShareView.as_view()),
+    path('pocklo/shares/<uuid:token>/download', PockloShareDownloadView.as_view()),
+    path('pocklo/shares/<uuid:token>/thumbnail', PockloShareThumbnailView.as_view()),
+    path('pocklo/shares/<uuid:token>/song', PockloSongView.as_view()),
+    path('pocklo/shares/<uuid:token>/playback', PockloSongPlaybackView.as_view()),
+    path('stillfolio/callback', StillfolioCallbackView.as_view()),
+    path('me/stillfolio', StillfolioConnectionView.as_view()),
+    path('me/stillfolio/albums', StillfolioAlbumsView.as_view()),
+    path('me/stillfolio/shares', StillfolioShareView.as_view()),
     path('<int:user_id>/chronelle/calendar', ChronelleProfileView.as_view()),
     path('me/chronelle/permissions', ChronellePermissionsView.as_view()),
     path('me/chronelle/account', FullChronelleView.as_view()),
+    path('chronelle/callback', ChronelleCallbackView.as_view()),
     path('oauth/chat/direct', OAuthDirectChatView.as_view()),
     path('oauth/chat/capabilities', OAuthChatCapabilitiesView.as_view()),
     path('oauth/chat/groups', OAuthGroupCreateView.as_view()),
@@ -169,5 +186,6 @@ urlpatterns = [
     path('me/chat-background/upload', ChatBackgroundUploadView.as_view(), name='chat background upload'),
     path('me/chat-background', ChatBackgroundView.as_view(), name='chat background'),
     path('me/personalization', UserPersonalizationView.as_view(), name='user personalization'),
+    path('me/chat-quick-actions', ChatQuickActionsView.as_view(), name='chat quick actions'),
     path('me/language', UserLanguagePreferenceView.as_view(), name='user language preference'),
 ]

@@ -5,7 +5,7 @@ from django.db import connection
 from django.db.migrations.loader import MigrationLoader
 from django.test import TestCase
 
-from User.models import BirthdayLetter, NativePushBinding, NativePushDelivery, NotificationDelivery, User, WebPushSubscription
+from User.models import BirthdayLetter, NativePushBinding, NativePushDelivery, NotificationDelivery, PockloConnection, StillfolioConnection, User, WebPushSubscription
 
 
 class NativePushCompatibilityTests(TestCase):
@@ -23,10 +23,14 @@ class NativePushCompatibilityTests(TestCase):
         self.assertEqual(len(leaves), 1)
         path = loader.graph.forwards_plan(leaves[0])
         for name in ('0094_native_push_bindings', '0095_native_push_delivery_queue',
-                     '0094_web_push_health_receipts', '0095_birthday', '0096_merge_native_push'):
+                     '0094_web_push_health_receipts', '0095_birthday', '0096_merge_native_push',
+                     '0096_pocklo_connection', '0097_stillfolio_connection',
+                     '0098_voice_call_notifications', '0099_chat_quick_actions',
+                     '0100_merge_native_push_and_current'):
             self.assertIn(('User', name), path)
         merge = loader.disk_migrations[('User', '0096_merge_native_push')]
         self.assertEqual(merge.operations, [])
+        self.assertEqual(loader.disk_migrations[('User', '0100_merge_native_push_and_current')].operations, [])
 
     def test_applied_schema_preserves_native_browser_and_birthday_columns(self):
         expected = {
@@ -34,8 +38,10 @@ class NativePushCompatibilityTests(TestCase):
             NativePushDelivery: ('binding_id', 'event_id', 'claim_id'),
             WebPushSubscription: ('invalidated_at',),
             NotificationDelivery: ('client_received_at', 'notification_submitted_at'),
-            User: ('birthday_month', 'birthday_day', 'birthday_set_at'),
+            User: ('birthday_month', 'birthday_day', 'birthday_set_at', 'chat_quick_actions'),
             BirthdayLetter: ('birthday_year', 'occasion_date', 'opened_at'),
+            PockloConnection: ('user_id', 'credential_id', 'phone_digest'),
+            StillfolioConnection: ('user_id', 'credential_id', 'phone_digest'),
         }
         with connection.cursor() as cursor:
             for model, names in expected.items():

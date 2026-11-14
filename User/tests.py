@@ -253,6 +253,24 @@ class CityBubbleUnlockTests(TestCase):
 
 
 class UserHeartbeatTests(TestCase):
+    def test_two_minute_presence_cutoff_also_drives_online_reminders(self):
+        space = Space.objects.create(name='Presence Space', slug='presence-space', email='presence@example.com')
+        user = User.create(space=space, name='Presence Test')
+        now = timezone.now()
+        with patch('User.models.timezone.now', return_value=now), patch('Chat.models.ChatUserPreference.emit_peer_online_events') as remind:
+            user.last_heartbeat = now - timedelta(seconds=119)
+            user.save(update_fields=['last_heartbeat'])
+            self.assertTrue(user.is_alive)
+            user.heartbeat()
+            remind.assert_not_called()
+
+            user.last_heartbeat = now - timedelta(seconds=120)
+            user.save(update_fields=['last_heartbeat'])
+            self.assertFalse(user.is_alive)
+            user.heartbeat()
+            self.assertTrue(user.is_alive)
+            remind.assert_called_once_with(user)
+
     def test_regular_model_save_does_not_refresh_heartbeat(self):
         space = Space.objects.create(name='Presence Space', slug='presence-space', email='presence@example.com')
         user = User.create(space=space, name='Presence Test')

@@ -19,8 +19,9 @@ class PermanentVipAvailabilityTests(TestCase):
                                           group_square_enabled=True, admin_phone_verified_at=timezone.now())
         self.user = User.create(self.space, 'Member', email='member@example.com', verified=True)
         self.user.email_verified_at = timezone.now()
+        self.user.phone = '+8613800138000'
         self.user.phone_verified_at = timezone.now()
-        self.user.save(update_fields=['email_verified_at', 'phone_verified_at'])
+        self.user.save(update_fields=['email_verified_at', 'phone', 'phone_verified_at'])
         self.level_patch = patch.object(User, 'effective_growth_level', return_value=6)
         self.level = self.level_patch.start()
         self.addCleanup(self.level_patch.stop)
@@ -110,16 +111,15 @@ class PermanentVipAvailabilityTests(TestCase):
         self.assertEqual(caught.exception, UserErrors.PERMANENT_VIP_NOT_ELIGIBLE)
         self.assertFalse(UserResourceInventory.objects.filter(user=self.user, reward_id='vip.permanent').exists())
 
-    def test_status_and_claim_share_next_slot_level_threshold(self):
+    def test_status_and_claim_share_no_minimum_level_policy(self):
         ActivityService.claim_for_space(self.campaign(), self.space)
         PermanentVipCampaign.objects.update_or_create(key='founding-100', defaults={'claimed_count': 20})
-        self.level.return_value = 4
+        self.level.return_value = 1
         status = PermanentVipCampaign.status_for(self.user)
-        self.assertEqual(status['required_level'], 5)
-        self.assertFalse(status['eligible'])
-        with self.assertRaises(Error) as caught:
-            PermanentVipCampaign.claim_for(self.user)
-        self.assertEqual(caught.exception, UserErrors.PERMANENT_VIP_NOT_ELIGIBLE)
+        self.assertEqual(status['required_level'], 1)
+        self.assertEqual(status['level_thresholds'], [])
+        self.assertTrue(status['eligible'])
+        self.assertEqual(PermanentVipCampaign.claim_for(self.user)['slot'], 21)
 
     def test_growth_failure_rolls_back_slot_inventory_and_vip_flag(self):
         ActivityService.claim_for_space(self.campaign(), self.space)

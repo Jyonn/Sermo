@@ -318,6 +318,40 @@ tests, passed 182 tests with no failures. No push deployment or APNs activation.
 
 ## Next Gates
 
+### Current Account/Migration Compatibility (Development Only, 2026-11-14)
+
+Integrated local current baseline `2c22b9f` into the isolated native-push branch,
+not the deployed worktree or default branch. Preserved Chronelle callback and
+external-app routes/models, quick-action no-store responses, native no-store
+responses, Chinese catalog entries and the newer no-minimum-VIP-level policy.
+VIP reporting and claiming use the current shared requirements while existing
+activity availability, canonical locked-user checks and rollback guards remain.
+Fixtures now persist revoked verification rather than modifying only an obsolete
+in-memory snapshot; a new stale-snapshot case rejects the claim.
+
+Added operation-free `0100_merge_native_push_and_current`, depending on existing
+`0096_merge_native_push` and `0099_chat_quick_actions`. No historical migration was
+rewritten or faked. A fresh synthetic MySQL 8.4/case-mode-0 schema first migrated
+only to User 0099, verified no native migrations applied, then migrated forward
+through both native migrations and the merge node. `migrate --check` passed.
+Logs: `/private/tmp/frienden-push-0099-base-migrate.log` and
+`/private/tmp/frienden-push-0099-native-upgrade.log`.
+
+Final regression: 172 isolated SQLite tests, 174 combined MySQL tests including
+real-connection races and current account integrations, and 14 MySQL VIP
+availability/atomicity cases all pass. Evidence:
+`frienden-push-newbase-final.log`, `frienden-push-newbase-mysql-final.log` and
+`frienden-push-newbase-vip-mysql.log` under `/private/tmp`. System/whitespace
+checks pass. Dry-run model drift remains nonzero for Chat index renames and
+OAuthGrant metadata/ID, reproduced unchanged on baseline 2c22b9f; no unrelated
+generated migration was added. The owned database was shut down and volume
+unmounted after testing.
+
+This is not deployment approval or proof that local baseline matches the dirty
+production source. Production MySQL 8.0 data/schema, unrelated deployed patches,
+APNs credentials and signed-device delivery still require separate acceptance.
+No production writes, service restart, real notification or runtime enablement.
+
 ### Case-Sensitive MySQL 8.4 Rehearsal (2026-11-14)
 
 The earlier macOS case-mode failures were not bypassed. A new empty MySQL

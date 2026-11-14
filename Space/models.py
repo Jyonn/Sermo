@@ -37,6 +37,8 @@ class SpaceFeatureKeyChoice(Choice):
     QQ_IDENTITY_BINDING = 'qq_identity_binding'
     OAUTH_DEVELOPER = 'oauth_developer'
     QIXI_THEME = 'qixi_theme'
+    ANNUAL_RECAP = 'annual_recap'
+    CHRISTMAS_THEME = 'christmas_theme'
 
 
 class Space(models.Model):
@@ -75,6 +77,8 @@ class Space(models.Model):
     submission_enabled = models.BooleanField(default=False)
     research_enabled = models.BooleanField(default=False)
     qixi_theme_enabled = models.BooleanField(default=False)
+    annual_recap_enabled = models.BooleanField(default=False)
+    christmas_theme_enabled = models.BooleanField(default=False)
     square_explore_enabled = models.BooleanField(default=True)
     qq_binding_enabled = models.BooleanField(default=False)
     oauth_developer_enabled = models.BooleanField(default=False)
@@ -267,15 +271,29 @@ class Space(models.Model):
     def set_admin_settings(
             self, name, group_square_enabled, chat_enabled, square_explore_enabled,
             unverified_group_policy, member_limit, level_names=None, submission_enabled=None,
-            square_free_post_enabled=None, qq_binding_enabled=None, space_group_enabled=None, oauth_developer_enabled=None, research_enabled=None, qixi_theme_enabled=None):
+            square_free_post_enabled=None, qq_binding_enabled=None, space_group_enabled=None, oauth_developer_enabled=None, research_enabled=None, qixi_theme_enabled=None, annual_recap_enabled=None, christmas_theme_enabled=None):
         # Serialize theme changes with platform grants/revocations.
         locked = Space.objects.select_for_update().get(pk=self.pk)
         self.qixi_theme_enabled = locked.qixi_theme_enabled
+        self.annual_recap_enabled = locked.annual_recap_enabled
+        self.christmas_theme_enabled = locked.christmas_theme_enabled
         getattr(self, '_prefetched_objects_cache', {}).pop('feature_grants', None)
         if qixi_theme_enabled is not None:
             if qixi_theme_enabled and not self.qixi_theme_granted:
                 raise SpaceErrors.THEME_NOT_GRANTED
             self.qixi_theme_enabled = bool(qixi_theme_enabled)
+            if self.qixi_theme_enabled:
+                self.christmas_theme_enabled = False
+        if christmas_theme_enabled is not None:
+            if christmas_theme_enabled and not self.christmas_theme_granted:
+                raise SpaceErrors.THEME_NOT_GRANTED
+            self.christmas_theme_enabled = bool(christmas_theme_enabled)
+            if self.christmas_theme_enabled:
+                self.qixi_theme_enabled = False
+        if annual_recap_enabled is not None:
+            if annual_recap_enabled and not self.annual_recap_granted:
+                raise SpaceErrors.ANNUAL_RECAP_NOT_GRANTED
+            self.annual_recap_enabled = bool(annual_recap_enabled)
         was_space_group_enabled = self.space_group_enabled
         normalized_name = self.vldt.name(name)
         normalized_member_limit = self.vldt.member_limit(member_limit)
@@ -327,7 +345,7 @@ class Space(models.Model):
         self.level_names = normalized_level_names
         self.save(update_fields=[
             'name', 'group_square_enabled', 'chat_enabled', 'square_free_post_enabled',
-            'submission_enabled', 'research_enabled', 'qixi_theme_enabled', 'square_explore_enabled', 'space_group_enabled',
+            'submission_enabled', 'research_enabled', 'qixi_theme_enabled', 'christmas_theme_enabled', 'annual_recap_enabled', 'square_explore_enabled', 'space_group_enabled',
             'unverified_group_policy', 'member_limit', 'level_names', 'qq_binding_enabled', 'oauth_developer_enabled',
         ])
         from Chat.models import Chat
@@ -365,7 +383,21 @@ class Space(models.Model):
         return self.is_feature_granted(SpaceFeatureKeyChoice.QIXI_THEME)
 
     @property
+    def annual_recap_granted(self):
+        return self.is_feature_granted(SpaceFeatureKeyChoice.ANNUAL_RECAP)
+
+    @property
+    def annual_recap_available(self):
+        return self.annual_recap_enabled and self.annual_recap_granted
+
+    @property
+    def christmas_theme_granted(self):
+        return self.is_feature_granted(SpaceFeatureKeyChoice.CHRISTMAS_THEME)
+
+    @property
     def site_theme(self):
+        if self.christmas_theme_enabled and self.christmas_theme_granted:
+            return 'christmas-2026'
         return 'qixi-2026' if self.qixi_theme_enabled and self.qixi_theme_granted else 'default'
 
     @property
@@ -422,6 +454,7 @@ class Space(models.Model):
     def jsonl(self):
         return self.dictify(
             'site_theme',
+            'annual_recap_available',
             'id->space_id',
             'name',
             'slug',
@@ -448,6 +481,10 @@ class Space(models.Model):
             'site_theme',
             'qixi_theme_granted',
             'qixi_theme_enabled',
+            'christmas_theme_granted',
+            'christmas_theme_enabled',
+            'annual_recap_granted',
+            'annual_recap_enabled',
             'id->space_id',
             'name',
             'slug',
@@ -514,6 +551,8 @@ class SpaceFeatureGrant(models.Model):
                 SpaceFeatureKeyChoice.QQ_IDENTITY_BINDING: 'qq_binding_enabled',
                 SpaceFeatureKeyChoice.OAUTH_DEVELOPER: 'oauth_developer_enabled',
                 SpaceFeatureKeyChoice.QIXI_THEME: 'qixi_theme_enabled',
+                SpaceFeatureKeyChoice.ANNUAL_RECAP: 'annual_recap_enabled',
+                SpaceFeatureKeyChoice.CHRISTMAS_THEME: 'christmas_theme_enabled',
             }[feature_key]
             # A new grant never activates a legacy or stale space setting.
             if not granted or not was_granted:

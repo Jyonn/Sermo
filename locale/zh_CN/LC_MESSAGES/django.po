@@ -1142,3 +1142,14 @@ msgstr "原生推送请求无效"
 
 msgid "Notification unavailable"
 msgstr "通知不可用"
+msgid "This phone number already has a permanent VIP account below LV9"
+msgstr "此手机号已有低于 LV9 的永久 VIP 账号"
+
+msgid "Call"
+msgstr "通话"
+
+msgid "Incoming call."
+msgstr "收到来电。"
+
+msgid "{name} is calling you."
+msgstr "{name} 邀请你通话。"

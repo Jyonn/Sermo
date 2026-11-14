@@ -1,4 +1,3 @@
-import datetime
 import logging
 import threading
 
@@ -240,6 +239,16 @@ class SpaceMeView(View):
         return request.user.space.json()
 
 
+class AnnualRecapView(View):
+    @auth.require_user
+    def get(self, request: Request):
+        from Space.annual_recap import summarize
+
+        if not request.user.space.annual_recap_available:
+            raise SpaceErrors.ANNUAL_RECAP_NOT_GRANTED
+        return summarize(request.user, request=request)
+
+
 class SpaceAdminSettingsView(View):
     @auth.require_space
     @analyse.json(
@@ -254,6 +263,8 @@ class SpaceAdminSettingsView(View):
         SpaceParams.oauth_developer_enabled,
         SpaceParams.research_enabled,
         SpaceParams.qixi_theme_enabled,
+        SpaceParams.annual_recap_enabled,
+        SpaceParams.christmas_theme_enabled,
         SpaceParams.unverified_group_policy,
         SpaceParams.member_limit,
         SpaceParams.level_names,
@@ -271,6 +282,8 @@ class SpaceAdminSettingsView(View):
             oauth_developer_enabled=request.json.oauth_developer_enabled,
             research_enabled=request.json.research_enabled,
             qixi_theme_enabled=request.json.qixi_theme_enabled,
+            annual_recap_enabled=request.json.annual_recap_enabled,
+            christmas_theme_enabled=request.json.christmas_theme_enabled,
             unverified_group_policy=request.json.unverified_group_policy,
             member_limit=request.json.member_limit,
             level_names=request.json.level_names() if request.json.level_names is not None else None,
@@ -309,7 +322,7 @@ class SpaceAdminDashboardView(View):
             is_deleted=False,
             role=UserRoleChoice.MEMBER,
         )
-        threshold = timezone.now() - datetime.timedelta(minutes=User.vldt.OFFLINE_MIN_INTERVAL)
+        threshold = User.online_heartbeat_cutoff(timezone.now())
         return dict(
             space=space.json_private(),
             operators=[item.json() for item in SpaceOperator.objects.filter(space=space).select_related('user')],
@@ -453,7 +466,7 @@ class SpaceUserListView(View):
         if self.force_online is not None:
             online = 1 if self.force_online else 0
         if online is not None:
-            threshold = timezone.now() - datetime.timedelta(minutes=User.vldt.OFFLINE_MIN_INTERVAL)
+            threshold = User.online_heartbeat_cutoff(timezone.now())
             if bool(online):
                 users = users.filter(Q(last_heartbeat__gt=threshold) | Q(role=UserRoleChoice.OFFICIAL))
             else:
@@ -536,7 +549,7 @@ class SpaceAdminUserListView(SpaceUserListView):
         if self.force_online is not None:
             online = 1 if self.force_online else 0
         if online is not None:
-            threshold = timezone.now() - datetime.timedelta(minutes=User.vldt.OFFLINE_MIN_INTERVAL)
+            threshold = User.online_heartbeat_cutoff(timezone.now())
             if bool(online):
                 active_users = active_users.filter(last_heartbeat__gt=threshold)
             else:

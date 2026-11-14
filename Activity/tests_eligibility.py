@@ -35,6 +35,15 @@ class ActivityEligibilityTests(TestCase):
         self.space.admin_phone_verified_at = None
         self.assertIn('square', missing_activity_requirements(self.campaign, self.space))
 
+    def test_disabled_square_reports_parent_even_when_free_post_is_enabled(self):
+        self.space.group_square_enabled = False
+        self.space.square_free_post_enabled = True
+        for mode in ('bgm_collection', 'annual_explorer', ''):
+            self.campaign.config = {'mode':mode}
+            self.assertEqual(missing_activity_requirements(self.campaign,self.space), ['square'])
+        self.assertFalse(SpaceActivity.objects.filter(space=self.space).exists())
+        self.assertFalse(self.space.group_square_enabled)
+
     def test_chat_comment_and_submission_alternatives_use_actual_features(self):
         self.space.square_free_post_enabled = False
         self.campaign.event_key = 'square.statement.comment'
@@ -44,7 +53,7 @@ class ActivityEligibilityTests(TestCase):
         self.space.submission_enabled = True
         self.assertEqual(missing_activity_requirements(self.campaign, self.space), [])
         self.space.group_square_enabled = False
-        self.assertEqual(missing_activity_requirements(self.campaign, self.space), ['publish'])
+        self.assertEqual(missing_activity_requirements(self.campaign, self.space), ['square'])
         self.campaign.config = {'mode': 'starry_night_streak'}
         self.campaign.event_key = 'chat.message.send'
         self.space.chat_enabled = False

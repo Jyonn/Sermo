@@ -6,17 +6,18 @@ import math
 import os
 import secrets
 import re
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 from pathlib import Path
 from uuid import UUID
 from cryptography.fernet import Fernet, InvalidToken
 import requests
 from django.db import transaction
+from django.http import HttpResponseRedirect
 from django.utils import timezone
 from django.views import View
-from User.models import ChronelleAccount, ChronelleCredential
+from User.models import ChronelleAccount, ChronelleCredential, User
 from Config.models import Config, CI
-from User.chronelle_origins import authorization_site, APP_ORIGINS, BASE, MIRROR_BASE
+from User.chronelle_origins import authorization_site, APP_ORIGINS, BASE, MIRROR_BASE, CALLBACK
 from Chat.research import fail
 from utils import auth
 
@@ -260,7 +261,7 @@ def validated_binding(fresh):
         'client_id':config()[0],'binding_version':fresh['grant_version'],'expires_at':expiry.timestamp()}
 
 
-def claim(user, origin, base, body):
+def claim(user, origin, body, *, api_callback=False):
     with transaction.atomic():
         row, _ = ChronelleAccount.objects.get_or_create(user=user)
         row = ChronelleAccount.objects.select_for_update().get(pk=row.pk)
@@ -268,6 +269,8 @@ def claim(user, origin, base, body):
         pending = value.get('pending', {})
         if pending.get('protocol') != 'oauth-v1' or pending.get('until',0) <= timezone.now().timestamp() or pending.get('origin') != origin:
             return {'status':'expired'}
+        if (pending.get('redirect') == CALLBACK) != api_callback:
+            raise BindingFailure('invalid_request', 400)
         if not isinstance(body.get('state'),str) or not secrets.compare_digest(body['state'],pending['state']):
             raise BindingFailure('invalid_state',403)
         if body.get('error'):
@@ -293,6 +296,75 @@ def claim(user, origin, base, body):
         from Chat.calendar_policy import initialize
         initialize(user, binding['subject'])
     return {'status':'active'}
+
+
+def return_context(body):
+    entry = body.get('entry')
+    if entry in ('menu', 'profile'):
+        return {'entry': entry}
+    project = body.get('project')
+    if entry == 'research' and type(project) is int and 0 < project < 2**63:
+        return {'entry': entry, 'project': project, 'onboarding': body.get('onboarding') is True}
+    activity = body.get('activity')
+    page = body.get('page')
+    if (entry == 'activity' and isinstance(activity, str) and re.fullmatch(r'[A-Za-z0-9_-]{1,120}', activity)
+            and page in ('menu', 'square')):
+        return {'entry': entry, 'activity': activity, 'page': page}
+    raise BindingFailure('invalid_request', 400)
+
+
+def binding_destination(user, context):
+    prefix = '/' + quote(user.space.slug, safe='')
+    if context['entry'] == 'profile':
+        return prefix + '/app/menu', {'panel': 'my-profile-card'}, 'profile'
+    if context['entry'] == 'activity':
+        page = context['page']
+        if page == 'square' and (not user.space.group_square_enabled or user.space.verification_tier == 'email'):
+            page = 'menu'
+        return prefix + '/app/' + page, {'activity': context['activity']}, 'activity'
+    if context['entry'] == 'research' and user.space.research_enabled:
+        from Chat.models import ChatMemberStatusChoice, ResearchProject
+        project = context['project']
+        if ResearchProject.objects.filter(pk=project, chat__space_id=user.space_id, chat__is_deleted=False,
+                chat__chat_members__user=user, chat__chat_members__status=ChatMemberStatusChoice.ACTIVE).exists():
+            query = {'project': project, 'calendar': '1'}
+            if context['onboarding']:
+                query['onboarding'] = '1'
+            return prefix + '/app/research', query, 'research'
+    return prefix + '/app/menu', {'panel': 'more-apps/chronelle'}, 'menu'
+
+
+class ChronelleCallbackView(View):
+    def get(self, request):
+        state = request.GET.get('state', '')
+        match = re.fullmatch(r'([1-9][0-9]{0,18})_[A-Za-z0-9_-]{43}', state)
+        if not match or int(match[1]) >= 2**63 or any(len(values) != 1 for _, values in request.GET.lists()):
+            return fail('invalid_state', 400)
+        user = User.objects.select_related('space').filter(pk=int(match[1]), is_deleted=False).first()
+        row = ChronelleAccount.objects.filter(user=user).first() if user else None
+        if not row:
+            return fail('invalid_state', 400)
+        try:
+            pending = unpack(row).get('pending', {})
+            if (pending.get('redirect') != CALLBACK or pending.get('origin') not in APP_ORIGINS
+                    or pending.get('until', 0) <= timezone.now().timestamp()
+                    or not secrets.compare_digest(state, pending.get('state', ''))):
+                return fail('invalid_state', 400)
+        except (BindingFailure, ValueError, KeyError, TypeError):
+            return fail('invalid_state', 400)
+        try:
+            outcome = claim(user, pending['origin'], request.GET, api_callback=True)['status']
+        except BindingFailure as error:
+            outcome = error.code
+        except (ValueError, KeyError, TypeError):
+            outcome = 'invalid_binding_response'
+        user.space.refresh_from_db()
+        path, query, entry = binding_destination(user, pending['return'])
+        query.update(chronelle_result=outcome, chronelle_state=state, chronelle_entry=entry)
+        response = HttpResponseRedirect(pending['origin'] + path + '?' + urlencode(query))
+        response['Cache-Control'] = 'no-store'
+        response['Referrer-Policy'] = 'no-referrer'
+        return response
 
 
 def calendar(user, base, resource, *, method='GET', body=None, key=None):
@@ -364,7 +436,7 @@ class FullChronelleView(View):
                 raise BindingFailure('origin_not_allowed', 403)
             config()
             if body.get('action') == 'claim':
-                return claim(request.user,origin,base,body)
+                return claim(request.user,origin,body)
             with transaction.atomic():
                 row, _ = ChronelleAccount.objects.get_or_create(user=request.user)
                 row = ChronelleAccount.objects.select_for_update().get(pk=row.pk)
@@ -379,15 +451,19 @@ class FullChronelleView(View):
                 if body.get('action') == 'authorize':
                     if body.get('confirmed') is not True:
                         raise BindingFailure('confirmation_required', 400)
+                    context = return_context(body) if 'entry' in body else None
                     pending = value.get('pending', {})
-                    if pending.get('protocol')=='oauth-v1' and pending.get('until', 0) > timezone.now().timestamp() and pending.get('origin') == origin:
+                    if (pending.get('protocol') == 'oauth-v1' and pending.get('until', 0) > timezone.now().timestamp()
+                            and pending.get('origin') == origin and pending.get('return') == context):
                         return {'authorize_url':pending['url']}
                     verifier, state = secrets.token_urlsafe(48), secrets.token_urlsafe(32)
                     challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b'=').decode()
-                    redirect = origin+'/app/research'
+                    redirect = CALLBACK if context else origin + '/app/research'
+                    if context:
+                        state = f'{request.user.pk}_{state}'
                     url = base+'/oauth/authorize/?'+urlencode({'client_id':config()[0],'response_type':'code','authorization_type':'account_binding','state':state,'code_challenge':challenge,'code_challenge_method':'S256','redirect_uri':redirect})
                     value.pop('claim_id',None)
-                    value['pending'] = {'protocol':'oauth-v1','verifier':verifier,'state':state,'redirect':redirect,'origin':origin,'base':base,'url':url,'until':timezone.now().timestamp()+600}
+                    value['pending'] = {'protocol':'oauth-v1','verifier':verifier,'state':state,'redirect':redirect,'origin':origin,'base':base,'url':url,'until':timezone.now().timestamp()+600,'return':context}
                     store(row, value)
                     return {'authorize_url':url}
                 if body.get('action') == 'revoke':

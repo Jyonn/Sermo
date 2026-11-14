@@ -2,6 +2,7 @@ import json
 import os
 import uuid
 from unittest.mock import patch
+from urllib.parse import parse_qs, urlsplit
 from cryptography.fernet import Fernet
 from django.test import TestCase
 from django.utils import timezone
@@ -30,6 +31,53 @@ class ChronelleAccountTests(TestCase):
 
     def call(self,body=None,path='/users/me/chronelle/account'):
         return self.client.get(path,**self.headers) if body is None else self.client.post(path,json.dumps(body),content_type='application/json',**self.headers)
+
+    def start_api_binding(self, **context):
+        result = self.call({'action': 'authorize', 'confirmed': True, **context})
+        query = parse_qs(urlsplit(result.json()['body']['authorize_url']).query)
+        self.assertEqual(query['redirect_uri'], ['https://api.sermo.jyonn.space/users/chronelle/callback'])
+        return query['state'][0]
+
+    @patch('User.chronelle_account.remote')
+    def test_profile_callback_binds_when_research_is_disabled(self, remote):
+        self.space.research_enabled = False
+        self.space.save(update_fields=['research_enabled'])
+        remote.return_value = {
+            'authorization_type': 'account_binding', 'subject': str(uuid.uuid4()), 'grant_id': str(uuid.uuid4()),
+            'grant_version': 1, 'grant_expires_at': (timezone.now() + timezone.timedelta(days=180)).isoformat(),
+            'access_token': 'cba_secret', 'refresh_token': 'cbr_secret', 'expires_in': 900,
+        }
+        state = self.start_api_binding(entry='profile')
+        response = self.client.get('/users/chronelle/callback', {'state': state, 'code': 'coc_test'})
+        self.assertEqual(response.status_code, 302)
+        target = urlsplit(response['Location'])
+        self.assertEqual(target.path, '/cal-tests/app/menu')
+        query = parse_qs(target.query)
+        self.assertEqual(query['panel'], ['my-profile-card'])
+        self.assertEqual(query['chronelle_result'], ['active'])
+        self.assertNotIn('code', query)
+        self.assertEqual(response['Cache-Control'], 'no-store')
+        self.assertEqual(remote.call_args.kwargs['body']['redirect_uri'], 'https://api.sermo.jyonn.space/users/chronelle/callback')
+        self.assertEqual(self.client.get('/users/chronelle/callback', {'state': state, 'code': 'coc_test'}).status_code, 400)
+        remote.assert_called_once()
+
+    def test_research_cancel_returns_to_project_or_falls_back_if_disabled(self):
+        for enabled in (True, False):
+            state = self.start_api_binding(entry='research', project=self.project.pk, onboarding=True)
+            self.space.research_enabled = enabled
+            self.space.save(update_fields=['research_enabled'])
+            response = self.client.get('/users/chronelle/callback', {'state': state, 'error': 'access_denied'})
+            self.assertEqual(response.status_code, 302)
+            target = urlsplit(response['Location'])
+            query = parse_qs(target.query)
+            if enabled:
+                self.assertEqual(target.path, '/cal-tests/app/research')
+                self.assertEqual(query['project'], [str(self.project.pk)])
+                self.assertEqual(query['onboarding'], ['1'])
+            else:
+                self.assertEqual(target.path, '/cal-tests/app/menu')
+                self.assertEqual(query['panel'], ['more-apps/chronelle'])
+            self.assertEqual(query['chronelle_result'], ['access_denied'])
 
     def bound(self,user=None,expired=False):
         row=ChronelleAccount.objects.create(user=user or self.user)

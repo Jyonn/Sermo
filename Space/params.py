@@ -14,6 +14,10 @@ class SpaceParams(metaclass=Params):
 
     qixi_theme_enabled = Validator('qixi_theme_enabled').to(int).null().default(None).bool(
         lambda x: x is None or x in (0, 1), message=_('qixi_theme_enabled should be 0 or 1'))
+    annual_recap_enabled = Validator('annual_recap_enabled').to(int).null().default(None).bool(
+        lambda x: x is None or x in (0, 1), message=_('annual_recap_enabled should be 0 or 1'))
+    christmas_theme_enabled = Validator('christmas_theme_enabled').to(int).null().default(None).bool(
+        lambda x: x is None or x in (0, 1), message=_('christmas_theme_enabled should be 0 or 1'))
 
     slug: Validator
     name: Validator
