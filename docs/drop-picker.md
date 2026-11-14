@@ -33,3 +33,10 @@ regression tests. These do not prove MySQL concurrency. Public Drop OAuth source
 hashes were matched to the local contract. The registered client was accepted by
 the live introspection endpoint; the embed page returns HTTP 200 with exact
 `frame-ancestors` and the official icon returns image/png.
+
+Production integration verification used temporary synthetic Frienden and Drop
+accounts only. Real HTTP requests passed PKCE code exchange, diary list, token
+refresh rotation, optional-field denial, share idempotency/conflict, public share
+retrieval, OAuth revocation and independent public-share lifetime. The test
+accounts, diary, grants and shares were removed afterward. This is distinct from
+user-consent UI verification; no real user's diary was shared.
