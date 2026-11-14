@@ -65,9 +65,18 @@ class PockloShareView(View):
             token = public_shares.share_token(response.get('url') or '')
             if not token:
                 raise PockloError('unavailable', 503)
-            return result({'url': f'https://{public_shares.HOST}/share/{token}'})
+            fields = {'url': f'https://{public_shares.HOST}/share/{token}'}
+            if response.get('type') == 'song':
+                fields.update(type='song', song=public_shares.song_metadata(token))
+            elif response.get('type') in ('file', 'folder'):
+                fields['type'] = response['type']
+            return result(fields)
         except PockloError as error:
             return result({'error': error.code}, error.status)
+        except public_shares.SongUnavailable as error:
+            return result({'error': 'share_not_found' if error.status == 404 else 'audio_unavailable'}, error.status)
+        except (ValueError, requests.RequestException):
+            return result({'error': 'unavailable'}, 503)
 
 
 class PockloShareDownloadView(View):
@@ -88,3 +97,23 @@ class PockloShareDownloadView(View):
 
 class PockloShareThumbnailView(PockloShareDownloadView):
     resolve_target = staticmethod(public_shares.thumbnail_target)
+
+
+class PockloSongView(View):
+    playback = False
+
+    def get(self, request, token):
+        try:
+            data = (public_shares.song_playback if self.playback else public_shares.song_metadata)(str(token))
+            response = result(data)
+        except public_shares.SongUnavailable as error:
+            response = result({'error': 'audio_unavailable' if error.status == 410 else 'share_not_found'}, error.status)
+        except (ValueError, requests.RequestException):
+            response = result({'error': 'unavailable'}, 503)
+        response['Cache-Control'] = 'private, no-store'
+        response['Referrer-Policy'] = 'no-referrer'
+        return response
+
+
+class PockloSongPlaybackView(PockloSongView):
+    playback = True

@@ -368,7 +368,7 @@ class LinkPreview(models.Model):
         if preview.status == LinkPreviewStatusChoice.READY:
             provider_data = preview.provider_data or {}
             provider = provider_data.get('provider')
-            if provider == 'pocklo_share':
+            if provider in ('pocklo_share', 'pocklo_music'):
                 ttl = datetime.timedelta(minutes=5)
             elif provider == 'stillfolio_collection':
                 ttl = datetime.timedelta(minutes=5 if provider_data.get('images') else 1)
