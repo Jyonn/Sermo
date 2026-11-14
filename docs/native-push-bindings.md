@@ -318,6 +318,31 @@ tests, passed 182 tests with no failures. No push deployment or APNs activation.
 
 ## Next Gates
 
+### Case-Sensitive MySQL 8.4 Rehearsal (2026-11-14)
+
+The earlier macOS case-mode failures were not bypassed. A new empty MySQL
+8.4.13 instance ran on a disposable case-sensitive APFS image with
+`lower_case_table_names=0`, TCP disabled, X Protocol disabled and an owner-private
+Unix socket. Only synthetic data and isolated settings were used. Full unchanged
+migrations and all 112 selected native-push tests pass, with no skipped cases:
+`/private/tmp/frienden-native-push-mysql84-final112.log`.
+
+Two new TransactionTestCase regressions use independently established MySQL
+sessions and a barrier: two workers racing the same delivery yield exactly one
+claim (repeated for five fresh events), and simultaneous opt-outs with the same
+revision yield exactly one update and one NativePushConflict. SQLite explicitly
+skips these two cases rather than claiming lock acceptance. System checks pass
+with the existing initialization-query warning. An initial run had three import
+errors from a missing declared httpx dependency; after restoring httpx 0.28.1
+only in the private test venv, the complete run passed.
+
+The owned daemon was shut down after the tests. This establishes fresh-schema
+migration and scoped row-lock behavior on MySQL 8.4/case mode 0, not compatibility
+with the uninspected production database version/schema or an upgrade of real
+data. No historical migration was changed/faked, no deployment settings or keys
+were loaded, no APNs request was sent and no runtime gate was enabled. Provider,
+production upgrade/deployment and signed-device delivery/tap checks remain open.
+
 1. Authenticated binding endpoints are implemented on the development branch;
    deployment and client integration remain pending. No endpoint is live yet.
 2. Connect the tested adapter/queue to automatic event dispatch behind an explicit
