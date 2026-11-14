@@ -4253,3 +4253,9 @@ class StillfolioConnection(models.Model):
     credential = models.ForeignKey(StillfolioCredential, on_delete=models.SET_NULL, null=True)
     phone_digest = models.CharField(max_length=64, blank=True)
     pending = models.TextField(blank=True)
+
+
+class DropConnection(models.Model):
+    user = models.OneToOneField(User, on_delete=models.CASCADE)
+    sealed = models.TextField(blank=True)
+    pending = models.TextField(blank=True)
