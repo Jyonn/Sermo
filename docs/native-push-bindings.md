@@ -342,7 +342,10 @@ real-connection races and current account integrations, and 14 MySQL VIP
 availability/atomicity cases all pass. Evidence:
 `frienden-push-newbase-final.log`, `frienden-push-newbase-mysql-final.log` and
 `frienden-push-newbase-vip-mysql.log` under `/private/tmp`. System/whitespace
-checks pass. Dry-run model drift remains nonzero for Chat index renames and
+checks pass against baseline 2c22b9f. The whole merge's staged whitespace check
+flags a trailing blank line already present in baseline scripts/verify_voice_media.py;
+that unrelated script was preserved, not reported as a clean whole-merge check.
+Dry-run model drift remains nonzero for Chat index renames and
 OAuthGrant metadata/ID, reproduced unchanged on baseline 2c22b9f; no unrelated
 generated migration was added. The owned database was shut down and volume
 unmounted after testing.
