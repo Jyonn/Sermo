@@ -49,3 +49,23 @@ for this candidate. Any changed working directory or input stops deployment.
 Keep source backups and existing framework versions; never publish this entire
 development worktree or test fixtures as a deployment package. No deployment has
 occurred during this reconciliation.
+
+## Approved Deployment Result (2026-11-15)
+
+Following explicit approval, candidate `318c1de` was deployed to the verified
+running `drop-diary-0c8fcbd` release. The private deployment receipt is
+`/home/ubuntu/sermo-release-backups/native-push-drop-bfbnz1yv/receipt.json`;
+its final stage is `verified_default_off`. Original sources were backed up,
+all 21 candidate file hashes verified, and existing file ownership preserved.
+
+Four native/merge migrations created exactly two native push tables. Six new
+HTTP/2 dependencies were installed without changing the 52 existing packages.
+The Django system check passed. One graceful master reload replaced both workers.
+Unauthenticated live native-push, Drop, chat-quick-actions and Chronelle account
+routes returned the expected authentication errors; these are route health
+checks, not authenticated feature or delivery acceptance tests.
+
+Queue and worker gates remain disabled, delivery availability is false, and
+both native tables contain zero rows. No notification was sent and no provider,
+client capability or Chronelle association was enabled. Real-device APNs delivery
+and the broader iOS release remain unverified.
