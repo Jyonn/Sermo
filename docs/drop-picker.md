@@ -22,7 +22,23 @@ No audio bytes are proxied. Sharing fields remain constrained by Drop's grant;
 audio/location are not silently added. Disconnect revokes the OAuth grant and
 does not revoke independent public links. The frontend validates exact iframe
 origin/source and only accepts links created in the current picker session,
-then asks for confirmation before sending to the current conversation.
+then sends to the originating conversation directly after the iframe's confirmed
+selection. Failed delivery retries the same link; repeated iframe events cannot
+send it twice. Chat/account changes invalidate the picker.
+
+`POST /users/drop/preview` reads the public share using the fixed Drop API host
+and returns only a bounded first-entry excerpt, date and entry count. It does
+not require the sender's OAuth grant, proxy audio, or retain text in LinkPreview.
+The request carries its bearer link in the POST body; the response is no-store.
+`POST /users/drop/diary` projects the full public entries for the in-app Drawer,
+including only shared location fields and recording IDs/durations. Audio lease
+requests use `POST /users/drop/audio` only on playback; the audio file stays on
+Drop's private CDN. Neither complete bodies nor short audio URLs are persisted.
+Public expiry metadata comes from Drop's `expires_at` and `server_time`, less
+request latency. Client timers use a monotonic deadline; expiry clears cards and
+Drawer contents and unmounts/stops their audio players.
+Existing messages are upgraded by URL recognition. Visible cards recheck on
+foreground and once a minute, clearing their excerpt when the share is gone.
 
 Apply additive migration `User.0100_drop_connection` before switching the API
 release. Existing deployed release trees must be preserved; do not overwrite the

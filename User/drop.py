@@ -14,6 +14,7 @@ from User.external_account_binding import (ExternalAccountBinding, ExternalBindi
     ExternalCallbackView, ORIGINS, RETURN_PATH, payload, result)
 from User.models import DropConnection, User
 from utils import auth
+from Message.providers.drop import DropProvider
 
 API = 'https://api.drop.jyonn.space/'
 HOME = 'https://drop.jyonn.space'
@@ -223,3 +224,36 @@ class DropShareView(View):
         except ExternalBindingError as error:
             if error.code == 'connect_required': binding.invalidate(request.user, access)
             return result({'error': error.code}, error.status)
+
+
+class DropPreviewView(View):
+    detail = False
+    @auth.require_user
+    def post(self, request):
+        try:
+            data = payload(request)
+            value = DropProvider.read(data.get('url'), detail=True) if self.detail else DropProvider.read(data.get('url'))
+            response = result(value)
+        except (ExternalBindingError, ValueError, requests.RequestException):
+            response = result({'status': 'error'})
+        response['Cache-Control'] = 'no-store, private'
+        response['Referrer-Policy'] = 'no-referrer'
+        return response
+
+
+class DropDiaryView(DropPreviewView):
+    detail = True
+
+
+class DropAudioView(View):
+    @auth.require_user
+    def post(self, request):
+        try:
+            data = payload(request)
+            value = DropProvider.audio(data.get('url'),data.get('recording_id'))
+        except (ExternalBindingError, ValueError, requests.RequestException):
+            value = {'status':'error'}
+        response = result(value)
+        response['Cache-Control'] = 'no-store, private'
+        response['Referrer-Policy'] = 'no-referrer'
+        return response

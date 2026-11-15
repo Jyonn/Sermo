@@ -33,6 +33,15 @@ class DropPickerTests(TestCase):
     def tokens(self, access='access', refresh='refresh'):
         return dict(access_token=access, refresh_token=refresh, expires_in=900, scope='diary.picker shares.create')
 
+    @patch('User.drop.DropProvider.read', return_value={'status':'gone'})
+    def test_public_diary_card_does_not_require_owners_oauth_and_is_not_cached(self, read):
+        response = self.post('/users/drop/preview', {'url':self.url}, self.other)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {'status':'gone'})
+        self.assertIn('no-store',response['Cache-Control'])
+        self.assertEqual(response['Referrer-Policy'],'no-referrer')
+        read.assert_called_once_with(self.url)
+
     def connected(self, expires=None):
         value = binding.credential(self.tokens())
         if expires is not None: value['expires'] = expires

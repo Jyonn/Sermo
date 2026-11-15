@@ -28,6 +28,7 @@ from Message.providers.music import MusicProvider
 from Message.providers.stillfolio import StillfolioProvider
 from Message.providers import pocklo
 from Message.providers.monifa import MonifaProvider
+from Message.providers.drop import DropProvider
 from Message.preview_queue import platform_slot, submit_preview
 from Message.validators import MessageErrors, MessageValidator
 from User.models import User, UserEmojiUsage
@@ -403,6 +404,9 @@ class LinkPreview(models.Model):
         if not current_url:
             raise ValueError('invalid url')
         requested_url = current_url
+        drop = DropProvider.preview(current_url)
+        if drop:
+            return drop
         monifa = MonifaProvider.preview(current_url)
         if monifa:
             return monifa

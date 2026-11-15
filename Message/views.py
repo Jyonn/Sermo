@@ -10,6 +10,7 @@ from Chat.models import Chat, SubmissionStatusChoice
 from Chat.validators import ChatErrors
 from Message.models import AudioTranscript, AudioTranscriptStatusChoice, ForwardBundle, LinkPreview, MediaAsset, MediaResource, Message, MessageEvent, MessageHistoryRecovery, MessageTypeChoice, PinnedMessage
 from Message.params import MessageParams
+from Message.providers.drop import DropProvider
 from Message.models import MessageUserState
 from utils.content_safety import ContentSafetyScene, check_user_text
 from Message.validators import MessageErrors
@@ -559,7 +560,7 @@ class MessageLinkPreviewView(View):
 class ExternalMediaPreviewView(View):
     SUPPORTED_PROVIDERS = {
         'douyin_video', 'douyin_gallery', 'xiaohongshu_video', 'xiaohongshu_gallery', 'netease_music', 'qq_music', 'kugou_music',
-        'qishui_music', 'apple_music', 'kuwo_music', 'pocklo_music', 'stillfolio_collection', 'monifa_otp',
+        'qishui_music', 'apple_music', 'kuwo_music', 'pocklo_music', 'stillfolio_collection', 'monifa_otp', 'drop_share',
     }
 
     @auth.require_user
@@ -569,6 +570,9 @@ class ExternalMediaPreviewView(View):
         if link_preview is None:
             return dict(status='none', supported=False)
         payload = link_preview.jsonl()
+        drop = DropProvider.preview(payload.get('url'))
+        if drop:
+            payload.update(drop, status='ready')
         provider = (payload.get('provider_data') or {}).get('provider')
         payload['supported'] = provider in self.SUPPORTED_PROVIDERS
         return payload

@@ -7,7 +7,7 @@ from User.chronelle_permissions import ChronellePermissionsView
 from User.chronelle_profile import ChronelleProfileView
 from User.pocklo import PockloCallbackView, PockloConnectionView, PockloFilesView, PockloShareView, PockloShareDownloadView, PockloShareThumbnailView, PockloSongView, PockloSongPlaybackView
 from User.stillfolio import StillfolioCallbackView, StillfolioConnectionView, StillfolioAlbumsView, StillfolioShareView
-from User.drop import DropCallbackView, DropConnectionView, DropEntriesView, DropShareView
+from User.drop import DropCallbackView, DropConnectionView, DropEntriesView, DropShareView, DropPreviewView, DropDiaryView, DropAudioView
 from User.oauth_views import OAuthAuthorizeView, OAuthTokenView, OAuthUserinfoView, OAuthRevokeView, OAuthEligibilityView
 from User.oauth_avatar import OAuthAvatarView
 from User.oauth_views import OAuthRequestsView, OAuthRequestCancelView
@@ -93,6 +93,9 @@ urlpatterns = [
     path('me/drop', DropConnectionView.as_view()),
     path('me/drop/entries', DropEntriesView.as_view()),
     path('me/drop/shares', DropShareView.as_view()),
+    path('drop/preview', DropPreviewView.as_view()),
+    path('drop/diary', DropDiaryView.as_view()),
+    path('drop/audio', DropAudioView.as_view()),
     path('<int:user_id>/chronelle/calendar', ChronelleProfileView.as_view()),
     path('me/chronelle/permissions', ChronellePermissionsView.as_view()),
     path('me/chronelle/account', FullChronelleView.as_view()),
