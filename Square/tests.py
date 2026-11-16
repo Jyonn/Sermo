@@ -71,7 +71,8 @@ class StatementApiTests(TestCase):
             fetched_at=timezone.now(),
         )
 
-    def test_statement_reuses_ready_external_media_preview(self):
+    @patch.object(LinkPreview, '_require_public_host')
+    def test_statement_reuses_ready_external_media_preview(self, _dns):
         preview = self.create_music_preview()
         self.assertTrue(LinkPreview.objects.filter(provider_data__canonical_url=preview.provider_data['canonical_url']).exists())
         response = self.post_statement(self.author, {
@@ -86,7 +87,53 @@ class StatementApiTests(TestCase):
         self.assertEqual(statement.link_preview_id, preview.id)
         self.assertEqual(response.json()['body']['external_media']['provider_data']['song_id'], 287726)
 
-    def test_statement_reuses_short_link_preview_by_canonical_url(self):
+    @patch('Message.models.socket.getaddrinfo', return_value=[(2, 1, 6, '', ('93.184.216.34', 443))])
+    @patch('Square.models._enforce_frequency')
+    def test_chat_link_cards_share_one_resolver_publish_and_detail_contract(self, _frequency, _dns):
+        cases = [
+            ('https://drop.jyonn.space/?share='+'a'*43, {}, 'drop_share'),
+            ('https://monifa.jyonn.space/#/share/'+'b'*43, {}, 'monifa_otp'),
+            ('https://pocklo.jyonn.space/share/00000000-0000-4000-8000-000000000001', {'provider':'pocklo_share','kind':'file','title':'Fixture','url':'https://pocklo.jyonn.space/share/00000000-0000-4000-8000-000000000001'}, 'pocklo_share'),
+            ('https://pocklo.jyonn.space/share/00000000-0000-4000-8000-000000000002', {'provider':'pocklo_music','schema':'pocklo.song.v1','song_id':'00000000-0000-4000-8000-000000000001','title':'Fixture song','artists':['Fixture artist'],'album':'Fixture','version':1,'canonical_url':'https://pocklo.jyonn.space/share/00000000-0000-4000-8000-000000000002'}, 'pocklo_music'),
+            ('https://example.com/article', {}, None),
+        ]
+        for url, data, provider in cases:
+            with self.subTest(provider=provider or 'web'):
+                preview = LinkPreview.objects.create(url=url, url_hash=LinkPreview.hash_url(url), status=LinkPreviewStatusChoice.READY, title='Shared fixture', provider_data=data, fetched_at=timezone.now())
+                resolved = self.client.post('/messages/external-media-preview', data=json.dumps({'text':'分享 '+url}), content_type='application/json', **self.authorization(self.author))
+                self.assertEqual(resolved.status_code, 200, resolved.content)
+                self.assertTrue(resolved.json()['body']['supported'])
+                self.assertEqual(resolved.json()['body']['preview_id'], preview.id)
+                published = self.post_statement(self.author, {'text':'链接分享', 'visibility':'public', 'media':[], 'external_media_url':url})
+                self.assertEqual(published.status_code, 200, published.content)
+                identity = published.json()['body']['statement_id']
+                reopened = self.client.get(f'/square/statements/{identity}', **self.authorization(self.friend))
+                self.assertEqual(reopened.status_code, 200, reopened.content)
+                card = reopened.json()['body']['external_media']
+                self.assertEqual(card['preview_id'], preview.id)
+                self.assertEqual(card['provider_data'].get('provider'), provider)
+                self.assertEqual(card['url'], url)
+
+    @patch('Message.models.socket.getaddrinfo', return_value=[(2, 1, 6, '', ('93.184.216.34', 443))])
+    @patch('Square.models._enforce_frequency')
+    def test_pending_and_failed_web_cards_remain_publishable(self, _frequency, _dns):
+        for status, label in [(LinkPreviewStatusChoice.PENDING,'pending'),(LinkPreviewStatusChoice.FAILED,'failed')]:
+            url = f'https://example.com/{label}'
+            preview = LinkPreview.objects.create(url=url,url_hash=LinkPreview.hash_url(url),status=status,fetched_at=timezone.now())
+            response = self.post_statement(self.author, {'text':'', 'visibility':'friends', 'media':[], 'external_media_url':url})
+            self.assertEqual(response.status_code, 200, response.content)
+            self.assertEqual(response.json()['body']['external_media']['status'],label)
+            self.assertEqual(response.json()['body']['external_media']['preview_id'],preview.id)
+
+    @patch('Message.models.socket.getaddrinfo', return_value=[(2, 1, 6, '', ('127.0.0.1', 443))])
+    def test_unifying_share_cards_does_not_accept_private_hosts(self, _dns):
+        for value in ['https://private.example.com/secret','没有链接']:
+            response = self.post_statement(self.author, {'text':'', 'visibility':'public', 'media':[], 'external_media_url':value})
+            self.assertEqual(response.status_code,400,response.content)
+            self.assertEqual(response.json()['identifier'],'SQUARE@EXTERNAL_MEDIA_INVALID')
+
+    @patch.object(LinkPreview, '_require_public_host')
+    def test_statement_reuses_short_link_preview_by_canonical_url(self, _dns):
         preview = self.create_music_preview()
         preview.url = 'https://163cn.tv/example'
         preview.url_hash = LinkPreview.hash_url(preview.url)
@@ -213,7 +260,8 @@ class StatementApiTests(TestCase):
             'https://v3-dy-o.zjcdn.com/last-known.mp4',
         )
 
-    def test_external_media_cannot_be_combined_with_uploaded_media(self):
+    @patch.object(LinkPreview, '_require_public_host')
+    def test_external_media_cannot_be_combined_with_uploaded_media(self, _dns):
         preview = self.create_music_preview()
         with patch.object(StatementMedia, 'normalize_payload', return_value=[{'kind': 0}]):
             response = self.post_statement(self.author, {

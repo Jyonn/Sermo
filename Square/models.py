@@ -11,7 +11,7 @@ from django.urls import reverse
 from smartdjango import Choice, models
 
 from Friendship.models import Friendship, FriendshipStatusChoice
-from Message.models import ForwardBundle, ForwardBundleItem, LinkPreview, LinkPreviewStatusChoice, MessageValidator
+from Message.models import ForwardBundle, ForwardBundleItem, LinkPreview, MessageValidator
 from Square.validators import SquareErrors
 from Sticker.models import StickerAsset
 from utils.qiniu import avatar_uri_for_key, validate_message_media_key
@@ -438,28 +438,8 @@ class Statement(models.Model):
         normalized_media = StatementMedia.normalize_payload(media)
         link_preview = None
         if external_media_url:
-            # A short share link keeps its original cache key after resolving to a canonical URL.
-            link_preview = LinkPreview.objects.filter(
-                status=LinkPreviewStatusChoice.READY,
-                provider_data__canonical_url=external_media_url.strip(),
-            ).first()
-            if link_preview is None:
-                link_preview = LinkPreview.objects.filter(
-                    status=LinkPreviewStatusChoice.READY,
-                    url=external_media_url.strip(),
-                ).first()
-            if link_preview is None:
-                link_preview = LinkPreview.queue_for_text(external_media_url)
-        provider = (link_preview.provider_data or {}).get('provider') if link_preview else None
-        supported_providers = {
-            'douyin_video', 'douyin_gallery', 'xiaohongshu_video', 'xiaohongshu_gallery', 'netease_music', 'qq_music', 'kugou_music',
-            'qishui_music', 'apple_music', 'kuwo_music', 'stillfolio_collection',
-        }
-        if external_media_url and (
-            link_preview is None
-            or link_preview.status != LinkPreviewStatusChoice.READY
-            or provider not in supported_providers
-        ):
+            link_preview = LinkPreview.queue_for_text(external_media_url)
+        if external_media_url and link_preview is None:
             raise SquareErrors.EXTERNAL_MEDIA_INVALID
         if link_preview and (normalized_media or forward_bundle is not None):
             raise SquareErrors.EXTERNAL_MEDIA_EXCLUSIVE
