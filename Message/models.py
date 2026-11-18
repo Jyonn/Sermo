@@ -28,6 +28,7 @@ from Message.providers.music import MusicProvider
 from Message.providers.stillfolio import StillfolioProvider
 from Message.providers import pocklo
 from Message.providers.monifa import MonifaProvider
+from Message.providers.drop import DropProvider
 from Message.preview_queue import platform_slot, submit_preview
 from Message.validators import MessageErrors, MessageValidator
 from User.models import User, UserEmojiUsage
@@ -368,7 +369,7 @@ class LinkPreview(models.Model):
         if preview.status == LinkPreviewStatusChoice.READY:
             provider_data = preview.provider_data or {}
             provider = provider_data.get('provider')
-            if provider == 'pocklo_share':
+            if provider in ('pocklo_share', 'pocklo_music'):
                 ttl = datetime.timedelta(minutes=5)
             elif provider == 'stillfolio_collection':
                 ttl = datetime.timedelta(minutes=5 if provider_data.get('images') else 1)
@@ -403,6 +404,9 @@ class LinkPreview(models.Model):
         if not current_url:
             raise ValueError('invalid url')
         requested_url = current_url
+        drop = DropProvider.preview(current_url)
+        if drop:
+            return drop
         monifa = MonifaProvider.preview(current_url)
         if monifa:
             return monifa
@@ -524,10 +528,20 @@ class LinkPreview(models.Model):
         if not url:
             return None
 
-        preview, created = cls.objects.get_or_create(
-            url_hash=cls.hash_url(url),
-            defaults={'url': url, 'status': LinkPreviewStatusChoice.PENDING},
-        )
+        preview = cls.objects.filter(url_hash=cls.hash_url(url)).first()
+        created = False
+        if preview is None:
+            # Short-link caches retain their original hash after canonical resolution.
+            match = cls.URL_RE.search(text or '')
+            original = match.group(0).rstrip(cls.TRAILING_PUNCTUATION) if match else url
+            preview = cls.objects.filter(status=LinkPreviewStatusChoice.READY).filter(
+                Q(url=url) | Q(url=original) | Q(provider_data__canonical_url=url) | Q(provider_data__canonical_url=original),
+            ).first()
+        if preview is None:
+            preview, created = cls.objects.get_or_create(
+                url_hash=cls.hash_url(url),
+                defaults={'url': url, 'status': LinkPreviewStatusChoice.PENDING},
+            )
         if (
             XiaohongshuProvider.supports(url)
             and urlparse(url).path != '/login'
@@ -647,7 +661,7 @@ class LinkPreview(models.Model):
             LinkPreviewStatusChoice.READY: 'ready',
             LinkPreviewStatusChoice.FAILED: 'failed',
         }.get(self.status, 'failed')
-        return dict(
+        payload = dict(
             preview_id=self.id,
             url=self.url,
             status=status,
@@ -659,6 +673,11 @@ class LinkPreview(models.Model):
             provider_data=self.provider_data,
             min_client_version=self.provider_data.get('min_client_version') if isinstance(self.provider_data, dict) else None,
         )
+        # These live cards store only a reference, including for legacy cached web previews.
+        reference = DropProvider.preview(self.url) or MonifaProvider.preview(self.url)
+        if reference:
+            payload.update(reference, status='ready')
+        return payload
 
 
 class Message(models.Model):

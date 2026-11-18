@@ -5,8 +5,9 @@ from User.web_push_receipts import WebPushReceiptView
 from User.chronelle_account import ChronelleCallbackView, FullChronelleView
 from User.chronelle_permissions import ChronellePermissionsView
 from User.chronelle_profile import ChronelleProfileView
-from User.pocklo import PockloCallbackView, PockloConnectionView, PockloFilesView, PockloShareView, PockloShareDownloadView, PockloShareThumbnailView
+from User.pocklo import PockloCallbackView, PockloConnectionView, PockloFilesView, PockloShareView, PockloShareDownloadView, PockloShareThumbnailView, PockloSongView, PockloSongPlaybackView
 from User.stillfolio import StillfolioCallbackView, StillfolioConnectionView, StillfolioAlbumsView, StillfolioShareView
+from User.drop import DropCallbackView, DropConnectionView, DropEntriesView, DropShareView, DropPreviewView, DropDiaryView, DropAudioView
 from User.oauth_views import OAuthAuthorizeView, OAuthTokenView, OAuthUserinfoView, OAuthRevokeView, OAuthEligibilityView
 from User.oauth_avatar import OAuthAvatarView
 from User.oauth_views import OAuthRequestsView, OAuthRequestCancelView
@@ -82,10 +83,19 @@ urlpatterns = [
     path('me/pocklo/shares', PockloShareView.as_view()),
     path('pocklo/shares/<uuid:token>/download', PockloShareDownloadView.as_view()),
     path('pocklo/shares/<uuid:token>/thumbnail', PockloShareThumbnailView.as_view()),
+    path('pocklo/shares/<uuid:token>/song', PockloSongView.as_view()),
+    path('pocklo/shares/<uuid:token>/playback', PockloSongPlaybackView.as_view()),
     path('stillfolio/callback', StillfolioCallbackView.as_view()),
     path('me/stillfolio', StillfolioConnectionView.as_view()),
     path('me/stillfolio/albums', StillfolioAlbumsView.as_view()),
     path('me/stillfolio/shares', StillfolioShareView.as_view()),
+    path('drop/callback', DropCallbackView.as_view()),
+    path('me/drop', DropConnectionView.as_view()),
+    path('me/drop/entries', DropEntriesView.as_view()),
+    path('me/drop/shares', DropShareView.as_view()),
+    path('drop/preview', DropPreviewView.as_view()),
+    path('drop/diary', DropDiaryView.as_view()),
+    path('drop/audio', DropAudioView.as_view()),
     path('<int:user_id>/chronelle/calendar', ChronelleProfileView.as_view()),
     path('me/chronelle/permissions', ChronellePermissionsView.as_view()),
     path('me/chronelle/account', FullChronelleView.as_view()),

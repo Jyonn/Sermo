@@ -21,8 +21,11 @@ from Chat.research_resources import ResearchResourceView
 from Chat.research_calendar import ResearchCalendarView
 from Chat.research_meetings import ResearchMeetingView
 from PlatformAdmin.frontend_releases import FrontendReleaseView, FrontendReleasePublishView
+from Message.live_transcription import VoiceStreamTicketView, AdminVoiceStreamTicketView
 
 urlpatterns = [
+    path('messages/voice-stream-ticket', VoiceStreamTicketView.as_view()),
+    path('spaces/admin/voice-stream-ticket', AdminVoiceStreamTicketView.as_view()),
     path('frontend/releases',FrontendReleaseView.as_view()),
     path('platform-admin/frontend/releases',FrontendReleasePublishView.as_view()),
     path('resources/collections/<slug:slug>', ResourceCatalogView.as_view()),

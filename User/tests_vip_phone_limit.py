@@ -78,6 +78,41 @@ class PermanentVipPhoneLimitTests(TestCase):
         self.vip(phone='+8613800138001')
         self.assertTrue(PermanentVipCampaign.claim_for(self.user)['claimed_by_user'])
 
+    def test_lv1_can_claim_at_every_former_slot_boundary(self):
+        self.levels[self.user.pk] = 1
+        for claimed in (0, 19, 20, 49, 50, 99):
+            with self.subTest(claimed=claimed):
+                PermanentVipCampaign.objects.update_or_create(
+                    key='founding-100', defaults={'claimed_count': claimed},
+                )
+                status = PermanentVipCampaign.status_for(self.user)
+                self.assertTrue(status['eligible'])
+                self.assertEqual(status['required_level'], 1)
+                self.assertEqual(status['level_thresholds'], [])
+        self.assertTrue(PermanentVipCampaign.claim_for(self.user)['claimed_by_user'])
+
+    def test_lv1_still_requires_email_and_phone(self):
+        self.levels[self.user.pk] = 1
+        self.user.email_verified_at = None
+        self.assertFalse(PermanentVipCampaign.status_for(self.user)['eligible'])
+        with self.assertRaises(type(UserErrors.PERMANENT_VIP_NOT_ELIGIBLE)):
+            PermanentVipCampaign.claim_for(self.user)
+
+    def test_new_account_with_real_lv1_calculation_can_claim(self):
+        self.level_patch.stop()
+        self.user.growth_score = 0
+        self.user.save(update_fields=['growth_score'])
+        self.assertEqual(self.user.effective_growth_level(), 1)
+        self.assertTrue(PermanentVipCampaign.status_for(self.user)['eligible'])
+        self.assertTrue(PermanentVipCampaign.claim_for(self.user)['claimed_by_user'])
+
+    def test_lv1_duplicate_phone_is_still_blocked(self):
+        self.levels[self.user.pk] = 1
+        self.vip()
+        self.assertFalse(PermanentVipCampaign.status_for(self.user)['eligible'])
+        with self.assertRaises(type(UserErrors.PERMANENT_VIP_PHONE_LIMIT)):
+            PermanentVipCampaign.claim_for(self.user)
+
     def test_existing_claim_remains_idempotent_even_with_legacy_duplicates(self):
         UserResourceInventory.grant_permanent_vip_resources(self.user, 2)
         self.vip()

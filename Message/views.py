@@ -557,11 +557,6 @@ class MessageLinkPreviewView(View):
 
 
 class ExternalMediaPreviewView(View):
-    SUPPORTED_PROVIDERS = {
-        'douyin_video', 'douyin_gallery', 'xiaohongshu_video', 'xiaohongshu_gallery', 'netease_music', 'qq_music', 'kugou_music',
-        'qishui_music', 'apple_music', 'kuwo_music', 'stillfolio_collection', 'monifa_otp',
-    }
-
     @auth.require_user
     @analyse.json(MessageParams.preview_text)
     def post(self, request: Request):
@@ -569,8 +564,7 @@ class ExternalMediaPreviewView(View):
         if link_preview is None:
             return dict(status='none', supported=False)
         payload = link_preview.jsonl()
-        provider = (payload.get('provider_data') or {}).get('provider')
-        payload['supported'] = provider in self.SUPPORTED_PROVIDERS
+        payload['supported'] = True
         return payload
 
 
@@ -579,8 +573,7 @@ class ExternalMediaPreviewRefreshView(View):
     @analyse.json(MessageParams.preview_id, MessageParams.force_refresh)
     def post(self, request: Request):
         link_preview = LinkPreview.objects.filter(id=request.json.preview_id).first()
-        provider = ((link_preview.provider_data if link_preview else None) or {}).get('provider')
-        if link_preview is None or provider not in ExternalMediaPreviewView.SUPPORTED_PROVIDERS:
+        if link_preview is None:
             return dict(status='none', supported=False)
         link_preview, refreshed = LinkPreview.refresh_now(
             link_preview.id,
