@@ -29,6 +29,7 @@ from Message.providers.stillfolio import StillfolioProvider
 from Message.providers import pocklo
 from Message.providers.monifa import MonifaProvider
 from Message.providers.drop import DropProvider
+from Message.providers.justone import JustOneProvider
 from Message.preview_queue import platform_slot, submit_preview
 from Message.validators import MessageErrors, MessageValidator
 from User.models import User, UserEmojiUsage
@@ -131,6 +132,15 @@ class LinkPreviewHTMLParser(HTMLParser):
         if not self.icons:
             return ''
         return max(self.icons, key=self._icon_score)['href']
+
+
+class SocialParseUsage(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    week = models.DateField()
+    count = models.PositiveSmallIntegerField(default=0)
+
+    class Meta:
+        unique_together = [('user', 'week')]
 
 
 class LinkPreview(models.Model):
@@ -366,6 +376,23 @@ class LinkPreview(models.Model):
 
     @classmethod
     def _is_expired(cls, preview, now=None):
+        if JustOneProvider.supports(preview.url):
+            data = preview.provider_data or {}
+            if preview.status == LinkPreviewStatusChoice.READY and data.get('adapter') != 'justone':
+                return True
+            ttl = datetime.timedelta(minutes=10 if preview.status == LinkPreviewStatusChoice.FAILED else 15)
+            # Signed CDN URLs may expire before the normal metadata TTL.
+            for value in [data.get('video_url'), data.get('cover_url'), *(data.get('images') or [])]:
+                if not value:
+                    continue
+                query = parse_qs(urlparse(value).query)
+                try:
+                    expiry = int(query['t'][0], 16) if 't' in query else int(query.get('expire', query.get('expires', ['0']))[0])
+                    if expiry and expiry <= int((now or timezone.now()).timestamp()) + 60:
+                        return True
+                except (ValueError, TypeError):
+                    pass
+            return preview.fetched_at is None or preview.fetched_at <= (now or timezone.now()) - ttl
         if preview.status == LinkPreviewStatusChoice.READY:
             provider_data = preview.provider_data or {}
             provider = provider_data.get('provider')
@@ -414,11 +441,8 @@ class LinkPreview(models.Model):
         if pocklo_token:
             return pocklo.preview(pocklo_token)
 
-        if DouyinProvider.supports(current_url):
-            douyin_data = DouyinProvider().parse(current_url)
-            if not douyin_data:
-                raise ValueError('douyin provider could not resolve media')
-            return cls._douyin_preview_data(douyin_data)
+        if JustOneProvider.supports(current_url):
+            return JustOneProvider.parse(current_url)
 
         if StillfolioProvider.token(current_url):
             data = StillfolioProvider.parse(current_url)
@@ -439,10 +463,6 @@ class LinkPreview(models.Model):
         for _ in range(cls.MAX_REDIRECTS + 1):
             cls.normalize_public_url(current_url)
             headers = dict(cls.BROWSER_HEADERS)
-            if XiaohongshuProvider.supports(current_url):
-                headers['User-Agent'] = XiaohongshuProvider.MOBILE_USER_AGENT
-                headers['Sec-CH-UA-Mobile'] = '?1'
-                headers.pop('Sec-CH-UA-Platform', None)
             response = requests.get(
                 current_url,
                 headers=headers,
@@ -492,8 +512,6 @@ class LinkPreview(models.Model):
         parsed = urlparse(current_url)
         site_name = parser.meta.get('og:site_name') or parsed.hostname or ''
         provider_data = cls._netease_music_data(current_url, html)
-        if not provider_data and XiaohongshuProvider.supports(current_url):
-            provider_data = XiaohongshuProvider.parse(current_url, html)
         if not provider_data and MusicProvider.supports(current_url):
             provider_data = MusicProvider.parse(current_url, html)
         if not provider_data and requested_url != current_url and MusicProvider.supports(requested_url):
@@ -520,7 +538,7 @@ class LinkPreview(models.Model):
         )
 
     @classmethod
-    def queue_for_text(cls, text: str):
+    def queue_for_text(cls, text: str, requester=None):
         try:
             url = cls.extract_first_url(text)
         except ValueError:
@@ -542,6 +560,15 @@ class LinkPreview(models.Model):
                 url_hash=cls.hash_url(url),
                 defaults={'url': url, 'status': LinkPreviewStatusChoice.PENDING},
             )
+        if JustOneProvider.supports(url):
+            expired = cls._is_expired(preview)
+            if preview.status == LinkPreviewStatusChoice.PENDING or expired:
+                from Message.social_quota import eligibility
+                preview._social_error = eligibility(requester) if requester else ''
+                preview._social_pending = True
+                if requester and not preview._social_error:
+                    transaction.on_commit(lambda: cls.fetch_async(preview.id, force=expired, requester_id=requester.id))
+            return preview
         if (
             XiaohongshuProvider.supports(url)
             and urlparse(url).path != '/login'
@@ -584,7 +611,7 @@ class LinkPreview(models.Model):
         return preview
 
     @classmethod
-    def fetch_async(cls, preview_id: int, force=False):
+    def fetch_async(cls, preview_id: int, force=False, requester_id=None):
         with cls._FETCHING_LOCK:
             if preview_id in cls._FETCHING_IDS:
                 return
@@ -595,14 +622,14 @@ class LinkPreview(models.Model):
                 with cls._FETCHING_LOCK:
                     cls._FETCHING_IDS.discard(preview_id)
                 return
-            submit_preview(url, cls.fetch_and_update, preview_id, force)
+            submit_preview(url, cls.fetch_and_update, preview_id, force, requester_id)
         except Exception:
             with cls._FETCHING_LOCK:
                 cls._FETCHING_IDS.discard(preview_id)
             raise
 
     @classmethod
-    def refresh_now(cls, preview_id: int, force=False):
+    def refresh_now(cls, preview_id: int, force=False, requester_id=None):
         preview = cls.objects.get(id=preview_id)
         if (
             preview.status != LinkPreviewStatusChoice.PENDING
@@ -617,10 +644,20 @@ class LinkPreview(models.Model):
                 return preview, False
             if preview.status != LinkPreviewStatusChoice.PENDING and not force and not cls._is_expired(preview):
                 return preview, False
+            if JustOneProvider.supports(preview.url):
+                from Message.social_quota import consume
+                error = ('provider_unavailable' if not os.environ.get('JUSTONEAPI_TOKEN') else
+                         consume(requester_id) if requester_id else 'vip_required')
+                if error:
+                    preview._social_error = error
+                    preview._social_pending = True
+                    return preview, False
             try:
                 data = cls.fetch_preview_data(preview.url)
             except Exception as err:
                 updates = {'error': str(err)[:255], 'updated_at': timezone.now()}
+                if JustOneProvider.supports(preview.url):
+                    updates.update(status=LinkPreviewStatusChoice.FAILED, fetched_at=timezone.now(), provider_data={}, image_url='')
                 if preview.status != LinkPreviewStatusChoice.READY:
                     updates.update(status=LinkPreviewStatusChoice.FAILED, fetched_at=timezone.now())
                 cls.objects.filter(id=preview_id).update(**updates)
@@ -643,13 +680,13 @@ class LinkPreview(models.Model):
             return preview, True
 
     @classmethod
-    def fetch_and_update(cls, preview_id: int, force=False):
+    def fetch_and_update(cls, preview_id: int, force=False, requester_id=None):
         close_old_connections()
         try:
             preview = cls.objects.get(id=preview_id)
             if preview.status == LinkPreviewStatusChoice.READY and not force:
                 return
-            cls.refresh_now(preview_id, force=force)
+            cls.refresh_now(preview_id, force=force, requester_id=requester_id)
         finally:
             with cls._FETCHING_LOCK:
                 cls._FETCHING_IDS.discard(preview_id)
@@ -674,6 +711,10 @@ class LinkPreview(models.Model):
             min_client_version=self.provider_data.get('min_client_version') if isinstance(self.provider_data, dict) else None,
         )
         # These live cards store only a reference, including for legacy cached web previews.
+        if JustOneProvider.supports(self.url) and (getattr(self, '_social_pending', False) or self._is_expired(self)):
+            payload.update(status='failed' if getattr(self, '_social_error', '') else 'pending', provider_data={}, image_url='', parse_error=getattr(self, '_social_error', ''))
+        elif JustOneProvider.supports(self.url) and self.status == LinkPreviewStatusChoice.FAILED:
+            payload['parse_error'] = 'unavailable'
         reference = DropProvider.preview(self.url) or MonifaProvider.preview(self.url)
         if reference:
             payload.update(reference, status='ready')

@@ -1,94 +1,11 @@
-"""Extract public Xiaohongshu note media from its server-rendered state."""
-
-import json
-import re
+"""Platform identification; no scraping or legacy parsing service."""
 from urllib.parse import urlparse
+from Message.providers.justone import JustOneProvider
 
 
 class XiaohongshuProvider:
-    HOSTS = frozenset(('xiaohongshu.com', 'www.xiaohongshu.com', 'xhslink.com', 'www.xhslink.com', 'xhslink.cn', 'www.xhslink.cn'))
-    MOBILE_USER_AGENT = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1'
-    IMAGE_HOSTS = ('xhscdn.com', 'xhsimg.com')
-    VIDEO_HOSTS = ('xhscdn.com',)
+    HOSTS = JustOneProvider.XHS
 
     @classmethod
     def supports(cls, url):
-        return (urlparse(url or '').hostname or '').lower() in cls.HOSTS
-
-    @staticmethod
-    def _media_url(value, hosts):
-        if not isinstance(value, str):
-            return ''
-        value = value.replace('\\u0026', '&').strip()
-        parsed = urlparse(value)
-        host = (parsed.hostname or '').lower()
-        if parsed.scheme not in ('http', 'https') or not parsed.path or not any(host == domain or host.endswith('.' + domain) for domain in hosts):
-            return ''
-        return parsed._replace(scheme='https').geturl()
-
-    @staticmethod
-    def _initial_state(html):
-        marker = 'window.__INITIAL_STATE__'
-        start = html.find(marker)
-        if start < 0:
-            return {}
-        start = html.find('{', start + len(marker))
-        if start < 0:
-            return {}
-        decoder = json.JSONDecoder()
-        try:
-            source = re.sub(r'(?<=:)\s*undefined(?=\s*[,}])', 'null', html[start:])
-            state, _ = decoder.raw_decode(source)
-            return state if isinstance(state, dict) else {}
-        except ValueError:
-            return {}
-
-    @classmethod
-    def parse(cls, url, html):
-        if not cls.supports(url):
-            return {}
-        match = re.search(r'/(?:explore/|discovery/item/)([0-9a-f]{24})', urlparse(url).path, re.I)
-        if not match:
-            return {}
-        note_id = match.group(1)
-        state = cls._initial_state(html)
-        details = ((state.get('note') or {}).get('noteDetailMap') or {}) if isinstance(state.get('note'), dict) else {}
-        detail = details.get(note_id) or {}
-        note = detail.get('note', detail) if isinstance(detail, dict) else {}
-        if not note:
-            mobile = state.get('noteData') or {}
-            mobile_data = mobile.get('data') or {} if isinstance(mobile, dict) else {}
-            candidate = mobile_data.get('noteData') or {} if isinstance(mobile_data, dict) else {}
-            note = candidate if isinstance(candidate, dict) and candidate.get('noteId') == note_id else {}
-        if not isinstance(note, dict):
-            return {}
-        title = str(note.get('title') or note.get('desc') or '')[:255]
-        user = note.get('user') or {}
-        author = str(user.get('nickname') or user.get('nickName') or '')[:120] if isinstance(user, dict) else ''
-        images = []
-        for image in note.get('imageList') or []:
-            if not isinstance(image, dict):
-                continue
-            info = image.get('infoList') or []
-            candidate = image.get('urlDefault') or image.get('urlPre') or image.get('url') or (info[0].get('url') if info and isinstance(info[0], dict) else '')
-            media = cls._media_url(candidate, cls.IMAGE_HOSTS)
-            if media and media not in images:
-                images.append(media)
-        cover = images[0] if images else ''
-        canonical_url = url
-        if note.get('type') == 'video':
-            video = note.get('video') or {}
-            media = video.get('media') or {} if isinstance(video, dict) else {}
-            streams = media.get('stream') or {} if isinstance(media, dict) else {}
-            h264 = streams.get('h264') or [] if isinstance(streams, dict) else []
-            first = h264[0] if h264 and isinstance(h264[0], dict) else {}
-            video_url = cls._media_url(first.get('masterUrl'), cls.VIDEO_HOSTS)
-            if video_url:
-                return {'provider': 'xiaohongshu_video', 'note_id': note_id, 'title': title,
-                        'author': author, 'canonical_url': canonical_url, 'cover_url': cover,
-                        'video_url': video_url, 'duration_ms': first.get('duration') or 0}
-        if images:
-            return {'provider': 'xiaohongshu_gallery', 'note_id': note_id, 'title': title,
-                    'author': author, 'canonical_url': canonical_url, 'cover_url': cover,
-                    'images': images[:30], 'description': str(note.get('desc') or '')[:1000]}
-        return {}
+        return urlparse(url or '').hostname in cls.HOSTS

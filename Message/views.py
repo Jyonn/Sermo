@@ -550,7 +550,7 @@ class MessageLinkPreviewView(View):
             raise MessageErrors.NOT_A_MEMBER
         if message.type != MessageTypeChoice.TEXT:
             return dict(status='none')
-        link_preview = LinkPreview.queue_for_text(message.content)
+        link_preview = LinkPreview.queue_for_text(message.content, requester=request.user)
         if link_preview is None:
             return dict(status='none')
         return link_preview.jsonl()
@@ -560,7 +560,7 @@ class ExternalMediaPreviewView(View):
     @auth.require_user
     @analyse.json(MessageParams.preview_text)
     def post(self, request: Request):
-        link_preview = LinkPreview.queue_for_text(request.json.preview_text)
+        link_preview = LinkPreview.queue_for_text(request.json.preview_text, requester=request.user)
         if link_preview is None:
             return dict(status='none', supported=False)
         payload = link_preview.jsonl()
@@ -578,6 +578,7 @@ class ExternalMediaPreviewRefreshView(View):
         link_preview, refreshed = LinkPreview.refresh_now(
             link_preview.id,
             force=request.json.force_refresh,
+            requester_id=request.user.id,
         )
         payload = link_preview.jsonl()
         payload.update(supported=True, refreshed=refreshed)
