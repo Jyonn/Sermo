@@ -654,6 +654,11 @@ class LinkPreview(models.Model):
                     return preview, False
             try:
                 data = cls.fetch_preview_data(preview.url)
+                if JustOneProvider.supports(preview.url):
+                    candidate = cls(url=data['url'], status=LinkPreviewStatusChoice.READY,
+                                    provider_data=data.get('provider_data') or {}, fetched_at=timezone.now())
+                    if cls._is_expired(candidate):
+                        raise ValueError('social_expired_upstream_media')
             except Exception as err:
                 updates = {'error': str(err)[:255], 'updated_at': timezone.now()}
                 if JustOneProvider.supports(preview.url):

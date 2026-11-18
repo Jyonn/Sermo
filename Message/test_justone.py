@@ -77,6 +77,16 @@ class QuotaTests(TestCase):
         self.preview.status = LinkPreviewStatusChoice.READY
         self.preview.fetched_at = timezone.now()
         self.assertTrue(LinkPreview._is_expired(self.preview))
+
+    @patch.dict('os.environ', {'JUSTONEAPI_TOKEN': 'test-only'})
+    @patch.object(LinkPreview, 'fetch_preview_data')
+    def test_expired_upstream_response_is_negatively_cached(self, fetch):
+        fetch.return_value = dict(url=self.preview.url, title='expired', description='', image_url='', site_name='抖音', favicon_url='', provider_data={'adapter': 'justone', 'video_url': 'https://v.zjcdn.com/a?expires=1'})
+        preview, refreshed = LinkPreview.refresh_now(self.preview.id, requester_id=self.vip.id)
+        self.assertFalse(refreshed)
+        self.assertEqual(preview.status, LinkPreviewStatusChoice.FAILED)
+        LinkPreview.refresh_now(preview.id, requester_id=self.vip.id)
+        self.assertEqual(fetch.call_count, 1)
         self.preview.provider_data = {'adapter': 'justone', 'video_url': 'https://v.zjcdn.com/a?expires=1'}
         self.assertTrue(LinkPreview._is_expired(self.preview))
 
