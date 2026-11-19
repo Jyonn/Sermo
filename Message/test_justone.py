@@ -122,6 +122,15 @@ class QuotaTests(TestCase):
         self.assertFalse(LinkPreview._is_expired(self.preview))
         self.assertEqual(self.preview.jsonl()['title'], '长期保留的标题')
 
+    def test_missing_video_keeps_metadata_but_reports_media_unavailable(self):
+        self.preview.status = LinkPreviewStatusChoice.READY
+        self.preview.title = '保留标题'
+        self.preview.provider_data = {'provider': 'xiaohongshu_video', 'video_url': ''}
+        payload = self.preview.jsonl()
+        self.assertEqual(payload['status'], 'ready')
+        self.assertEqual(payload['title'], '保留标题')
+        self.assertEqual(payload['parse_error'], 'unavailable')
+
     @patch.dict('os.environ', {'JUSTONEAPI_TOKEN': 'test-only'})
     @patch.object(LinkPreview, 'fetch_preview_data')
     def test_first_send_costs_sender_once_then_only_explicit_viewer(self, fetch):

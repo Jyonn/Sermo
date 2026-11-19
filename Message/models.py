@@ -709,8 +709,9 @@ class LinkPreview(models.Model):
         )
         # These live cards store only a reference, including for legacy cached web previews.
         if JustOneProvider.supports(self.url):
-            payload['parse_error'] = getattr(self, '_social_error', '') or ('unavailable' if self.status == LinkPreviewStatusChoice.FAILED or (self.error and self.error != 'social_parsing') else '')
-            payload['requires_parse'] = self.status != LinkPreviewStatusChoice.READY or bool(self.error)
+            missing_media = str((self.provider_data or {}).get('provider', '')).endswith('_video') and not (self.provider_data or {}).get('video_url')
+            payload['parse_error'] = getattr(self, '_social_error', '') or ('unavailable' if missing_media or self.status == LinkPreviewStatusChoice.FAILED or (self.error and self.error != 'social_parsing') else '')
+            payload['requires_parse'] = missing_media or self.status != LinkPreviewStatusChoice.READY or bool(self.error)
             in_progress = getattr(self, '_social_queued', False) or (self.error == 'social_parsing' and self.updated_at and self.updated_at > timezone.now() - datetime.timedelta(minutes=3))
             if self.status == LinkPreviewStatusChoice.PENDING and not in_progress:
                 payload['status'] = 'failed'  # A read must not start paid work.
