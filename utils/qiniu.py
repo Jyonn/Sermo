@@ -10,8 +10,6 @@ import uuid
 from urllib.parse import urlparse
 
 import requests
-from qiniu import QiniuMacAuth
-from qiniu.auth import QiniuMacRequestsAuth
 from Config.models import Config, CI
 from Message.validators import MessageErrors
 from User.validators import UserErrors
@@ -20,10 +18,6 @@ from User.validators import UserErrors
 QINIU_UPLOAD_URL = 'https://up-z0.qiniup.com'
 QINIU_RS_HOST = 'rs.qiniuapi.com'
 QINIU_RS_BATCH_URL = f'https://{QINIU_RS_HOST}/batch'
-QINIU_SHORT_AUDIO_ASR_URL = os.getenv(
-    'QINIU_SHORT_AUDIO_ASR_URL',
-    'http://yitu-audio.qiniuapi.com/v2/asr',
-)
 QINIU_TOKEN_EXPIRE_SECONDS = 10 * 60
 AVATAR_MAX_FILE_SIZE = 5 * 1024 * 1024  # 5M
 CHAT_BACKGROUND_MAX_FILE_SIZE = 10 * 1024 * 1024  # 10M
@@ -120,45 +114,6 @@ def sign_private_processed_url(url: str, fops: str, expire_seconds: int = AVATAR
         return ''
     separator = '&' if '?' in normalized_url else '?'
     return sign_private_download_url(f'{normalized_url}{separator}{normalized_fops}', expire_seconds=expire_seconds)
-
-
-def transcribe_short_audio(audio_url: str):
-    normalized_url = (audio_url or '').strip()
-    if not normalized_url:
-        raise ShortAudioTranscriptionError('Audio URL is empty')
-
-    auth = QiniuMacAuth(
-        _required_config(CI.QINIU_ACCESS_KEY),
-        _required_config(CI.QINIU_SECRET_KEY),
-    )
-    try:
-        response = requests.post(
-            QINIU_SHORT_AUDIO_ASR_URL,
-            json={
-                'audioUrl': normalized_url,
-                'lang': 'MANDARIN',
-                'scene': 'GENERAL',
-            },
-            auth=QiniuMacRequestsAuth(auth),
-            timeout=(5, 70),
-        )
-        response.raise_for_status()
-        payload = response.json()
-    except (requests.RequestException, ValueError) as err:
-        raise ShortAudioTranscriptionError('Qiniu transcription request failed') from err
-
-    request_id = str(payload.get('requestId') or '')[:128]
-    try:
-        result_code = int(payload.get('rtn'))
-    except (TypeError, ValueError):
-        result_code = None
-    if result_code != 0:
-        raise ShortAudioTranscriptionError(
-            str(payload.get('message') or 'Qiniu transcription failed'),
-            code=result_code,
-            request_id=request_id,
-        )
-    return str(payload.get('resultText') or '').strip(), request_id
 
 
 def build_message_image_thumbnail_uri(uri: str, width: int = 120):

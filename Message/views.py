@@ -8,12 +8,14 @@ from smartdjango import analyse, OK
 
 from Chat.models import Chat, SubmissionStatusChoice
 from Chat.validators import ChatErrors
+from Message.aliyun_transcription import transcribe_short_audio
+from Message.recording_transcript import attach as attach_recording_transcript
 from Message.models import AudioTranscript, AudioTranscriptStatusChoice, ForwardBundle, LinkPreview, MediaAsset, MediaResource, Message, MessageEvent, MessageHistoryRecovery, MessageTypeChoice, PinnedMessage
 from Message.params import MessageParams
 from Message.models import MessageUserState
 from utils.content_safety import ContentSafetyScene, check_user_text
 from Message.validators import MessageErrors
-from utils.qiniu import ShortAudioTranscriptionError, issue_message_upload, build_message_image_thumbnail_uri, build_message_video_thumbnail_uri, sign_private_download_url, avatar_uri_for_key, transcribe_short_audio, validate_message_media_key, validate_message_media_size
+from utils.qiniu import ShortAudioTranscriptionError, issue_message_upload, build_message_image_thumbnail_uri, build_message_video_thumbnail_uri, sign_private_download_url, avatar_uri_for_key, validate_message_media_key, validate_message_media_size
 from utils import auth
 from utils.auth import Request
 from utils.compact import compact_response
@@ -84,6 +86,7 @@ class MessageView(View):
         MessageParams.client_message_id,
         MessageParams.mention_user_ids,
         MessageParams.resource_id,
+        MessageParams.live_transcript_receipt,
     )
     def post(self, request: Request):
         _require_message_feature(request.query.chat, request.user)
@@ -107,6 +110,7 @@ class MessageView(View):
                 client_message_id=request.json.client_message_id,
                 mention_user_ids=request.json.mention_user_ids,
                 media_resource=media_resource)
+            attach_recording_transcript(message, request.user, request.json.live_transcript_receipt)
             if getattr(message, '_was_created', True) and not message.chat.submission:
                 NotificationEvent.emit_message_notifications(message, actor=request.user)
         return message.jsonl(request=request)
@@ -570,7 +574,7 @@ class ExternalMediaPreviewView(View):
 
 class ExternalMediaPreviewRefreshView(View):
     @auth.require_user
-    @analyse.json(MessageParams.preview_id, MessageParams.force_refresh)
+    @analyse.json(MessageParams.preview_id, MessageParams.force_refresh, MessageParams.confirmed_parse)
     def post(self, request: Request):
         link_preview = LinkPreview.objects.filter(id=request.json.preview_id).first()
         if link_preview is None:
@@ -579,6 +583,7 @@ class ExternalMediaPreviewRefreshView(View):
             link_preview.id,
             force=request.json.force_refresh,
             requester_id=request.user.id,
+            confirmed=request.json.confirmed_parse,
         )
         payload = link_preview.jsonl()
         payload.update(supported=True, refreshed=refreshed)

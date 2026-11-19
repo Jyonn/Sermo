@@ -61,6 +61,8 @@ class MessageParams(metaclass=Params):
     preview_text = Validator('text', final_name='preview_text').to(str).bool(lambda value: len(value) <= 4096)
     preview_id = Validator('preview_id').to(int).bool(lambda value: value > 0)
     force_refresh = Validator('force', final_name='force_refresh').to(bool).default(False)
+    confirmed_parse = Validator('confirmed').to(bool).default(False)
+    live_transcript_receipt = Validator('live_transcript_receipt').to(str).bool(lambda value: len(value) <= 24000).default('')
     chat_id = Validator('chat_id', final_name='chat').to(int).to(Chat.index)
 
     content: Validator

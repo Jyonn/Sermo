@@ -620,6 +620,7 @@ class SpaceAdminBroadcastView(View):
         SpaceAdminBroadcastParams.content,
         SpaceAdminBroadcastParams.type,
         SpaceAdminBroadcastParams.broadcast_id,
+        MessageParams.live_transcript_receipt,
     )
     def post(self, request: Request):
         official = request.space.ensure_official_user()
@@ -644,6 +645,8 @@ class SpaceAdminBroadcastView(View):
                 )
                 if not getattr(message, '_was_created', True):
                     continue
+                from Message.recording_transcript import attach
+                attach(message, official, request.json.live_transcript_receipt)
                 created_count += 1
                 events = NotificationEvent.emit_message_notifications(
                     message,

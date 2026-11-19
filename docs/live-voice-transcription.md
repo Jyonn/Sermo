@@ -2,9 +2,10 @@
 
 The shared hold-to-talk composer records its ordinary compressed voice message
 while an AudioWorklet sends 16 kHz mono signed little-endian PCM to a dedicated
-ASGI service. Audio and transcripts are transient; cancelling or sending voice
-closes transcription. Converting to text waits for the final sentence and lets
-the user review a draft. Provider failure must never prevent sending voice.
+ASGI service. Cancelling leaves no stored result. Sending voice waits for the
+bounded finalization and attaches a signed final-result receipt to the send.
+Converting to text still inserts an editable draft. Provider failure must never
+prevent sending voice.
 
 ## Deployment
 
@@ -33,14 +34,32 @@ limits are in memory. Scaling out requires shared atomic admission first.
 3. Wait for `{ "type": "ready" }`, then send PCM binary frames.
 4. Receive `transcript` with `text`, `final_text` and `partial_text`. Partial
    updates replace the matching sentence instead of appending duplicates.
-5. Flush PCM then send `{ "type": "finish" }`; `done` includes final `text`.
+5. Flush PCM then send `{ "type": "finish" }`; `done` includes final `text`
+   and a signed `receipt`, including for completed silence.
    `error` means transcription is unavailable; retain the recording.
 
 Maximum 60 seconds of PCM, 90-second session deadline, 12-second idle deadline,
 8-second finalization, one simultaneous session per account, 32 global sessions,
-12 starts/minute and 120 starts/hour per account. No transcript/audio storage or
-provider payload logging. Only exact allowed origins are accepted (localhost
+12 starts/minute and 120 starts/hour per account. The relay does not store raw
+audio or log provider payloads. Only exact allowed origins are accepted (localhost
 origins additionally allowed with Django DEBUG for development).
+
+## Saved results and file recognition
+
+`live_transcript_receipt` is optional on the normal voice-message send and admin
+broadcast endpoints. It expires after one hour, is bound to the authenticated
+recording principal and a one-use nonce, and can populate only an owned audio
+asset. It never overwrites an existing ready transcript or binds one nonce to
+two assets. Text is persisted in AudioTranscript in the send transaction; later
+GET/POST transcription and forwarded references reuse the asset's ready result.
+No raw client transcript is accepted. Apply Message migration 0042 and restart
+both the API and the one-worker transcription sidecar from the new release.
+
+Uncached uploaded audio now uses Aliyun `qwen3-asr-flash` synchronously at the
+configured DashScope region/workspace endpoint, reusing DASHSCOPE_API_KEY.
+Optional `QWEN_FILE_MODEL` overrides the model. Qiniu remains the media store,
+with signed download URLs, and is no longer the active recognition provider.
+Official contract: https://www.alibabacloud.com/help/en/model-studio/qwen-asr-api-reference
 
 ## Checks
 

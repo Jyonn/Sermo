@@ -84,9 +84,6 @@ class JustOneProvider:
                      cover_url=cover or (images[0] if images else ''), adapter='justone', adapter_version=cls.VERSION)
         media['video_id' if dy else 'note_id'] = ident
         if is_video:
-            if not video_url:
-                # A cover is not a gallery and audio is not a video.
-                raise ValueError('social_video_unavailable')
             media.update(video_url=video_url, width=video.get('width', 0), height=video.get('height', 0), duration_ms=video.get('duration', 0))
         else:
             if not images:

@@ -197,7 +197,9 @@ async def stream_application(scope, receive, send):
                     elif event == 'task-finished':
                         if not finished_input:
                             raise ValueError('Premature end')
-                        await emit({'type': 'done', 'text': sentences.text()})
+                        from Message.recording_transcript import receipt
+                        text = sentences.text()
+                        await emit({'type': 'done', 'text': text, 'receipt': receipt(principal, text)})
                         return
                     elif event == 'task-failed':
                         raise ValueError('Provider failed')

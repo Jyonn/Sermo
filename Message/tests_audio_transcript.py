@@ -9,51 +9,7 @@ from Message.models import AudioTranscript, AudioTranscriptStatusChoice, MediaAs
 from Space.models import Space
 from User.models import User
 from utils import auth
-from utils.qiniu import QINIU_SHORT_AUDIO_ASR_URL, QiniuMacRequestsAuth, ShortAudioTranscriptionError, transcribe_short_audio
-
-
-class QiniuShortAudioTranscriptionTests(SimpleTestCase):
-    @patch('utils.qiniu._required_config', side_effect=['access-key', 'secret-key'])
-    @patch('utils.qiniu.requests.post')
-    def test_request_uses_qiniu_mac_and_returns_transcript(self, post, _required_config):
-        response = Mock()
-        response.json.return_value = {
-            'rtn': 0,
-            'requestId': 'request-1',
-            'resultText': ' 今天见。 ',
-        }
-        response.raise_for_status.return_value = None
-        post.return_value = response
-
-        text, request_id = transcribe_short_audio('https://media.example.com/audio.m4a')
-
-        self.assertEqual(text, '今天见。')
-        self.assertEqual(request_id, 'request-1')
-        self.assertEqual(post.call_args.args[0], QINIU_SHORT_AUDIO_ASR_URL)
-        self.assertEqual(post.call_args.kwargs['json'], {
-            'audioUrl': 'https://media.example.com/audio.m4a',
-            'lang': 'MANDARIN',
-            'scene': 'GENERAL',
-        })
-        self.assertIsInstance(post.call_args.kwargs['auth'], QiniuMacRequestsAuth)
-
-    @patch('utils.qiniu._required_config', side_effect=['access-key', 'secret-key'])
-    @patch('utils.qiniu.requests.post')
-    def test_provider_failure_is_normalized(self, post, _required_config):
-        response = Mock()
-        response.json.return_value = {
-            'rtn': 4204,
-            'requestId': 'request-2',
-            'message': 'unsupported format',
-        }
-        response.raise_for_status.return_value = None
-        post.return_value = response
-
-        with self.assertRaises(ShortAudioTranscriptionError) as raised:
-            transcribe_short_audio('https://media.example.com/audio.webm')
-
-        self.assertEqual(raised.exception.code, 4204)
-        self.assertEqual(raised.exception.request_id, 'request-2')
+from utils.qiniu import ShortAudioTranscriptionError
 
 
 class MessageAudioTranscriptTests(TestCase):

@@ -438,7 +438,7 @@ class Statement(models.Model):
         normalized_media = StatementMedia.normalize_payload(media)
         link_preview = None
         if external_media_url:
-            link_preview = LinkPreview.queue_for_text(external_media_url)
+            link_preview = LinkPreview.queue_for_text(external_media_url, requester=user, initial=True)
         if external_media_url and link_preview is None:
             raise SquareErrors.EXTERNAL_MEDIA_INVALID
         if link_preview and (normalized_media or forward_bundle is not None):
