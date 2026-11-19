@@ -268,12 +268,17 @@ class MessageForwardView(View):
             MessageTypeChoice.TEXT, MessageTypeChoice.IMAGE, MessageTypeChoice.FILE,
             MessageTypeChoice.VIDEO, MessageTypeChoice.AUDIO, MessageTypeChoice.LOCATION,
             MessageTypeChoice.STATEMENT, MessageTypeChoice.STICKER, MessageTypeChoice.ACTIVITY,
+            MessageTypeChoice.PROFILE, MessageTypeChoice.RESEARCH_TASK,
+            MessageTypeChoice.RESEARCH_COMMENT, MessageTypeChoice.RESEARCH_REPLY,
         }
         for message in source_messages:
             if message.type not in allowed_types:
                 raise MessageErrors.FORWARD_UNSUPPORTED
             if not message.is_visible_to(request.user):
                 raise MessageErrors.NOT_A_MEMBER
+            if message.type in (15, 16, 17, 18):
+                from Message.shared_references import payload
+                payload(message.type, Message._parse_payload(message.content), request.user, require_access=True)
         if request.json.forward_mode == 'individual' and any(
             message.type == MessageTypeChoice.AUDIO for message in source_messages
         ):

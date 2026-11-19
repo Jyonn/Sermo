@@ -58,6 +58,10 @@ class MessageTypeChoice(Choice):
     OFFICIAL_NOTICE = 12
     SUBMISSION_INVITE = 13
     VOICE_CALL = 14
+    PROFILE = 15
+    RESEARCH_TASK = 16
+    RESEARCH_COMMENT = 17
+    RESEARCH_REPLY = 18
 
 
 class MessageEventTypeChoice(Choice):
@@ -730,7 +734,7 @@ class Message(models.Model):
     MENTION_TOKEN_RE = re.compile(r'<@(\d+)>')
     validators = MessageValidator
     vldt = MessageValidator
-    MIN_CLIENT_VERSION_BY_TYPE = {}
+    MIN_CLIENT_VERSION_BY_TYPE = {value: '2026.11.19.6' for value in (15, 16, 17, 18)}
     MEDIA_KIND_BY_TYPE = {
         MessageTypeChoice.IMAGE: 'image',
         MessageTypeChoice.FILE: 'file',
@@ -749,6 +753,10 @@ class Message(models.Model):
         MessageTypeChoice.FORWARD_BUNDLE: '[聊天记录]',
         MessageTypeChoice.ACTIVITY: '[活动]',
         MessageTypeChoice.SUBMISSION_INVITE: '[投稿邀请]',
+        MessageTypeChoice.PROFILE: '[个人名片]',
+        MessageTypeChoice.RESEARCH_TASK: '[科研任务]',
+        MessageTypeChoice.RESEARCH_COMMENT: '[科研评论]',
+        MessageTypeChoice.RESEARCH_REPLY: '[科研回复]',
     }
 
     chat = models.ForeignKey(Chat, on_delete=models.CASCADE, db_index=True)
@@ -899,6 +907,9 @@ class Message(models.Model):
                     if not NumberDuel.objects.filter(code=reference.get('room_code'), run__space=user.space,
                                                      run__campaign__key=reference.get('activity_key')).exists():
                         raise MessageErrors.PAYLOAD_INVALID
+            if message_type in (15, 16, 17, 18):
+                from Message.shared_references import payload
+                payload(message_type, cls._parse_payload(normalized_content), user, require_access=True)
             if message_type == MessageTypeChoice.STICKER:
                 from Sticker.models import StickerAsset, UserSticker
                 sticker_payload = cls._parse_payload(content)
@@ -1092,6 +1103,9 @@ class Message(models.Model):
             raise MessageErrors.FORWARD_UNSUPPORTED
         if not chat.has_active_member(user):
             raise MessageErrors.NOT_A_MEMBER
+        if source.type in (15, 16, 17, 18):
+            from Message.shared_references import payload
+            payload(source.type, cls._parse_payload(source.content), user, require_access=True)
         message = cls.objects.create(
             chat=chat,
             user=user,
@@ -1438,6 +1452,9 @@ class Message(models.Model):
 
     @classmethod
     def normalize_content(cls, message_type, content):
+        if message_type in (15, 16, 17, 18):
+            from Message.shared_references import normalize
+            return json.dumps(normalize(message_type, content), separators=(',', ':'), ensure_ascii=False)
         if message_type in (MessageTypeChoice.TEXT, MessageTypeChoice.SYSTEM):
             normalized = (content or '').strip()
             if not normalized:
@@ -1611,6 +1628,9 @@ class Message(models.Model):
         return viewer if isinstance(viewer, User) else None
 
     def _payload_for_type(self, request: HttpRequest = None):
+        if self.type in (15, 16, 17, 18):
+            from Message.shared_references import payload
+            return payload(self.type, self._parse_payload(self.content), self._viewer_from_request(request))
         if self.type == MessageTypeChoice.VOICE_CALL:
             return self._parse_payload(self.content)
         if self.type == MessageTypeChoice.TEXT:
@@ -3069,7 +3089,7 @@ class ForwardBundle(models.Model):
                 message_type=message.type,
                 author=message._dictify_user(),
                 content=message.preview_text(),
-                payload=message._payload_for_type(request=request) or {},
+                payload=message._parse_payload(message.content) if message.type in (15, 16, 17, 18) else message._payload_for_type(request=request) or {},
                 sent_at=message.created_at,
             )
             for position, message in enumerate(ordered)
@@ -3154,6 +3174,9 @@ class ForwardBundleItem(models.Model):
 
     def jsonl(self, request=None):
         payload = dict(self.payload or {})
+        if self.message_type in (15, 16, 17, 18):
+            from Message.shared_references import payload as reference_payload
+            payload = reference_payload(self.message_type, payload, Message._viewer_from_request(request))
         if self.media_resource_id:
             asset = self.media_resource.asset
             path = reverse('message blob', kwargs={'blob_slug': asset.blob_slug})
