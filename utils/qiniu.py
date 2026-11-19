@@ -141,8 +141,11 @@ def build_message_video_thumbnail_uri(uri: str, width: int = 480):
 def build_avatar_display_uri(uri: str, size: int = 400, *, raster: bool = False,
                              expire_seconds: int = AVATAR_DOWNLOAD_EXPIRE_SECONDS):
     normalized_size = max(96, min(int(size), 1024))
-    processing = f'imageView2/1/w/{normalized_size}/h/{normalized_size}/q/85'
-    if raster:
+    # The client has already confirmed its crop. Fit legacy non-square artwork
+    # without a second crop, and preserve alpha through CDN transformations.
+    processing = f'imageView2/2/w/{normalized_size}/h/{normalized_size}/q/85'
+    extension = os.path.splitext(urlparse(uri).path)[1].lower()
+    if raster or extension not in {'.gif', '.webp'}:
         processing += '/format/png'
     return sign_private_processed_url(uri, processing, expire_seconds=expire_seconds)
 

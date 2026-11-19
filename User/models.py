@@ -1051,7 +1051,8 @@ class User(models.Model):
         avatar_uri = (self.avatar_uri or '').strip()
         if not avatar_uri:
             return ''
-        identity = f'{self.avatar_type}:{avatar_uri}'
+        version = 'alpha-v2:' if self.avatar_type == UserAvatarTypeChoice.CUSTOM else ''
+        identity = f'{self.avatar_type}:{version}{avatar_uri}'
         return hashlib.sha256(identity.encode('utf-8')).hexdigest()[:24]
 
     def _dictify_official(self):

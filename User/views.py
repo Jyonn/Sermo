@@ -1035,7 +1035,7 @@ class AvatarPresetView(View):
     @analyse.json(UserParams.avatar_preset_id)
     def post(self, request: Request):
         request.user.set_preset_avatar(request.json.avatar_preset_id)
-        return request.user.dictify('avatar_type', 'avatar_uri')
+        return request.user.dictify('avatar_type', 'avatar_uri', 'avatar_cache_key')
 
 
 class AvatarCustomUploadView(View):
@@ -1060,7 +1060,7 @@ class AvatarCustomView(View):
         _require_profile_edit_enabled(request.user)
         key = validate_avatar_key(request.json.key)
         request.user.set_custom_avatar(avatar_uri_for_key(key))
-        return request.user.dictify('avatar_type', 'avatar_uri')
+        return request.user.dictify('avatar_type', 'avatar_uri', 'avatar_cache_key')
 
 
 class ChatBackgroundUploadView(View):
