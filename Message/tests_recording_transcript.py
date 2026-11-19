@@ -16,12 +16,25 @@ class RecordingResultTests(TestCase):
     @patch('User.models.NotificationEvent.emit_message_notifications')
     def test_send_endpoint_binds_signed_result_in_same_transaction(self, notify, capability):
         proof = receipt(f'user:{self.peer.id}', '发送时保存的实时结果')
+        asset = MediaAsset.objects.create(source_key='fresh-recording.m4a', source_uri='https://media.example.com/fresh-recording.m4a', kind=MediaAsset.KIND_AUDIO, status=MediaAsset.STATUS_READY)
+        resource = MediaResource.acquire(self.peer, asset, MediaAsset.KIND_AUDIO, 'fresh-recording.m4a')
         response = self.client.post(f'/messages/?chat_id={self.chat.id}', data=json.dumps({
-            'type': self.message.type, 'content': '', 'resource_id': self.message.media_resource_id,
+            'type': self.message.type, 'content': '', 'resource_id': resource.id,
             'client_message_id': 'live-recording-test', 'live_transcript_receipt': proof,
         }), content_type='application/json', **audio_fixture.MessageAudioTranscriptTests.authorization(self.peer))
         self.assertEqual(response.status_code, 200, response.content)
-        self.assertEqual(AudioTranscript.objects.get(asset=self.message.media_resource.asset).text, '发送时保存的实时结果')
+        self.assertEqual(AudioTranscript.objects.get(asset=asset).text, '发送时保存的实时结果')
+
+    def test_new_proof_cannot_initialize_a_forwarded_untranscribed_asset(self):
+        resource = self.message.media_resource.clone_for(self.user)
+        forwarded = Message.objects.create(chat=self.chat, user=self.user, type=self.message.type, media_resource=resource)
+        self.assertFalse(attach(forwarded, self.user, receipt(f'user:{self.user.id}', 'Unrelated recording')))
+        self.assertFalse(AudioTranscript.objects.exists())
+
+    def test_new_message_cannot_rewrite_older_uncached_voice(self):
+        reused = Message.objects.create(chat=self.chat, user=self.peer, type=self.message.type, media_resource=self.message.media_resource)
+        self.assertFalse(attach(reused, self.peer, receipt(f'user:{self.peer.id}', 'Another recording')))
+        self.assertFalse(AudioTranscript.objects.exists())
 
     @patch('Message.views.transcribe_short_audio')
     def test_recording_result_is_ready_and_no_second_provider_call(self, provider):

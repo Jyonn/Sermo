@@ -10,7 +10,7 @@ def receipt(principal, text):
 
 
 def attach(message, user, token):
-    from Message.models import AudioTranscript, AudioTranscriptStatusChoice, MediaAsset, MessageTypeChoice
+    from Message.models import AudioTranscript, AudioTranscriptStatusChoice, MediaAsset, MediaResource, Message, MessageTypeChoice
     if not token or message.type != MessageTypeChoice.AUDIO or not message.media_resource_id:
         return False
     try:
@@ -28,6 +28,10 @@ def attach(message, user, token):
             existing = AudioTranscript.objects.filter(asset=asset).first()
             if existing and existing.status == AudioTranscriptStatusChoice.READY:
                 return existing.live_receipt_id == data['nonce']
+            # A recording proof may initialize only this newly sent, owned asset.
+            # Reusing a library/forwarded resource must never rewrite older chats.
+            if MediaResource.objects.filter(asset=asset).exclude(owner=user).exists() or Message.objects.filter(media_resource__asset=asset).exclude(id=message.id).exists():
+                return False
             transcript = existing or AudioTranscript.objects.create(asset=asset)
             transcript.live_receipt_id = data['nonce']
             transcript.save(update_fields=['live_receipt_id'])
