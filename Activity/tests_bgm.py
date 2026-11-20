@@ -149,9 +149,65 @@ class BgmTests(TestCase):
         self.run.save(update_fields=['ends_at'])
         BgmService.record(self.user, 'publish', self.statement(self.user))
         self.assertEqual(BgmInteraction.objects.count(), 0)
-        result = BgmService.configure(self.campaign, self.user, {'style': 'blue'})
+        with self.assertRaises(type(BgmErrors.CLOSED)):
+            BgmService.configure(self.campaign, self.user, {'style': 'blue'})
+        result = BgmService.payload(self.campaign, self.user, self.run)
         self.assertFalse(result['active'])
         self.assertTrue(result['bgm']['tracks'][0]['owned'])
+        self.assertTrue(all(track['uri'] is None for track in result['bgm']['tracks']))
+        self.assertEqual(result['bgm']['mode'], 'off')
+        self.assertFalse(result['bgm']['receive_audio'])
+
+    def test_expiry_rejects_saved_auto_and_manual_settings_and_hides_preflight(self):
+        from utils import auth
+        from Activity.models import BgmEntrance
+        from Message.models import Message
+        chat = self.chat(self.user)
+        authorization = {'HTTP_AUTHORIZATION': f'Bearer {auth.get_login_token(self.user)["auth"]}'}
+        for mode in ('auto', 'manual'):
+            BgmService.configure(self.campaign, self.user, {'style': 'blue', 'mode': mode})
+            with patch('Activity.bgm.timezone.now', return_value=self.run.ends_at):
+                self.assertIsNone(self.client.get('/activities/bgm/me', **authorization).json()['body'])
+                self.assertIsNone(self.client.get(f'/activities/bgm/me?chat_id={chat.id}', **authorization).json()['body'])
+                self.assertFalse(BgmService.entrance_status(self.user, chat.id)['allowed'])
+                data = {'chat_id': chat.id, 'request_id': f'expired-{mode}-001'}
+                if mode == 'manual':
+                    data['track'] = '1'
+                with self.assertRaises(type(BgmErrors.CLOSED)):
+                    BgmService.enter(self.campaign, self.user, data)
+                response = self.client.post('/activities/bgm-test/bgm/enter', data=data, content_type='application/json', **authorization)
+                self.assertNotEqual(response.json()['identifier'], 'OK')
+                response = self.client.post('/activities/bgm-test/bgm', data={'style': 'blue', 'mode': 'auto'}, content_type='application/json', **authorization)
+                self.assertNotEqual(response.json()['identifier'], 'OK')
+        self.assertEqual(BgmEntrance.objects.count(), 0)
+        self.assertEqual(Message.objects.filter(chat=chat).count(), 0)
+
+    def test_activity_disabled_and_future_or_other_space_run_cannot_play(self):
+        chat = self.chat(self.user)
+        BgmService.configure(self.campaign, self.user, {'style': 'blue', 'mode': 'auto'})
+        self.campaign.enabled = False
+        self.campaign.save(update_fields=['enabled'])
+        self.assertIsNone(BgmService.current_payload(self.user))
+        with self.assertRaises(type(BgmErrors.CLOSED)):
+            BgmService.enter(self.campaign, self.user, {'chat_id': chat.id, 'request_id': 'disabled-001'})
+        self.campaign.enabled = True
+        self.campaign.save(update_fields=['enabled'])
+        self.run.claimed_at = timezone.now() + timedelta(days=1)
+        self.run.save(update_fields=['claimed_at'])
+        self.assertIsNone(BgmService.current_payload(self.user))
+        with self.assertRaises(type(BgmErrors.CLOSED)):
+            BgmService.configure(self.campaign, self.user, {'style': 'blue'})
+        other = Space.objects.create(name='Other', slug='bgm-no-run', email='other@example.test')
+        outsider = User.create(other, 'Outsider', verified=True)
+        self.assertIsNone(BgmService.current_payload(outsider))
+
+    def test_active_noncollector_can_receive_but_does_not_get_settings(self):
+        result = BgmService.current_payload(self.peer)
+        self.assertTrue(result['active'])
+        self.assertFalse(result['bgm']['joined'])
+        self.assertTrue(result['bgm']['receive_audio'])
+        self.assertEqual(result['bgm']['mode'], 'off')
+        self.assertFalse(any(track['uri'] for track in result['bgm']['tracks']))
 
     def test_task_day_uses_beijing_time_and_no_prejoin_history(self):
         BgmParticipation.objects.all().delete()

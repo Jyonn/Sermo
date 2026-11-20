@@ -22,14 +22,12 @@ class BgmMeView(View):
     @auth.require_user
     def get(self, request: Request):
         from Activity.bgm import BgmErrors, BgmService
-        from Activity.models import BgmParticipation
-        participation = BgmParticipation.objects.filter(
-            progress__user=request.user, progress__campaign__enabled=True,
-            progress__space_activity__space=request.user.space,
-        ).select_related('progress__campaign', 'progress__space_activity').order_by('-joined_at').first()
-        if participation is None:
-            return None
-        payload = BgmService.payload(participation.progress.campaign, request.user, participation.progress.space_activity)
+        from utils.middleware import APIPacker
+        payload = BgmService.current_payload(request.user)
+        if payload is None:
+            response = APIPacker.pack(None)
+            response['Cache-Control'] = 'no-store, private'
+            return response
         if 'chat_id' in request.GET:
             try:
                 chat_id = int(request.GET['chat_id'])
@@ -37,7 +35,9 @@ class BgmMeView(View):
                 raise BgmErrors.INVALID
             BgmService.entrance_chat(request.user, chat_id)
             payload['bgm']['entrance'] = BgmService.entrance_status(request.user, chat_id)
-        return payload
+        response = APIPacker.pack(payload)
+        response['Cache-Control'] = 'no-store, private'
+        return response
 
 
 class BgmEntranceView(View):

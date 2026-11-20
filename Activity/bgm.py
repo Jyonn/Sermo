@@ -34,6 +34,29 @@ class BgmService:
     TASKS = {'publish': (1, 6), 'comment': (3, 3), 'like': (5, 1)}
 
     @classmethod
+    def active_runs(cls, space):
+        return ActivityService.space_activities(space, active_only=True).filter(campaign__config__mode=cls.MODE)
+
+    @classmethod
+    def require_active_run(cls, campaign, user):
+        run = cls.active_runs(user.space).filter(campaign=campaign).first()
+        if run is None or not cls.catalog(run.campaign):
+            raise BgmErrors.CLOSED
+        return run
+
+    @classmethod
+    def current_payload(cls, user):
+        runs = list(cls.active_runs(user.space).order_by('-claimed_at', '-id'))
+        # Listeners need the space's live policy even if they never collected keys.
+        joined = set(BgmParticipation.objects.filter(
+            progress__user=user, progress__space_activity__in=runs,
+        ).values_list('progress__space_activity_id', flat=True))
+        for run in sorted(runs, key=lambda run: run.id not in joined):
+            if cls.catalog(run.campaign):
+                return cls.payload(run.campaign, user, run)
+        return None
+
+    @classmethod
     def catalog(cls, campaign):
         tracks = campaign.config.get('tracks', [])
         if not isinstance(tracks, list) or len(tracks) != 12:
@@ -110,9 +133,7 @@ class BgmService:
     def configure(cls, campaign, user, data):
         if not user.verified:
             raise BgmErrors.VERIFIED
-        run = ActivityService.space_activity_for(campaign, user.space)
-        if not cls.catalog(campaign):
-            raise BgmErrors.CLOSED
+        run = cls.require_active_run(campaign, user)
         if not isinstance(data, dict) or set(data) - {'style', 'slots', 'mode', 'track', 'receive_audio'}:
             raise BgmErrors.INVALID
         style = data.get('style')
@@ -124,8 +145,8 @@ class BgmService:
             participation = BgmParticipation.objects.filter(progress=progress).first()
             if participation is not None and participation.style != style:
                 raise BgmErrors.STYLE_LOCKED
-            if participation is None and (not campaign.enabled or not run.is_active()):
-                raise BgmErrors.CLOSED
+            # Recheck after the lock; expiry applies to existing collectors too.
+            cls.require_active_run(campaign, user)
             points, days, _ = cls.stats(progress)
             owned = {str(index + 1) for index, (gate_days, gate_points) in enumerate(cls.GATES) if days >= gate_days and points >= gate_points}
             slots = data.get('slots', participation.slots if participation else ['1'])
@@ -147,19 +168,20 @@ class BgmService:
         participation = BgmParticipation.objects.filter(progress=progress).first()
         points, days, today = cls.stats(progress)
         catalog = cls.catalog(campaign)
+        available = campaign.enabled and run.is_active() and bool(catalog)
         tracks = []
         for item in catalog:
             owned = bool(participation and days >= item['days'] and points >= item['points'])
             asset = item['asset']
             tracks.append({key: value for key, value in item.items() if key != 'asset'} | dict(
                 owned=owned, duration=asset.duration_seconds,
-                uri=(asset.source_uri if asset.raw_metadata.get('bgm_public') else sign_private_download_url(asset.playback_uri or asset.source_uri)) if owned else None,
+                uri=(asset.source_uri if asset.raw_metadata.get('bgm_public') else sign_private_download_url(asset.playback_uri or asset.source_uri)) if owned and available else None,
             ))
         return dict(
             key=campaign.key, title=campaign.title, title_en=campaign.title_en,
             summary=campaign.summary, summary_en=campaign.summary_en,
             starts_at=run.claimed_at.timestamp(), ends_at=run.ends_at.timestamp() if run.ends_at else None,
-            active=campaign.enabled and run.is_active() and bool(catalog), theme='bgm',
+            active=available, theme='bgm',
             presentation=presentation(campaign.config),
             assignment_mode=campaign.assignment_mode, duration_seconds=campaign.duration_seconds,
             newly_claimed=bool(run.attention_started_at and not run.user_views.filter(user=user).exists()),
@@ -169,9 +191,9 @@ class BgmService:
             personal_reward_claimable=False, personal_reward=None, space_reward_claimable=None,
             official_user=None, space_total=0, target=cls.GATES[-1][1], milestones=[], awakenings=[],
             bgm=dict(joined=participation is not None, style=participation.style if participation else None,
-                     mode=participation.mode if participation else 'off', track=participation.track if participation else '1',
-                     receive_audio=participation.receive_audio if participation else True,
-                     slots=participation.slots if participation else [], points=points, active_days=days,
+                     mode=participation.mode if participation and available else 'off', track=participation.track if participation else '1',
+                     receive_audio=(participation.receive_audio if participation else True) if available else False,
+                     slots=participation.slots if participation and available else [], points=points, active_days=days,
                      today_points=sum(today[kind] * value for kind, (_, value) in cls.TASKS.items()),
                      tasks=[dict(kind=kind, count=today[kind], limit=limit, points=value) for kind, (limit, value) in cls.TASKS.items()],
                      tracks=tracks, ready=bool(catalog)),
@@ -180,6 +202,8 @@ class BgmService:
     @classmethod
     def entrance_status(cls, user, chat_id):
         """One policy for preflight and sending, scoped to the actor and conversation."""
+        if not any(cls.catalog(run.campaign) for run in cls.active_runs(user.space)):
+            return dict(allowed=False, reason='ended', retry_after_seconds=0)
         latest = BgmEntrance.objects.filter(participation__progress__user=user, chat_id=chat_id).order_by('-created_at').first()
         remaining = max(0, math.ceil(cls.ENTRANCE_COOLDOWN_SECONDS - (timezone.now() - latest.created_at).total_seconds())) if latest else 0
         return dict(allowed=not remaining, reason='cooldown' if remaining else None, retry_after_seconds=remaining)
@@ -207,6 +231,7 @@ class BgmService:
         with transaction.atomic():
             # Serialize across campaigns too; one user's entrances never throttle another user.
             type(user).objects.select_for_update().get(pk=user.pk)
+            cls.require_active_run(campaign, user)
             participation = BgmParticipation.objects.select_for_update().select_related('progress').filter(progress__campaign=campaign, progress__user=user).first()
             if participation is None:
                 raise BgmErrors.CLOSED
