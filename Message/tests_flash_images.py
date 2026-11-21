@@ -1,4 +1,5 @@
 import json
+from base64 import b64decode
 from datetime import timedelta
 from io import BytesIO
 from unittest.mock import patch
@@ -60,13 +61,21 @@ class FlashImageTests(TestCase):
         self.assertEqual(sent['type'], MessageTypeChoice.FLASH_IMAGE)
         self.assertFalse(sent['payload']['flash_available'])
         self.assertNotIn('uri', sent['payload'])
-        self.assertIsNone(Message.objects.get(pk=message_id).media_resource_id)
+        message = Message.objects.get(pk=message_id)
+        self.assertIsNone(message.media_resource_id)
+        self.assertEqual(message.content, '')
+        thumbnail = FlashImage.objects.get(message_id=message_id).thumbnail
+        self.assertGreater(len(thumbnail), Message.vldt.MAX_CONTENT_LENGTH)
+        self.assertEqual(sent['payload']['flash_thumbnail'], thumbnail)
+        with Image.open(BytesIO(b64decode(thumbnail))) as preview:
+            self.assertLessEqual(max(preview.size), 10)
         self.assertEqual(self.send()['message_id'], message_id)
         self.assertEqual(self.reveal(self.outsider, message_id).status_code, 404)
         self.assertEqual(self.reveal(self.sender, message_id).status_code, 410)
         self.read.assert_not_called()
         peer_view = self.client.get(f'/messages/?chat_id={self.chat.pk}&limit=5', **self.headers(self.peer)).json()['body'][0]
         self.assertTrue(peer_view['payload']['flash_available'])
+        self.assertEqual(peer_view['payload']['flash_thumbnail'], thumbnail)
         self.assertNotIn('uri', peer_view['payload'])
         cursor = MessageEvent.sync_baseline_for_user(self.peer)['next_after']
         revealed = self.reveal(self.peer, message_id)
@@ -79,6 +88,8 @@ class FlashImageTests(TestCase):
                          [('message.updated', message_id)])
         self.assertEqual(MessageEvent.sync_for_user(self.sender, cursor, 10)['events'], [])
         self.assertEqual(self.reveal(self.peer, message_id).status_code, 410)
+        peer_after = self.client.get(f'/messages/?chat_id={self.chat.pk}&limit=5', **self.headers(self.peer)).json()['body'][0]
+        self.assertIsNone(peer_after['payload']['flash_thumbnail'])
         retained = FlashImage.objects.get(message_id=message_id)
         self.assertEqual(retained.pending_viewers, [])
         self.assertEqual(bytes(retained.pixels), b'')

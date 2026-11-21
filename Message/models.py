@@ -850,10 +850,10 @@ class Message(models.Model):
         return self.visible_for_user(self.chat, user).filter(id=self.id).exists()
 
     @classmethod
-    def create(cls, chat: Chat, user: User, message_type, content, reply_to=None, client_message_id=None, mention_user_ids=None, media_resource=None, *, flash_thumbnail=None):
+    def create(cls, chat: Chat, user: User, message_type, content, reply_to=None, client_message_id=None, mention_user_ids=None, media_resource=None, *, flash_image=False):
         if message_type in (MessageTypeChoice.SYSTEM, MessageTypeChoice.FORWARD_BUNDLE, MessageTypeChoice.OFFICIAL_NOTICE, MessageTypeChoice.SUBMISSION_INVITE, MessageTypeChoice.VOICE_CALL):
             raise MessageErrors.SYSTEM_MESSAGE_FORBIDDEN
-        if message_type == MessageTypeChoice.FLASH_IMAGE and (not flash_thumbnail or media_resource is not None):
+        if message_type == MessageTypeChoice.FLASH_IMAGE and (not flash_image or media_resource is not None):
             raise MessageErrors.PAYLOAD_INVALID
         if chat.has_active_member(user):
             chat.require_user_message_allowed(user)
@@ -905,7 +905,7 @@ class Message(models.Model):
                     raise MessageErrors.MEDIA_ASSET_INVALID
                 normalized_content = ''
             elif message_type == MessageTypeChoice.FLASH_IMAGE:
-                normalized_content = json.dumps({'thumbnail': flash_thumbnail}, separators=(',', ':'))
+                normalized_content = ''
             else:
                 normalized_content = cls.normalize_content(message_type, content)
             if message_type == MessageTypeChoice.ACTIVITY:
@@ -2110,6 +2110,7 @@ class FlashImage(models.Model):
     message = models.OneToOneField(Message, on_delete=models.CASCADE, related_name='flash_image')
     pixels = models.BinaryField()
     storage_key = models.CharField(max_length=128, blank=True, default='', db_default='')
+    thumbnail = models.CharField(max_length=1500, blank=True, default='', db_default='')
     pending_viewers = models.JSONField(default=list)
     expires_at = models.DateTimeField(db_index=True)
 

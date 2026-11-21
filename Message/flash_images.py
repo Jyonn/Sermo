@@ -80,14 +80,17 @@ def flash_payload(message, viewer):
     expiry = message.created_at + LIFETIME
     now = timezone.now()
     available = False
-    if viewer is not None and viewer.pk != message.user_id and expiry > now:
-        pending = FlashImage.objects.filter(message_id=message.pk, expires_at__gt=now) \
-            .values_list('pending_viewers', flat=True).first()
-        available = viewer.pk in (pending or [])
-    show_thumbnail = available or (viewer is not None and viewer.pk == message.user_id and expiry > now)
+    thumbnail = None
+    if viewer is not None and expiry > now:
+        photo = (FlashImage.objects.filter(message_id=message.pk, expires_at__gt=now)
+                 .values('pending_viewers', 'thumbnail').first())
+        if photo:
+            available = viewer.pk in photo['pending_viewers']
+        if available or viewer.pk == message.user_id:
+            thumbnail = (photo and photo['thumbnail']) or Message._parse_payload(message.content).get('thumbnail')
     return {
         'kind': 'flash_image',
-        'flash_thumbnail': Message._parse_payload(message.content).get('thumbnail') if show_thumbnail else None,
+        'flash_thumbnail': thumbnail,
         'flash_available': available,
         'flash_expires_at': expiry.timestamp(),
     }
@@ -133,12 +136,12 @@ class FlashImageSendView(View):
             return private_response(status=503)
         with transaction.atomic():
             message = Message.create(chat, user, MessageTypeChoice.FLASH_IMAGE, '',
-                                     client_message_id=client_id, flash_thumbnail=thumbnail)
+                                     client_message_id=client_id, flash_image=True)
             if message.type != MessageTypeChoice.FLASH_IMAGE or message.is_deleted:
                 raise MessageErrors.PAYLOAD_INVALID
             if message._was_created:
-                FlashImage.objects.create(message=message, pixels=b'', storage_key=storage_key, pending_viewers=recipients,
-                                          expires_at=message.created_at + LIFETIME)
+                FlashImage.objects.create(message=message, pixels=b'', storage_key=storage_key, thumbnail=thumbnail,
+                                          pending_viewers=recipients, expires_at=message.created_at + LIFETIME)
                 if not chat.submission:
                     NotificationEvent.emit_message_notifications(message, actor=user)
         return message.jsonl(request=request)
