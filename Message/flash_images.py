@@ -1,9 +1,13 @@
 """One-view image delivery, independent of the reusable media library."""
 from base64 import b64encode
 from datetime import timedelta
+from hashlib import sha256
+from hmac import new as hmac_digest
 from io import BytesIO
 
+import requests
 from PIL import Image, ImageFilter, ImageOps, UnidentifiedImageError
+from django.conf import settings
 from django.db import transaction
 from django.http import HttpResponse
 from django.utils import timezone
@@ -16,10 +20,39 @@ from Message.params import MessageParams
 from Message.validators import MessageErrors
 from User.models import NotificationEvent
 from utils import auth
+from utils.qiniu import QINIU_UPLOAD_URL, avatar_uri_for_key, build_upload_token, sign_private_download_url
 
 
 MAX_UPLOAD = 2 * 1024 * 1024
 LIFETIME = timedelta(hours=24)
+
+
+def store_photo(pixels, chat_id, user_id, client_id):
+    scope = f'flash:{chat_id}:{user_id}:{client_id}:{sha256(pixels).hexdigest()}'
+    digest = hmac_digest(settings.SECRET_KEY.encode(), scope.encode(), sha256).hexdigest()
+    key = f'frienden/flash-photos/{digest}.jpg'
+    token = build_upload_token(key, max_file_size=MAX_UPLOAD)
+    response = requests.post(QINIU_UPLOAD_URL, data={'key': key, 'token': token},
+                             files={'file': ('photo.jpg', pixels, 'image/jpeg')}, timeout=(3, 8))
+    response.raise_for_status()
+    if response.json().get('key') != key:
+        raise ValueError('Invalid storage receipt')
+    return key
+
+
+def read_photo(key):
+    uri = sign_private_download_url(avatar_uri_for_key(key), expire_seconds=30)
+    with requests.get(uri, allow_redirects=False, stream=True, timeout=(3, 8)) as response:
+        if response.status_code != 200:
+            raise ValueError('Photo source unavailable')
+        pixels = bytearray()
+        for chunk in response.iter_content(64 * 1024):
+            pixels.extend(chunk)
+            if len(pixels) > MAX_UPLOAD:
+                raise ValueError('Photo source exceeded upload limit')
+        if not pixels.startswith(b'\xff\xd8\xff'):
+            raise ValueError('Invalid photo source')
+        return bytes(pixels)
 
 
 def encode_image(upload):
@@ -89,18 +122,22 @@ class FlashImageSendView(View):
                 raise MessageErrors.PAYLOAD_INVALID
             return existing.jsonl(request=request)
         full, thumbnail = encode_image(request.FILES.get('image'))
+        recipients = list(ChatMember.objects.filter(
+            chat=chat, status=ChatMemberStatusChoice.ACTIVE, user__is_deleted=False,
+        ).exclude(user=user).values_list('user_id', flat=True))
+        if not recipients:
+            raise MessageErrors.PAYLOAD_INVALID
+        try:
+            storage_key = store_photo(full, chat.pk, user.pk, client_id)
+        except (ValueError, requests.RequestException):
+            return private_response(status=503)
         with transaction.atomic():
-            recipients = list(ChatMember.objects.filter(
-                chat=chat, status=ChatMemberStatusChoice.ACTIVE, user__is_deleted=False,
-            ).exclude(user=user).values_list('user_id', flat=True))
-            if not recipients:
-                raise MessageErrors.PAYLOAD_INVALID
             message = Message.create(chat, user, MessageTypeChoice.FLASH_IMAGE, '',
                                      client_message_id=client_id, flash_thumbnail=thumbnail)
             if message.type != MessageTypeChoice.FLASH_IMAGE or message.is_deleted:
                 raise MessageErrors.PAYLOAD_INVALID
             if message._was_created:
-                FlashImage.objects.create(message=message, pixels=full, pending_viewers=recipients,
+                FlashImage.objects.create(message=message, pixels=b'', storage_key=storage_key, pending_viewers=recipients,
                                           expires_at=message.created_at + LIFETIME)
                 if not chat.submission:
                     NotificationEvent.emit_message_notifications(message, actor=user)
@@ -121,22 +158,21 @@ class FlashImageRevealView(View):
             user.space.require_chat_enabled()
         if message.chat.group:
             user.space.require_group_join_allowed(user)
+        item = FlashImage.objects.filter(message_id=message.pk, expires_at__gt=timezone.now()).first()
+        if item is None or user.pk not in item.pending_viewers:
+            return private_response(status=410)
+        try:
+            pixels = read_photo(item.storage_key) if item.storage_key else bytes(item.pixels)
+        except (ValueError, requests.RequestException):
+            return private_response(status=503)
         with transaction.atomic():
-            item = FlashImage.objects.select_for_update().filter(message_id=message.pk).first()
-            if item is None:
+            item = FlashImage.objects.select_for_update().defer('pixels').filter(pk=item.pk, expires_at__gt=timezone.now()).first()
+            if item is None or user.pk not in item.pending_viewers:
                 return private_response(status=410)
-            if item.expires_at <= timezone.now():
-                item.delete()
-                return private_response(status=410)
-            if user.pk not in item.pending_viewers:
-                return private_response(status=410)
-            pixels = bytes(item.pixels)
             viewers = [pk for pk in item.pending_viewers if pk != user.pk]
             changed = FlashImage.objects.filter(pk=item.pk, pending_viewers=item.pending_viewers).update(pending_viewers=viewers)
             if not changed:
                 return private_response(status=410)
-            if not viewers:
-                item.delete()
             MessageEvent.objects.create(message=message, chat=message.chat, actor=user,
                                         target_user=user, type=MessageEventTypeChoice.UPDATED)
         return private_response(pixels)

@@ -27,6 +27,14 @@ class FlashImageTests(TestCase):
         Friendship.ensure_locked_friendship(self.peer, self.outsider)
         self.chat = Chat.get_or_create_direct(self.sender, self.peer)
         self.target = Chat.get_or_create_direct(self.peer, self.outsider)
+        self.cloud = {}
+        self.store = self.enterContext(patch('Message.flash_images.store_photo', side_effect=self.store_fixture))
+        self.read = self.enterContext(patch('Message.flash_images.read_photo', side_effect=lambda key: self.cloud[key]))
+
+    def store_fixture(self, data, chat_id, user_id, client_id):
+        key = f'fixture/{chat_id}/{user_id}/{client_id}.jpg'
+        self.cloud[key] = data
+        return key
 
     def headers(self, user):
         return {'HTTP_AUTHORIZATION': f"Bearer {auth.get_login_token(user)['auth']}"}
@@ -56,6 +64,7 @@ class FlashImageTests(TestCase):
         self.assertEqual(self.send()['message_id'], message_id)
         self.assertEqual(self.reveal(self.outsider, message_id).status_code, 404)
         self.assertEqual(self.reveal(self.sender, message_id).status_code, 410)
+        self.read.assert_not_called()
         peer_view = self.client.get(f'/messages/?chat_id={self.chat.pk}&limit=5', **self.headers(self.peer)).json()['body'][0]
         self.assertTrue(peer_view['payload']['flash_available'])
         self.assertNotIn('uri', peer_view['payload'])
@@ -70,9 +79,14 @@ class FlashImageTests(TestCase):
                          [('message.updated', message_id)])
         self.assertEqual(MessageEvent.sync_for_user(self.sender, cursor, 10)['events'], [])
         self.assertEqual(self.reveal(self.peer, message_id).status_code, 410)
-        self.assertFalse(FlashImage.objects.filter(message_id=message_id).exists())
+        retained = FlashImage.objects.get(message_id=message_id)
+        self.assertEqual(retained.pending_viewers, [])
+        self.assertEqual(bytes(retained.pixels), b'')
+        self.assertEqual(self.cloud[retained.storage_key], revealed.content)
         self.assertEqual(self.send()['message_id'], message_id)
         self.assertEqual(self.reveal(self.peer, message_id).status_code, 410)
+        self.store.assert_called_once()
+        self.read.assert_called_once()
 
     def test_expired_and_forwarding_are_blocked(self):
         message_id = self.send()['message_id']
@@ -83,4 +97,13 @@ class FlashImageTests(TestCase):
             self.assertEqual(response.status_code, 400, response.content)
         FlashImage.objects.filter(message_id=message_id).update(expires_at=timezone.now() - timedelta(seconds=1))
         self.assertEqual(self.reveal(self.peer, message_id).status_code, 410)
-        self.assertFalse(FlashImage.objects.filter(message_id=message_id).exists())
+        self.assertIn(FlashImage.objects.get(message_id=message_id).storage_key, self.cloud)
+        self.read.assert_not_called()
+
+    def test_storage_failure_does_not_consume_view(self):
+        message_id = self.send()['message_id']
+        self.read.side_effect = ValueError('temporary read failure')
+        self.assertEqual(self.reveal(self.peer, message_id).status_code, 503)
+        self.assertEqual(FlashImage.objects.get(message_id=message_id).pending_viewers, [self.peer.pk])
+        self.read.side_effect = lambda key: self.cloud[key]
+        self.assertEqual(self.reveal(self.peer, message_id).status_code, 200)

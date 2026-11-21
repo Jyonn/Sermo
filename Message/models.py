@@ -1962,7 +1962,7 @@ class Message(models.Model):
         self.is_deleted = True
         self.save(update_fields=['is_deleted'])
         if self.type == MessageTypeChoice.FLASH_IMAGE:
-            FlashImage.objects.filter(message_id=self.pk).delete()
+            FlashImage.objects.filter(message_id=self.pk).update(pending_viewers=[])
         MessageEvent.record_recalled(self)
         if self.media_resource_id:
             self.media_resource.recalculate_reference_count()
@@ -2109,6 +2109,7 @@ class AudioTranscript(models.Model):
 class FlashImage(models.Model):
     message = models.OneToOneField(Message, on_delete=models.CASCADE, related_name='flash_image')
     pixels = models.BinaryField()
+    storage_key = models.CharField(max_length=128, blank=True, default='', db_default='')
     pending_viewers = models.JSONField(default=list)
     expires_at = models.DateTimeField(db_index=True)
 

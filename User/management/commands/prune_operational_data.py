@@ -7,7 +7,6 @@ from django.db.models import Q
 from django.utils import timezone
 
 from PlatformAdmin.models import ClientDebugReport, PlatformAdminEmailCode
-from Message.models import FlashImage
 from Space.models import SpaceEmailVerificationCode, SpacePhoneVerificationCode
 from User.models import (
     AccountSwitchTicket,
@@ -62,7 +61,6 @@ class Command(BaseCommand):
         credential_cutoff = now - datetime.timedelta(days=credential_grace_days)
         web_push_cutoff = now - datetime.timedelta(days=web_push_stale_days)
         rules = {
-            'expired_flash_images': FlashImage.objects.filter(expires_at__lte=now),
             'client_debug_reports': ClientDebugReport.objects.filter(created_at__lt=now - datetime.timedelta(hours=6)),
             'notification_deliveries': NotificationDelivery.objects.filter(
                 status__in=(
