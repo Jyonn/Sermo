@@ -62,6 +62,7 @@ class MessageTypeChoice(Choice):
     RESEARCH_TASK = 16
     RESEARCH_COMMENT = 17
     RESEARCH_REPLY = 18
+    FLASH_IMAGE = 19
 
 
 class MessageEventTypeChoice(Choice):
@@ -735,6 +736,7 @@ class Message(models.Model):
     validators = MessageValidator
     vldt = MessageValidator
     MIN_CLIENT_VERSION_BY_TYPE = {value: '2026.11.19.6' for value in (15, 16, 17, 18)}
+    MIN_CLIENT_VERSION_BY_TYPE[MessageTypeChoice.FLASH_IMAGE] = '2026.11.21.1'
     MEDIA_KIND_BY_TYPE = {
         MessageTypeChoice.IMAGE: 'image',
         MessageTypeChoice.FILE: 'file',
@@ -743,6 +745,7 @@ class Message(models.Model):
     }
     PREVIEW_TEXT_BY_TYPE = {
         MessageTypeChoice.IMAGE: '[图片]',
+        MessageTypeChoice.FLASH_IMAGE: '[闪图]',
         MessageTypeChoice.VIDEO: '[视频]',
         MessageTypeChoice.AUDIO: '[语音]',
         MessageTypeChoice.FILE: '[文件]',
@@ -847,9 +850,11 @@ class Message(models.Model):
         return self.visible_for_user(self.chat, user).filter(id=self.id).exists()
 
     @classmethod
-    def create(cls, chat: Chat, user: User, message_type, content, reply_to=None, client_message_id=None, mention_user_ids=None, media_resource=None):
+    def create(cls, chat: Chat, user: User, message_type, content, reply_to=None, client_message_id=None, mention_user_ids=None, media_resource=None, *, flash_thumbnail=None):
         if message_type in (MessageTypeChoice.SYSTEM, MessageTypeChoice.FORWARD_BUNDLE, MessageTypeChoice.OFFICIAL_NOTICE, MessageTypeChoice.SUBMISSION_INVITE, MessageTypeChoice.VOICE_CALL):
             raise MessageErrors.SYSTEM_MESSAGE_FORBIDDEN
+        if message_type == MessageTypeChoice.FLASH_IMAGE and (not flash_thumbnail or media_resource is not None):
+            raise MessageErrors.PAYLOAD_INVALID
         if chat.has_active_member(user):
             chat.require_user_message_allowed(user)
             if chat.submission:
@@ -863,6 +868,7 @@ class Message(models.Model):
                     content = json.dumps(reference, separators=(',', ':'), ensure_ascii=False)
             capability = {
                 MessageTypeChoice.IMAGE: 'chat.message.send.image',
+                MessageTypeChoice.FLASH_IMAGE: 'chat.message.send.image',
                 MessageTypeChoice.AUDIO: 'chat.message.send.audio',
                 MessageTypeChoice.LOCATION: 'chat.message.send.location',
                 MessageTypeChoice.VIDEO: 'chat.message.send.video',
@@ -898,6 +904,8 @@ class Message(models.Model):
                 ):
                     raise MessageErrors.MEDIA_ASSET_INVALID
                 normalized_content = ''
+            elif message_type == MessageTypeChoice.FLASH_IMAGE:
+                normalized_content = json.dumps({'thumbnail': flash_thumbnail}, separators=(',', ':'))
             else:
                 normalized_content = cls.normalize_content(message_type, content)
             if message_type == MessageTypeChoice.ACTIVITY:
@@ -1099,7 +1107,7 @@ class Message(models.Model):
         chat.require_user_message_allowed(user)
         if source.type == MessageTypeChoice.AUDIO:
             raise MessageErrors.FORWARD_AUDIO_BUNDLE_ONLY
-        if source.type in (MessageTypeChoice.SYSTEM, MessageTypeChoice.OFFICIAL_NOTICE, MessageTypeChoice.SUBMISSION_INVITE, MessageTypeChoice.MAP_ACCESS, MessageTypeChoice.FORWARD_BUNDLE, MessageTypeChoice.VOICE_CALL):
+        if source.type in (MessageTypeChoice.SYSTEM, MessageTypeChoice.OFFICIAL_NOTICE, MessageTypeChoice.SUBMISSION_INVITE, MessageTypeChoice.MAP_ACCESS, MessageTypeChoice.FORWARD_BUNDLE, MessageTypeChoice.VOICE_CALL, MessageTypeChoice.FLASH_IMAGE):
             raise MessageErrors.FORWARD_UNSUPPORTED
         if not chat.has_active_member(user):
             raise MessageErrors.NOT_A_MEMBER
@@ -1628,6 +1636,9 @@ class Message(models.Model):
         return viewer if isinstance(viewer, User) else None
 
     def _payload_for_type(self, request: HttpRequest = None):
+        if self.type == MessageTypeChoice.FLASH_IMAGE:
+            from Message.flash_images import flash_payload
+            return flash_payload(self, self._viewer_from_request(request))
         if self.type in (15, 16, 17, 18):
             from Message.shared_references import payload
             return payload(self.type, self._parse_payload(self.content), self._viewer_from_request(request))
@@ -1950,6 +1961,8 @@ class Message(models.Model):
             return
         self.is_deleted = True
         self.save(update_fields=['is_deleted'])
+        if self.type == MessageTypeChoice.FLASH_IMAGE:
+            FlashImage.objects.filter(message_id=self.pk).delete()
         MessageEvent.record_recalled(self)
         if self.media_resource_id:
             self.media_resource.recalculate_reference_count()
@@ -2091,6 +2104,13 @@ class AudioTranscript(models.Model):
             'text': self.text if self.status == AudioTranscriptStatusChoice.READY else '',
             'cached': bool(cached and self.status == AudioTranscriptStatusChoice.READY),
         }
+
+
+class FlashImage(models.Model):
+    message = models.OneToOneField(Message, on_delete=models.CASCADE, related_name='flash_image')
+    pixels = models.BinaryField()
+    pending_viewers = models.JSONField(default=list)
+    expires_at = models.DateTimeField(db_index=True)
 
 
 class MessageCopy(models.Model):
@@ -3075,7 +3095,7 @@ class ForwardBundle(models.Model):
 
     @classmethod
     def create_from_messages(cls, messages, user, request=None):
-        if any(message.type == MessageTypeChoice.VOICE_CALL for message in messages):
+        if any(message.type in (MessageTypeChoice.VOICE_CALL, MessageTypeChoice.FLASH_IMAGE) for message in messages):
             raise MessageErrors.FORWARD_UNSUPPORTED
         ordered = sorted(messages, key=lambda message: (message.created_at, message.id))
         source_chat = ordered[0].chat if ordered else None

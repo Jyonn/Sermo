@@ -5,8 +5,11 @@ from Message.views import ExternalMediaPreviewRefreshView, ExternalMediaPreviewV
 
 from Message.views import MessageHistoryManagementView
 from Message.monifa import MonifaOtpView
+from Message.flash_images import FlashImageRevealView, FlashImageSendView
 
 urlpatterns = [
+    path('flash-image', FlashImageSendView.as_view()),
+    path('flash-image/reveal', FlashImageRevealView.as_view()),
     path('monifa-otp', MonifaOtpView.as_view()),
     path('history', MessageHistoryManagementView.as_view(), name='history management'),
     path('copies', MessageCopyView.as_view(), name='message copy suggestions'),
