@@ -1,5 +1,6 @@
 from django.urls import path
 from User.quick_actions import ChatQuickActionsView
+from User.permission_quotas import PersonalPermissionQuotaView
 from User.birthday_views import BirthdayView, BirthdaySeenView, BirthdayLetterOpenView, BirthdayLetterArchiveView
 from User.web_push_receipts import WebPushReceiptView
 from User.chronelle_account import ChronelleCallbackView, FullChronelleView
@@ -138,6 +139,7 @@ urlpatterns = [
     path('me/wechat-miniprogram', WeChatMiniProgramBindingView.as_view(), name='wechat miniprogram binding'),
     path('heartbeat', HeartbeatView.as_view(), name='heartbeat'),
     path('me', UserMeView.as_view(), name='user me'),
+    path('me/permissions-quotas', PersonalPermissionQuotaView.as_view(), name='personal permissions and quotas'),
     path('me/birthday', BirthdayView.as_view()),
     path('me/birthday/seen', BirthdaySeenView.as_view()),
     path('me/birthday/letters', BirthdayLetterArchiveView.as_view()),

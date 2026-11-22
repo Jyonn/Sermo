@@ -34,6 +34,16 @@ def require_enabled():
     if not enabled():
         raise CallError('unavailable', 503)
 
+def require_service():
+    from Chat.voice_media import configured
+    require_enabled()
+    if not configured():
+        raise CallError('unavailable', 503)
+
+
+def require_vip(*users):
+    if not all(user.is_permanent_vip for user in users):
+        raise CallError('vip_required')
 
 def week_at(now):
     day = now.astimezone(ZONE).date()
@@ -66,9 +76,34 @@ def participants(chat, user):
     return peer
 
 
-def remaining(key, week):
+def weekly_usage(key, week):
     row = VoiceWeeklyQuota.objects.filter(identity_id=key, week=week).first()
-    return max(0, WEEK_SECONDS - row.used_seconds - row.reserved_seconds) if row else WEEK_SECONDS
+    used, reserved = (row.used_seconds, row.reserved_seconds) if row else (0, 0)
+    return dict(used=used, reserved=reserved, remaining=max(0, WEEK_SECONDS - used - reserved))
+
+
+def remaining(key, week):
+    return weekly_usage(key, week)['remaining']
+
+
+def personal_quota(user):
+    week = week_at(timezone.now())
+    result = dict(limit=WEEK_SECONDS, reset_at=week_end(week).timestamp(), reason=None, usage=None)
+    try:
+        require_service()
+        require_vip(user)
+        key = identity_key(user)
+    except CallError as error:
+        return {**result, 'reason': error.reason}
+
+    result['usage'] = usage = weekly_usage(key, week)
+    if not user.space.chat_enabled:
+        result['reason'] = 'space_disabled'
+    elif user.chat_mute_payload()['active']:
+        result['reason'] = 'muted'
+    elif not usage['remaining']:
+        result['reason'] = 'voice_reserved' if usage['reserved'] else 'exhausted'
+    return result
 
 
 def identities_busy(keys):
@@ -92,12 +127,8 @@ def capability(chat, user):
     result = dict(enabled=enabled(), can_call=False, reason='', remaining_seconds=0, max_seconds=0,
                   reset_at=week_end(week_at(now)).timestamp(), peer=peer.tiny_json(), chat_id=chat.id)
     try:
-        require_enabled()
-        from Chat.voice_media import configured
-        if not configured():
-            raise CallError('unavailable', 503)
-        if not user.is_permanent_vip or not peer.is_permanent_vip:
-            raise CallError('vip_required')
+        require_service()
+        require_vip(user, peer)
         own, other = identity_key(user), identity_key(peer)
         if own == other:
             raise CallError('same_person')

@@ -637,8 +637,8 @@ class LinkPreview(models.Model):
             if preview.status != LinkPreviewStatusChoice.PENDING and not force and not cls._is_expired(preview):
                 return preview, False
             if JustOneProvider.supports(preview.url):
-                from Message.social_quota import consume
-                error = ('provider_unavailable' if not os.environ.get('JUSTONEAPI_TOKEN') else
+                from Message.social_quota import configured, consume
+                error = ('provider_unavailable' if not configured() else
                          consume(requester_id) if requester_id else 'vip_required')
                 if error:
                     preview._social_error = error

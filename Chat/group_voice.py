@@ -22,15 +22,12 @@ def check_member(chat, user):
             or user.is_deleted or not chat.has_active_member(user) or not chat.space.chat_enabled
             or chat.send_restriction_for(user)['active']):
         raise voice.CallError('forbidden', 403)
-    if not user.is_permanent_vip:
-        raise voice.CallError('vip_required')
+    voice.require_vip(user)
     return voice.identity_key(user)
 
 
 def eligibility(chat, user, now):
-    voice.require_enabled()
-    if not voice_media.configured():
-        raise voice.CallError('unavailable', 503)
+    voice.require_service()
     key = check_member(chat, user)
     week = voice.week_at(now)
     if voice.identities_busy([key]):
