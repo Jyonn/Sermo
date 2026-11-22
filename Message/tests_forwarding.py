@@ -93,6 +93,7 @@ class MessageForwardingTests(TestCase):
             source_uri='https://example.com/sermo/messages/audio/source.m4a',
             kind=MediaAsset.KIND_AUDIO,
             status=MediaAsset.STATUS_READY,
+            duration_seconds=5,
         )
         resource = MediaResource.acquire(self.peer, asset, MediaAsset.KIND_AUDIO, 'source.m4a')
         voice = Message.objects.create(
@@ -111,3 +112,13 @@ class MessageForwardingTests(TestCase):
         response = self.post_forward([voice.id], 'bundle')
         self.assertEqual(response.status_code, 200, response.content)
         self.assertTrue(Message.objects.filter(chat=self.target_chat, type=MessageTypeChoice.FORWARD_BUNDLE).exists())
+
+        own_voice = Message.objects.create(
+            chat=self.source_chat, user=self.user, type=MessageTypeChoice.AUDIO,
+            content=voice.content, media_resource=MediaResource.acquire(self.user, asset, MediaAsset.KIND_AUDIO, 'source.m4a'),
+        )
+        response = self.post_forward([own_voice.id], 'individual')
+        self.assertEqual(response.status_code, 200, response.content)
+        forwarded = Message.objects.get(chat=self.target_chat, type=MessageTypeChoice.AUDIO)
+        self.assertEqual(forwarded.media_resource.asset_id, asset.id)
+        self.assertEqual(forwarded._payload_for_type()['duration_seconds'], 5)

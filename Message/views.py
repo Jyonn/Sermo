@@ -269,10 +269,12 @@ class MessageForwardView(View):
             MessageTypeChoice.VIDEO, MessageTypeChoice.AUDIO, MessageTypeChoice.LOCATION,
             MessageTypeChoice.STATEMENT, MessageTypeChoice.STICKER, MessageTypeChoice.ACTIVITY,
             MessageTypeChoice.PROFILE, MessageTypeChoice.RESEARCH_TASK,
-            MessageTypeChoice.RESEARCH_COMMENT, MessageTypeChoice.RESEARCH_REPLY,
+            MessageTypeChoice.RESEARCH_COMMENT, MessageTypeChoice.RESEARCH_REPLY, MessageTypeChoice.FLASH_IMAGE,
         }
         for message in source_messages:
             if message.type not in allowed_types:
+                raise MessageErrors.FORWARD_UNSUPPORTED
+            if message.type == MessageTypeChoice.FLASH_IMAGE and message.user_id != request.user.pk:
                 raise MessageErrors.FORWARD_UNSUPPORTED
             if not message.is_visible_to(request.user):
                 raise MessageErrors.NOT_A_MEMBER
@@ -280,7 +282,7 @@ class MessageForwardView(View):
                 from Message.shared_references import payload
                 payload(message.type, Message._parse_payload(message.content), request.user, require_access=True)
         if request.json.forward_mode == 'individual' and any(
-            message.type == MessageTypeChoice.AUDIO for message in source_messages
+            message.type == MessageTypeChoice.AUDIO and message.user_id != request.user.pk for message in source_messages
         ):
             raise MessageErrors.FORWARD_AUDIO_BUNDLE_ONLY
 
@@ -301,7 +303,7 @@ class MessageForwardView(View):
 
         created = []
         with transaction.atomic():
-            bundle = ForwardBundle.create_from_messages(source_messages, request.user, request=request) \
+            bundle = ForwardBundle.create_from_messages(source_messages, request.user, request=request, allow_flash=True) \
                 if request.json.forward_mode == 'bundle' else None
             for target in targets:
                 if bundle is not None:

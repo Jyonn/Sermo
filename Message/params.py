@@ -49,6 +49,7 @@ class MessageParams(metaclass=Params):
     history_ids = Validator('message_ids').to(validate_history_ids).default([])
 
     message_id = Validator('message_id', final_name='message').to(int).to(Message.index)
+    flash_position = Validator('position').to(int).bool(lambda value: -1 <= value < 50).default(-1)
     message_ids = Validator('message_ids').to(validate_message_ids)
     target_chat_ids = Validator('target_chat_ids').to(validate_target_chat_ids)
     forward_mode = Validator('mode', final_name='forward_mode').to(str).bool(

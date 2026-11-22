@@ -9,6 +9,7 @@ import requests
 from PIL import Image, ImageFilter, ImageOps, UnidentifiedImageError
 from django.conf import settings
 from django.db import transaction
+from django.db.models import F
 from django.http import HttpResponse
 from django.utils import timezone
 from django.views import View
@@ -76,24 +77,63 @@ def encode_image(upload):
         raise MessageErrors.PAYLOAD_INVALID from None
 
 
-def flash_payload(message, viewer):
-    expiry = message.created_at + LIFETIME
-    now = timezone.now()
-    available = False
-    thumbnail = None
-    if viewer is not None and expiry > now:
-        photo = (FlashImage.objects.filter(message_id=message.pk, expires_at__gt=now)
-                 .values('pending_viewers', 'thumbnail').first())
-        if photo:
-            available = viewer.pk in photo['pending_viewers']
-        if available or viewer.pk == message.user_id:
-            thumbnail = (photo and photo['thumbnail']) or Message._parse_payload(message.content).get('thumbnail')
-    return {
+def delivery_recipients(chat, user):
+    return list(ChatMember.objects.filter(
+        chat=chat, status=ChatMemberStatusChoice.ACTIVE, user__is_deleted=False,
+    ).exclude(user=user).values_list('user_id', flat=True))
+
+
+def copy_delivery(source, message, user, *, position=-1):
+    if source is None or source.user_id != user.pk or not source.is_visible_to(user):
+        raise MessageErrors.FORWARD_UNSUPPORTED
+    photo = FlashImage.objects.filter(message=source, position=-1).first()
+    recipients = delivery_recipients(message.chat, user)
+    if photo is None or not recipients:
+        raise MessageErrors.FORWARD_UNSUPPORTED
+    return FlashImage.objects.create(
+        message=message, position=position, storage_key=photo.storage_key, pixels=photo.pixels,
+        thumbnail=photo.thumbnail or Message._parse_payload(source.content).get('thumbnail', ''),
+        pending_viewers=recipients, viewed_users=[], expires_at=message.created_at + LIFETIME,
+    )
+
+
+def delivery_views(photo, message):
+    if photo.viewed_users is not None:
+        return photo.viewed_users
+    # Older deliveries recorded one targeted update per successful reveal.
+    return list(MessageEvent.objects.filter(
+        message=message, type=MessageEventTypeChoice.UPDATED, target_user_id=F('actor_id'),
+    ).exclude(actor_id=message.user_id).values_list('actor_id', flat=True).distinct())
+
+
+def delivery_payload(message, viewer, photo):
+    result = {
         'kind': 'flash_image',
-        'flash_thumbnail': thumbnail,
-        'flash_available': available,
-        'flash_expires_at': expiry.timestamp(),
+        'flash_available': False,
+        'flash_expires_at': (photo.expires_at if photo else message.created_at + LIFETIME).timestamp(),
     }
+    if photo is None or viewer is None:
+        return result
+    sender = viewer.pk == message.user_id
+    viewed_users = delivery_views(photo, message)
+    viewed = viewer.pk in viewed_users
+    available = sender or (photo.expires_at > timezone.now() and viewer.pk in photo.pending_viewers)
+    result.update(flash_available=available, flash_viewed=viewed, flash_sender=sender, flash_thumbnail=None)
+    if sender or available:
+        result['flash_thumbnail'] = photo.thumbnail or Message._parse_payload(message.content).get('thumbnail')
+    if sender:
+        result.update(flash_viewed_count=len(viewed_users),
+                      flash_recipient_count=len(photo.pending_viewers) + len(viewed_users))
+    if photo.position >= 0:
+        result.update(flash_message_id=message.pk, flash_position=photo.position)
+    return result
+
+
+def flash_payload(message, viewer):
+    photo = None
+    if viewer is not None:
+        photo = FlashImage.objects.filter(message=message, position=-1).defer('pixels', 'storage_key').first()
+    return delivery_payload(message, viewer, photo)
 
 
 def private_response(content=b'', status=200):
@@ -125,9 +165,7 @@ class FlashImageSendView(View):
                 raise MessageErrors.PAYLOAD_INVALID
             return existing.jsonl(request=request)
         full, thumbnail = encode_image(request.FILES.get('image'))
-        recipients = list(ChatMember.objects.filter(
-            chat=chat, status=ChatMemberStatusChoice.ACTIVE, user__is_deleted=False,
-        ).exclude(user=user).values_list('user_id', flat=True))
+        recipients = delivery_recipients(chat, user)
         if not recipients:
             raise MessageErrors.PAYLOAD_INVALID
         try:
@@ -141,7 +179,7 @@ class FlashImageSendView(View):
                 raise MessageErrors.PAYLOAD_INVALID
             if message._was_created:
                 FlashImage.objects.create(message=message, pixels=b'', storage_key=storage_key, thumbnail=thumbnail,
-                                          pending_viewers=recipients, expires_at=message.created_at + LIFETIME)
+                                          pending_viewers=recipients, viewed_users=[], expires_at=message.created_at + LIFETIME)
                 if not chat.submission:
                     NotificationEvent.emit_message_notifications(message, actor=user)
         return message.jsonl(request=request)
@@ -149,10 +187,12 @@ class FlashImageSendView(View):
 
 class FlashImageRevealView(View):
     @auth.require_user
-    @analyse.query(MessageParams.message_id)
+    @analyse.query(MessageParams.message_id, MessageParams.flash_position)
     def post(self, request):
         message, user = request.query.message, request.user
-        if (message.type != MessageTypeChoice.FLASH_IMAGE or not message.chat.has_active_member(user)
+        position = request.query.position
+        expected_type = MessageTypeChoice.FLASH_IMAGE if position == -1 else MessageTypeChoice.FORWARD_BUNDLE
+        if (message.type != expected_type or not message.chat.has_active_member(user)
                 or not message.is_visible_to(user)):
             return private_response(status=404)
         if message.chat.submission:
@@ -161,21 +201,32 @@ class FlashImageRevealView(View):
             user.space.require_chat_enabled()
         if message.chat.group:
             user.space.require_group_join_allowed(user)
-        item = FlashImage.objects.filter(message_id=message.pk, expires_at__gt=timezone.now()).first()
-        if item is None or user.pk not in item.pending_viewers:
+        sender = user.pk == message.user_id
+        photos = FlashImage.objects.filter(message_id=message.pk, position=position)
+        item = photos.first()
+        if item is None or (not sender and (item.expires_at <= timezone.now() or user.pk not in item.pending_viewers)):
             return private_response(status=410)
         try:
             pixels = read_photo(item.storage_key) if item.storage_key else bytes(item.pixels)
         except (ValueError, requests.RequestException):
             return private_response(status=503)
+        if sender:
+            return private_response(pixels) if message.is_visible_to(user) else private_response(status=404)
         with transaction.atomic():
-            item = FlashImage.objects.select_for_update().defer('pixels').filter(pk=item.pk, expires_at__gt=timezone.now()).first()
+            item = photos.select_for_update().defer('pixels').filter(expires_at__gt=timezone.now()).first()
             if item is None or user.pk not in item.pending_viewers:
                 return private_response(status=410)
+            if not message.is_visible_to(user):
+                return private_response(status=404)
             viewers = [pk for pk in item.pending_viewers if pk != user.pk]
-            changed = FlashImage.objects.filter(pk=item.pk, pending_viewers=item.pending_viewers).update(pending_viewers=viewers)
+            views = [*delivery_views(item, message), user.pk]
+            changed = FlashImage.objects.filter(pk=item.pk, pending_viewers=item.pending_viewers).update(
+                pending_viewers=viewers, viewed_users=views)
             if not changed:
                 return private_response(status=410)
-            MessageEvent.objects.create(message=message, chat=message.chat, actor=user,
-                                        target_user=user, type=MessageEventTypeChoice.UPDATED)
+            MessageEvent.objects.bulk_create([
+                MessageEvent(message=message, chat=message.chat, actor=user,
+                             target_user_id=target_id, type=MessageEventTypeChoice.UPDATED)
+                for target_id in (user.pk, message.user_id)
+            ])
         return private_response(pixels)

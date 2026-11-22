@@ -1105,12 +1105,14 @@ class Message(models.Model):
     @classmethod
     def forward_individual(cls, source, chat: Chat, user: User):
         chat.require_user_message_allowed(user)
-        if source.type == MessageTypeChoice.AUDIO:
+        if source.type == MessageTypeChoice.AUDIO and source.user_id != user.pk:
             raise MessageErrors.FORWARD_AUDIO_BUNDLE_ONLY
-        if source.type in (MessageTypeChoice.SYSTEM, MessageTypeChoice.OFFICIAL_NOTICE, MessageTypeChoice.SUBMISSION_INVITE, MessageTypeChoice.MAP_ACCESS, MessageTypeChoice.FORWARD_BUNDLE, MessageTypeChoice.VOICE_CALL, MessageTypeChoice.FLASH_IMAGE):
+        if source.type in (MessageTypeChoice.SYSTEM, MessageTypeChoice.OFFICIAL_NOTICE, MessageTypeChoice.SUBMISSION_INVITE, MessageTypeChoice.MAP_ACCESS, MessageTypeChoice.FORWARD_BUNDLE, MessageTypeChoice.VOICE_CALL):
             raise MessageErrors.FORWARD_UNSUPPORTED
         if not chat.has_active_member(user):
             raise MessageErrors.NOT_A_MEMBER
+        if source.type == MessageTypeChoice.FLASH_IMAGE and source.user_id != user.pk:
+            raise MessageErrors.FORWARD_UNSUPPORTED
         if source.type in (15, 16, 17, 18):
             from Message.shared_references import payload
             payload(source.type, cls._parse_payload(source.content), user, require_access=True)
@@ -1126,6 +1128,9 @@ class Message(models.Model):
         MessageEvent.record_created(message)
         if message.media_resource_id:
             message.media_resource.recalculate_reference_count()
+        if source.type == MessageTypeChoice.FLASH_IMAGE:
+            from Message.flash_images import copy_delivery
+            copy_delivery(source, message, user)
         return message
 
     @classmethod
@@ -1145,6 +1150,9 @@ class Message(models.Model):
         MessageEvent.record_created(message)
         for resource_id in bundle.items.exclude(media_resource__isnull=True).values_list('media_resource_id', flat=True).distinct():
             MediaResource.objects.get(id=resource_id).recalculate_reference_count()
+        from Message.flash_images import copy_delivery
+        for item in bundle.items.filter(message_type=MessageTypeChoice.FLASH_IMAGE).select_related('original_message'):
+            copy_delivery(item.original_message, message, user, position=item.position)
         return message
 
     @classmethod
@@ -1758,7 +1766,7 @@ class Message(models.Model):
         if self.type == MessageTypeChoice.FORWARD_BUNDLE:
             if self.forward_bundle_id is None:
                 return dict(kind='forward_bundle', unavailable=True, items=[])
-            return self.forward_bundle.jsonl(request=request)
+            return self.forward_bundle.jsonl(request=request, delivery=self)
         if self.type == MessageTypeChoice.FILE and not self.media_resource_id and not self.content.lstrip().startswith('{'):
             return dict(kind='file', text=self.content)
         if self.type in self.MEDIA_KIND_BY_TYPE:
@@ -1961,7 +1969,7 @@ class Message(models.Model):
             return
         self.is_deleted = True
         self.save(update_fields=['is_deleted'])
-        if self.type == MessageTypeChoice.FLASH_IMAGE:
+        if self.type in (MessageTypeChoice.FLASH_IMAGE, MessageTypeChoice.FORWARD_BUNDLE):
             FlashImage.objects.filter(message_id=self.pk).update(pending_viewers=[])
         MessageEvent.record_recalled(self)
         if self.media_resource_id:
@@ -2107,12 +2115,17 @@ class AudioTranscript(models.Model):
 
 
 class FlashImage(models.Model):
-    message = models.OneToOneField(Message, on_delete=models.CASCADE, related_name='flash_image')
+    message = models.ForeignKey(Message, on_delete=models.CASCADE, related_name='flash_images')
+    position = models.SmallIntegerField(default=-1, db_default=-1)
     pixels = models.BinaryField()
     storage_key = models.CharField(max_length=128, blank=True, default='', db_default='')
     thumbnail = models.CharField(max_length=1500, blank=True, default='', db_default='')
     pending_viewers = models.JSONField(default=list)
+    viewed_users = models.JSONField(null=True, blank=True)
     expires_at = models.DateTimeField(db_index=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['message', 'position'], name='flash_image_delivery_position')]
 
 
 class MessageCopy(models.Model):
@@ -3096,9 +3109,12 @@ class ForwardBundle(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     @classmethod
-    def create_from_messages(cls, messages, user, request=None):
-        if any(message.type in (MessageTypeChoice.VOICE_CALL, MessageTypeChoice.FLASH_IMAGE) for message in messages):
-            raise MessageErrors.FORWARD_UNSUPPORTED
+    def create_from_messages(cls, messages, user, request=None, *, allow_flash=False):
+        for message in messages:
+            if message.type == MessageTypeChoice.VOICE_CALL or (
+                message.type == MessageTypeChoice.FLASH_IMAGE and (not allow_flash or message.user_id != user.pk)
+            ):
+                raise MessageErrors.FORWARD_UNSUPPORTED
         ordered = sorted(messages, key=lambda message: (message.created_at, message.id))
         source_chat = ordered[0].chat if ordered else None
         bundle = cls.objects.create(created_by=user, source_chat=source_chat)
@@ -3111,7 +3127,10 @@ class ForwardBundle(models.Model):
                 message_type=message.type,
                 author=message._dictify_user(),
                 content=message.preview_text(),
-                payload=message._parse_payload(message.content) if message.type in (15, 16, 17, 18) else message._payload_for_type(request=request) or {},
+                payload={} if message.type == MessageTypeChoice.FLASH_IMAGE else (
+                    message._parse_payload(message.content) if message.type in (15, 16, 17, 18)
+                    else message._payload_for_type(request=request) or {}
+                ),
                 sent_at=message.created_at,
             )
             for position, message in enumerate(ordered)
@@ -3121,10 +3140,17 @@ class ForwardBundle(models.Model):
             MediaResource.objects.get(id=resource_id).recalculate_reference_count()
         return bundle
 
-    def jsonl(self, request=None, redact_identity=False):
+    def jsonl(self, request=None, redact_identity=False, delivery=None):
         prefetched = getattr(self, '_prefetched_objects_cache', {}).get('items')
         bundle_items = prefetched if prefetched is not None else self.items.select_related('media_resource__asset').order_by('position')
         items = [item.jsonl(request=request) for item in bundle_items]
+        viewer = Message._viewer_from_request(request)
+        if delivery is not None and viewer is not None and any(item['type'] == MessageTypeChoice.FLASH_IMAGE for item in items):
+            from Message.flash_images import delivery_payload
+            photos = {photo.position: photo for photo in delivery.flash_images.defer('pixels', 'storage_key')}
+            for item in items:
+                if item['type'] == MessageTypeChoice.FLASH_IMAGE:
+                    item['payload'] = delivery_payload(delivery, viewer, photos.get(item['position']))
         first_person_user_id = self.created_by_id
         if redact_identity:
             official_author_id = self.created_by_id if self.created_by.is_official else None
@@ -3164,6 +3190,7 @@ class ForwardBundle(models.Model):
         return dict(
             kind='forward_bundle',
             bundle_id=self.id,
+            delivery_message_id=delivery.pk if delivery else None,
             first_person_user_id=first_person_user_id,
             redacted_identity=bool(redact_identity),
             title=_('Chat history'),
