@@ -34,6 +34,54 @@ class ChronellePermissionsTests(TestCase):
         self.assertEqual(self.permissions(defaults()).status_code,200)
         self.assertFalse(self.permissions().json()['body']['review_required'])
 
+    @patch('User.chronelle_permissions.calendar', return_value=[{'id':7,'name':'Private'}])
+    def test_detail_defaults_and_legacy_saves_preserve_disabled_fields(self, calendar):
+        _, value = self.bound()
+        self.assertEqual(self.permissions().json()['body']['detail_fields'], {'location': True, 'description': True})
+        for invalid in [None, {'location': False}, {'location': 'false', 'description': True}]:
+            self.assertEqual(self.call({'audiences': defaults(), 'detail_fields': invalid}, self.path).status_code, 400)
+        fields = {'location': False, 'description': True}
+        self.assertEqual(self.call({'audiences': defaults(), 'detail_fields': fields}, self.path).status_code, 200)
+        self.assertEqual(self.permissions(defaults('detail')).status_code, 200)
+        initialize(self.user, value['binding']['subject'])
+        self.assertEqual(self.permissions().json()['body']['detail_fields'], fields)
+
+    @patch('User.chronelle_permissions.calendar', return_value=[{'id':7,'name':'Private'}])
+    @patch('Chat.research_calendar.remote')
+    def test_hiding_details_revokes_previous_browser_grants(self, remote, calendar):
+        self.bound()
+        self.project.calendar_displays = [{'protocol': 'oauth-v1', 'id': 'old', 'owner': self.user.pk,
+            'viewer': self.other.pk, 'until': timezone.now().timestamp() + 300}]
+        self.project.save()
+        result = self.call({'audiences': defaults(), 'detail_fields': {'location': False, 'description': True}}, self.path)
+        self.assertTrue(result.json()['body']['rebind_required'])
+        remote.assert_called_once()
+
+    @patch('User.chronelle_account.remote', return_value=[{'id':7,'name':'Private'}])
+    @patch('Chat.research_calendar.remote')
+    def test_research_reads_filtered_agenda_without_a_browser_token(self, remote, groups):
+        self.bound()
+        _, owner = self.bound(self.other)
+        ResearchCalendarPreference.objects.create(user=self.other, binding_subject=owner['binding']['subject'],
+            overrides={'version': 2, 'audiences': defaults('detail'), 'detail_fields': {'location': True, 'description': False}})
+        path = f'/research/{self.project.pk}/calendar/'
+        result = self.call({'action': 'display', 'members': [self.other.pk]}, path).json()['body']
+        self.assertEqual(result, {'displays': [], 'filtered': True})
+        remote.assert_not_called()
+        remote.side_effect = [
+            {'active': True, 'grant': {'id': owner['binding']['binding_id'], 'authorization_type': 'account_binding',
+                'version': 1, 'expires_at': (timezone.now() + timezone.timedelta(days=180)).isoformat()}},
+            {'events': [{'start': '2026-11-01T12:00:00Z', 'end': '2026-11-01T13:00:00Z', 'visibility': 'details',
+                'title': 'Meeting', 'location': 'Room', 'description': 'Private note'}], 'availability': 'known'},
+        ]
+        response = self.call({'action': 'agenda', 'members': [self.other.pk],
+            'start': '2026-11-01T00:00:00Z', 'end': '2026-11-02T00:00:00Z'}, path)
+        self.assertEqual(response.status_code, 200)
+        event = response.json()['body']['events'][0]
+        self.assertEqual((event['title'], event['location'], event['description']), ('Meeting', 'Room', ''))
+        self.assertNotIn('token', response.json()['body'])
+        self.assertNotIn('Private note', response.content.decode())
+
     @patch('User.chronelle_permissions.calendar', return_value=[{'id':7,'name':'Private'},{'id':8,'name':'Work'}])
     def test_actual_friendship_selects_tier_and_forged_tier_is_ignored(self, calendar):
         self.bound()

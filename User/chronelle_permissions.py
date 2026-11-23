@@ -1,6 +1,6 @@
 import json
 from django.views import View
-from Chat.calendar_policy import defaults, modes, review_required, save
+from Chat.calendar_policy import defaults, detail_fields, modes, review_required, save
 from Chat.models import ResearchCalendarPreference
 from Chat.research import fail
 from User.chronelle_account import BindingFailure, calendar, credentials
@@ -23,7 +23,8 @@ class ChronellePermissionsView(View):
             for entry in audiences.values():
                 entry['overrides'] = {key: mode for key, mode in entry['overrides'].items() if key in known}
             return {'status': 'active', 'groups': [{'id': g['id'], 'name': g['name']} for g in groups],
-                    'audiences': audiences, 'review_required': review_required(request.user, subject)}
+                    'audiences': audiences, 'detail_fields': detail_fields(pref if pref and pref.binding_subject == subject else None),
+                    'review_required': review_required(request.user, subject)}
         except BindingFailure as error:
             return {'status': error.code, 'groups': []}
 
@@ -40,7 +41,9 @@ class ChronellePermissionsView(View):
             base, _ = authorization_site(request)
             subject = credentials(request.user, base)['binding']['subject']
             group_ids = {g['id'] for g in calendar(request.user, base, 'groups/')}
-            return save(request.user, subject, body.get('audiences'), group_ids, base)
+            if 'detail_fields' in body and body['detail_fields'] is None:
+                raise BindingFailure('invalid_policy', 400)
+            return save(request.user, subject, body.get('audiences'), group_ids, base, body.get('detail_fields'))
         except BindingFailure as error:
             return fail(error.code, error.status)
         except (ValueError, TypeError):

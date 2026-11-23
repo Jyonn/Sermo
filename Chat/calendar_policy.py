@@ -7,6 +7,7 @@ from Friendship.models import Friendship, FriendshipStatusChoice
 
 RANK = {'hidden': 0, 'busy': 1, 'detail': 2}
 TIERS = ('strangers', 'friends')
+DETAIL_FIELDS = ('location', 'description')
 
 
 def defaults(mode='busy'):
@@ -23,12 +24,23 @@ def modes(preference):
     return {tier: deepcopy(legacy) for tier in TIERS}
 
 
+def detail_fields(preference):
+    saved = preference.overrides.get('detail_fields', {}) if preference and preference.overrides.get('version') == 2 else {}
+    return {key: saved.get(key, True) for key in DETAIL_FIELDS}
+
+
+def shared_detail_fields(user, subject):
+    return detail_fields(ResearchCalendarPreference.objects.filter(user=user, binding_subject=subject).first())
+
+
 def initialize(user, subject):
     pref = ResearchCalendarPreference.objects.filter(user=user).first()
-    audiences = modes(pref) if pref and pref.binding_subject == subject else defaults()
+    if pref and pref.binding_subject != subject:
+        pref = None
+    audiences = modes(pref)
     ResearchCalendarPreference.objects.update_or_create(user=user, defaults={
         'binding_subject': subject, 'default_busy': audiences['strangers']['default'] == 'busy',
-        'overrides': {'version': 2, 'audiences': audiences, 'reviewed': False}})
+        'overrides': {'version': 2, 'audiences': audiences, 'reviewed': False, 'detail_fields': detail_fields(pref)}})
 
 
 def review_required(user, subject):
@@ -84,10 +96,13 @@ def projection(owner, viewer, group_ids, *, preview_tier=None):
     return result
 
 
-def save(user, subject, audiences, group_ids, base):
+def save(user, subject, audiences, group_ids, base, fields=None):
     from User.chronelle_account import BindingFailure, credentials, revocation_credentials
     from Chat.research_calendar import revoke_displays
     audiences = validate(audiences, group_ids)
+    if fields is not None and (not isinstance(fields, dict) or set(fields) != set(DETAIL_FIELDS)
+                               or any(type(value) is not bool for value in fields.values())):
+        raise BindingFailure('invalid_policy', 400)
     with transaction.atomic():
         # Use the same lock order as OAuth claim: account, then preferences/projects.
         from User.models import ChronelleAccount
@@ -96,10 +111,13 @@ def save(user, subject, audiences, group_ids, base):
             raise BindingFailure('binding_superseded')
         pref = ResearchCalendarPreference.objects.select_for_update().filter(user=user).first()
         before = modes(pref) if pref is None or pref.binding_subject == subject else defaults('hidden')
+        before_fields = detail_fields(pref if pref and pref.binding_subject == subject else None)
+        fields = before_fields if fields is None else fields
         keys = {None, *map(str, group_ids)}
         for tier in TIERS:
             keys.update(before[tier]['overrides'])
         reduced = any(RANK[effective(audiences, tier, key)] < RANK[effective(before, tier, key)] for tier in TIERS for key in keys)
+        reduced = reduced or any(before_fields[key] and not fields[key] for key in DETAIL_FIELDS)
         revoked = False
         owned_projects = ResearchProject.objects.filter(chat__chat_members__user=user).values('pk')
         projects = ResearchProject.objects.select_for_update().filter(pk__in=owned_projects).order_by('pk') if reduced else []
@@ -116,7 +134,7 @@ def save(user, subject, audiences, group_ids, base):
             project.save(update_fields=['calendar_displays'])
         ResearchCalendarPreference.objects.update_or_create(user=user, defaults={
             'binding_subject': subject, 'default_busy': audiences['strangers']['default'] == 'busy',
-            'overrides': {'version': 2, 'audiences': audiences, 'reviewed': True}})
+            'overrides': {'version': 2, 'audiences': audiences, 'reviewed': True, 'detail_fields': fields}})
     return {'status': 'saved', 'rebind_required': revoked}
 
 

@@ -65,6 +65,28 @@ class ChronelleProfileTests(TestCase):
         self.profile(audience='stranger');self.assertEqual(self.claims['detail_group_ids'],[]);self.assertEqual(self.claims['busy_group_ids'],[7])
         self.assertEqual(self.profile(audience='friend').json()['body']['availability'],'unknown')
 
+    @patch('User.chronelle_profile.calendar',return_value=[{'id':7,'name':'Private'}])
+    @patch('User.chronelle_profile.remote')
+    def test_location_and_notes_are_independently_filtered_for_visitors_and_previews(self, remote, calendar):
+        _, value = self.bound()
+        pref = ResearchCalendarPreference.objects.create(user=self.user, binding_subject=value['binding']['subject'],
+            overrides={'version': 2, 'audiences': defaults('detail')})
+        remote.side_effect = self.provider(value, [{'start': '2026-10-29T10:00:00Z', 'end': '2026-10-29T11:00:00Z',
+            'visibility': 'details', 'title': 'Research', 'location': 'Lab', 'description': 'Note'}])
+        for fields, expected in [
+            ({}, ('Lab', 'Note')),
+            ({'location': False, 'description': True}, ('', 'Note')),
+            ({'location': True, 'description': False}, ('Lab', '')),
+            ({'location': False, 'description': False}, ('', '')),
+        ]:
+            pref.overrides['detail_fields'] = fields
+            pref.save(update_fields=['overrides'])
+            for response in (self.profile(self.other), self.profile(audience='stranger')):
+                event = response.json()['body']['events'][0]
+                self.assertEqual((event['location'], event['description']), expected)
+            owner_event = self.profile().json()['body']['events'][0]
+            self.assertEqual((owner_event['location'], owner_event['description']), ('Lab', 'Note'))
+
     @patch('User.chronelle_profile.remote')
     def test_unbound_and_hidden_profiles_do_not_issue_display_credentials(self,remote):
         self.assertEqual(self.profile().json()['body']['status'],'hidden');remote.assert_not_called()

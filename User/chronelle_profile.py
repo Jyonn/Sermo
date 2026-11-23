@@ -1,16 +1,16 @@
 """Profile agenda projections. Parent and child credentials stay on the server."""
 import uuid
 import jwt
-from datetime import datetime
 from django.http import JsonResponse
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from django.views import View
-from Chat.calendar_policy import projection
+from Chat.calendar_policy import detail_fields, projection, shared_detail_fields
 from Chat.research import fail
 from User.models import User, ChronelleAccount
 from User.chronelle_account import BindingFailure, calendar, config, credentials, remote, unpack
 from User.chronelle_origins import authorization_site
+from User.chronelle_events import project_events
 from utils import auth
 
 
@@ -41,7 +41,8 @@ class ChronelleProfileView(View):
             base,origin = authorization_site(request)
             binding = credentials(owner,base)['binding']
             groups = {group['id'] for group in calendar(owner,base,'groups/')}
-            policy = {'detail':list(groups),'busy':[]} if owner.pk == request.user.pk and not audience else projection(
+            personal_view = owner.pk == request.user.pk and not audience
+            policy = {'detail':list(groups),'busy':[]} if personal_view else projection(
                 owner,request.user,groups,preview_tier={'friend':'friends','stranger':'strangers'}.get(audience))
             if not policy['detail'] and not policy['busy']:
                 return {'status':'hidden','events':[],'availability':'unknown'}
@@ -62,18 +63,8 @@ class ChronelleProfileView(View):
                 algorithm='HS256',headers={'typ':'chronelle-display+jwt'})
             result = remote(base,'/api/oauth/display/events/',method='GET',token=token,origin=origin,
                 params={'start':start.isoformat(),'end':end.isoformat()})
-            if not isinstance(result,dict) or not isinstance(result.get('events'),list) or len(result['events']) > 10000:
-                raise BindingFailure('chronelle_unavailable',503)
-            events = []
-            for index,event in enumerate(result['events']):
-                if not isinstance(event,dict) or not isinstance(event.get('start'),str) or not isinstance(event.get('end'),str) or event.get('visibility') not in ('busy','details'):
-                    raise BindingFailure('chronelle_unavailable',503)
-                if datetime.fromisoformat(event['end']) <= datetime.fromisoformat(event['start']):
-                    raise BindingFailure('chronelle_unavailable',503)
-                busy = event['visibility'] == 'busy'
-                events.append({'id':str(index),'start':event['start'],'end':event['end'],'all_day':bool(event.get('all_day')),
-                    'locked':busy,'title':'' if busy else event.get('title',''),'location':'' if busy else event.get('location','')})
-            return {'status':'active','events':events,'availability':'known' if result.get('availability') == 'known' else 'unknown'}
+            fields = detail_fields(None) if personal_view else shared_detail_fields(owner, binding['subject'])
+            return {'status': 'active', **project_events(result, fields)}
         except BindingFailure as error:
             return fail(error.code,error.status)
         except (ValueError,TypeError,KeyError):

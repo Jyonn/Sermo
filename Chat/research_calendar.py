@@ -4,12 +4,14 @@ import uuid
 import jwt
 from django.db import transaction
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 from django.views import View
 from Chat.models import ResearchProject, ResearchCalendarPreference, ChatMemberStatusChoice
 from Chat.research import fail
 from User.models import ChronelleAccount
 from User.chronelle_account import BindingFailure, calendar, config, credentials, remote, revocation_credentials, unpack
 from User.chronelle_origins import authorization_site, APP_ORIGINS
+from User.chronelle_events import project_events
 from utils import auth
 
 
@@ -134,15 +136,21 @@ class ResearchCalendarView(View):
                             'binding_subject':binding_subject,
                             'overrides':{str(i):'detail' if i in detail else 'busy' if i in busy else 'hidden' for i in group_ids}})
                 return {'status':'saved'}
-            if body.get('action')!='display':
+            action = body.get('action')
+            if action not in ('display', 'agenda'):
                 raise BindingFailure('invalid_request',400)
+            if action == 'agenda':
+                start, end = (parse_datetime(body.get(key, '')) for key in ('start', 'end'))
+                if (not start or not end or timezone.is_naive(start) or timezone.is_naive(end)
+                        or not 0 < (end - start).total_seconds() <= 26 * 3600):
+                    raise BindingFailure('invalid_date_range', 400)
             selected=body.get('members')
             if not isinstance(selected,list) or not 1<=len(selected)<=20 or len(set(selected))!=len(selected) or any(type(i) is not int for i in selected):
                 raise BindingFailure('invalid_selection',400)
             active={m.user_id:m.user for m in project.chat.chat_members.filter(status=ChatMemberStatusChoice.ACTIVE,user__is_deleted=False).select_related('user')}
             if not set(selected)<=set(active):
                 raise BindingFailure('member_unavailable',403)
-            viewer=credentials(request.user,base)
+            credentials(request.user,base)
             tokens={uid:credentials(active[uid],base) for uid in selected}
             # Only the viewer's own new groups are automatically visible. Peers
             # retain their explicit saved group policy; never expand it on read.
@@ -154,16 +162,23 @@ class ResearchCalendarView(View):
                 if not set(selected)<=current:
                     raise BindingFailure('member_unavailable',403)
                 project.calendar_displays=[d for d in project.calendar_displays if d['until']>timezone.now().timestamp()]
-                if len(project.calendar_displays)+len(selected)>1000 or sum(d['viewer']==request.user.pk for d in project.calendar_displays)+len(selected)>100:
-                    raise BindingFailure('display_limit',429)
                 results=[]
                 # Preflight all policies before issuing anything. No partial merge fallback.
                 policies={}
+                fields = {}
+                from Chat.calendar_policy import detail_fields, shared_detail_fields
                 for uid in selected:
                     policy={'detail':list(groups[uid]),'busy':[]} if uid==request.user.pk else shared_policy(active[uid],project,groups[uid],request.user)
                     if uid!=request.user.pk and not (policy['detail'] or policy['busy']):
                         raise BindingFailure('member_calendar_not_shared',403)
                     policies[uid]=policy
+                    fields[uid] = detail_fields(None) if uid == request.user.pk else shared_detail_fields(active[uid], tokens[uid]['binding']['subject'])
+                if action == 'display':
+                    if any(policies[uid]['detail'] and not all(fields[uid].values()) for uid in selected):
+                        return {'displays': [], 'filtered': True}
+                    if len(project.calendar_displays)+len(selected)>1000 or sum(d['viewer']==request.user.pk for d in project.calendar_displays)+len(selected)>100:
+                        raise BindingFailure('display_limit',429)
+                known = True
                 for uid in selected:
                     policy=policies[uid]
                     allowed=groups[uid]
@@ -172,10 +187,9 @@ class ResearchCalendarView(View):
                     grant=status.get('grant',{})
                     if not status.get('active') or grant.get('id')!=binding['binding_id'] or grant.get('authorization_type')!='account_binding':
                         raise BindingFailure('binding_required')
-                    from django.utils.dateparse import parse_datetime
                     expiry=parse_datetime(grant['expires_at'])
                     if expiry is None or timezone.is_naive(expiry):raise BindingFailure('invalid_binding')
-                    now=int(timezone.now().timestamp());until=min(now+300,int(expiry.timestamp()))
+                    now=int(timezone.now().timestamp());until=min(now+(30 if action == 'agenda' else 300),int(expiry.timestamp()))
                     if until<=now:raise BindingFailure('binding_required')
                     display_id=str(uuid.uuid4());client,secret,_=config()
                     token=jwt.encode({'key':client,'sub':binding['subject'],'grant_id':binding['binding_id'],
@@ -184,8 +198,17 @@ class ResearchCalendarView(View):
                         'busy_group_ids':sorted(set(policy['busy'])&allowed),'task_group_ids':[],
                         'aud':'chronelle-display-api','iat':now,'exp':until,'jti':display_id},secret,
                         algorithm='HS256',headers={'typ':'chronelle-display+jwt'})
+                    if action == 'agenda':
+                        data = project_events(remote(base, '/api/oauth/display/events/', method='GET', token=token,
+                            origin=origin, params={'start': start.isoformat(), 'end': end.isoformat()}), fields[uid])
+                        known = known and data['availability'] == 'known'
+                        results.extend(data['events'])
+                        continue
                     results.append({'member_id':uid,'id':display_id,'token':token,'url':base+'/oauth/embed/'+client+'/'})
                     project.calendar_displays.append({'protocol':'oauth-v1','id':display_id,'owner':uid,'viewer':request.user.pk,'until':until,'base':base})
+                if action == 'agenda':
+                    return {'status': 'active', 'events': [{**event, 'id': str(index)} for index, event in enumerate(results)],
+                            'availability': 'known' if known else 'unknown'}
                 project.save(update_fields=['calendar_displays'])
             return {'displays':results,'renew_after':240}
         except BindingFailure as error:
