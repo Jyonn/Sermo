@@ -1,6 +1,10 @@
+import json
 from datetime import timedelta
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
+from django.core.management import call_command
 from django.test import TestCase
 from django.core.management.base import CommandError
 from django.utils import timezone
@@ -164,8 +168,9 @@ class RecordShopTests(TestCase):
                         self.assertEqual(finish_listen(key, self.user, packet), {'points': points})
                         self.assertEqual(finish_listen(key, self.user, packet), {'points': 0})
 
-    def test_manifest_requires_audio_files_instead_of_streaming_pages(self):
-        manifest = {
+    @staticmethod
+    def example_manifest():
+        return {
             'portraits': {artist: 'https://example.test/portrait.webp' for artist in SINGERS},
             'verified_titles': {artist: ['示例曲'] for artist in SINGERS},
             'albums': {artist: [
@@ -174,12 +179,35 @@ class RecordShopTests(TestCase):
                 for tier, probability in [('gold', .59952), ('platinum', .29976), ('diamond', .09992), ('obsidian', .0008)]
             ] for artist in SINGERS},
         }
+
+    def test_manifest_requires_audio_files_instead_of_streaming_pages(self):
+        manifest = self.example_manifest()
         self.assertEqual(validate_manifest(manifest)['mode'], 'record_shop')
         manifest['albums']['jay'][0]['clip'] = 'https://example.test/resources/assets/10/display/' + 'a' * 64
         self.assertEqual(validate_manifest(manifest)['mode'], 'record_shop')
         manifest['albums']['jay'][0]['clip'] = 'https://music.apple.com/cn/song/123'
         with self.assertRaisesMessage(CommandError, 'Missing clipped recordings for 1 albums: jay-gold'):
             validate_manifest(manifest)
+
+    def test_replacing_clips_preserves_running_activity_and_album_data(self):
+        manifest = self.example_manifest()
+        self.campaign.config = validate_manifest(manifest)
+        self.campaign.save(update_fields=['config'])
+        award(self.run, self.user, 'share', 'jay:track', 10)
+        replacement = 'https://example.test/resources/assets/11/display/' + 'c' * 64
+        manifest['albums']['jay'][0]['clip'] = replacement
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / 'manifest.json'
+            path.write_text(json.dumps(manifest))
+            call_command('configure_record_shop', str(path), replace_clips=True)
+            self.campaign.refresh_from_db()
+            self.assertEqual(self.campaign.config['albums']['jay'][0]['clip'], replacement)
+            self.assertEqual(SpaceActivity.objects.get(pk=self.run.pk).ends_at, self.run.ends_at)
+            self.assertEqual(UserActivityProgress.objects.get(campaign=self.campaign, user=self.user).earned_points, 10)
+            manifest['albums']['jay'][0]['cover'] = 'https://example.test/other.webp'
+            path.write_text(json.dumps(manifest))
+            with self.assertRaisesMessage(CommandError, 'Clip replacement must preserve every album'):
+                call_command('configure_record_shop', str(path), replace_clips=True)
 
     def test_space_admin_claim_starts_one_thirty_day_run(self):
         self.campaign.assignment_mode = ActivityCampaign.AssignmentMode.MANUAL

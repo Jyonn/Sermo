@@ -90,7 +90,9 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument('manifest', type=Path)
-        parser.add_argument('--enable', action='store_true')
+        actions = parser.add_mutually_exclusive_group()
+        actions.add_argument('--enable', action='store_true')
+        actions.add_argument('--replace-clips', action='store_true')
 
     @transaction.atomic
     def handle(self, *args, **options):
@@ -99,6 +101,19 @@ class Command(BaseCommand):
         except (ValueError, OSError) as error:
             raise CommandError(str(error)) from error
         count = sum(map(len, config['albums'].values()))
+        if options['replace_clips']:
+            campaign = ActivityCampaign.objects.select_for_update().filter(key='record-shop', config__mode=MODE).first()
+            if not campaign:
+                raise CommandError('No existing Record Shop campaign')
+            def without_clips(pools):
+                return {artist: [{k: v for k, v in album.items() if k != 'clip'} for album in albums]
+                        for artist, albums in pools.items()}
+            if without_clips(config['albums']) != without_clips(campaign.config['albums']):
+                raise CommandError('Clip replacement must preserve every album, cover, and probability')
+            campaign.config['albums'] = config['albums']
+            campaign.save(update_fields=['config'])
+            self.stdout.write(self.style.SUCCESS(f'Updated {count} Record Shop clips.'))
+            return
         if not options['enable']:
             self.stdout.write(self.style.SUCCESS(f'Validated {count} covers and clip references.'))
             return

@@ -14,7 +14,7 @@ from django.utils.translation import gettext_lazy as _
 from opencc import OpenCC
 from smartdjango import Code, Error
 
-from Activity.models import ActivityEvent, ActivityService, RecordShopAnnouncement, RecordShopDiscovery, RecordShopPreference, RecordShopShare, UserActivityProgress
+from Activity.models import ActivityCampaign, ActivityEvent, ActivityService, RecordShopAnnouncement, RecordShopDiscovery, RecordShopPreference, RecordShopShare, UserActivityProgress
 
 
 MODE = 'record_shop'
@@ -242,6 +242,19 @@ def progress_payload(progress, active):
 
 def public_album(album):
     return {key: album[key] for key in ('id', 'name', 'title', 'tier', 'cover', 'clip') if album.get(key)}
+
+
+def current_album_clip_path(album_id):
+    config = ActivityCampaign.objects.filter(key='record-shop', config__mode=MODE).values_list('config', flat=True).first()
+    if not config:
+        return None
+    for albums in config.get('albums', {}).values():
+        for album in albums:
+            if album['id'] == album_id and isinstance(album.get('clip'), str):
+                path = urlsplit(album['clip']).path
+                if re.fullmatch(r'/resources/assets/[1-9][0-9]*/display/[a-f0-9]{64}', path):
+                    return path
+    return None
 
 
 @transaction.atomic

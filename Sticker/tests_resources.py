@@ -124,6 +124,24 @@ class ResourceTests(TestCase):
         self.collection.published=False;self.collection.save()
         self.assertNotEqual(self.client.get('/resources/collections/haibara-v2').status_code,200)
 
+    def test_old_record_shop_clip_redirects_to_current_managed_clip(self):
+        from Activity.models import ActivityCampaign
+
+        old = self.resource()
+        old.slug = 'jay-jay-clip'
+        old.mime_type = 'audio/mp4'
+        old.storage_key = f'frienden/assets/activities/record-shop/v1/{old.content_hash}.m4a'
+        old.save(update_fields=['slug', 'mime_type', 'storage_key'])
+        new = self.resource()
+        new_uri = new.jsonl()['uri']
+        ActivityCampaign.objects.create(key='record-shop', title='Record Shop', event_key='record-shop.share', config={
+            'mode': 'record_shop', 'albums': {'jay': [{'id': 'jay-jay', 'clip': f'https://example.test{new_uri}'}]},
+        })
+
+        response = self.client.get(old.jsonl()['uri'])
+        self.assertRedirects(response, new_uri, fetch_redirect_response=False)
+        self.assertEqual(response['Cache-Control'], 'public, max-age=300')
+
     def test_admin_mutations_require_platform_token_and_reject_namespace_injection(self):
         for path in ('/platform-admin/resources','/platform-admin/resources/upload','/platform-admin/resources/1'):
             self.assertNotEqual(self.client.post(path,data='{}',content_type='application/json').status_code,200)

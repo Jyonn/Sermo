@@ -166,8 +166,17 @@ class ResourceFileView(View):
         row = ManagedResource.objects.filter(id=asset_id, content_hash=digest).first()
         if not row or variant not in {'display', 'thumbnail', 'original'}:
             raise StickerErrors.NOT_FOUND
+        replacement = None
+        # Old chat payloads retain the original album URLs, including in offline caches.
+        if row.mime_type == 'audio/mp4' and row.slug.endswith('-clip') and re.fullmatch(
+            r'frienden/assets/activities/record-shop/v1/[a-f0-9]{64}\.m4a', row.storage_key,
+        ):
+            from Activity.record_shop import current_album_clip_path
+            replacement = current_album_clip_path(row.slug.removesuffix('-clip'))
+            if replacement == row.jsonl()['uri']:
+                replacement = None
         key = {'display': row.storage_key, 'thumbnail': row.thumbnail_key, 'original': row.original_key}[variant]
-        response = HttpResponseRedirect(sign_private_download_url(avatar_uri_for_key(key)))
+        response = HttpResponseRedirect(replacement or sign_private_download_url(avatar_uri_for_key(key)))
         response['Cache-Control'] = 'public, max-age=300'
         response['X-Content-Type-Options'] = 'nosniff'
         return response
