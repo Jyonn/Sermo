@@ -30,6 +30,13 @@ SINGERS = {
     'david': ('陶喆', '陶吉吉', 'David Tao', 'Tao Zhe'),
     'jj': ('林俊杰', 'JJ Lin', 'Lin Junjie'),
 }
+WOMEN_SINGERS = {
+    'jolin': ('蔡依林', 'Jolin', 'Jolin Tsai', 'JOLIN蔡依林'),
+    'stefanie': ('孙燕姿', '孫燕姿', 'Stefanie Sun', 'Yanzi Sun', 'Sun Yanzi'),
+    'elva': ('萧亚轩', '蕭亞軒', 'Elva Hsiao', 'Elva'),
+    'fish': ('梁静茹', '梁靜茹', 'Fish Leong', 'Fish'),
+}
+ROSTERS = {'classic': SINGERS, 'women': WOMEN_SINGERS}
 PLAYBACK_SALT = 'record-shop.playback.v1'
 PLAYBACK_MAX_AGE = timedelta(hours=6)
 SIMPLIFY = OpenCC('t2s')
@@ -49,7 +56,10 @@ def normalized(value):
     return ''.join(char for char in value if char.isalnum())
 
 
-SINGER_IDS = {normalized(alias): singer for singer, aliases in SINGERS.items() for alias in aliases}
+SINGER_IDS = {
+    edition: {normalized(alias): singer for singer, aliases in roster.items() for alias in aliases}
+    for edition, roster in ROSTERS.items()
+}
 
 
 def track_identity(music, config):
@@ -65,7 +75,8 @@ def track_identity(music, config):
     artist_names = {normalized(artist) for artist in artists} - {''}
     if not artist_names:
         return None
-    featured = {SINGER_IDS[name] for name in artist_names if name in SINGER_IDS}
+    roster_ids = SINGER_IDS[config.get('roster', 'classic')]
+    featured = {roster_ids[name] for name in artist_names if name in roster_ids}
     if featured:
         # Keep the track keys used by existing activity scores and playback receipts.
         singer = min(featured)
@@ -74,10 +85,15 @@ def track_identity(music, config):
     return f'other:{"+".join(sorted(artist_names))}:{title}'
 
 
-def active_run(user, key=None):
+def record_shop_runs(user, *, active_only=True):
+    runs = ActivityService.space_activities(user.space, active_only=active_only).filter(campaign__config__mode=MODE)
     if user.is_official or user.is_deleted:
-        return None
-    runs = ActivityService.space_activities(user.space, active_only=True).filter(campaign__config__mode=MODE)
+        return runs.none()
+    return runs
+
+
+def active_run(user, key=None):
+    runs = record_shop_runs(user)
     if key:
         runs = runs.filter(campaign__key=key)
     return runs.first()
@@ -115,14 +131,14 @@ def register_share(source, surface, preview):
     hostname = urlsplit(preview.url).hostname
     if hostname not in LinkPreview.NETEASE_HOSTS | MusicProvider.QQ_HOSTS and not pocklo.share_token(preview.url):
         return
-    run = active_run(source.user)
-    if run is None or not run.is_active(source.created_at):
-        return
-    RecordShopShare.objects.get_or_create(
-        surface=surface, source_id=source.pk,
-        defaults={'run': run, 'user': source.user, 'preview': preview, 'published_at': source.created_at},
-    )
-    transaction.on_commit(lambda: resolve_shares(preview.pk), robust=True)
+    runs = [run for run in record_shop_runs(source.user) if run.is_active(source.created_at)]
+    for run in runs:
+        RecordShopShare.objects.get_or_create(
+            run=run, surface=surface, source_id=source.pk,
+            defaults={'user': source.user, 'preview': preview, 'published_at': source.created_at},
+        )
+    if runs:
+        transaction.on_commit(lambda: resolve_shares(preview.pk), robust=True)
 
 
 def resolve_shares(preview_id):
@@ -217,7 +233,7 @@ def finish_listen(key, user, data):
     expected = music.get('duration_ms')
     if type(expected) is not int or expected <= 0:
         return {'points': 0}
-    featured = song.partition(':')[0] in SINGERS
+    featured = song.partition(':')[0] in ROSTERS[run.campaign.config.get('roster', 'classic')]
     if abs(duration - expected) <= 1200 and (expected <= PREVIEW_LIMIT_MS or duration > PREVIEW_LIMIT_MS):
         points = FULL_TRACK_POINTS[featured]
     elif provider != 'pocklo_music' and expected > PREVIEW_LIMIT_MS and duration <= PREVIEW_LIMIT_MS:
@@ -245,24 +261,24 @@ def public_album(album):
 
 
 def space_first_album_medals(space_id):
-    run = SpaceActivity.objects.select_related('campaign').filter(
-        space_id=space_id, campaign__key='record-shop', campaign__config__mode=MODE,
-    ).first()
-    if run is None:
-        return []
-
-    albums = {
-        album['id']: (artist, album)
-        for artist, catalog in run.campaign.config.get('albums', {}).items()
-        for album in catalog
-        if album['tier'] in ('diamond', 'obsidian')
+    runs = SpaceActivity.objects.select_related('campaign').filter(space_id=space_id, campaign__config__mode=MODE)
+    catalogs = {
+        run.pk: {
+            album['id']: (artist, album)
+            for artist, catalog in run.campaign.config.get('albums', {}).items()
+            for album in catalog if album['tier'] in ('diamond', 'obsidian')
+        }
+        for run in runs
     }
     medals = RecordShopAnnouncement.objects.select_related('user').filter(
-        run=run, album_id__in=albums, user__space_id=space_id, user__is_deleted=False,
+        run_id__in=catalogs, user__space_id=space_id, user__is_deleted=False,
     ).order_by('-discovered_at', '-id')
     rows = []
     for medal in medals:
-        artist, album = albums[medal.album_id]
+        item = catalogs[medal.run_id].get(medal.album_id)
+        if item is None:
+            continue
+        artist, album = item
         rows.append({
             'album': {field: album[field] for field in ('id', 'name', 'title', 'tier', 'cover')},
             'artist': artist,
@@ -287,20 +303,28 @@ def current_album_clip_path(album_id):
 
 @transaction.atomic
 def select_singer(key, user, singer):
-    if not isinstance(singer, str) or singer not in SINGERS:
-        raise RecordShopErrors.INVALID
-    run = active_run(user, key)
+    from User.models import User
+
+    run = record_shop_runs(user, active_only=False).filter(campaign__key=key, claimed_at__lte=timezone.now()).first()
     if run is None:
         raise RecordShopErrors.UNAVAILABLE
+    if not isinstance(singer, str) or singer not in ROSTERS[run.campaign.config.get('roster', 'classic')]:
+        raise RecordShopErrors.INVALID
+    User.objects.select_for_update().get(pk=user.pk)
     progress = _locked_progress(run, user)
     preference, _ = RecordShopPreference.objects.get_or_create(progress=progress)
     if singer not in preference.singers:
+        if not run.is_active():
+            raise RecordShopErrors.UNAVAILABLE
         if len(preference.singers) >= sum(progress.earned_points >= threshold for threshold in THRESHOLDS):
             raise RecordShopErrors.NO_SELECTION
         preference.singers.append(singer)
     preference.equipped = singer
     preference.save(update_fields=['singers', 'equipped'])
-    return progress_payload(progress, True)
+    RecordShopPreference.objects.filter(
+        progress__user=user, progress__space_activity__space_id=user.space_id,
+    ).exclude(pk=preference.pk).exclude(equipped='').update(equipped='')
+    return progress_payload(progress, run.is_active())
 
 
 def decorate_message(message):
@@ -375,7 +399,7 @@ def publish_announcement(announcement_id):
         return
     level = '曜' if album['tier'] == 'obsidian' else '钻'
     time = timezone.localtime(first.discovered_at, ActivityService.BEIJING_TIMEZONE).strftime('%m月%d日 %H:%M')
-    text = f'恭喜{first.user.name[:30]}于{time}在回声唱片铺首次发现{level}级专辑《{album["name"][:55]}》！'
+    text = f'恭喜{first.user.name[:30]}于{time}在{first.run.campaign.title[:40]}首次发现{level}级专辑《{album["name"][:55]}》！'
     first.statement = Statement.create_statement(space.ensure_official_user(), text, 'public', [])
     first.published = True
     first.save(update_fields=['statement', 'published'])

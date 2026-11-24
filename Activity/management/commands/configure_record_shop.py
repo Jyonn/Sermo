@@ -8,12 +8,16 @@ from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 
 from Activity.models import ActivityCampaign
-from Activity.record_shop import MODE, SINGERS, normalized
+from Activity.record_shop import MODE, ROSTERS, normalized
 
 
 TIERS = ('gold', 'platinum', 'diamond', 'obsidian')
 AUDIO_SUFFIXES = {'.m4a', '.mp3', '.aac', '.opus', '.ogg', '.wav', '.flac'}
 MANAGED_ASSET = re.compile(r'/resources/assets/[1-9][0-9]*/display/[a-f0-9]{64}')
+EDITIONS = {
+    'classic': ('record-shop', '回声唱片铺', 'Echo Record Shop'),
+    'women': ('record-shop-women', '回声唱片铺 · 女声篇', 'Echo Record Shop · Women in Mandopop'),
+}
 
 
 def https_asset(value):
@@ -33,17 +37,19 @@ def audio_asset(value):
     return Path(path).suffix.lower() in AUDIO_SUFFIXES or bool(MANAGED_ASSET.fullmatch(path))
 
 
-def validate_manifest(value):
+def validate_manifest(value, edition='classic'):
     if not isinstance(value, dict):
         raise CommandError('Expected a JSON object')
+    singers = ROSTERS[edition]
+    campaign_key = EDITIONS[edition][0]
     pools, portraits, titles = (value.get(key) for key in ('albums', 'portraits', 'verified_titles'))
     for label, mapping in [('albums', pools), ('portraits', portraits), ('verified_titles', titles)]:
-        if not isinstance(mapping, dict) or set(mapping) != set(SINGERS):
+        if not isinstance(mapping, dict) or set(mapping) != set(singers):
             raise CommandError(f'{label}: expected all four artist IDs')
 
     album_ids = set()
     missing_clips = []
-    for artist in SINGERS:
+    for artist in singers:
         if not https_asset(portraits[artist]):
             raise CommandError(f'{artist}: missing WebP portrait URL')
         if not isinstance(titles[artist], list) or not titles[artist] or any(not normalized(title) for title in titles[artist]):
@@ -78,10 +84,11 @@ def validate_manifest(value):
     if missing_clips:
         raise CommandError(f'Missing clipped recordings for {len(missing_clips)} albums: {", ".join(missing_clips)}')
     return {
-        'mode': MODE, 'theme': 'record-shop', 'albums': pools, 'portraits': portraits,
+        'mode': MODE, 'theme': 'record-shop', 'roster': edition, 'albums': pools, 'portraits': portraits,
         'verified_titles': {artist: sorted({normalized(title) for title in rows}) for artist, rows in titles.items()},
         'title_aliases': value.get('title_aliases', {}),
-        'presentation': {'palette': 'gold', 'title_art_url': '/assets/activity/wordmarks/record-shop.webp'},
+        'presentation': {'palette': 'rose' if edition == 'women' else 'gold',
+                         'title_art_url': f'/assets/activity/wordmarks/{campaign_key}.webp'},
     }
 
 
@@ -90,6 +97,7 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument('manifest', type=Path)
+        parser.add_argument('--edition', choices=EDITIONS, default='classic')
         actions = parser.add_mutually_exclusive_group()
         actions.add_argument('--enable', action='store_true')
         actions.add_argument('--replace-clips', action='store_true')
@@ -97,12 +105,13 @@ class Command(BaseCommand):
     @transaction.atomic
     def handle(self, *args, **options):
         try:
-            config = validate_manifest(json.loads(options['manifest'].read_text(encoding='utf-8')))
+            config = validate_manifest(json.loads(options['manifest'].read_text(encoding='utf-8')), options['edition'])
         except (ValueError, OSError) as error:
             raise CommandError(str(error)) from error
         count = sum(map(len, config['albums'].values()))
+        key, title, title_en = EDITIONS[options['edition']]
         if options['replace_clips']:
-            campaign = ActivityCampaign.objects.select_for_update().filter(key='record-shop', config__mode=MODE).first()
+            campaign = ActivityCampaign.objects.select_for_update().filter(key=key, config__mode=MODE).first()
             if not campaign:
                 raise CommandError('No existing Record Shop campaign')
             def without_clips(pools):
@@ -117,11 +126,11 @@ class Command(BaseCommand):
         if not options['enable']:
             self.stdout.write(self.style.SUCCESS(f'Validated {count} covers and clip references.'))
             return
-        campaign = ActivityCampaign.objects.select_for_update().filter(key='record-shop').first()
+        campaign = ActivityCampaign.objects.select_for_update().filter(key=key).first()
         if campaign and campaign.space_runs.exists():
             raise CommandError('A space has already claimed this release. Keep album IDs and odds fixed for its run.')
-        ActivityCampaign.objects.update_or_create(key='record-shop', defaults={
-            'title': '回声唱片铺', 'title_en': 'Echo Record Shop',
+        ActivityCampaign.objects.update_or_create(key=key, defaults={
+            'title': title, 'title_en': title_en,
             'summary': '分享歌曲，收藏歌手气泡。', 'summary_en': 'Share songs and collect artist bubbles.',
             'assignment_mode': ActivityCampaign.AssignmentMode.MANUAL, 'duration_seconds': 30 * 86400,
             'event_key': 'record-shop.share', 'config': config, 'enabled': True,

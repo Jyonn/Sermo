@@ -171,7 +171,7 @@ class RecordShopShare(models.Model):
 
     class Meta:
         constraints = [
-            models.UniqueConstraint(fields=['surface', 'source_id'], name='record_shop_publish_once'),
+            models.UniqueConstraint(fields=['run', 'surface', 'source_id'], name='record_shop_run_publish_once'),
         ]
         indexes = [
             models.Index(fields=['preview', 'resolved'], name='record_shop_pending_share'),

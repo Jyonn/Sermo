@@ -2,6 +2,7 @@ import json
 from datetime import timedelta
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.core.management import call_command
@@ -11,8 +12,8 @@ from django.utils import timezone
 from smartdjango import Error
 
 from Activity.management.commands.configure_record_shop import validate_manifest
-from Activity.models import ActivityCampaign, ActivityEvent, ActivityService, RecordShopAnnouncement, RecordShopDiscovery, RecordShopShare, SpaceActivity, UserActivityProgress
-from Activity.record_shop import SINGERS, award, decorate_message, finish_listen, played_complete, publish_announcement, resolve_shares, select_singer, start_listen, track_identity
+from Activity.models import ActivityCampaign, ActivityEvent, ActivityService, RecordShopAnnouncement, RecordShopDiscovery, RecordShopPreference, RecordShopShare, SpaceActivity, UserActivityProgress
+from Activity.record_shop import SINGERS, award, decorate_message, finish_listen, played_complete, publish_announcement, register_share, resolve_shares, select_singer, start_listen, track_identity
 from Chat.models import Chat, ChatTypeChoice
 from Message.models import LinkPreview, LinkPreviewStatusChoice, Message, MessageTypeChoice
 from Space.models import Space
@@ -60,6 +61,54 @@ class RecordShopTests(TestCase):
         self.assertEqual(award(self.run, self.user, 'listen', 'jay:七里香', 6), 0)
         self.assertEqual(UserActivityProgress.objects.get(user=self.user, campaign=self.campaign).earned_points, 16)
         self.assertEqual(UserActivityProgress.objects.get(user=self.other, campaign=self.campaign).earned_points, 5)
+
+    def test_concurrent_editions_credit_a_share_and_apply_their_own_singer_rates(self):
+        women = ActivityCampaign.objects.create(
+            key='record-shop-women', title='回声唱片铺 · 女声篇', event_key='record-shop.share',
+            duration_seconds=30 * 86400, config={'mode': 'record_shop', 'roster': 'women'},
+        )
+        ActivityService.claim_for_space(women, self.space, timezone.now() - timedelta(days=1))
+        track = {**self.music, 'title': '暖暖', 'artists': ['梁靜茹']}
+        self.assertEqual(track_identity(track, women.config), 'fish:暖暖')
+        self.assertEqual(track_identity({**track, 'artists': ['Fish Leong'], 'provider': 'qq_music'}, women.config), 'fish:暖暖')
+        url = 'https://music.163.com/song?id=1'
+        preview = LinkPreview.objects.create(url=url, url_hash=LinkPreview.hash_url(url),
+                                             status=LinkPreviewStatusChoice.READY, provider_data=track)
+        source = SimpleNamespace(user=self.user, pk=8, created_at=timezone.now())
+        for _ in range(2):
+            with self.captureOnCommitCallbacks(execute=True):
+                register_share(source, 'chat', preview)
+        self.assertEqual(RecordShopShare.objects.filter(source_id=8).count(), 2)
+        self.assertEqual(set(UserActivityProgress.objects.filter(user=self.user).values_list('earned_points', flat=True)), {5})
+        now = timezone.now()
+        with patch('Activity.record_shop.get_playback_source', return_value=track):
+            body = dict(surface='chat', source_id=8, provider='netease_music', song_id='1')
+            receipts = {key: start_listen(key, self.user, body)['receipt'] for key in (women.key, self.campaign.key)}
+            with patch('Activity.record_shop.timezone.now', return_value=now + timedelta(seconds=299)):
+                def listen(key, receipt):
+                    return finish_listen(key, self.user, dict(
+                        receipt=receipt, duration_ms=298_000, played=[[0, 298_000]], ended=True))
+                self.assertEqual(listen(women.key, receipts[self.campaign.key]), {'points': 0})
+                self.assertEqual(listen(women.key, receipts[women.key]), {'points': 6})
+                self.assertEqual(listen(self.campaign.key, receipts[self.campaign.key]), {'points': 4})
+
+    def test_earned_singer_can_be_equipped_across_editions_after_a_run_ends(self):
+        women = ActivityCampaign.objects.create(
+            key='record-shop-women', title='回声唱片铺 · 女声篇', event_key='record-shop.share',
+            duration_seconds=30 * 86400, config={'mode': 'record_shop', 'roster': 'women'},
+        )
+        start = timezone.now()
+        run = ActivityService.claim_for_space(women, self.space, start - timedelta(days=1))
+        award(self.run, self.user, 'share', 'jay:track', 30)
+        award(run, self.user, 'share', 'jolin:track', 30)
+        select_singer(self.campaign.key, self.user, 'jay')
+        with self.assertRaises(Error):
+            select_singer(women.key, self.user, 'jay')
+        select_singer(women.key, self.user, 'jolin')
+        self.assertEqual(list(RecordShopPreference.objects.exclude(equipped='').values_list('equipped', flat=True)), ['jolin'])
+        with patch('Activity.record_shop.timezone.now', return_value=start + timedelta(days=31)):
+            self.assertEqual(select_singer(self.campaign.key, self.user, 'jay')['equipped'], 'jay')
+        self.assertEqual(RecordShopPreference.objects.get(progress__campaign=women).singers, ['jolin'])
 
     def test_only_twice_unlocks_and_reequip_is_free(self):
         with self.assertRaises(Error):
