@@ -679,6 +679,9 @@ class LinkPreview(models.Model):
                 updated_at=timezone.now(),
             )
             preview.refresh_from_db()
+            if preview.record_shop_shares.filter(resolved=False).exists():
+                from Activity.record_shop import resolve_shares
+                resolve_shares(preview.pk)
             return preview, True
 
     @classmethod
@@ -1004,6 +1007,9 @@ class Message(models.Model):
                 UserEmojiUsage.record_text(user, message.content)
                 if link_preview is not None:
                     user.award_growth('explore:link')
+                    if not chat.submission:
+                        from Activity.record_shop import register_share
+                        register_share(message, 'chat', link_preview)
             elif message.type == MessageTypeChoice.STICKER:
                 from Sticker.models import UserStickerUsage
                 UserStickerUsage.record_asset(user, asset)
@@ -1027,6 +1033,8 @@ class Message(models.Model):
                 from Chat.models import ChatMessageMention
                 token_user_ids = cls.mention_user_ids_from_content(message.content)
                 ChatMessageMention.record(message, token_user_ids or mention_user_ids)
+            from Activity.record_shop import decorate_message
+            decorate_message(message)
             MessageEvent.record_created(message)
             return message
         raise MessageErrors.NOT_A_MEMBER
@@ -1884,6 +1892,8 @@ class Message(models.Model):
         )
         if include_deleted:
             payload['is_deleted'] = self.is_deleted
+        if not self.is_deleted and self.appearance.get('record_shop'):
+            payload['record_shop'] = self.appearance['record_shop']
         return payload
 
     @classmethod

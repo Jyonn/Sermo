@@ -160,6 +160,55 @@ class ActivityEvent(models.Model):
         ]
 
 
+class RecordShopShare(models.Model):
+    run = models.ForeignKey(SpaceActivity, on_delete=models.CASCADE)
+    user = models.ForeignKey('User.User', on_delete=models.CASCADE)
+    preview = models.ForeignKey('Message.LinkPreview', on_delete=models.CASCADE, related_name='record_shop_shares')
+    surface = models.CharField(max_length=6)
+    source_id = models.PositiveBigIntegerField()
+    published_at = models.DateTimeField()
+    resolved = models.BooleanField(default=False)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['surface', 'source_id'], name='record_shop_publish_once'),
+        ]
+        indexes = [
+            models.Index(fields=['preview', 'resolved'], name='record_shop_pending_share'),
+        ]
+
+
+class RecordShopPreference(models.Model):
+    progress = models.OneToOneField(UserActivityProgress, on_delete=models.CASCADE)
+    singers = models.JSONField(default=list)
+    equipped = models.CharField(max_length=12, blank=True, default='')
+
+
+class RecordShopDiscovery(models.Model):
+    progress = models.ForeignKey(UserActivityProgress, on_delete=models.CASCADE)
+    album_id = models.SlugField(max_length=80)
+    discovered_at = models.DateTimeField()
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['progress', 'album_id'], name='record_shop_discovery_once'),
+        ]
+
+
+class RecordShopAnnouncement(models.Model):
+    run = models.ForeignKey(SpaceActivity, on_delete=models.CASCADE)
+    album_id = models.SlugField(max_length=80)
+    user = models.ForeignKey('User.User', on_delete=models.CASCADE)
+    discovered_at = models.DateTimeField()
+    statement = models.OneToOneField('Square.Statement', on_delete=models.SET_NULL, null=True, blank=True)
+    published = models.BooleanField(default=False)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['run', 'album_id'], name='record_shop_space_first_once'),
+        ]
+
+
 class SpaceActivityReward(models.Model):
     space_activity = models.ForeignKey(SpaceActivity, on_delete=models.CASCADE, related_name='rewards')
     milestone = models.ForeignKey(ActivityMilestone, on_delete=models.CASCADE, related_name='space_rewards')
@@ -867,4 +916,7 @@ class ActivityService:
                 reward_owned=owned,
                 reward_claimable=not owned and achieved,
             )
+        if campaign.config.get('mode') == 'record_shop':
+            from Activity.record_shop import progress_payload
+            payload['record_shop'] = progress_payload(progress, payload['active'])
         return payload

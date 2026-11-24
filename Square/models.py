@@ -512,6 +512,9 @@ class Statement(models.Model):
         ActivityService.record_event(user, 'square.statement.publish', statement.id)
         from Activity.bgm import BgmService
         BgmService.record(user, 'publish', statement)
+        if link_preview is not None:
+            from Activity.record_shop import register_share
+            register_share(statement, 'square', link_preview)
         return cls.objects.select_related('user', 'forward_bundle', 'link_preview').prefetch_related(
             statement_media_prefetch(), statement_forward_bundle_prefetch(),
         ).get(id=statement.id)

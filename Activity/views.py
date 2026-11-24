@@ -118,6 +118,29 @@ class ActivitySeenView(View):
         return ActivityService.payload(campaign, request.user, space_activity)
 
 
+class RecordShopView(View):
+    @auth.require_user
+    def post(self, request: Request, key: str, action: str):
+        import json
+        from Activity.record_shop import RecordShopErrors, finish_listen, select_singer, start_listen
+
+        if len(request.body) > 8192:
+            raise RecordShopErrors.INVALID
+        try:
+            data = json.loads(request.body)
+        except (ValueError, UnicodeDecodeError):
+            raise RecordShopErrors.INVALID
+        if not isinstance(data, dict):
+            raise RecordShopErrors.INVALID
+        if action == 'listen-start':
+            return start_listen(key, request.user, data)
+        if action == 'listen-finish':
+            return finish_listen(key, request.user, data)
+        if action == 'singer':
+            return select_singer(key, request.user, data.get('singer'))
+        raise RecordShopErrors.INVALID
+
+
 class ActivityContributionView(View):
     @auth.require_user
     def post(self, request: Request, key: str):
