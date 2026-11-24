@@ -342,6 +342,18 @@ class SquareQuotaView(View):
         return quota_for_user(request.user)
 
 
+class SquareMedalsView(View):
+    @auth.require_user
+    def get(self, request: Request):
+        from Activity.record_shop import space_first_album_medals
+        from utils.middleware import APIPacker
+
+        request.user.space.require_square_enabled()
+        response = APIPacker.pack(space_first_album_medals(request.user.space_id))
+        response['Cache-Control'] = 'private, no-store'
+        return response
+
+
 class SquareStatusView(View):
     @staticmethod
     def _activity_needs_attention(activity):

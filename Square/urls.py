@@ -1,10 +1,11 @@
 from django.urls import path
-from Square.views import StatementSyncView
+from Square.views import SquareMedalsView, StatementSyncView
 
 from Square.views import AdminSquareMuteView, AdminStatementView, PinnedStatementView, SquareChatRecordStatementView, SquareQuotaView, SquareStatusView, StatementAuthorMuteView, StatementCalendarView, StatementCommentDetailView, StatementCommentLikeView, StatementCommentView, StatementDetailView, StatementEmoticonView, StatementLikeView, StatementLocationView, StatementMediaThumbnailView, StatementMediaView, StatementNearbyLocationView, StatementPinView, StatementUploadView, StatementView
 
 
 urlpatterns = [
+    path('medals', SquareMedalsView.as_view(), name='square medals'),
     path('quota', SquareQuotaView.as_view(), name='square quota'),
     path('status', SquareStatusView.as_view(), name='square status'),
     path('media/<slug:blob_slug>/thumbnail', StatementMediaThumbnailView.as_view(), name='square media thumbnail'),

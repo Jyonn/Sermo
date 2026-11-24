@@ -140,6 +140,50 @@ class RecordShopTests(TestCase):
         self.assertIn(self.user.name, announcement.statement.text)
         self.assertEqual(Statement.objects.filter(space=self.space).count(), 1)
 
+    def test_square_medals_show_only_the_spaces_first_rare_discoveries(self):
+        now = timezone.now()
+        self.space.admin_phone_verified_at = now
+        self.space.group_square_enabled = True
+        self.space.save(update_fields=['admin_phone_verified_at', 'group_square_enabled'])
+        self.campaign.config['albums'] = {
+            'jay': [
+                {'id': tier, 'tier': tier, 'name': tier, 'title': 'A song',
+                 'cover': 'https://example.test/cover.jpg', 'clip': 'https://example.test/clip.m4a'}
+                for tier in ('gold', 'diamond', 'obsidian')
+            ],
+        }
+        self.campaign.save(update_fields=['config'])
+        other_space = Space.objects.create(
+            name='Other records', slug='other-records', email='other@example.test',
+            group_square_enabled=True, admin_phone_verified_at=now,
+        )
+        outsider = User.create(other_space, 'Outsider', email='outside@example.test', verified=True)
+        other_run = ActivityService.claim_for_space(self.campaign, other_space, now - timedelta(days=1))
+        RecordShopAnnouncement.objects.create(run=other_run, album_id='diamond', user=outsider, discovered_at=now)
+        RecordShopAnnouncement.objects.create(run=self.run, album_id='diamond', user=self.other,
+                                             discovered_at=now - timedelta(hours=1))
+        RecordShopAnnouncement.objects.create(run=self.run, album_id='gold', user=self.user, discovered_at=now)
+        RecordShopAnnouncement.objects.create(run=self.run, album_id='obsolete', user=self.user, discovered_at=now)
+        RecordShopAnnouncement.objects.create(run=self.run, album_id='obsidian', user=self.user, discovered_at=now)
+
+        auth = {'HTTP_AUTHORIZATION': 'Bearer ' + get_login_token(self.user)['auth']}
+        self.run.ends_at = now - timedelta(minutes=1)
+        self.run.save(update_fields=['ends_at'])
+        response = self.client.get('/square/medals', **auth)
+        self.assertEqual(response['Cache-Control'], 'private, no-store')
+        medals = response.json()['body']
+        self.assertEqual([item['album']['tier'] for item in medals], ['obsidian', 'diamond'])
+        self.assertEqual([item['user']['name'] for item in medals], [self.user.name, self.other.name])
+        self.assertEqual(medals[0]['discovered_at'], now.timestamp())
+        self.assertEqual(medals[0]['artist'], 'jay')
+        self.assertNotIn('clip', medals[0]['album'])
+        self.assertNotIn('email', medals[0]['user'])
+        self.assertFalse(RecordShopAnnouncement.objects.filter(published=True).exists())
+
+        self.space.group_square_enabled = False
+        self.space.save(update_fields=['group_square_enabled'])
+        self.assertNotEqual(self.client.get('/square/medals', **auth).json()['body'], medals)
+
     def test_full_short_audio_is_six_points(self):
         music = {**self.music, 'duration_ms': 20_000}
         key = self.campaign.key

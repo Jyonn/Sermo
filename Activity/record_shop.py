@@ -14,7 +14,7 @@ from django.utils.translation import gettext_lazy as _
 from opencc import OpenCC
 from smartdjango import Code, Error
 
-from Activity.models import ActivityCampaign, ActivityEvent, ActivityService, RecordShopAnnouncement, RecordShopDiscovery, RecordShopPreference, RecordShopShare, UserActivityProgress
+from Activity.models import ActivityCampaign, ActivityEvent, ActivityService, RecordShopAnnouncement, RecordShopDiscovery, RecordShopPreference, RecordShopShare, SpaceActivity, UserActivityProgress
 
 
 MODE = 'record_shop'
@@ -242,6 +242,34 @@ def progress_payload(progress, active):
 
 def public_album(album):
     return {key: album[key] for key in ('id', 'name', 'title', 'tier', 'cover', 'clip') if album.get(key)}
+
+
+def space_first_album_medals(space_id):
+    run = SpaceActivity.objects.select_related('campaign').filter(
+        space_id=space_id, campaign__key='record-shop', campaign__config__mode=MODE,
+    ).first()
+    if run is None:
+        return []
+
+    albums = {
+        album['id']: (artist, album)
+        for artist, catalog in run.campaign.config.get('albums', {}).items()
+        for album in catalog
+        if album['tier'] in ('diamond', 'obsidian')
+    }
+    medals = RecordShopAnnouncement.objects.select_related('user').filter(
+        run=run, album_id__in=albums, user__space_id=space_id, user__is_deleted=False,
+    ).order_by('-discovered_at', '-id')
+    rows = []
+    for medal in medals:
+        artist, album = albums[medal.album_id]
+        rows.append({
+            'album': {field: album[field] for field in ('id', 'name', 'title', 'tier', 'cover')},
+            'artist': artist,
+            'user': medal.user.dictify('user_id', 'name', 'avatar_uri', 'avatar_cache_key', 'avatar_frame_style'),
+            'discovered_at': medal.discovered_at.timestamp(),
+        })
+    return rows
 
 
 def current_album_clip_path(album_id):
