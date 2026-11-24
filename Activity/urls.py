@@ -7,7 +7,6 @@ from Activity.views import AdminActivityClaimView, AdminActivityListView, Active
 
 
 urlpatterns = [
-    path('<slug:key>/record-shop/<slug:action>', RecordShopView.as_view(), name='record shop action'),
     path('<slug:key>/explorer/rewards/<int:tier>/claim', ExplorerRewardClaimView.as_view(), name='annual explorer reward claim'),
     path('<slug:key>/duel', NumberDuelView.as_view(), name='number duel'),
     path('bgm/me', BgmMeView.as_view(), name='my activity bgm'),
@@ -16,6 +15,7 @@ urlpatterns = [
     path('active', ActiveActivityView.as_view(), name='active activities'),
     path('admin', AdminActivityListView.as_view(), name='admin activities'),
     path('admin/<slug:key>/claim', AdminActivityClaimView.as_view(), name='admin activity claim'),
+    path('<slug:key>/record-shop/<slug:action>', RecordShopView.as_view(), name='record shop action'),
     path('<slug:key>', ActivityDetailView.as_view(), name='activity detail'),
     path('<slug:key>/seen', ActivitySeenView.as_view(), name='activity seen'),
     path('<slug:key>/claim', ActivityClaimView.as_view(), name='activity claim'),

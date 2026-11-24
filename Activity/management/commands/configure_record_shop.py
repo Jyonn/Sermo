@@ -13,6 +13,7 @@ from Activity.record_shop import MODE, SINGERS, normalized
 
 TIERS = ('gold', 'platinum', 'diamond', 'obsidian')
 AUDIO_SUFFIXES = {'.m4a', '.mp3', '.aac', '.opus', '.ogg', '.wav', '.flac'}
+MANAGED_ASSET = re.compile(r'/resources/assets/[1-9][0-9]*/display/[a-f0-9]{64}')
 
 
 def https_asset(value):
@@ -23,6 +24,13 @@ def https_asset(value):
         return url.scheme == 'https' and bool(url.hostname and url.path) and not (url.username or url.password)
     except ValueError:
         return False
+
+
+def audio_asset(value):
+    if not https_asset(value):
+        return False
+    path = urlsplit(value).path
+    return Path(path).suffix.lower() in AUDIO_SUFFIXES or bool(MANAGED_ASSET.fullmatch(path))
 
 
 def validate_manifest(value):
@@ -55,7 +63,7 @@ def validate_manifest(value):
                 raise CommandError(f'{key}: invalid probability or rarity')
             masses[tier].append(probability)
             clip = album.get('clip')
-            if not https_asset(clip) or Path(urlsplit(clip).path).suffix.lower() not in AUDIO_SUFFIXES:
+            if not audio_asset(clip):
                 missing_clips.append(key)
         if any(not values for values in masses.values()) or len(masses['obsidian']) != 1 or masses['obsidian'][0] >= .001:
             raise CommandError(f'{artist}: expected one Obsidian cover below 0.1% and all other rarity tiers')

@@ -92,7 +92,7 @@ def image_variants(data, category):
 
 
 def upload_object(key, data, mime):
-    if not re.fullmatch(r'frienden/assets/(?:[a-z0-9][a-z0-9_-]{0,63}/){2,4}[a-f0-9]{64}\.(?:png|webp|jpg|jpeg|svg|mp3|json)', key):
+    if not re.fullmatch(r'frienden/assets/(?:[a-z0-9][a-z0-9_-]{0,63}/){2,4}[a-f0-9]{64}\.(?:png|webp|jpg|jpeg|svg|m4a|mp3|json)', key):
         raise StickerErrors.INVALID_HASH
     bucket = _required_config(CI.QINIU_BUCKET)
     client = Auth(_required_config(CI.QINIU_ACCESS_KEY), _required_config(CI.QINIU_SECRET_KEY))

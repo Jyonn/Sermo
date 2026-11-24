@@ -7,13 +7,14 @@ from django.utils import timezone
 from smartdjango import Error
 
 from Activity.management.commands.configure_record_shop import validate_manifest
-from Activity.models import ActivityCampaign, ActivityEvent, ActivityService, RecordShopAnnouncement, RecordShopDiscovery, RecordShopShare, UserActivityProgress
+from Activity.models import ActivityCampaign, ActivityEvent, ActivityService, RecordShopAnnouncement, RecordShopDiscovery, RecordShopShare, SpaceActivity, UserActivityProgress
 from Activity.record_shop import SINGERS, award, decorate_message, finish_listen, played_complete, publish_announcement, resolve_shares, select_singer, start_listen, track_identity
 from Chat.models import Chat, ChatTypeChoice
 from Message.models import LinkPreview, LinkPreviewStatusChoice, Message, MessageTypeChoice
 from Space.models import Space
 from Square.models import Statement
 from User.models import User
+from utils.auth import get_login_token, get_space_login_token
 
 
 class RecordShopTests(TestCase):
@@ -140,6 +141,30 @@ class RecordShopTests(TestCase):
             ] for artist in SINGERS},
         }
         self.assertEqual(validate_manifest(manifest)['mode'], 'record_shop')
+        manifest['albums']['jay'][0]['clip'] = 'https://example.test/resources/assets/10/display/' + 'a' * 64
+        self.assertEqual(validate_manifest(manifest)['mode'], 'record_shop')
         manifest['albums']['jay'][0]['clip'] = 'https://music.apple.com/cn/song/123'
         with self.assertRaisesMessage(CommandError, 'Missing clipped recordings for 1 albums: jay-gold'):
             validate_manifest(manifest)
+
+    def test_space_admin_claim_starts_one_thirty_day_run(self):
+        self.campaign.assignment_mode = ActivityCampaign.AssignmentMode.MANUAL
+        self.campaign.save(update_fields=['assignment_mode'])
+        space = Space.objects.create(name='Local music test', slug='record-claim', email='claim@example.test')
+        admin = {'HTTP_AUTHORIZATION': 'Bearer ' + get_space_login_token(space)['auth']}
+        listener = {'HTTP_AUTHORIZATION': 'Bearer ' + get_login_token(self.user)['auth']}
+        endpoint = f'/activities/admin/{self.campaign.key}/claim'
+
+        available = self.client.get('/activities/admin', **admin).json()['body']
+        activity = next(row for row in available if row['key'] == self.campaign.key)
+        self.assertEqual(activity['status'], 'unclaimed')
+        self.assertFalse(activity['mandatory'])
+        self.assertNotEqual(self.client.post(endpoint, **listener).status_code, 200)
+        self.assertFalse(SpaceActivity.objects.filter(space=space, campaign=self.campaign).exists())
+
+        for _ in range(2):
+            response = self.client.post(endpoint, **admin)
+            self.assertEqual(response.status_code, 200, response.content)
+        run = SpaceActivity.objects.get(space=space, campaign=self.campaign)
+        self.assertEqual(run.ends_at - run.claimed_at, timedelta(days=30))
+        self.assertTrue(run.is_active())
