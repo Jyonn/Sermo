@@ -34,9 +34,10 @@ class RecordShopTests(TestCase):
         self.assertEqual(track_identity({**self.music, 'artists': ['Jay Chou'], 'provider': 'qq_music'}, self.campaign.config), 'jay:七里香')
         pocklo = {**self.music, 'provider': 'pocklo_music', 'available': True}
         self.assertEqual(track_identity(pocklo, self.campaign.config), 'jay:七里香')
-        self.assertIsNone(track_identity({**pocklo, 'title': '自定义文件'}, self.campaign.config))
+        self.assertEqual(track_identity({**pocklo, 'title': '未收录的歌曲'}, self.campaign.config), 'jay:未收录的歌曲')
         self.assertIsNone(track_identity({**pocklo, 'available': False}, self.campaign.config))
         self.assertIsNone(track_identity({**self.music, 'provider': 'apple_music'}, self.campaign.config))
+        self.assertIsNone(track_identity({**self.music, 'artists': []}, self.campaign.config))
 
     def test_cached_preview_credits_publishers_once_with_separate_listens(self):
         url = 'https://music.163.com/song?id=1'
@@ -69,6 +70,21 @@ class RecordShopTests(TestCase):
             award(self.run, self.user, 'share', f'jay:test{index}', 10)
         self.assertEqual(select_singer(self.campaign.key, self.user, 'jj')['singers'], ['jay', 'jj'])
         self.assertEqual(select_singer(self.campaign.key, self.user, 'jay')['choices'], 0)
+
+    def test_other_artist_shares_are_scored_once_across_platforms(self):
+        tracks = [
+            ('https://music.163.com/song?id=2', 'netease_music', '陳奕迅', '十年'),
+            ('https://y.qq.com/n/ryqq/songDetail/test', 'qq_music', '陈奕迅', '十年 (feat. 演唱嘉宾)'),
+        ]
+        for index, (url, provider, artist, title) in enumerate(tracks):
+            preview = LinkPreview.objects.create(url=url, url_hash=LinkPreview.hash_url(url), status=LinkPreviewStatusChoice.READY,
+                provider_data={**self.music, 'song_id': str(index), 'provider': provider, 'artists': [artist], 'title': title})
+            for source, actor, surface in [(index * 10 + 1, self.user, 'chat'), (index * 10 + 2, self.other, 'square')]:
+                RecordShopShare.objects.create(run=self.run, user=actor, preview=preview, source_id=source,
+                                               surface=surface, published_at=timezone.now())
+            resolve_shares(preview.pk)
+        self.assertEqual(UserActivityProgress.objects.get(user=self.user, campaign=self.campaign).earned_points, 5)
+        self.assertEqual(UserActivityProgress.objects.get(user=self.other, campaign=self.campaign).earned_points, 10)
 
     def test_partial_playback_never_scores(self):
         self.assertTrue(played_complete(30_000, [[12_000, 30_000], [0, 12_000]]))
@@ -129,6 +145,24 @@ class RecordShopTests(TestCase):
             packet = dict(receipt=receipt, duration_ms=20_000, played=[[0, 20_000]], ended=True)
             with patch('Activity.record_shop.timezone.now', return_value=started + timedelta(seconds=21)):
                 self.assertEqual(finish_listen(key, self.user, packet), {'points': 6})
+
+    def test_complete_listen_scores_follow_artist_and_preview_status(self):
+        key = self.campaign.key
+        started = timezone.now()
+        cases = [
+            ('Jay Chou', '周杰伦整首', 182_000, 6),
+            ('陈奕迅', '普通歌曲整首', 182_000, 4),
+            ('陈奕迅', '普通歌曲试听', 30_000, 2),
+        ]
+        for index, (artist, title, duration, points) in enumerate(cases, start=2):
+            with self.subTest(artist=artist, duration=duration):
+                music = {**self.music, 'song_id': index, 'artists': [artist], 'title': title, 'duration_ms': 182_000}
+                with patch('Activity.record_shop.get_playback_source', return_value=music):
+                    receipt = start_listen(key, self.user, dict(surface='chat', source_id=5, provider='netease_music', song_id=str(index)))['receipt']
+                    packet = dict(receipt=receipt, duration_ms=duration, played=[[0, duration]], ended=True)
+                    with patch('Activity.record_shop.timezone.now', return_value=started + timedelta(seconds=183)):
+                        self.assertEqual(finish_listen(key, self.user, packet), {'points': points})
+                        self.assertEqual(finish_listen(key, self.user, packet), {'points': 0})
 
     def test_manifest_requires_audio_files_instead_of_streaming_pages(self):
         manifest = {

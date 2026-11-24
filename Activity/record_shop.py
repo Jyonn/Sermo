@@ -19,6 +19,9 @@ from Activity.models import ActivityEvent, ActivityService, RecordShopAnnounceme
 
 MODE = 'record_shop'
 SHARE_POINTS = {'chat': 5, 'square': 10}
+FULL_TRACK_POINTS = {True: 6, False: 4}
+PREVIEW_POINTS = {True: 3, False: 2}
+PREVIEW_LIMIT_MS = 30_000
 THRESHOLDS = (30, 60)
 PROVIDERS = {'netease_music', 'qq_music', 'pocklo_music'}
 SINGERS = {
@@ -52,24 +55,23 @@ SINGER_IDS = {normalized(alias): singer for singer, aliases in SINGERS.items() f
 def track_identity(music, config):
     if not isinstance(music, dict) or music.get('provider') not in PROVIDERS or not music.get('song_id'):
         return None
+    if music['provider'] == 'pocklo_music' and not music.get('available'):
+        return None
     title = re.sub(r'\s*[（(]\s*(?:feat\.?|ft\.?|with)\s+[^)）]+[)）]\s*$', '', str(music.get('title') or ''), flags=re.IGNORECASE)
     title = normalized(title)
     artists = music.get('artists')
-    if not isinstance(artists, list):
+    if not title or not isinstance(artists, list):
         return None
-    singers = sorted({SINGER_IDS.get(normalized(artist), '') for artist in artists} - {''})
-    for singer in singers:
+    artist_names = {normalized(artist) for artist in artists} - {''}
+    if not artist_names:
+        return None
+    featured = {SINGER_IDS[name] for name in artist_names if name in SINGER_IDS}
+    if featured:
+        # Keep the track keys used by existing activity scores and playback receipts.
+        singer = min(featured)
         aliases = config.get('title_aliases', {}).get(singer, {})
-        canonical_title = aliases.get(title, title)
-        if not canonical_title:
-            continue
-        if music['provider'] == 'pocklo_music':
-            # Pocklo tags are user-editable. Only credit titles confirmed in this release's catalog.
-            catalog = config.get('verified_titles', {}).get(singer, [])
-            if not music.get('available') or canonical_title not in catalog:
-                continue
-        return f'{singer}:{canonical_title}'
-    return None
+        return f'{singer}:{aliases.get(title) or title}'
+    return f'other:{"+".join(sorted(artist_names))}:{title}'
 
 
 def active_run(user, key=None):
@@ -215,10 +217,11 @@ def finish_listen(key, user, data):
     expected = music.get('duration_ms')
     if type(expected) is not int or expected <= 0:
         return {'points': 0}
-    if abs(duration - expected) <= 1200 and (expected <= 30_000 or duration > 30_000):
-        points = 6
-    elif provider != 'pocklo_music' and expected > 31_200 and duration <= 30_000:
-        points = 3
+    featured = song.partition(':')[0] in SINGERS
+    if abs(duration - expected) <= 1200 and (expected <= PREVIEW_LIMIT_MS or duration > PREVIEW_LIMIT_MS):
+        points = FULL_TRACK_POINTS[featured]
+    elif provider != 'pocklo_music' and expected > PREVIEW_LIMIT_MS and duration <= PREVIEW_LIMIT_MS:
+        points = PREVIEW_POINTS[featured]
     else:
         return {'points': 0}
     return {'points': award(run, user, 'listen', song, points)}

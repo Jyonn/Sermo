@@ -347,6 +347,8 @@ class SquareStatusView(View):
     def _activity_needs_attention(activity):
         if activity.get('newly_claimed'):
             return True
+        if activity.get('record_shop', {}).get('choices'):
+            return True
         if activity.get('starry_night', {}).get('reward_claimable'):
             return True
         if any(reward.get('claimable') for reward in activity.get('explorer', {}).get('rewards', [])):

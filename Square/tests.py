@@ -955,6 +955,8 @@ class StatementApiTests(TestCase):
         self.assertFalse(SquareStatusView._activity_needs_attention(completed))
         self.assertTrue(SquareStatusView._activity_needs_attention(pending_space_progress))
         self.assertTrue(SquareStatusView._activity_needs_attention(pending_personal_reward))
+        self.assertTrue(SquareStatusView._activity_needs_attention({**completed, 'record_shop': {'choices': 1}}))
+        self.assertFalse(SquareStatusView._activity_needs_attention({**completed, 'record_shop': {'choices': 0}}))
 
     def test_square_notification_feed_can_start_with_unread_and_page_history(self):
         old = NotificationEvent.objects.create(
