@@ -13,7 +13,8 @@ from smartdjango import Error
 
 from Activity.management.commands.configure_record_shop import validate_manifest
 from Activity.models import ActivityCampaign, ActivityEvent, ActivityService, RecordShopAnnouncement, RecordShopDiscovery, RecordShopPreference, RecordShopShare, SpaceActivity, UserActivityProgress
-from Activity.record_shop import SINGERS, award, decorate_message, finish_listen, played_complete, publish_announcement, register_share, resolve_shares, select_singer, start_listen, track_identity
+from Activity.record_shop import ROSTERS, SINGERS, award, current_album_clip_path, decorate_message, finish_listen, played_complete, publish_announcement, register_share, resolve_shares, select_singer, space_first_album_medals, start_listen, track_identity
+from Activity.record_shop_studio_catalog import STUDIO_ALBUMS
 from Chat.models import Chat, ChatTypeChoice
 from Message.models import LinkPreview, LinkPreviewStatusChoice, Message, MessageTypeChoice
 from Space.models import Space
@@ -301,6 +302,69 @@ class RecordShopTests(TestCase):
             path.write_text(json.dumps(manifest))
             with self.assertRaisesMessage(CommandError, 'Clip replacement must preserve every album'):
                 call_command('configure_record_shop', str(path), replace_clips=True)
+
+    def test_studio_refresh_preserves_medals_and_old_audio_when_catalog_is_pruned(self):
+        old_clip = 'https://example.test/resources/assets/11/display/' + 'c' * 64
+        for edition, key in [('classic', self.campaign.key), ('women', 'record-shop-women')]:
+            config = {
+                'mode': 'record_shop',
+                'roster': edition,
+                'portraits': {artist: 'https://example.test/portrait.webp' for artist in ROSTERS[edition]},
+                'verified_titles': {artist: ['Track'] for artist in ROSTERS[edition]},
+                'albums': {artist: [
+                    dict(id=album_id, name=album_id, title='Track', tier='diamond', probability=1,
+                         cover='https://example.test/cover.webp', clip=old_clip)
+                    for tier in STUDIO_ALBUMS[artist] for album_id in tier
+                ] for artist in ROSTERS[edition]},
+            }
+            if edition == 'classic':
+                config['albums']['jay'].append({**config['albums']['jay'][0], 'id': 'jay-world-tour', 'tier': 'obsidian'})
+                self.campaign.config = config
+                self.campaign.save(update_fields=['config'])
+            else:
+                ActivityCampaign.objects.create(key=key, title='Women', event_key='record-shop.share', config=config)
+
+        for album_id in ('jay-world-tour', 'jay-chopin'):
+            RecordShopAnnouncement.objects.create(run=self.run, album_id=album_id, user=self.user, discovered_at=timezone.now())
+        award(self.run, self.user, 'share', 'jay:track', 30)
+        select_singer(self.campaign.key, self.user, 'jay')
+        progress = UserActivityProgress.objects.get(user=self.user, campaign=self.campaign)
+        RecordShopDiscovery.objects.create(progress=progress, album_id='jay-world-tour', discovered_at=timezone.now())
+
+        call_command('refresh_record_shop_catalog')
+        self.assertEqual(RecordShopAnnouncement.objects.filter(album_snapshot__isnull=True).count(), 2)
+        for _ in range(2):
+            call_command('refresh_record_shop_catalog', apply=True)
+        self.campaign.refresh_from_db()
+        self.assertEqual(self.campaign.config['albums']['jay'][0]['id'], 'jay-fantasy')
+        self.assertNotIn('jay-world-tour', [row['id'] for row in self.campaign.config['albums']['jay']])
+        self.assertEqual(current_album_clip_path('jay-world-tour'), '/resources/assets/11/display/' + 'c' * 64)
+        self.assertEqual(SpaceActivity.objects.get(pk=self.run.pk).ends_at, self.run.ends_at)
+        self.assertEqual(UserActivityProgress.objects.get(pk=progress.pk).earned_points, 30)
+        self.assertTrue(RecordShopDiscovery.objects.filter(progress=progress, album_id='jay-world-tour').exists())
+        medals = space_first_album_medals(self.space.pk)
+        self.assertEqual({row['album']['id']: row['album']['tier'] for row in medals},
+                         {'jay-world-tour': 'obsidian', 'jay-chopin': 'diamond'})
+        women = ActivityCampaign.objects.get(key='record-shop-women')
+        self.assertEqual([len(women.config['albums'][artist]) for artist in ROSTERS['women']], [16, 12, 15, 14])
+
+    def test_a_later_rare_draw_earns_space_medal_without_replaying_personal_first_discovery(self):
+        album = dict(id='jay-studio', tier='diamond', name='Studio', title='Track', probability=1,
+                     cover='https://example.test/cover.webp', clip='https://example.test/song.m4a')
+        self.campaign.config.update(albums={'jay': [album]}, portraits={'jay': 'https://example.test/portrait.webp'})
+        self.campaign.save(update_fields=['config'])
+        award(self.run, self.user, 'share', 'jay:track', 30)
+        select_singer(self.campaign.key, self.user, 'jay')
+        progress = UserActivityProgress.objects.get(user=self.user, campaign=self.campaign)
+        RecordShopDiscovery.objects.create(progress=progress, album_id=album['id'], discovered_at=timezone.now())
+        chat = Chat.objects.create(space=self.space, chat_type=ChatTypeChoice.GROUP, created_by=self.user)
+        for text in ('First', 'Second', 'Third'):
+            message = Message.objects.create(chat=chat, user=self.user, type=MessageTypeChoice.TEXT, content=text)
+            decorate_message(message)
+        self.assertFalse(message.appearance['record_shop']['first'])
+        self.assertEqual(message.appearance['record_shop']['album']['tier'], 'diamond')
+        self.assertEqual(RecordShopDiscovery.objects.filter(progress=progress).count(), 1)
+        self.assertEqual(RecordShopAnnouncement.objects.get(run=self.run).album_snapshot['album']['tier'], 'diamond')
 
     def test_space_admin_claim_starts_one_thirty_day_run(self):
         self.campaign.assignment_mode = ActivityCampaign.AssignmentMode.MANUAL

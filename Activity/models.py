@@ -198,6 +198,7 @@ class RecordShopDiscovery(models.Model):
 class RecordShopAnnouncement(models.Model):
     run = models.ForeignKey(SpaceActivity, on_delete=models.CASCADE)
     album_id = models.SlugField(max_length=80)
+    album_snapshot = models.JSONField(null=True, blank=True)
     user = models.ForeignKey('User.User', on_delete=models.CASCADE)
     discovered_at = models.DateTimeField()
     statement = models.OneToOneField('Square.Statement', on_delete=models.SET_NULL, null=True, blank=True)

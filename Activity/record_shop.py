@@ -23,6 +23,7 @@ FULL_TRACK_POINTS = {True: 6, False: 4}
 PREVIEW_POINTS = {True: 3, False: 2}
 PREVIEW_LIMIT_MS = 30_000
 THRESHOLDS = (30, 60)
+MEDAL_TIERS = ('diamond', 'obsidian')
 PROVIDERS = {'netease_music', 'qq_music', 'pocklo_music'}
 SINGERS = {
     'jay': ('周杰伦', 'Jay Chou'),
@@ -260,28 +261,34 @@ def public_album(album):
     return {key: album[key] for key in ('id', 'name', 'title', 'tier', 'cover', 'clip') if album.get(key)}
 
 
+def album_medal_snapshot(artist, album):
+    return {
+        'artist': artist,
+        'album': {field: album[field] for field in ('id', 'name', 'title', 'tier', 'cover')},
+    }
+
+
+def medal_catalog(config):
+    return {
+        album['id']: album_medal_snapshot(artist, album)
+        for artist, catalog in config.get('albums', {}).items()
+        for album in catalog if album['tier'] in MEDAL_TIERS
+    }
+
+
 def space_first_album_medals(space_id):
     runs = SpaceActivity.objects.select_related('campaign').filter(space_id=space_id, campaign__config__mode=MODE)
-    catalogs = {
-        run.pk: {
-            album['id']: (artist, album)
-            for artist, catalog in run.campaign.config.get('albums', {}).items()
-            for album in catalog if album['tier'] in ('diamond', 'obsidian')
-        }
-        for run in runs
-    }
+    catalogs = {run.pk: medal_catalog(run.campaign.config) for run in runs}
     medals = RecordShopAnnouncement.objects.select_related('user').filter(
         run_id__in=catalogs, user__space_id=space_id, user__is_deleted=False,
     ).order_by('-discovered_at', '-id')
     rows = []
     for medal in medals:
-        item = catalogs[medal.run_id].get(medal.album_id)
+        item = medal.album_snapshot or catalogs[medal.run_id].get(medal.album_id)
         if item is None:
             continue
-        artist, album = item
         rows.append({
-            'album': {field: album[field] for field in ('id', 'name', 'title', 'tier', 'cover')},
-            'artist': artist,
+            **item,
             'user': medal.user.dictify('user_id', 'name', 'avatar_uri', 'avatar_cache_key', 'avatar_frame_style'),
             'discovered_at': medal.discovered_at.timestamp(),
         })
@@ -292,12 +299,14 @@ def current_album_clip_path(album_id):
     config = ActivityCampaign.objects.filter(key='record-shop', config__mode=MODE).values_list('config', flat=True).first()
     if not config:
         return None
-    for albums in config.get('albums', {}).values():
-        for album in albums:
-            if album['id'] == album_id and isinstance(album.get('clip'), str):
-                path = urlsplit(album['clip']).path
-                if re.fullmatch(r'/resources/assets/[1-9][0-9]*/display/[a-f0-9]{64}', path):
-                    return path
+    clip = next(
+        (album.get('clip') for albums in config.get('albums', {}).values() for album in albums if album['id'] == album_id),
+        config.get('retired_clips', {}).get(album_id),
+    )
+    if isinstance(clip, str):
+        path = urlsplit(clip).path
+        if re.fullmatch(r'/resources/assets/[1-9][0-9]*/display/[a-f0-9]{64}', path):
+            return path
     return None
 
 
@@ -369,11 +378,13 @@ def decorate_message(message):
                 progress=progress, album_id=album['id'], defaults={'discovered_at': message.created_at},
             )
             decoration['first'] = first_for_user
-            if first_for_user and album['tier'] in ('diamond', 'obsidian'):
-                announcement, _ = RecordShopAnnouncement.objects.get_or_create(
-                    run=run, album_id=album['id'], defaults={'user': message.user, 'discovered_at': message.created_at},
+            if album['tier'] in MEDAL_TIERS:
+                announcement, first_for_space = RecordShopAnnouncement.objects.get_or_create(
+                    run=run, album_id=album['id'],
+                    defaults={'user': message.user, 'discovered_at': message.created_at,
+                              'album_snapshot': album_medal_snapshot(artist, album)},
                 )
-                if not announcement.published:
+                if first_for_space or (first_for_user and not announcement.published):
                     transaction.on_commit(lambda: publish_announcement(announcement.pk), robust=True)
     message.appearance = {**message.appearance, 'record_shop': decoration}
     message.save(update_fields=['appearance'])
@@ -390,13 +401,10 @@ def publish_announcement(announcement_id):
     space = Space.objects.select_for_update().get(pk=first.run.space_id)
     if space.verification_tier == 'email' or not space.group_square_enabled or not space.square_free_post_enabled:
         return
-    album = next(
-        (album for albums in first.run.campaign.config.get('albums', {}).values()
-         for album in albums if album['id'] == first.album_id),
-        None,
-    )
-    if album is None:
+    snapshot = first.album_snapshot or medal_catalog(first.run.campaign.config).get(first.album_id)
+    if snapshot is None:
         return
+    album = snapshot['album']
     level = '曜' if album['tier'] == 'obsidian' else '钻'
     time = timezone.localtime(first.discovered_at, ActivityService.BEIJING_TIMEZONE).strftime('%m月%d日 %H:%M')
     text = f'恭喜{first.user.name[:30]}于{time}在{first.run.campaign.title[:40]}首次发现{level}级专辑《{album["name"][:55]}》！'
