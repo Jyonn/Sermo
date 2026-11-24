@@ -18,7 +18,7 @@ from Chat.voice_models import GroupVoiceParticipant, VoiceCall, VoiceIdentity, V
 
 ACTIVE = ('ringing', 'connecting', 'active')
 ZONE = ZoneInfo('Asia/Shanghai')
-WEEK_SECONDS = 1800
+WEEK_SECONDS = 5 * 60
 
 
 class CallError(Exception):
@@ -231,7 +231,7 @@ def _end_locked(call, reason, now):
     for key in sorted([call.caller_identity_id, call.callee_identity_id]):
         quota = VoiceWeeklyQuota.objects.select_for_update().get(identity_id=key, week=call.week)
         quota.reserved_seconds = max(0, quota.reserved_seconds-call.max_seconds)
-        quota.used_seconds = min(WEEK_SECONDS, quota.used_seconds+call.duration_seconds)
+        quota.used_seconds += call.duration_seconds
         quota.save(update_fields=['reserved_seconds', 'used_seconds'])
         VoiceIdentity.objects.filter(digest=key, active_call=call).update(active_call=None)
     update_message(call)

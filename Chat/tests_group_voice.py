@@ -57,8 +57,9 @@ class GroupVoiceTests(TestCase):
         self.assertEqual(len(call_ids), 1)
 
     def test_three_members_join_one_room_and_settle_independently(self):
-        self.assertEqual(group_voice.capability(self.chat, self.users[0])['remaining_seconds'], 1800)
+        self.assertEqual(group_voice.capability(self.chat, self.users[0])['remaining_seconds'], 300)
         seats = [group_voice.join(self.chat, user, uuid.uuid4(), uuid.uuid4()) for user in self.users]
+        self.assertTrue(all(seat.reserved_seconds == 300 for seat in seats))
         call_id = seats[0].call_id
         self.assertEqual({seat.call_id for seat in seats}, {call_id})
         self.assertEqual(Message.objects.filter(chat=self.chat, type=14).count(), 1)

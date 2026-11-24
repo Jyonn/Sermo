@@ -145,6 +145,20 @@ class VoiceCallTests(TestCase):
         self.assertEqual(Message.objects.filter(type=14).count(), 1)
         self.assertEqual(Message.objects.get(pk=call.message_id)._payload_for_type()['state'], 'ended')
 
+    def test_settlement_keeps_time_used_before_the_weekly_limit_changed(self):
+        key = voice.identity_key(self.caller)
+        VoiceIdentity.objects.create(digest=key)
+        quota = VoiceWeeklyQuota.objects.create(identity_id=key, week=voice.week_at(timezone.now()),
+                                                 used_seconds=290)
+        with patch.object(voice, 'WEEK_SECONDS', 1800):
+            call = self.activate(self.create(), seconds=30)
+        ended = voice.mutate(call.id, self.caller, 'end', self.device)
+        quota.refresh_from_db()
+        self.assertEqual(quota.used_seconds, 290 + ended.duration_seconds)
+        self.assertGreater(quota.used_seconds, 300)
+        self.assertEqual(quota.reserved_seconds, 0)
+        self.assertEqual(voice.capability(self.chat, self.caller)['reason'], 'quota_empty')
+
     def test_timeout_and_quota_capped_on_recovery(self):
         call = self.activate(self.create(), seconds=voice.WEEK_SECONDS + 10)
         voice.reconcile()
