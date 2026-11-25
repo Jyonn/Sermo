@@ -151,7 +151,7 @@ VIP_OR_LEVEL_PERSONALIZATION = {
     ('avatar_frame_style', 'niko-run'), ('avatar_frame_style', 'fufu-wave'),
 }
 
-RESOURCE_REWARD_CATEGORIES = {'background', 'bubble', 'frame', 'statement', 'identity'}
+RESOURCE_REWARD_CATEGORIES = {'background', 'bubble', 'frame', 'statement', 'identity', 'profile'}
 
 PERMANENT_VIP_RESOURCES = (
     ('vip', 'vip.permanent', 'founding-100'),
@@ -168,11 +168,12 @@ PERMANENT_VIP_RESOURCES = (
 
 
 def _reward(reward_id, level, category, title, rarity, asset_key=None, capability_key=None, status='live'):
-    preview_kind = 'live' if category in {'background', 'bubble', 'frame'} else 'image'
+    preview_kind = 'live' if category in {'background', 'bubble', 'frame', 'profile'} else 'image'
     destination = {
         'background': '/app/menu/personalization/background',
         'bubble': '/app/menu/personalization/bubble',
         'frame': '/app/menu/personalization/frame',
+        'profile': '/app/menu?panel=personalization/profile-card',
         'capability': '/app/menu/growth',
         'identity': '/app/menu/growth',
     }[category]
@@ -197,6 +198,15 @@ def _reward(reward_id, level, category, title, rarity, asset_key=None, capabilit
     }
 
 
+MUSIC_PROFILE_REWARDS = {
+    13: _reward('profile.accusefive', 13, 'profile', '告五人 · 月台夜歌', 'rare', 'accusefive'),
+    14: _reward('profile.landlords-cat', 14, 'profile', '房东的猫 · 窗边小调', 'rare', 'landlords-cat'),
+    15: _reward('profile.she', 15, 'profile', 'S.H.E · 三色和声', 'epic', 'she'),
+    16: _reward('profile.mayday', 16, 'profile', '五月天 · 蓝色主场', 'legendary', 'mayday'),
+}
+MUSIC_PROFILE_UNLOCK_LEVELS = {reward['asset_key']: level for level, reward in MUSIC_PROFILE_REWARDS.items()}
+
+
 LEVEL_REWARDS = {
     1: [_reward('capability.basic', 1, 'capability', '基础沟通', 'common', capability_key='basic'), _reward('background.default', 1, 'background', '默认背景', 'common', 'default'), _reward('bubble.default', 1, 'bubble', '默认气泡', 'common', 'default'), _reward('frame.none', 1, 'frame', '无边框', 'common', 'none')],
     2: [_reward('capability.image', 2, 'capability', '发送图片', 'rare', capability_key='send_image'), _reward('background.paper', 2, 'background', '纸张背景', 'common', 'paper'), _reward('bubble.comic', 2, 'bubble', '漫画气泡', 'uncommon', 'comic'), _reward('frame.orbit', 2, 'frame', '轨道头像框', 'uncommon', 'orbit')],
@@ -217,6 +227,8 @@ LEVEL_REWARDS = {
     17: [_reward('background.frienden_night', 17, 'background', '夜航友间背景', 'epic', 'frienden-night'), _reward('background.frienden_garden', 17, 'background', '午后花房背景', 'epic', 'frienden-garden'), _reward('bubble.fufu', 17, 'bubble', 'Fufu 气泡', 'legendary', 'fufu'), _reward('frame.fufu', 17, 'frame', 'Fufu Wave 头像框', 'legendary', 'fufu-wave')],
     18: [_reward('background.noir', 18, 'background', '黑色电影背景', 'legendary', 'noir-film'), _reward('identity.final_badge', 18, 'identity', '“尽兴”永久成长徽记', 'legendary'), _reward('profile.final_slot', 18, 'identity', '满级个人名片展示位', 'legendary')],
 }
+for level, reward in MUSIC_PROFILE_REWARDS.items():
+    LEVEL_REWARDS[level].append(reward)
 
 
 def level_unlock_titles(level):

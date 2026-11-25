@@ -3,6 +3,7 @@ import string
 from django.utils.translation import gettext_lazy as _
 
 from smartdjango import Error, Code
+from User.growth import MUSIC_PROFILE_UNLOCK_LEVELS
 from utils.space_slug import is_reserved_space_slug
 
 
@@ -170,7 +171,7 @@ class UserValidator:
         'statement_card_style': {
             'default', 'editorial', 'mosaic', 'hero', 'comic', 'receipt', 'vip', 'niko', 'fufu',
         },
-        'profile_card_theme': {'default', 'level-12', 'vip', 'spider-city', 'explorer-romance'},
+        'profile_card_theme': {'default', 'level-12', 'vip', 'spider-city', 'explorer-romance'} | MUSIC_PROFILE_UNLOCK_LEVELS.keys(),
     }
     GESTURE_LOCK_MIN_MINUTES = 1
     GESTURE_LOCK_MAX_MINUTES = 30
