@@ -216,6 +216,7 @@ class RecordShopTests(TestCase):
         self.assertTrue(announcement.published)
         self.assertTrue(announcement.statement.user.is_official)
         self.assertIn(self.user.name, announcement.statement.text)
+        self.assertEqual(announcement.statement.created_at, announcement.discovered_at)
         self.assertEqual(Statement.objects.filter(space=self.space).count(), 1)
 
         auth = {'HTTP_AUTHORIZATION': 'Bearer ' + get_login_token(self.other)['auth']}
@@ -248,6 +249,26 @@ class RecordShopTests(TestCase):
                                               discovered_at=now, statement=post, published=True)
         self.assertEqual(Statement.detail(self.other, post.id)['record_shop_announcement']['album'], album)
         self.assertNotIn('record_shop_announcement', Statement.detail(self.other, ordinary.id))
+
+        unlocked_at = now - timedelta(days=2, seconds=17)
+        RecordShopAnnouncement.objects.filter(statement=post).update(discovered_at=unlocked_at)
+        post.delete_for(official)
+        ordinary.delete_for(official)
+        with TemporaryDirectory() as tempdir, open(Path(tempdir) / 'restore.log', 'w+') as log:
+            call_command('restore_record_shop_announcements', stdout=log)
+            post.refresh_from_db()
+            self.assertTrue(post.is_deleted)
+            for _ in range(2):
+                call_command('restore_record_shop_announcements', '--apply', stdout=log)
+            log.seek(0)
+            self.assertIn('Applied: restored=0, corrected_time=0, skipped=0', log.read())
+        post.refresh_from_db()
+        ordinary.refresh_from_db()
+        self.assertFalse(post.is_deleted)
+        self.assertEqual(post.created_at, unlocked_at)
+        self.assertEqual(Statement.detail(self.other, post.id)['created_at'], unlocked_at.timestamp())
+        self.assertTrue(ordinary.is_deleted)
+        self.assertEqual(Statement.objects.filter(space=self.space).count(), 2)
 
     def test_square_medals_show_only_the_spaces_first_rare_discoveries(self):
         now = timezone.now()

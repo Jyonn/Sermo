@@ -455,5 +455,7 @@ def publish_announcement(announcement_id):
     time = timezone.localtime(first.discovered_at, ActivityService.BEIJING_TIMEZONE).strftime('%m月%d日 %H:%M')
     text = f'恭喜{first.user.name[:30]}于{time}在{first.run.campaign.title[:30]}首次发现{level}级专辑《{album["name"][:45]}》！'
     first.statement = Statement.create_statement(space.ensure_official_user(), text, 'public', [])
+    first.statement.created_at = first.discovered_at
+    first.statement.save(update_fields=['created_at'])
     first.published = True
     first.save(update_fields=['statement', 'published'])
