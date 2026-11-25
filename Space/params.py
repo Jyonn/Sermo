@@ -49,7 +49,8 @@ class SpaceParams(metaclass=Params):
         lambda x: x is None or x in (0, 1), message=_('oauth_developer_enabled should be 0 or 1'))
     research_enabled = Validator('research_enabled').to(int).null().default(None).bool(
         lambda x: x is None or x in (0, 1), message=_('research_enabled should be 0 or 1'))
-    unverified_group_policy = Validator('unverified_group_policy').to(int).null().default(2).to(SpaceValidator.unverified_group_policy)
+    unverified_group_policy = Validator('unverified_group_policy').to(int).null().default(None).to(
+        lambda value: None if value is None else SpaceValidator.unverified_group_policy(value))
 
 
 class SpaceEmailVerificationCodeParams(metaclass=Params):

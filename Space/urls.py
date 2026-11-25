@@ -27,7 +27,7 @@ from Space.views import (
     SpaceMeView,
     SpaceUserListView,
 )
-from AccessPolicy.views import SpacePolicyDetailView, SpacePolicyListView, SpacePolicySimulateView
+from AccessPolicy.views import SpaceGroupParticipationView, SpacePolicyDetailView, SpacePolicyListView, SpacePolicySimulateView
 
 urlpatterns = [
     path('annual-recap', AnnualRecapView.as_view(), name='space annual recap'),
@@ -52,6 +52,7 @@ urlpatterns = [
     path('admin/operators', SpaceAdminOperatorView.as_view(), name='space admin operators'),
     path('admin/permissions', SpacePolicyListView.as_view(), name='space admin permissions'),
     path('admin/permissions/simulate', SpacePolicySimulateView.as_view(), name='space admin permission simulation'),
+    path('admin/permissions/group-participation', SpaceGroupParticipationView.as_view(), name='space group participation'),
     path('admin/permissions/<path:capability_key>', SpacePolicyDetailView.as_view(), name='space admin permission detail'),
     path('lookup', SpaceLookupView.as_view(), name='space lookup'),
     path('login', SpaceLoginView.as_view(), name='space email login'),

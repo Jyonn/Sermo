@@ -171,13 +171,16 @@ def _frequency_limits(level):
     return 5, 35
 
 
-def frequency_limits_for_user(user):
-    if user.is_permanent_vip:
-        daily, weekly = _frequency_limits(18)
-    else:
-        daily, weekly = _frequency_limits(user.effective_growth_level())
-    policy_limits = user.capability_decision('square.statement.publish').limits
+def effective_frequency_limits(level, permanent_vip, policy_limits):
+    daily, weekly = _frequency_limits(18 if permanent_vip else level)
     return min(daily, policy_limits.get('daily', daily)), min(weekly, policy_limits.get('weekly', weekly))
+
+
+def frequency_limits_for_user(user):
+    return effective_frequency_limits(
+        user.effective_growth_level(), user.is_permanent_vip,
+        user.capability_decision('square.statement.publish').limits,
+    )
 
 
 def anonymous_weekly_limit_for_user(user):
@@ -317,6 +320,7 @@ class Statement(models.Model):
 
     @classmethod
     def feed(cls, user, before=None, limit=20, request=None, scope='all', user_id=None, feed_date=None, keyword=None, date_from=None, date_to=None):
+        user.require_capability('square.explore' if scope == 'all' else 'square.browse')
         queryset = cls.visible_for(user)
         queryset = cls._apply_feed_scope(queryset, user, scope=scope, user_id=user_id)
         if feed_date is not None:
@@ -346,6 +350,7 @@ class Statement(models.Model):
 
     @classmethod
     def calendar_days(cls, user, year, month, scope='all', user_id=None):
+        user.require_capability('square.explore' if scope == 'all' else 'square.browse')
         base_tz = ZoneInfo('Asia/Shanghai')
         month_start = datetime.datetime(year, month, 1, tzinfo=base_tz)
         queryset = cls._apply_feed_scope(cls.visible_for(user), user, scope=scope, user_id=user_id)
@@ -387,6 +392,7 @@ class Statement(models.Model):
 
     @classmethod
     def detail(cls, user, statement_id, request=None):
+        user.require_capability('square.browse')
         try:
             statement = cls.visible_for(user).select_related(
                 'user', 'user__qq_identity', 'forward_bundle', 'link_preview',
@@ -597,6 +603,7 @@ class StatementComment(models.Model):
 
     @classmethod
     def feed(cls, user, statement_id, offset=0, limit=30, sort='hot', request=None):
+        user.require_capability('square.browse')
         statement = cls.statement_for_user(user, statement_id)
         queryset = cls.objects.filter(statement=statement, is_deleted=False).select_related(
             'statement', 'user', 'user__qq_identity', 'parent__user', 'parent__user__qq_identity',

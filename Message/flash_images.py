@@ -156,6 +156,7 @@ class FlashImageSendView(View):
         if chat.group:
             user.space.require_group_send_allowed(user)
         user.require_capability('chat.message.send.image')
+        user.require_capability('chat.message.flash_image')
         client_id = request.POST.get('client_message_id', '').strip()
         if not client_id or len(client_id) > Message.vldt.MAX_CLIENT_MESSAGE_ID_LENGTH:
             raise MessageErrors.PAYLOAD_INVALID

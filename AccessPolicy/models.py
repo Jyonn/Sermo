@@ -3,6 +3,7 @@ from django.db import models
 
 class PlatformCapabilityPolicy(models.Model):
     capability_key = models.CharField(max_length=160, unique=True, db_index=True)
+    enabled = models.BooleanField(default=True, db_default=True)
     requirement = models.JSONField(default=dict, blank=True)
     denial = models.JSONField(default=dict, blank=True)
     limits = models.JSONField(default=dict, blank=True)
@@ -17,6 +18,7 @@ class PlatformCapabilityPolicy(models.Model):
 class SpaceCapabilityPolicy(models.Model):
     space = models.ForeignKey('Space.Space', on_delete=models.CASCADE, related_name='capability_policies')
     capability_key = models.CharField(max_length=160, db_index=True)
+    enabled = models.BooleanField(default=True, db_default=True)
     requirement = models.JSONField(default=dict, blank=True)
     denial = models.JSONField(default=dict, blank=True)
     limits = models.JSONField(default=dict, blank=True)

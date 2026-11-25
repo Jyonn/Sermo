@@ -51,16 +51,23 @@ register('chat.message', '消息', 'Messages', 'chat', 'forum')
 register('chat.message.send', '发送消息', 'Send messages', 'chat.message', 'send')
 register('chat.message.send.text', '文字', 'Text', 'chat.message.send', 'text_fields')
 register('chat.message.send.image', '图片', 'Images', 'chat.message.send', 'image')
+register('chat.message.flash_image', '闪图', 'Flash photos', 'chat.message', 'bolt')
 register('chat.message.send.audio', '语音', 'Voice', 'chat.message.send', 'mic')
 register('chat.message.send.location', '位置', 'Location', 'chat.message.send', 'location_on')
 register('chat.message.send.video', '视频', 'Video', 'chat.message.send', 'videocam')
 register('chat.message.send.file', '文件', 'Files', 'chat.message.send', 'draft')
 register('chat.message.send.sticker', '表情包', 'Stickers', 'chat.message.send', 'mood')
-register('chat.message.download', '下载消息附件', 'Download attachments', 'chat.message', 'download')
-register('chat.message.download.audio', '下载语音', 'Download voice', 'chat.message.download', 'audio_file')
+register('chat.message.download', '附件下载入口', 'Attachment download controls', 'chat.message', 'download')
+register('chat.message.download.audio', '语音下载入口', 'Voice download control', 'chat.message.download', 'audio_file')
 register('chat.group', '群聊', 'Groups', 'chat', 'groups')
-register('chat.group.join', '加入群聊', 'Join groups', 'chat.group', 'group_add')
-register('chat.group.send', '在群聊发言', 'Send in groups', 'chat.group', 'forum')
+register('chat.group.join', '加入群聊', 'Join groups', 'chat.group', 'group_add', requirement={'any': [
+    {'field': 'verified', 'op': 'eq', 'value': True},
+    {'field': 'unverified_group_policy', 'op': 'gte', 'value': 1},
+]})
+register('chat.group.send', '在群聊发言', 'Send in groups', 'chat.group.join', 'forum', requirement={'any': [
+    {'field': 'verified', 'op': 'eq', 'value': True},
+    {'field': 'unverified_group_policy', 'op': 'gte', 'value': 2},
+]})
 register('chat.group.create', '创建群聊', 'Create groups', 'chat.group', 'group_add')
 register('chat.group.invite', '邀请群成员', 'Invite group members', 'chat.group', 'person_add')
 register('chat.group.rename', '修改群名称', 'Rename groups', 'chat.group', 'edit')

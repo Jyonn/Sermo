@@ -8,7 +8,7 @@ from AccessPolicy.validators import AccessPolicyErrors
 ALLOWED_FIELDS = {
     'growth_level', 'has_password', 'verified', 'email_verified', 'phone_verified',
     'dual_verified', 'permanent_vip', 'official', 'chat_enabled', 'square_enabled',
-    'square_explore_enabled', 'space_phone_verified', 'space_identity_verified',
+    'square_explore_enabled', 'square_free_post_enabled', 'space_phone_verified', 'space_identity_verified',
     'unverified_group_policy', 'qr_invite', 'wechat_miniprogram',
 }
 ALLOWED_OPERATORS = {'eq', 'neq', 'gte', 'gt', 'lte', 'lt', 'in', 'not_in', 'exists'}
@@ -118,6 +118,7 @@ def subject_context(user=None, space=None, overrides=None):
             and getattr(space, 'verification_tier', 'phone') != 'email'
         ),
         'square_explore_enabled': bool(getattr(space, 'square_explore_enabled', True)),
+        'square_free_post_enabled': bool(getattr(space, 'square_free_post_enabled', True)),
         'space_phone_verified': bool(getattr(space, 'admin_phone_verified_at', None)),
         'space_identity_verified': bool(getattr(space, 'identity_verified_at', False)),
         'unverified_group_policy': int(getattr(space, 'unverified_group_policy', 2)),
@@ -201,14 +202,21 @@ def evaluate_capability(
         if platform_policy is not None:
             checks.append(('platform', platform_policy.requirement or {}))
             limits = _merge_limits(limits, platform_policy.limits)
+            if not getattr(platform_policy, 'enabled', True):
+                denied_by.append({'key': item.key, 'source': 'platform', 'reason': 'disabled'})
             if platform_policy.denial and evaluate_expression(platform_policy.denial, values):
                 denied_by.append({'key': item.key, 'source': 'platform'})
         if space_policy is not None:
             checks.append(('space', space_policy.requirement or {}))
             limits = _merge_limits(limits, space_policy.limits)
+            if not getattr(space_policy, 'enabled', True):
+                denied_by.append({'key': item.key, 'source': 'space', 'reason': 'disabled'})
             if space_policy.denial and evaluate_expression(space_policy.denial, values):
                 denied_by.append({'key': item.key, 'source': 'space'})
         for source, expression in checks:
+            # Existing installations may still carry the same seeded group preset as a platform policy.
+            if source == 'platform' and expression == item.requirement:
+                continue
             if expression and not evaluate_expression(expression, values):
                 failed.append({'key': item.key, 'source': source, 'expression': expression})
     return CapabilityDecision(

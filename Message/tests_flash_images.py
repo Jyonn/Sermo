@@ -10,6 +10,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from django.utils import timezone
 
+from AccessPolicy.models import PlatformCapabilityPolicy, SpaceCapabilityPolicy
 from Chat.models import Chat
 from Friendship.models import Friendship
 from Message.models import FlashImage, Message, MessageEvent, MessageTypeChoice
@@ -41,15 +42,18 @@ class FlashImageTests(TestCase):
     def headers(self, user):
         return {'HTTP_AUTHORIZATION': f"Bearer {auth.get_login_token(user)['auth']}"}
 
-    def send(self):
+    def send_request(self):
         stream = BytesIO()
         exif = Image.Exif()
         exif[0x010e] = 'private description'
         Image.new('RGB', (64, 40), '#9a6338').save(stream, 'JPEG', exif=exif)
         upload = SimpleUploadedFile('test.jpg', stream.getvalue(), content_type='image/jpeg')
+        return self.client.post(f'/messages/flash-image?chat_id={self.chat.pk}',
+            {'image': upload, 'client_message_id': 'photo:fixture'}, **self.headers(self.sender))
+
+    def send(self):
         with patch.object(User, 'require_capability'):
-            response = self.client.post(f'/messages/flash-image?chat_id={self.chat.pk}',
-                {'image': upload, 'client_message_id': 'photo:fixture'}, **self.headers(self.sender))
+            response = self.send_request()
         self.assertEqual(response.status_code, 200, response.content)
         return response.json()['body']
 
@@ -176,4 +180,17 @@ class FlashImageTests(TestCase):
         self.assertEqual(self.reveal(self.peer, message_id).status_code, 503)
         self.assertEqual(FlashImage.objects.get(message_id=message_id).pending_viewers, [self.peer.pk])
         self.read.side_effect = lambda key: self.cloud[key]
+        self.assertEqual(self.reveal(self.peer, message_id).status_code, 200)
+
+    def test_closed_space_blocks_new_deliveries_and_forwarding_but_preserves_reveal(self):
+        message_id = self.send()['message_id']
+        PlatformCapabilityPolicy.objects.filter(capability_key='chat.message.send.image').update(requirement={})
+        SpaceCapabilityPolicy.objects.create(space=self.sender.space, capability_key='chat.message.flash_image', enabled=False)
+        capability = self.client.get('/capabilities/me?keys=chat.message.flash_image', **self.headers(self.sender))
+        self.assertFalse(capability.json()['body']['capabilities']['chat.message.flash_image']['allowed'])
+        self.store.reset_mock()
+        self.assertEqual(self.send_request().status_code, 403)
+        self.store.assert_not_called()
+        for mode in ('individual', 'bundle'):
+            self.assertEqual(self.forward(self.sender, [message_id], [self.chat.pk], mode).status_code, 403)
         self.assertEqual(self.reveal(self.peer, message_id).status_code, 200)

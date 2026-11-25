@@ -865,6 +865,7 @@ class Message(models.Model):
             if reply_to is not None and message_type != MessageTypeChoice.TEXT:
                 raise MessageErrors.REPLY_TEXT_ONLY
             if message_type == MessageTypeChoice.TEXT:
+                user.require_capability('chat.message.send.text')
                 reference = cls.site_reference_from_text(content, user) if reply_to is None else None
                 if reference is not None:
                     message_type = MessageTypeChoice.STATEMENT if reference['kind'] == 'statement' else MessageTypeChoice.ACTIVITY
@@ -875,11 +876,14 @@ class Message(models.Model):
                 MessageTypeChoice.AUDIO: 'chat.message.send.audio',
                 MessageTypeChoice.LOCATION: 'chat.message.send.location',
                 MessageTypeChoice.VIDEO: 'chat.message.send.video',
+                MessageTypeChoice.STICKER: 'chat.message.send.sticker',
             }.get(message_type)
             if capability:
                 user.require_capability(capability)
             elif message_type == MessageTypeChoice.FILE:
                 user.require_capability('chat.message.send.file')
+            if message_type == MessageTypeChoice.FLASH_IMAGE:
+                user.require_capability('chat.message.flash_image')
             if reply_to is not None and (
                 reply_to.chat_id != chat.id
                 or reply_to.is_deleted
@@ -1121,6 +1125,8 @@ class Message(models.Model):
             raise MessageErrors.NOT_A_MEMBER
         if source.type == MessageTypeChoice.FLASH_IMAGE and source.user_id != user.pk:
             raise MessageErrors.FORWARD_UNSUPPORTED
+        if source.type == MessageTypeChoice.FLASH_IMAGE:
+            user.require_capability('chat.message.flash_image')
         if source.type in (15, 16, 17, 18):
             from Message.shared_references import payload
             payload(source.type, cls._parse_payload(source.content), user, require_access=True)
@@ -1146,6 +1152,9 @@ class Message(models.Model):
         chat.require_user_message_allowed(user)
         if not chat.has_active_member(user):
             raise MessageErrors.NOT_A_MEMBER
+        flash_items = list(bundle.items.filter(message_type=MessageTypeChoice.FLASH_IMAGE).select_related('original_message'))
+        if flash_items:
+            user.require_capability('chat.message.flash_image')
         message = cls.objects.create(
             chat=chat,
             user=user,
@@ -1159,7 +1168,7 @@ class Message(models.Model):
         for resource_id in bundle.items.exclude(media_resource__isnull=True).values_list('media_resource_id', flat=True).distinct():
             MediaResource.objects.get(id=resource_id).recalculate_reference_count()
         from Message.flash_images import copy_delivery
-        for item in bundle.items.filter(message_type=MessageTypeChoice.FLASH_IMAGE).select_related('original_message'):
+        for item in flash_items:
             copy_delivery(item.original_message, message, user, position=item.position)
         return message
 

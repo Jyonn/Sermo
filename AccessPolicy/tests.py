@@ -7,6 +7,7 @@ from AccessPolicy.validators import AccessPolicyErrors
 from AccessPolicy.views import _simulate
 from Space.models import Space
 from User.models import User, UserAccountLevelChoice, UserRoleChoice
+from utils.auth import get_space_login_token
 
 
 class ExpressionTests(TestCase):
@@ -157,3 +158,56 @@ class CapabilityDecisionTests(TestCase):
         )
         decision = evaluate_capability('square.statement.publish.text', user=self.user)
         self.assertEqual(decision.limits, {'daily': 3, 'weekly': 20})
+
+    def test_space_switch_cannot_override_platform_closure_and_leaves_other_spaces_open(self):
+        flash = 'chat.message.flash_image'
+        SpaceCapabilityPolicy.objects.create(space=self.space, capability_key=flash, enabled=False)
+        second_space = Space.objects.create(name='Other', slug='other-policy', email='other@example.test')
+        self.assertFalse(evaluate_capability(flash, space=self.space).allowed)
+        self.assertTrue(evaluate_capability(flash, space=second_space).allowed)
+        self.assertTrue(evaluate_capability(
+            'chat.message.send.image', space=self.space, context={'growth_level': 2},
+        ).allowed)
+        PlatformCapabilityPolicy.objects.create(capability_key='chat.message', enabled=False)
+        reopened = SpaceCapabilityPolicy(space=self.space, capability_key=flash, enabled=True)
+        decision = evaluate_capability(flash, space=Space.objects.get(pk=self.space.pk), space_overrides={flash: reopened})
+        self.assertEqual(decision.denied_by, [{'key': 'chat.message', 'source': 'platform', 'reason': 'disabled'}])
+
+    def test_group_modes_are_builtin_and_saved_without_overwriting_other_settings(self):
+        PlatformCapabilityPolicy.objects.filter(capability_key__in=['chat.group.join', 'chat.group.send']).delete()
+        authorization = 'Bearer ' + get_space_login_token(self.space)['auth']
+        for mode in (0, 1, 2):
+            response = self.client.post('/spaces/admin/permissions/group-participation',
+                {'unverified_group_policy': mode}, content_type='application/json', HTTP_AUTHORIZATION=authorization)
+            self.assertEqual(response.status_code, 200, response.content)
+            self.space.refresh_from_db()
+            self.assertEqual(self.space.unverified_group_policy, mode)
+            self.assertTrue(self.space.chat_enabled)
+            self.assertTrue(evaluate_capability('chat.group.send', space=self.space, context={'verified': True}).allowed)
+            preview_join = _simulate(self.space, {'capability_key': 'chat.group.join'}, 'space')
+            preview_send = _simulate(self.space, {'capability_key': 'chat.group.send'}, 'space')
+            self.assertEqual(preview_join['rows'][0]['allowed'], mode >= 1)
+            self.assertEqual(preview_send['rows'][0]['allowed'], mode >= 2)
+        self.space.unverified_group_policy = 1
+        self.space.save(update_fields=['unverified_group_policy'])
+        response = self.client.post('/spaces/admin/settings', {
+            'name': 'New name', 'group_square_enabled': 1, 'chat_enabled': 1, 'square_explore_enabled': 1,
+            'member_limit': 5,
+        }, content_type='application/json', HTTP_AUTHORIZATION=authorization)
+        self.assertEqual(response.status_code, 200, response.content)
+        self.space.refresh_from_db()
+        self.assertEqual(self.space.unverified_group_policy, 1)
+
+    def test_preview_reports_space_gate_publishing_limits_and_member_context(self):
+        space = self.space
+        space.square_free_post_enabled = False
+        simulation = _simulate(space, {'capability_key': 'square.statement.publish'}, 'space')
+        row = next(row for row in simulation['rows'] if row['verification'] == 'dual')
+        self.assertFalse(row['allowed'])
+        self.assertIn('square_free_post_enabled', {reason['reason'] for reason in row['denied_by']})
+        self.assertEqual(row['limits'], {'daily': 1, 'weekly': 5})
+        base = {'capability_key': 'chat.message.flash_image', 'space_verification': 'phone'}
+        self.assertFalse(_simulate(None, base, 'platform')['rows'][0]['allowed'])
+        self.assertTrue(_simulate(None, {**base, 'flash_forward': True}, 'platform')['rows'][0]['allowed'])
+        disabled = _simulate(None, {**base, 'chat_enabled': False, 'flash_forward': True}, 'platform')
+        self.assertEqual(disabled['rows'][0]['denied_by'][0]['reason'], 'chat_enabled')

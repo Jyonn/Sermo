@@ -340,7 +340,8 @@ class Space(models.Model):
                 raise SpaceErrors.QQ_BINDING_NOT_GRANTED
             self.qq_binding_enabled = requested_qq_binding
         self.square_explore_enabled = bool(square_explore_enabled) and normalized_square_enabled
-        self.unverified_group_policy = self.vldt.unverified_group_policy(unverified_group_policy)
+        self.unverified_group_policy = (locked.unverified_group_policy if unverified_group_policy is None
+                                        else self.vldt.unverified_group_policy(unverified_group_policy))
         self.member_limit = normalized_member_limit
         self.level_names = normalized_level_names
         self.save(update_fields=[

@@ -447,6 +447,7 @@ class StatementSyncView(View):
     @analyse.json(SquareParams.statement_ids)
     def post(self, request: Request):
         request.user.space.require_square_enabled()
+        request.user.require_capability('square.browse')
         ids = raw(request.json.statement_ids)
         # Share the same visibility policy as feed/detail; inaccessible IDs are
         # indistinguishable from deleted IDs, including IDs in other spaces.

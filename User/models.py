@@ -827,6 +827,7 @@ class User(models.Model):
         return self
 
     def set_preset_avatar(self, preset_id: int, save=True):
+        self.require_capability('menu.profile.avatar.preset')
         previous_avatar_type = self.avatar_type
         previous_avatar_uri = self.avatar_uri
         self.avatar_type = UserAvatarTypeChoice.PRESET
