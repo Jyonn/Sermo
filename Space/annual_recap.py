@@ -1,4 +1,4 @@
-"""Year-end message statistics. Personal results never include message bodies."""
+"""Year-end activity statistics. Personal results never include message bodies."""
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -7,6 +7,7 @@ from django.utils import timezone
 
 from Chat.models import Chat, ChatMemberStatusChoice, ChatPurposeChoice
 from Message.models import Message, MessageTypeChoice
+from Square.models import Statement, StatementComment, StatementLike
 from Sticker.models import ManagedResource, StickerAsset, StickerSeries
 
 
@@ -18,6 +19,9 @@ MESSAGE_TYPES = (
     MessageTypeChoice.TEXT, MessageTypeChoice.IMAGE, MessageTypeChoice.FILE,
     MessageTypeChoice.VIDEO, MessageTypeChoice.AUDIO, MessageTypeChoice.LOCATION,
     MessageTypeChoice.STICKER, MessageTypeChoice.FORWARD_BUNDLE,
+    MessageTypeChoice.STATEMENT, MessageTypeChoice.ACTIVITY, MessageTypeChoice.PROFILE,
+    MessageTypeChoice.RESEARCH_TASK, MessageTypeChoice.RESEARCH_COMMENT,
+    MessageTypeChoice.RESEARCH_REPLY, MessageTypeChoice.FLASH_IMAGE,
 )
 
 
@@ -67,19 +71,37 @@ def summarize(user, *, now=None, request=None):
     latest = None
     latest_rank = None
     active_dates = set()
-    for timestamp in own_messages.order_by().values_list('created_at', flat=True).iterator():
+    conversations = set()
+    monthly_counts = [0] * 12
+    for timestamp, chat_id in own_messages.order_by().values_list('created_at', 'chat_id').iterator():
         local = timestamp.astimezone(SHANGHAI)
         active_dates.add(local.date())
+        conversations.add(chat_id)
+        monthly_counts[local.month - 1] += 1
         # Treat the hours before dawn as part of the previous night.
         rank = ((local.hour - 6) % 24, local.minute, local.second, local)
         if latest_rank is None or rank > latest_rank:
             latest, latest_rank = local, rank
+    square = None
+    if user.space.group_square_enabled:
+        period = {'created_at__gte': START, 'created_at__lt': end}
+        statements = Statement.objects.filter(space_id=user.space_id, user=user, is_deleted=False, **period)
+        square = {
+            'posts': statements.count(),
+            'comments': StatementComment.objects.filter(
+                user=user, is_deleted=False, statement__in=Statement.visible_for(user), **period,
+            ).count(),
+            'received_likes': StatementLike.objects.filter(statement__in=statements, **period).exclude(user=user).count(),
+        }
     return {
         'year': YEAR,
         'through': end.isoformat(),
         'space_message_count': space_messages.count(),
-        'personal_message_count': own_messages.distinct().count(),
+        'personal_message_count': sum(monthly_counts),
         'active_days': len(active_dates),
+        'monthly_message_counts': monthly_counts,
+        'conversation_count': len(conversations),
+        'square': square,
         'favorite_chat': favorite_chat,
         'favorite_public_sticker': favorite_public_sticker(space_messages, request),
         'latest_local_time': latest.isoformat() if latest else None,

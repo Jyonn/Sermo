@@ -7,6 +7,7 @@ from Chat.models import Chat, ChatMember, ChatMemberStatusChoice, ChatTypeChoice
 from Message.models import Message, MessageTypeChoice
 from Space.annual_recap import CUTOFF, START, summarize
 from Space.models import Space, SpaceFeatureGrant, SpaceFeatureKeyChoice
+from Square.models import Statement, StatementComment, StatementLike, StatementVisibilityChoice
 from Sticker.models import StickerAsset, StickerSeries
 from User.models import User
 from utils.auth import get_login_token, get_space_login_token
@@ -58,8 +59,52 @@ class AnnualRecapTests(TestCase):
         result = summarize(self.user, now=CUTOFF + timedelta(days=1))
         self.assertEqual(result['space_message_count'], 2)
         self.assertEqual(result['personal_message_count'], 1)
+        self.assertEqual(result['monthly_message_counts'], [0] * 11 + [1])
+        self.assertEqual(result['conversation_count'], 1)
+        self.assertIsNone(result['square'])
         self.assertEqual(result['favorite_chat'], {'chat_id': self.chat.id, 'count': 1, 'name': None})
         self.assertNotIn('Private text', str(result))
+
+    def test_month_boundaries_and_current_chat_membership(self):
+        former_chat = Chat.objects.create(space=self.space, chat_type=ChatTypeChoice.GROUP, created_by=self.user)
+        ChatMember.objects.filter(chat=former_chat, user=self.user).delete()
+        Message.objects.filter(chat__space=self.space).update(created_at=START - timedelta(seconds=1))
+        for chat, sent_at, kind in (
+            (self.chat, START + timedelta(days=31, seconds=-1), MessageTypeChoice.TEXT),
+            (self.chat, START + timedelta(days=31), MessageTypeChoice.FLASH_IMAGE),
+            (self.chat, START + timedelta(days=31), MessageTypeChoice.SYSTEM),
+            (former_chat, START + timedelta(days=31), MessageTypeChoice.TEXT),
+        ):
+            message = Message.objects.create(chat=chat, user=self.user, type=kind, content='Private content')
+            Message.objects.filter(pk=message.pk).update(created_at=sent_at)
+        result = summarize(self.user, now=CUTOFF)
+        self.assertEqual(result['monthly_message_counts'], [1, 1] + [0] * 10)
+        self.assertEqual(result['personal_message_count'], 2)
+        self.assertEqual(result['space_message_count'], 3)
+        self.assertEqual(result['active_days'], 2)
+        self.assertEqual(result['conversation_count'], 1)
+
+    def test_square_counts_respect_visibility_and_cutoff(self):
+        self.space.group_square_enabled = True
+        self.space.save(update_fields=['group_square_enabled'])
+        other = User.create(self.space, 'Other')
+        own = Statement.objects.create(space=self.space, user=self.user, text='Personal post', is_anonymous=True)
+        removed = Statement.objects.create(space=self.space, user=self.user, is_deleted=True)
+        friends_only = Statement.objects.create(space=self.space, user=other, visibility=StatementVisibilityChoice.FRIENDS)
+        older = Statement.objects.create(space=self.space, user=other)
+        Statement.objects.filter(pk__in=[own.pk, removed.pk, friends_only.pk]).update(created_at=START)
+        Statement.objects.filter(pk=older.pk).update(created_at=START - timedelta(days=1))
+        for statement, deleted in ((own, False), (older, False), (own, True), (friends_only, False), (removed, False)):
+            comment = StatementComment.objects.create(statement=statement, user=self.user, text='Comment', is_deleted=deleted)
+            StatementComment.objects.filter(pk=comment.pk).update(created_at=START)
+        after = StatementComment.objects.create(statement=own, user=self.user)
+        StatementComment.objects.filter(pk=after.pk).update(created_at=CUTOFF)
+        like = StatementLike.objects.create(statement=own, user=other)
+        self_like = StatementLike.objects.create(statement=own, user=self.user)
+        StatementLike.objects.filter(pk__in=[like.pk, self_like.pk]).update(created_at=START)
+        result = summarize(self.user, now=CUTOFF)
+        self.assertEqual(result['square'], {'posts': 1, 'comments': 2, 'received_likes': 1})
+        self.assertNotIn('Personal post', str(result))
 
     def test_only_published_stickers_can_appear_in_space_recap(self):
         public = StickerAsset.objects.create(content_hash='a' * 64, storage_key='public.png')
