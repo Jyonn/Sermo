@@ -24,6 +24,7 @@ from utils.notificator_integration import (
     verification_title,
 )
 from User.models import (
+    User,
     NotificationPreference,
     NotificationEvent,
     NotificationEventTypeChoice,
@@ -1101,16 +1102,25 @@ class UserPersonalizationView(View):
         UserParams.statement_card_style,
         UserParams.show_self_avatar,
         UserParams.profile_card_theme,
+        UserParams.record_shop_singer,
     )
     def post(self, request: Request):
-        request.user.set_personalization(
-            chat_bubble_style=request.json.chat_bubble_style,
-            avatar_frame_style=request.json.avatar_frame_style,
-            statement_card_style=request.json.statement_card_style,
-            show_self_avatar=request.json.show_self_avatar,
-            profile_card_theme=request.json.profile_card_theme,
-        )
-        return request.user.json_me()
+        from Activity.record_shop import set_equipped_singer
+
+        with transaction.atomic():
+            user = User.objects.select_for_update().get(pk=request.user.pk)
+            bubble_changed = user.chat_bubble_style != request.json.chat_bubble_style
+            user.set_personalization(
+                chat_bubble_style=request.json.chat_bubble_style,
+                avatar_frame_style=request.json.avatar_frame_style,
+                statement_card_style=request.json.statement_card_style,
+                show_self_avatar=request.json.show_self_avatar,
+                profile_card_theme=request.json.profile_card_theme,
+            )
+            singer = request.json.record_shop_singer
+            if singer is not None or bubble_changed:
+                set_equipped_singer(user, singer if singer is not None else '')
+        return user.json_me()
 
 
 class UserLanguagePreferenceView(View):

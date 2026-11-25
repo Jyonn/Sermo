@@ -122,7 +122,7 @@ class RecordShopView(View):
     @auth.require_user
     def post(self, request: Request, key: str, action: str):
         import json
-        from Activity.record_shop import RecordShopErrors, finish_listen, select_singer, start_listen
+        from Activity.record_shop import RecordShopErrors, claim_singer, finish_listen, start_listen
 
         if len(request.body) > 8192:
             raise RecordShopErrors.INVALID
@@ -136,8 +136,8 @@ class RecordShopView(View):
             return start_listen(key, request.user, data)
         if action == 'listen-finish':
             return finish_listen(key, request.user, data)
-        if action == 'singer':
-            return select_singer(key, request.user, data.get('singer'))
+        if action in {'claim', 'singer'}:
+            return claim_singer(key, request.user, data.get('singer'))
         raise RecordShopErrors.INVALID
 
 

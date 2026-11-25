@@ -13,7 +13,7 @@ from smartdjango import Error
 
 from Activity.management.commands.configure_record_shop import validate_manifest
 from Activity.models import ActivityCampaign, ActivityEvent, ActivityService, RecordShopAnnouncement, RecordShopDiscovery, RecordShopPreference, RecordShopShare, SpaceActivity, UserActivityProgress
-from Activity.record_shop import ROSTERS, SINGERS, award, current_album_clip_path, decorate_message, finish_listen, played_complete, publish_announcement, register_share, resolve_shares, select_singer, space_first_album_medals, start_listen, track_identity
+from Activity.record_shop import ROSTERS, SINGERS, award, bubble_preferences_payload, claim_singer, current_album_clip_path, decorate_message, finish_listen, played_complete, publish_announcement, register_share, resolve_shares, set_equipped_singer, space_first_album_medals, start_listen, track_identity
 from Activity.record_shop_studio_catalog import STUDIO_ALBUMS
 from Chat.models import Chat, ChatTypeChoice
 from Message.models import LinkPreview, LinkPreviewStatusChoice, Message, MessageTypeChoice
@@ -102,28 +102,55 @@ class RecordShopTests(TestCase):
         run = ActivityService.claim_for_space(women, self.space, start - timedelta(days=1))
         award(self.run, self.user, 'share', 'jay:track', 30)
         award(run, self.user, 'share', 'jolin:track', 30)
-        select_singer(self.campaign.key, self.user, 'jay')
+        self.assertEqual(claim_singer(self.campaign.key, self.user, 'jay')['equipped'], '')
         with self.assertRaises(Error):
-            select_singer(women.key, self.user, 'jay')
-        select_singer(women.key, self.user, 'jolin')
-        self.assertEqual(list(RecordShopPreference.objects.exclude(equipped='').values_list('equipped', flat=True)), ['jolin'])
+            claim_singer(women.key, self.user, 'jay')
+        # An already equipped singer (including data from older clients) remains in use.
+        RecordShopPreference.objects.filter(progress__campaign=self.campaign, progress__user=self.user).update(equipped='jay')
+        headers = {'HTTP_AUTHORIZATION': f"Bearer {get_login_token(self.user)['auth']}"}
+        claimed = self.client.post(f'/activities/{women.key}/record-shop/claim', {'singer': 'jolin'},
+                                   content_type='application/json', **headers).json()['body']
+        self.assertEqual(claimed['singers'], ['jolin'])
+        self.assertEqual(claimed['equipped'], '')
+        self.assertEqual(list(RecordShopPreference.objects.exclude(equipped='').values_list('equipped', flat=True)), ['jay'])
+        retried = self.client.post(f'/activities/{women.key}/record-shop/singer', {'singer': 'jolin'},
+                                   content_type='application/json', **headers).json()['body']
+        self.assertEqual(retried['equipped'], '')
+
+        def personalize(**changes):
+            return self.client.post('/users/me/personalization',
+                                    {'chat_bubble_style': 'default', 'avatar_frame_style': 'none', **changes},
+                                    content_type='application/json', **headers)
+
         with patch('Activity.record_shop.timezone.now', return_value=start + timedelta(days=31)):
-            self.assertEqual(select_singer(self.campaign.key, self.user, 'jay')['equipped'], 'jay')
+            denial = personalize(record_shop_singer='stefanie', show_self_avatar=False)
+            self.assertEqual(denial.status_code, 403)
+            self.user.refresh_from_db()
+            self.assertTrue(self.user.show_self_avatar)
+            self.assertEqual(personalize(show_self_avatar=False).json()['body']['record_shop_bubbles'],
+                             {'claimed': ['jay', 'jolin'], 'equipped': 'jay'})
+            self.assertEqual(personalize(record_shop_singer='jolin').json()['body']['record_shop_bubbles'],
+                             {'claimed': ['jay', 'jolin'], 'equipped': 'jolin'})
+            self.assertEqual(list(RecordShopPreference.objects.exclude(equipped='').values_list('equipped', flat=True)), ['jolin'])
+            self.assertEqual(personalize(record_shop_singer='').json()['body']['record_shop_bubbles'],
+                             {'claimed': ['jay', 'jolin'], 'equipped': ''})
+            self.assertEqual(personalize(record_shop_singer='jay').json()['body']['record_shop_bubbles']['equipped'], 'jay')
+        self.assertEqual(bubble_preferences_payload(self.other), {'claimed': [], 'equipped': ''})
         self.assertEqual(RecordShopPreference.objects.get(progress__campaign=women).singers, ['jolin'])
 
-    def test_only_twice_unlocks_and_reequip_is_free(self):
+    def test_only_two_claims_and_retry_is_free(self):
         with self.assertRaises(Error):
-            select_singer(self.campaign.key, self.user, 'jay')
+            claim_singer(self.campaign.key, self.user, 'jay')
         for index in range(3):
             award(self.run, self.user, 'share', f'jay:test{index}', 10)
-        self.assertEqual(select_singer(self.campaign.key, self.user, 'jay')['singers'], ['jay'])
+        self.assertEqual(claim_singer(self.campaign.key, self.user, 'jay')['singers'], ['jay'])
         with self.assertRaises(Error):
-            select_singer(self.campaign.key, self.user, 'jj')
-        self.assertEqual(select_singer(self.campaign.key, self.user, 'jay')['equipped'], 'jay')
+            claim_singer(self.campaign.key, self.user, 'jj')
+        self.assertEqual(claim_singer(self.campaign.key, self.user, 'jay')['equipped'], '')
         for index in range(3, 6):
             award(self.run, self.user, 'share', f'jay:test{index}', 10)
-        self.assertEqual(select_singer(self.campaign.key, self.user, 'jj')['singers'], ['jay', 'jj'])
-        self.assertEqual(select_singer(self.campaign.key, self.user, 'jay')['choices'], 0)
+        self.assertEqual(claim_singer(self.campaign.key, self.user, 'jj')['singers'], ['jay', 'jj'])
+        self.assertEqual(claim_singer(self.campaign.key, self.user, 'jay')['choices'], 0)
 
     def test_other_artist_shares_are_scored_once_across_platforms(self):
         tracks = [
@@ -169,7 +196,8 @@ class RecordShopTests(TestCase):
         )
         self.campaign.save(update_fields=['config'])
         award(self.run, self.user, 'share', 'jay:testing', 30)
-        select_singer(self.campaign.key, self.user, 'jay')
+        claim_singer(self.campaign.key, self.user, 'jay')
+        set_equipped_singer(self.user, 'jay')
         chat = Chat.objects.create(space=self.space, chat_type=ChatTypeChoice.GROUP, created_by=self.user)
         first = Message.objects.create(chat=chat, user=self.user, type=MessageTypeChoice.TEXT, content='第一条')
         decorate_message(first)
@@ -327,7 +355,8 @@ class RecordShopTests(TestCase):
         for album_id in ('jay-world-tour', 'jay-chopin'):
             RecordShopAnnouncement.objects.create(run=self.run, album_id=album_id, user=self.user, discovered_at=timezone.now())
         award(self.run, self.user, 'share', 'jay:track', 30)
-        select_singer(self.campaign.key, self.user, 'jay')
+        claim_singer(self.campaign.key, self.user, 'jay')
+        set_equipped_singer(self.user, 'jay')
         progress = UserActivityProgress.objects.get(user=self.user, campaign=self.campaign)
         RecordShopDiscovery.objects.create(progress=progress, album_id='jay-world-tour', discovered_at=timezone.now())
 
@@ -354,7 +383,8 @@ class RecordShopTests(TestCase):
         self.campaign.config.update(albums={'jay': [album]}, portraits={'jay': 'https://example.test/portrait.webp'})
         self.campaign.save(update_fields=['config'])
         award(self.run, self.user, 'share', 'jay:track', 30)
-        select_singer(self.campaign.key, self.user, 'jay')
+        claim_singer(self.campaign.key, self.user, 'jay')
+        set_equipped_singer(self.user, 'jay')
         progress = UserActivityProgress.objects.get(user=self.user, campaign=self.campaign)
         RecordShopDiscovery.objects.create(progress=progress, album_id=album['id'], discovered_at=timezone.now())
         chat = Chat.objects.create(space=self.space, chat_type=ChatTypeChoice.GROUP, created_by=self.user)

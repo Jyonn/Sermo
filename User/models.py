@@ -1414,6 +1414,8 @@ class User(models.Model):
         return data
 
     def json_me(self):
+        from Activity.record_shop import bubble_preferences_payload
+
         payload = self.dictify(
             'name',
             'signature',
@@ -1454,6 +1456,7 @@ class User(models.Model):
         payload['growth'] = self.calculate_growth()
         payload['welcome_message_count'] = self.welcome_message_templates.count()
         payload['resource_inventory'] = UserResourceInventory.payload_for(self)
+        payload['record_shop_bubbles'] = bubble_preferences_payload(self)
         payload['growth_honor'] = self.growth_honor()
         payload['founder_medal_years'] = self.founder_medal_years()
         payload['explorer_badge_years'] = self.explorer_badge_years()

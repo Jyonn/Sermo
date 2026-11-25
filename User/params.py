@@ -49,6 +49,7 @@ class UserParams(metaclass=Params):
     chat_bubble_style = Validator('chat_bubble_style').to(str).to(
         lambda value: User.validators.personalization('chat_bubble_style', value)
     )
+    record_shop_singer = Validator('record_shop_singer').to(str).null().default(None)
     avatar_frame_style = Validator('avatar_frame_style').to(str).to(
         lambda value: User.validators.personalization('avatar_frame_style', value)
     )

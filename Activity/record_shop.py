@@ -48,6 +48,7 @@ class RecordShopErrors:
     INVALID = Error(_('Invalid record shop action'), code=Code.BadRequest)
     UNAVAILABLE = Error(_('The record shop campaign is unavailable'), code=Code.Forbidden)
     NO_SELECTION = Error(_('There is no singer selection available'), code=Code.Forbidden)
+    NOT_CLAIMED = Error(_('Claim this singer bubble before using it'), code=Code.Forbidden)
 
 
 def normalized(value):
@@ -311,7 +312,7 @@ def current_album_clip_path(album_id):
 
 
 @transaction.atomic
-def select_singer(key, user, singer):
+def claim_singer(key, user, singer):
     from User.models import User
 
     run = record_shop_runs(user, active_only=False).filter(campaign__key=key, claimed_at__lte=timezone.now()).first()
@@ -328,12 +329,42 @@ def select_singer(key, user, singer):
         if len(preference.singers) >= sum(progress.earned_points >= threshold for threshold in THRESHOLDS):
             raise RecordShopErrors.NO_SELECTION
         preference.singers.append(singer)
-    preference.equipped = singer
-    preference.save(update_fields=['singers', 'equipped'])
-    RecordShopPreference.objects.filter(
-        progress__user=user, progress__space_activity__space_id=user.space_id,
-    ).exclude(pk=preference.pk).exclude(equipped='').update(equipped='')
+        preference.save(update_fields=['singers'])
     return progress_payload(progress, run.is_active())
+
+
+def _bubble_preferences(user):
+    return RecordShopPreference.objects.filter(
+        progress__user=user, progress__space_activity__space_id=user.space_id,
+        progress__campaign__config__mode=MODE,
+    )
+
+
+def bubble_preferences_payload(user):
+    rows = _bubble_preferences(user).filter(progress__campaign__enabled=True).order_by('-pk')
+    claimed, equipped = set(), ''
+    for singers, active in rows.values_list('singers', 'equipped'):
+        claimed.update(singers)
+        equipped = equipped or active
+    return {'claimed': sorted(claimed), 'equipped': equipped}
+
+
+def set_equipped_singer(user, singer):
+    """Change the worn bubble under the same user lock as claim_singer."""
+    preferences = _bubble_preferences(user)
+    if singer == '':
+        preferences.exclude(equipped='').update(equipped='')
+        return
+    if not isinstance(singer, str) or not any(singer in roster for roster in ROSTERS.values()):
+        raise RecordShopErrors.INVALID
+    owned = next((row for row in preferences.filter(progress__campaign__enabled=True).order_by('-pk')
+                  if singer in row.singers), None)
+    if owned is None:
+        raise RecordShopErrors.NOT_CLAIMED
+    preferences.exclude(pk=owned.pk).exclude(equipped='').update(equipped='')
+    if owned.equipped != singer:
+        owned.equipped = singer
+        owned.save(update_fields=['equipped'])
 
 
 def decorate_message(message):
@@ -341,8 +372,8 @@ def decorate_message(message):
 
     if message.chat.submission or message.user.is_official:
         return
-    preference = RecordShopPreference.objects.select_related('progress__space_activity__campaign').filter(
-        progress__user=message.user, progress__space_activity__space=message.user.space, progress__campaign__enabled=True,
+    preference = _bubble_preferences(message.user).select_related('progress__space_activity__campaign').filter(
+        progress__campaign__enabled=True,
     ).exclude(equipped='').order_by('-pk').first()
     if preference is None:
         return
