@@ -54,6 +54,7 @@ class GrowthRuleTests(SimpleTestCase):
         self.assertEqual(rewards, {
             'none', 'orbit', 'polaroid', 'aurora', 'papercut',
             'mechanical', 'niko-run', 'fufu-wave',
+            'joker-xue', 'khalil-fong', 'gem', 'eason-chan',
         })
 
     def test_background_catalog_only_contains_active_themes(self):

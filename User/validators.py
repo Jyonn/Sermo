@@ -3,7 +3,7 @@ import string
 from django.utils.translation import gettext_lazy as _
 
 from smartdjango import Error, Code
-from User.growth import MUSIC_PROFILE_UNLOCK_LEVELS
+from User.growth import MUSIC_PROFILE_UNLOCK_LEVELS, SINGER_AVATAR_FRAMES
 from utils.space_slug import is_reserved_space_slug
 
 
@@ -167,7 +167,7 @@ class UserValidator:
         'avatar_frame_style': {
             'none', 'orbit', 'aurora', 'polaroid', 'papercut', 'mechanical',
             'niko-run', 'fufu-wave', 'xiaobai-run', 'vip', 'spider-web', 'explorer-conan',
-        },
+        } | SINGER_AVATAR_FRAMES.keys(),
         'statement_card_style': {
             'default', 'editorial', 'mosaic', 'hero', 'comic', 'receipt', 'vip', 'niko', 'fufu',
         },

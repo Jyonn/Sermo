@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from User.growth import ACTIVITY_PERSONALIZATION, CHAT_BACKGROUND_LEVELS, PERSONALIZATION_LEVELS
+from User.growth import ACTIVITY_PERSONALIZATION, CHAT_BACKGROUND_LEVELS, PERSONALIZATION_LEVELS, SINGER_AVATAR_FRAMES
 
 
 @dataclass(frozen=True)
@@ -139,9 +139,11 @@ for style in ('city-jdz', 'city-shanghai', 'city-nyc', 'city-beijing'):
     register(f'menu.personalization.bubble.use.{style}', style, style, 'menu.personalization.bubble', 'location_city', asset_key=style)
 
 for style in PERSONALIZATION_LEVELS['avatar_frame_style']:
+    frame = SINGER_AVATAR_FRAMES.get(style)
     register(
-        f'menu.personalization.frame.use.{style}', style, style,
+        f'menu.personalization.frame.use.{style}', frame.title if frame else style, frame.title_en if frame else style,
         'menu.personalization.frame', 'portrait', asset_key=style,
+        requirement={'field': 'growth_level', 'op': 'gte', 'value': frame.level} if frame else None,
     )
 for style in ACTIVITY_PERSONALIZATION.get('avatar_frame_style', set()):
     register(

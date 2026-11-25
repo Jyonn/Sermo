@@ -127,6 +127,22 @@ CHAT_BACKGROUND_LEVELS = {
     'custom': 8,
 }
 
+@dataclass(frozen=True)
+class SingerAvatarFrame:
+    level: int
+    title: str
+    title_en: str
+    rarity: str
+
+
+SINGER_AVATAR_FRAMES = {
+    'joker-xue': SingerAvatarFrame(14, '薛之谦 · 星舱来信', 'Joker Xue · Signal from Orbit', 'epic'),
+    'khalil-fong': SingerAvatarFrame(15, '方大同 · 木弦留声', 'Khalil Fong · Acoustic Soul', 'epic'),
+    'gem': SingerAvatarFrame(17, '邓紫棋 · 赤金耀光', 'G.E.M. · Golden Radiance', 'legendary'),
+    'eason-chan': SingerAvatarFrame(18, '陈奕迅 · 梦幕回响', 'Eason Chan · Encore in the Dark', 'legendary'),
+}
+
+
 PERSONALIZATION_LEVELS = {
     'chat_bubble_style': {
         'default': 1, 'comic': 2, 'typewriter': 4,
@@ -137,6 +153,7 @@ PERSONALIZATION_LEVELS = {
     'avatar_frame_style': {
         'none': 1, 'orbit': 2, 'polaroid': 3, 'aurora': 7,
         'papercut': 9, 'mechanical': 13, 'niko-run': 16, 'fufu-wave': 17,
+        **{style: frame.level for style, frame in SINGER_AVATAR_FRAMES.items()},
     },
 }
 
@@ -229,6 +246,10 @@ LEVEL_REWARDS = {
 }
 for level, reward in MUSIC_PROFILE_REWARDS.items():
     LEVEL_REWARDS[level].append(reward)
+for style, frame in SINGER_AVATAR_FRAMES.items():
+    LEVEL_REWARDS[frame.level].append(
+        _reward(f'frame.{style}', frame.level, 'frame', frame.title, frame.rarity, style)
+    )
 
 
 def level_unlock_titles(level):
