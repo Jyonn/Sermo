@@ -277,6 +277,25 @@ def medal_catalog(config):
     }
 
 
+def album_medal_payload(medal, snapshot):
+    return {
+        **snapshot,
+        'user': medal.user.dictify('user_id', 'name', 'avatar_uri', 'avatar_cache_key', 'avatar_frame_style'),
+        'discovered_at': medal.discovered_at.timestamp(),
+    }
+
+
+def statement_announcement_payload(statement):
+    first = getattr(statement, 'recordshopannouncement', None)
+    if (first is None or not first.published or first.user.is_deleted
+            or first.user.space_id != statement.space_id):
+        return None
+    snapshot = first.album_snapshot or medal_catalog(first.run.campaign.config).get(first.album_id)
+    if snapshot and snapshot['album']['tier'] in MEDAL_TIERS:
+        return album_medal_payload(first, snapshot)
+    return None
+
+
 def space_first_album_medals(space_id):
     runs = SpaceActivity.objects.select_related('campaign').filter(space_id=space_id, campaign__config__mode=MODE)
     catalogs = {run.pk: medal_catalog(run.campaign.config) for run in runs}
@@ -288,11 +307,7 @@ def space_first_album_medals(space_id):
         item = medal.album_snapshot or catalogs[medal.run_id].get(medal.album_id)
         if item is None:
             continue
-        rows.append({
-            **item,
-            'user': medal.user.dictify('user_id', 'name', 'avatar_uri', 'avatar_cache_key', 'avatar_frame_style'),
-            'discovered_at': medal.discovered_at.timestamp(),
-        })
+        rows.append(album_medal_payload(medal, item))
     return rows
 
 
@@ -438,7 +453,7 @@ def publish_announcement(announcement_id):
     album = snapshot['album']
     level = '曜' if album['tier'] == 'obsidian' else '钻'
     time = timezone.localtime(first.discovered_at, ActivityService.BEIJING_TIMEZONE).strftime('%m月%d日 %H:%M')
-    text = f'恭喜{first.user.name[:30]}于{time}在{first.run.campaign.title[:40]}首次发现{level}级专辑《{album["name"][:55]}》！'
+    text = f'恭喜{first.user.name[:30]}于{time}在{first.run.campaign.title[:30]}首次发现{level}级专辑《{album["name"][:45]}》！'
     first.statement = Statement.create_statement(space.ensure_official_user(), text, 'public', [])
     first.published = True
     first.save(update_fields=['statement', 'published'])

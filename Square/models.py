@@ -221,6 +221,12 @@ def _enforce_frequency(queryset, user, multiplier=1):
         raise SquareErrors.WEEKLY_LIMIT_REACHED
 
 
+def statement_record_shop_prefetch():
+    from Activity.models import RecordShopAnnouncement
+
+    return Prefetch('recordshopannouncement', queryset=RecordShopAnnouncement.objects.select_related('user'))
+
+
 class Statement(models.Model):
     space = models.ForeignKey('Space.Space', on_delete=models.CASCADE, related_name='statements', db_index=True)
     user = models.ForeignKey('User.User', on_delete=models.CASCADE, related_name='statements')
@@ -338,6 +344,7 @@ class Statement(models.Model):
         if normalized_keyword:
             queryset = queryset.filter(text__icontains=normalized_keyword)
         queryset = queryset.select_related('user', 'user__qq_identity', 'forward_bundle', 'link_preview').prefetch_related(
+            statement_record_shop_prefetch(),
             statement_media_prefetch(), statement_forward_bundle_prefetch(),
             'qzone_source__emoticons__media_asset',
         ).annotate(
@@ -380,6 +387,7 @@ class Statement(models.Model):
         queryset = cls.objects.filter(space=space, is_deleted=False).select_related(
             'user', 'user__qq_identity', 'forward_bundle', 'link_preview',
         ).prefetch_related(
+            statement_record_shop_prefetch(),
             statement_media_prefetch(), statement_forward_bundle_prefetch(),
             'qzone_source__emoticons__media_asset',
         ).annotate(
@@ -397,6 +405,7 @@ class Statement(models.Model):
             statement = cls.visible_for(user).select_related(
                 'user', 'user__qq_identity', 'forward_bundle', 'link_preview',
             ).prefetch_related(
+                statement_record_shop_prefetch(),
                 statement_media_prefetch(), statement_forward_bundle_prefetch(),
                 'qzone_source__emoticons__media_asset',
             ).annotate(
@@ -529,7 +538,7 @@ class Statement(models.Model):
         viewer = getattr(request, 'user', None) if request else None
         if viewer is not None and not hasattr(viewer, 'space_id'):
             viewer = None
-        return dict(
+        payload = dict(
             statement_id=self.id,
             user=anonymous_user_json() if self.is_anonymous else self.user.tiny_json(),
             is_anonymous=self.is_anonymous,
@@ -558,6 +567,13 @@ class Statement(models.Model):
             is_pinned=bool(self.user.is_official and self.user.pinned_square_statement_id == self.id),
             created_at=self.created_at.timestamp(),
         )
+        if self.user.is_official and not self.is_anonymous and self.visibility == StatementVisibilityChoice.PUBLIC:
+            from Activity.record_shop import statement_announcement_payload
+
+            announcement = statement_announcement_payload(self)
+            if announcement is not None:
+                payload['record_shop_announcement'] = announcement
+        return payload
 
     def delete_for(self, user):
         if user.id != self.user_id and not (user.is_official and user.space_id == self.space_id):

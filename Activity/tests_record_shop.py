@@ -218,6 +218,37 @@ class RecordShopTests(TestCase):
         self.assertIn(self.user.name, announcement.statement.text)
         self.assertEqual(Statement.objects.filter(space=self.space).count(), 1)
 
+        auth = {'HTTP_AUTHORIZATION': 'Bearer ' + get_login_token(self.other)['auth']}
+        detail = self.client.get(f'/square/statements/{announcement.statement_id}', **auth)
+        self.assertEqual(detail.status_code, 200)
+        card = detail.json()['body']['record_shop_announcement']
+        self.assertEqual(card['artist'], 'jay')
+        self.assertEqual(card['album'], {key: announcement.album_snapshot['album'][key]
+                                         for key in ('id', 'name', 'title', 'tier', 'cover')})
+        self.assertEqual(card['user']['user_id'], self.user.id)
+        self.assertEqual(card['user']['name'], self.user.name)
+        self.assertEqual(card['discovered_at'], announcement.discovered_at.timestamp())
+        self.assertNotIn('email', card['user'])
+        self.assertNotIn('clip', card['album'])
+        feed = self.client.get('/square/statements?limit=20', **auth)
+        self.assertEqual(feed.status_code, 200)
+        self.assertEqual(feed.json()['body'][0]['record_shop_announcement'], card)
+
+    def test_existing_official_discovery_post_uses_catalog_when_snapshot_is_missing(self):
+        now = timezone.now()
+        self.space.admin_phone_verified_at = now
+        self.space.save(update_fields=['admin_phone_verified_at'])
+        album = dict(id='rare-album', tier='diamond', name='珍藏', title='示例曲', cover='https://example.test/cover.jpg')
+        self.campaign.config['albums'] = {'jay': [album]}
+        self.campaign.save(update_fields=['config'])
+        official = self.space.ensure_official_user()
+        post = Statement.objects.create(space=self.space, user=official, text='历史首解祝贺')
+        ordinary = Statement.objects.create(space=self.space, user=official, text='普通官方发言')
+        RecordShopAnnouncement.objects.create(run=self.run, album_id=album['id'], user=self.user,
+                                              discovered_at=now, statement=post, published=True)
+        self.assertEqual(Statement.detail(self.other, post.id)['record_shop_announcement']['album'], album)
+        self.assertNotIn('record_shop_announcement', Statement.detail(self.other, ordinary.id))
+
     def test_square_medals_show_only_the_spaces_first_rare_discoveries(self):
         now = timezone.now()
         self.space.admin_phone_verified_at = now
