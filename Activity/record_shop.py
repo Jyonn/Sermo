@@ -285,17 +285,6 @@ def album_medal_payload(medal, snapshot):
     }
 
 
-def statement_announcement_payload(statement):
-    first = getattr(statement, 'recordshopannouncement', None)
-    if (first is None or not first.published or first.user.is_deleted
-            or first.user.space_id != statement.space_id):
-        return None
-    snapshot = first.album_snapshot or medal_catalog(first.run.campaign.config).get(first.album_id)
-    if snapshot and snapshot['album']['tier'] in MEDAL_TIERS:
-        return album_medal_payload(first, snapshot)
-    return None
-
-
 def space_first_album_medals(space_id):
     runs = SpaceActivity.objects.select_related('campaign').filter(space_id=space_id, campaign__config__mode=MODE)
     catalogs = {run.pk: medal_catalog(run.campaign.config) for run in runs}
@@ -425,37 +414,10 @@ def decorate_message(message):
             )
             decoration['first'] = first_for_user
             if album['tier'] in MEDAL_TIERS:
-                announcement, first_for_space = RecordShopAnnouncement.objects.get_or_create(
+                RecordShopAnnouncement.objects.get_or_create(
                     run=run, album_id=album['id'],
                     defaults={'user': message.user, 'discovered_at': message.created_at,
                               'album_snapshot': album_medal_snapshot(artist, album)},
                 )
-                if first_for_space or (first_for_user and not announcement.published):
-                    transaction.on_commit(lambda: publish_announcement(announcement.pk), robust=True)
     message.appearance = {**message.appearance, 'record_shop': decoration}
     message.save(update_fields=['appearance'])
-
-
-@transaction.atomic
-def publish_announcement(announcement_id):
-    from Space.models import Space
-    from Square.models import Statement
-
-    first = RecordShopAnnouncement.objects.select_for_update().filter(pk=announcement_id, published=False).first()
-    if first is None:
-        return
-    space = Space.objects.select_for_update().get(pk=first.run.space_id)
-    if space.verification_tier == 'email' or not space.group_square_enabled or not space.square_free_post_enabled:
-        return
-    snapshot = first.album_snapshot or medal_catalog(first.run.campaign.config).get(first.album_id)
-    if snapshot is None:
-        return
-    album = snapshot['album']
-    level = '曜' if album['tier'] == 'obsidian' else '钻'
-    time = timezone.localtime(first.discovered_at, ActivityService.BEIJING_TIMEZONE).strftime('%m月%d日 %H:%M')
-    text = f'恭喜{first.user.name[:30]}于{time}在{first.run.campaign.title[:30]}首次发现{level}级专辑《{album["name"][:45]}》！'
-    first.statement = Statement.create_statement(space.ensure_official_user(), text, 'public', [])
-    first.statement.created_at = first.discovered_at
-    first.statement.save(update_fields=['created_at'])
-    first.published = True
-    first.save(update_fields=['statement', 'published'])

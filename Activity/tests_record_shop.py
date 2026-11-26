@@ -13,7 +13,7 @@ from smartdjango import Error
 
 from Activity.management.commands.configure_record_shop import validate_manifest
 from Activity.models import ActivityCampaign, ActivityEvent, ActivityService, RecordShopAnnouncement, RecordShopDiscovery, RecordShopPreference, RecordShopShare, SpaceActivity, UserActivityProgress
-from Activity.record_shop import ROSTERS, SINGERS, award, bubble_preferences_payload, claim_singer, current_album_clip_path, decorate_message, finish_listen, played_complete, publish_announcement, register_share, resolve_shares, set_equipped_singer, space_first_album_medals, start_listen, track_identity
+from Activity.record_shop import ROSTERS, SINGERS, award, bubble_preferences_payload, claim_singer, current_album_clip_path, decorate_message, finish_listen, played_complete, register_share, resolve_shares, set_equipped_singer, space_first_album_medals, start_listen, track_identity
 from Activity.record_shop_studio_catalog import STUDIO_ALBUMS
 from Chat.models import Chat, ChatTypeChoice
 from Message.models import LinkPreview, LinkPreviewStatusChoice, Message, MessageTypeChoice
@@ -185,7 +185,7 @@ class RecordShopTests(TestCase):
                 self.assertEqual(finish_listen(key, self.user, packet), {'points': 3})
                 self.assertEqual(finish_listen(key, self.user, packet), {'points': 0})
 
-    def test_first_cover_is_stored_and_space_announcement_is_idempotent(self):
+    def test_first_cover_creates_one_medal_without_an_official_post(self):
         self.space.admin_phone_verified_at = timezone.now()
         self.space.group_square_enabled = True
         self.space.save(update_fields=['admin_phone_verified_at', 'group_square_enabled'])
@@ -204,25 +204,21 @@ class RecordShopTests(TestCase):
         self.assertNotIn('album', first.appearance['record_shop'])
         for expected in (True, False):
             message = Message.objects.create(chat=chat, user=self.user, type=MessageTypeChoice.TEXT, content='第二条')
-            decorate_message(message)
+            with self.captureOnCommitCallbacks(execute=True):
+                decorate_message(message)
             message.refresh_from_db()
             self.assertEqual(message.appearance['record_shop']['first'], expected)
             self.assertEqual(message.appearance['record_shop']['album']['id'], 'rare-album')
         self.assertEqual(RecordShopDiscovery.objects.count(), 1)
         announcement = RecordShopAnnouncement.objects.get()
-        publish_announcement(announcement.pk)
-        publish_announcement(announcement.pk)
-        announcement.refresh_from_db()
-        self.assertTrue(announcement.published)
-        self.assertTrue(announcement.statement.user.is_official)
-        self.assertIn(self.user.name, announcement.statement.text)
-        self.assertEqual(announcement.statement.created_at, announcement.discovered_at)
-        self.assertEqual(Statement.objects.filter(space=self.space).count(), 1)
+        self.assertFalse(announcement.published)
+        self.assertIsNone(announcement.statement_id)
+        self.assertFalse(Statement.objects.filter(space=self.space).exists())
 
         auth = {'HTTP_AUTHORIZATION': 'Bearer ' + get_login_token(self.other)['auth']}
-        detail = self.client.get(f'/square/statements/{announcement.statement_id}', **auth)
-        self.assertEqual(detail.status_code, 200)
-        card = detail.json()['body']['record_shop_announcement']
+        medals = self.client.get('/square/medals', **auth)
+        self.assertEqual(medals.status_code, 200)
+        card, = medals.json()['body']
         self.assertEqual(card['artist'], 'jay')
         self.assertEqual(card['album'], {key: announcement.album_snapshot['album'][key]
                                          for key in ('id', 'name', 'title', 'tier', 'cover')})
@@ -231,11 +227,8 @@ class RecordShopTests(TestCase):
         self.assertEqual(card['discovered_at'], announcement.discovered_at.timestamp())
         self.assertNotIn('email', card['user'])
         self.assertNotIn('clip', card['album'])
-        feed = self.client.get('/square/statements?limit=20', **auth)
-        self.assertEqual(feed.status_code, 200)
-        self.assertEqual(feed.json()['body'][0]['record_shop_announcement'], card)
 
-    def test_existing_official_discovery_post_uses_catalog_when_snapshot_is_missing(self):
+    def test_hide_legacy_congratulations_preserves_medals_and_other_official_posts(self):
         now = timezone.now()
         self.space.admin_phone_verified_at = now
         self.space.save(update_fields=['admin_phone_verified_at'])
@@ -247,28 +240,23 @@ class RecordShopTests(TestCase):
         ordinary = Statement.objects.create(space=self.space, user=official, text='普通官方发言')
         RecordShopAnnouncement.objects.create(run=self.run, album_id=album['id'], user=self.user,
                                               discovered_at=now, statement=post, published=True)
-        self.assertEqual(Statement.detail(self.other, post.id)['record_shop_announcement']['album'], album)
-        self.assertNotIn('record_shop_announcement', Statement.detail(self.other, ordinary.id))
-
-        unlocked_at = now - timedelta(days=2, seconds=17)
-        RecordShopAnnouncement.objects.filter(statement=post).update(discovered_at=unlocked_at)
-        post.delete_for(official)
-        ordinary.delete_for(official)
-        with TemporaryDirectory() as tempdir, open(Path(tempdir) / 'restore.log', 'w+') as log:
-            call_command('restore_record_shop_announcements', stdout=log)
+        with TemporaryDirectory() as tempdir, open(Path(tempdir) / 'hide.log', 'w+') as log:
+            call_command('hide_record_shop_posts', stdout=log)
             post.refresh_from_db()
-            self.assertTrue(post.is_deleted)
+            self.assertFalse(post.is_deleted)
             for _ in range(2):
-                call_command('restore_record_shop_announcements', '--apply', stdout=log)
+                call_command('hide_record_shop_posts', '--apply', stdout=log)
             log.seek(0)
-            self.assertIn('Applied: restored=0, corrected_time=0, skipped=0', log.read())
+            self.assertEqual(log.read().splitlines(), ['Posts to hide: 1', 'Hidden posts: 1', 'Hidden posts: 0'])
         post.refresh_from_db()
         ordinary.refresh_from_db()
-        self.assertFalse(post.is_deleted)
-        self.assertEqual(post.created_at, unlocked_at)
-        self.assertEqual(Statement.detail(self.other, post.id)['created_at'], unlocked_at.timestamp())
-        self.assertTrue(ordinary.is_deleted)
-        self.assertEqual(Statement.objects.filter(space=self.space).count(), 2)
+        self.assertTrue(post.is_deleted)
+        self.assertFalse(ordinary.is_deleted)
+        self.assertFalse(Statement.visible_for(self.other).filter(pk=post.id).exists())
+        card, = space_first_album_medals(self.space.id)
+        self.assertEqual(card['album'], album)
+        self.assertEqual(card['discovered_at'], now.timestamp())
+        self.assertTrue(RecordShopAnnouncement.objects.filter(statement=post).exists())
 
     def test_square_medals_show_only_the_spaces_first_rare_discoveries(self):
         now = timezone.now()
