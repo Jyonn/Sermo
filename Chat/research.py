@@ -40,11 +40,13 @@ def members(project):
 def payload(project, viewer=None):
     from Chat.models import SubmissionInvite, SubmissionInviteStatusChoice
     rows = project.chat.ordered_members()
-    from Chat.research_workflow import serialize
+    from Chat.research_workflow import serialize, visible_tasks
+    project.status = research_status(project.status)
+    project.tasks = normalize_tasks(project.tasks)
     workflow = serialize(project, viewer) if viewer else {}
     return dict(id=project.pk, chat_id=project.chat_id, title=project.chat.title, description=project.description,
                 workflow=workflow, start=project.start.isoformat(), end=project.end.isoformat() if project.end else None,
-                status=research_status(project.status), revision=project.revision, tasks=normalize_tasks(project.tasks),
+                status=project.status, revision=project.revision, tasks=visible_tasks(project, viewer),
                 pending_invitee_ids=list(SubmissionInvite.objects.filter(chat=project.chat,status=SubmissionInviteStatusChoice.PENDING,expires_at__gt=timezone.now()).values_list('invitee_id',flat=True)),
                 members=[dict(id=row.user_id, name=row.user.name, owner=row.role == ChatMemberRoleChoice.OWNER,
                               **row.user.dictify('avatar_uri', 'avatar_cache_key', 'avatar_frame_style')) for row in rows])
@@ -113,7 +115,7 @@ class ResearchView(View):
                     project.tasks = response_status(project.tasks)
                     action = body.get('action')
                     owner = project.chat.is_owner(request.user)
-                    if action not in ('progress', 'leave', 'resolve_request', 'reimbursement', 'reimbursement_open', 'reimbursement_resubmit') and not owner:
+                    if action not in ('progress', 'progress_edit', 'progress_delete', 'leave', 'resolve_request', 'reimbursement', 'reimbursement_open', 'reimbursement_resubmit') and not owner:
                         return fail('Only the project owner can manage this project', 403)
                     if project.status == 'archived' and action not in ('settings', 'leave', 'dissolve', 'transfer', 'reimbursement_open'):
                         return fail('Archived projects are read-only', 403)
@@ -205,7 +207,7 @@ class ResearchView(View):
                             task.update(fields)
                         else:
                             project.tasks.append(dict(id=str(uuid.uuid4()), status='active', progress=[], **fields))
-                    elif action in ('task_status', 'task_dates', 'progress'):
+                    elif action in ('task_status', 'task_dates', 'progress', 'progress_edit', 'progress_delete'):
                         task = next((t for t in project.tasks if t['id'] == body.get('task_id')), None)
                         if not task:
                             return fail('Task unavailable', 404)
@@ -215,20 +217,39 @@ class ResearchView(View):
                             start, end = period(body)
                             task['start'] = start.isoformat()
                             task['end'] = end.isoformat() if end else None
-                        else:
+                        elif action == 'progress':
                             if task['status'] == 'archived':
                                 return fail('Archived tasks are read-only', 403)
                             if len(task['progress']) >= 500:
                                 raise ValueError('Progress limit reached')
                             content = text(body, 'body', 20000)
                             reply = body.get('reply_to')
-                            if reply and not any(p['id'] == reply for p in task['progress']):
+                            if reply and not any(p['id'] == reply and not p.get('deleted_at') for p in task['progress']):
                                 raise ValueError('Reply unavailable')
                             check_user_text(request, content, ContentSafetyScene.PROFILE)
                             entry = dict(id=str(uuid.uuid4()), user_id=request.user.pk, body=content, created_at=timezone.now().isoformat(), reply_to=reply)
                             from Chat.research_workflow import progress_fields
                             progress_fields(project, task, request.user, body, entry, active, owner)
                             task['progress'].insert(0, entry)
+                        else:
+                            if task['status'] == 'archived':
+                                return fail('Archived tasks are read-only', 403)
+                            entry = next((item for item in task['progress'] if item['id'] == body.get('progress_id') and not item.get('deleted_at')), None)
+                            if entry is None:
+                                return fail('Progress unavailable', 404)
+                            if entry['user_id'] != request.user.pk:
+                                return fail('Only the author can change this progress entry', 403)
+                            if action == 'progress_edit':
+                                content = text(body, 'body', 20000)
+                                check_user_text(request, content, ContentSafetyScene.PROFILE)
+                                if entry['body'] == content:
+                                    return payload(project, request.user)
+                                entry.update(body=content, edited_at=timezone.now().isoformat())
+                            else:
+                                # Keep the report period and reward links for accounting and deduplication.
+                                entry.update(body='', deleted_at=timezone.now().isoformat())
+                                entry.pop('response_to', None)
+                            project.tasks = response_status(project.tasks)
                     else:
                         raise ValueError('Unknown action')
                     if len(json.dumps(project.tasks)) > 2000000:

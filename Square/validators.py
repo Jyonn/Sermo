@@ -33,6 +33,8 @@ class SquareErrors:
     EDIT_FORBIDDEN = Error(message=_('Only the author can edit this statement'), code=Code.Forbidden)
     EDIT_CONFLICT = Error(message=_('This statement changed. Reopen the editor to see the latest version.'), code=Code.Conflict)
     COMMENT_DELETE_FORBIDDEN = Error(message=_('You cannot delete this comment'), code=Code.Forbidden)
+    COMMENT_EDIT_FORBIDDEN = Error(message=_('Only the author can edit this comment'), code=Code.Forbidden)
+    COMMENT_EDIT_CONFLICT = Error(message=_('This comment changed. Reopen the editor to see the latest version.'), code=Code.Conflict)
     PIN_FORBIDDEN = Error(message=_('Only the official account can pin its own statement'), code=Code.Forbidden)
     CHAT_RECORD_FORBIDDEN = Error(message=_('Only the official account can publish chat records'), code=Code.Forbidden)
     CHAT_RECORD_EXCLUSIVE = Error(message=_('Chat records cannot be combined with other attachments'), code=Code.BadRequest)

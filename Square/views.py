@@ -624,22 +624,44 @@ class StatementCommentLikeView(View):
 
 
 class StatementCommentDetailView(View):
+    @staticmethod
+    def locked_comment(user, comment_id):
+        statement_id = StatementComment.objects.filter(id=comment_id, is_deleted=False, statement__space_id=user.space_id).values_list('statement_id', flat=True).first()
+        if statement_id is None:
+            raise SquareErrors.NOT_EXISTS
+        StatementComment.statement_for_user(user, statement_id)
+        if not Statement.objects.select_for_update().filter(id=statement_id, is_deleted=False).first():
+            raise SquareErrors.NOT_EXISTS
+        comment = StatementComment.objects.select_for_update().select_related('statement', 'user').filter(id=comment_id, is_deleted=False).first()
+        if comment is None:
+            raise SquareErrors.NOT_EXISTS
+        return comment
+
     @auth.require_user
+    @analyse.json(SquareParams.edit_revision, SquareParams.comment_text, SquareParams.comment_sticker_asset_id, SquareParams.comment_mention_user_ids)
+    @transaction.atomic
+    def patch(self, request: Request, comment_id: int):
+        user = request.user
+        user.space.require_square_enabled()
+        comment = self.locked_comment(user, comment_id)
+        if comment.user_id != user.id:
+            raise SquareErrors.COMMENT_EDIT_FORBIDDEN
+        if request.json.text:
+            check_user_text(request, request.json.text, ContentSafetyScene.COMMENT)
+        comment.edit_for(user, request.json.text, request.json.sticker_asset_id, request.json.mention_user_ids, request.json.revision)
+        return comment.jsonl(viewer=user, request=request)
+
+    @auth.require_user
+    @transaction.atomic
     def delete(self, request: Request, comment_id: int):
         request.user.space.require_square_enabled()
-        try:
-            comment = StatementComment.objects.select_related('statement', 'user').get(
-                id=comment_id,
-                is_deleted=False,
-            )
-        except StatementComment.DoesNotExist:
-            raise SquareErrors.NOT_EXISTS
-        StatementComment.statement_for_user(request.user, comment.statement_id)
-        deleted_count = comment.delete_for(request.user)
+        comment = self.locked_comment(request.user, comment_id)
+        deleted_ids = comment.delete_for(request.user)
         return dict(
             comment_id=comment.id,
             statement_id=comment.statement_id,
-            deleted_count=deleted_count,
+            deleted_count=len(deleted_ids),
+            deleted_ids=deleted_ids,
             root_deleted=comment.parent_id is None,
         )
 

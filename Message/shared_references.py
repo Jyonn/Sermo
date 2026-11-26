@@ -60,7 +60,7 @@ def payload(message_type, reference, viewer, *, require_access=False):
         result['text'] = task.get('body', '')[:240]
         return result
     progress = next((row for row in task.get('progress', []) if row['id'] == reference.get('progress_id')), None)
-    if progress is None or bool(progress.get('reply_to')) != (message_type == 18):
+    if progress is None or progress.get('deleted_at') or bool(progress.get('reply_to')) != (message_type == 18):
         return unavailable()
     from User.models import User
     author = User.objects.filter(pk=progress['user_id'], space_id=viewer.space_id, is_deleted=False).first()

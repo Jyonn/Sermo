@@ -51,7 +51,7 @@ def response_status(tasks):
     for task in tasks:
         replies = {}
         for entry in task.get('progress', []):
-            if entry.get('reply_to') and entry.get('body', '').strip():
+            if not entry.get('deleted_at') and entry.get('reply_to') and entry.get('body', '').strip():
                 replies.setdefault((entry['reply_to'], entry['user_id']), []).append(entry)
         for entry in task.get('progress', []):
             if not entry.get('response_to'):
@@ -66,6 +66,28 @@ def response_status(tasks):
     return tasks
 
 
+def visible_tasks(project, viewer):
+    tasks = []
+    for task in project.tasks:
+        entries = {entry['id']: entry for entry in task['progress']}
+        progress = []
+        for entry in entries.values():
+            if entry.get('deleted_at'):
+                continue
+            owned = bool(viewer and entry['user_id'] == viewer.pk)
+            writable = project.status != 'archived' and task['status'] != 'archived'
+            parent = entry.get('reply_to')
+            visited = set()
+            while parent in entries and entries[parent].get('deleted_at') and parent not in visited:
+                visited.add(parent)
+                parent = entries[parent].get('reply_to')
+            # A reply with no surviving parent still has its original reference kind.
+            progress.append(dict(entry, reply_to=parent or entry.get('reply_to'),
+                                 can_edit=owned and writable, can_delete=owned and writable))
+        tasks.append(dict(task, progress=progress))
+    return tasks
+
+
 def serialize(project, viewer):
     project.tasks = response_status(project.tasks)
     value = state(project)
@@ -77,7 +99,8 @@ def serialize(project, viewer):
             row['task_id'] = source[0]
         row['origin'] = row.get('origin', 'report' if source and source[1].get('report_kind') else 'manual')
         row['editable'] = owner and row['origin'] == 'manual'
-    value['comment_awards'] = [{key: row[key] for key in ('id', 'user_id', 'reward_type', 'amount', 'reason', 'source_id', 'task_id', 'origin', 'created_at', 'editable') if key in row} for row in value['ledger'] if row.get('source_id') in sources and row['origin'] == 'manual']
+    active_sources = {entry_id for entry_id, (_, entry) in sources.items() if not entry.get('deleted_at')}
+    value['comment_awards'] = [{key: row[key] for key in ('id', 'user_id', 'reward_type', 'amount', 'reason', 'source_id', 'task_id', 'origin', 'created_at', 'editable') if key in row} for row in value['ledger'] if row.get('source_id') in active_sources and row['origin'] == 'manual']
     value['reimbursements'] = [r for r in value['reimbursements'] if owner or r['user_id'] == viewer.pk]
     value['ledger'] = [r for r in value['ledger'] if owner or r['user_id'] == viewer.pk]
     todos = []
@@ -94,7 +117,7 @@ def serialize(project, viewer):
                     if not any(p.get('report_kind') == kind and p['user_id'] == viewer.pk and p.get('period_start') == start for p in task['progress']):
                         todos.append(dict(id=task['id']+kind, task_id=task['id'], title=task['title'], kind=kind, period_start=start))
             for progress in task['progress']:
-                if progress.get('response_to') == viewer.pk and not progress.get('resolved_at'):
+                if not progress.get('deleted_at') and progress.get('response_to') == viewer.pk and not progress.get('resolved_at'):
                     todos.append(dict(id=progress['id'], task_id=task['id'], title=task['title'], kind='response', body=progress['body'], progress_id=progress['id']))
         if owner:
             todos += [dict(id=r['id'], title=r['title'], kind='reimbursement') for r in value['reimbursements'] if r['status'] == 'submitted']
@@ -205,7 +228,7 @@ def mutate(project, actor, body, active, owner, clean_text):
             raise ValueError('Member unavailable')
         reason = clean_text(body, 'reason', 1000)
         source = clean_text(body, 'source_id', 64, False)
-        if source and not any(p['id'] == source and p['user_id'] == body['user_id'] for t in project.tasks for p in t['progress']):
+        if source and not any(p['id'] == source and p['user_id'] == body['user_id'] and not p.get('deleted_at') for t in project.tasks for p in t['progress']):
             raise ValueError('Comment unavailable')
         grant(value, actor, body['user_id'], body.get('reward_type'), body.get('amount'), reason, source)
     elif action == 'resolve_request':

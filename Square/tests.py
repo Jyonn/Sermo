@@ -1164,6 +1164,35 @@ class StatementApiTests(TestCase):
         self.assertTrue(deleted.json()['body']['root_deleted'])
         self.assertEqual(StatementComment.objects.filter(statement=statement, is_deleted=False).count(), 0)
 
+    def test_comment_edit_is_author_only_versioned_and_preserves_the_thread(self):
+        statement = Statement.create_statement(self.author, 'Discussion', 'public', [])
+        comment = StatementComment.create_comment(self.friend, statement.id, f'<@{self.author.id}> original')
+        reply = StatementComment.create_comment(self.author, statement.id, 'Reply', parent_id=comment.id)
+        StatementCommentLike.objects.create(comment=comment, user=self.author)
+        route = f'/square/comments/{comment.id}'
+
+        def edit(user, revision, text):
+            return self.client.patch(route, json.dumps(dict(revision=revision, text=text)),
+                                     content_type='application/json', **self.authorization(user))
+
+        self.assertEqual(edit(self.author, 0, 'Author moderates only').status_code, 403)
+        response = edit(self.friend, 0, 'Revised comment')
+        self.assertEqual(response.status_code, 200, response.content)
+        item = response.json()['body']
+        self.assertEqual(item['text'], 'Revised comment')
+        self.assertEqual(item['created_at'], comment.created_at.timestamp())
+        self.assertEqual(item['like_count'], 1)
+        self.assertEqual(item['reply_count'], 1)
+        self.assertEqual(item['edit_revision'], 1)
+        self.assertIsNotNone(item['edited_at'])
+        self.assertTrue(item['can_edit'])
+        self.assertEqual(item['mentions'], [])
+        self.assertEqual(edit(self.friend, 0, 'Stale version').status_code, 409)
+        self.assertEqual(edit(self.friend, 1, ' ').status_code, 400)
+        feed = self.client.get(f'/square/statements/{statement.id}/comments', **self.authorization(self.author)).json()['body']
+        self.assertFalse(feed[0]['can_edit'])
+        self.assertEqual(feed[0]['replies'][0]['comment_id'], reply.id)
+
     def test_deleting_reply_also_removes_nested_descendants(self):
         statement = Statement.create_statement(self.author, '回复治理', 'public', [])
         root = StatementComment.create_comment(self.friend, statement.id, '一级评论')
@@ -1175,6 +1204,7 @@ class StatementApiTests(TestCase):
         self.assertEqual(deleted.status_code, 200, deleted.content)
         self.assertEqual(deleted.json()['body']['deleted_count'], 2)
         self.assertFalse(deleted.json()['body']['root_deleted'])
+        self.assertEqual(deleted.json()['body']['deleted_ids'], [reply.id, nested.id])
         self.assertEqual(
             list(StatementComment.objects.filter(statement=statement, is_deleted=False).values_list('id', flat=True)),
             [root.id],

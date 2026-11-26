@@ -23,6 +23,45 @@ class WorkflowTests(TestCase):
         return self.update(p, dict(action='progress', task_id=p['tasks'][0]['id'], body='Report', report_kind=kind, **fields), self.student)
 
     @patch('Chat.research_workflow.today', return_value=date(2026, 11, 5))
+    def test_edit_and_delete_report_preserve_rewards_and_other_peoples_replies(self, _):
+        from Message.shared_references import payload as reference_payload
+
+        p = self.project()
+        task_id = p['tasks'][0]['id']
+        p = self.report(p, ai_slots=3).json()['body']
+        report = p['tasks'][0]['progress'][0]
+        edit = dict(action='progress_edit', task_id=task_id, progress_id=report['id'], body='Updated report')
+        remove = dict(action='progress_delete', task_id=task_id, progress_id=report['id'])
+        self.assertTrue(report['can_edit'])
+        self.assertEqual(self.update(p, edit, self.owner).status_code, 403)
+        self.assertEqual(self.update(p, remove, self.other).status_code, 403)
+        edited = self.update(p, edit, self.student).json()['body']
+        item = edited['tasks'][0]['progress'][0]
+        self.assertEqual(item['body'], 'Updated report')
+        self.assertEqual(item['created_at'], report['created_at'])
+        self.assertEqual(item['ai_slots'], 3)
+        self.assertIn('edited_at', item)
+        self.assertEqual(self.update(p, remove, self.student).status_code, 409)
+        p = self.update(edited, dict(action='progress', task_id=task_id, body='Mentor reply', reply_to=report['id'])).json()['body']
+        removed = self.update(p, remove, self.student).json()['body']
+        self.assertEqual([entry['body'] for entry in removed['tasks'][0]['progress']], ['Mentor reply'])
+        self.assertEqual(len(removed['workflow']['ledger']), 1)
+        self.assertEqual(self.report(removed).status_code, 400)
+        self.assertTrue(reference_payload(17, dict(project_id=p['id'], task_id=task_id, progress_id=report['id']), self.owner)['unavailable'])
+        self.assertEqual(self.update(removed, dict(action='progress', task_id=task_id, body='Late reply', reply_to=report['id'])).status_code, 400)
+
+    def test_deleting_the_answer_reopens_the_request(self):
+        p = self.project()
+        task_id = p['tasks'][0]['id']
+        p = self.update(p, dict(action='progress', task_id=task_id, body='Question', response_to=self.owner.pk), self.student).json()['body']
+        question = p['tasks'][0]['progress'][0]
+        p = self.update(p, dict(action='progress', task_id=task_id, body='Answer', reply_to=question['id'])).json()['body']
+        answer = p['tasks'][0]['progress'][0]
+        p = self.update(p, dict(action='progress_delete', task_id=task_id, progress_id=answer['id'])).json()['body']
+        self.assertEqual([todo['progress_id'] for todo in p['workflow']['todos']], [question['id']])
+        self.assertNotIn('resolved_at', p['tasks'][0]['progress'][0])
+
+    @patch('Chat.research_workflow.today', return_value=date(2026, 11, 5))
     def test_required_reports_rewards_duplicate_and_waiver(self, _):
         p = self.project()
         snapshot = self.call(self.student, id=p['id']).json()['body']

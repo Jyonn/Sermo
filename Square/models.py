@@ -623,6 +623,8 @@ class StatementComment(models.Model):
         related_name='statement_comments',
     )
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    edited_at = models.DateTimeField(null=True, blank=True)
+    edit_revision = models.PositiveIntegerField(default=0)
     is_deleted = models.BooleanField(default=False, db_index=True)
     is_anonymous = models.BooleanField(default=False, db_index=True)
 
@@ -680,7 +682,37 @@ class StatementComment(models.Model):
             roots.sort(key=lambda item: (-item.visible_like_count, -item.visible_reply_count, -item.created_at.timestamp(), -item.id))
         return [comment.jsonl(viewer=user, include_replies=True, request=request) for comment in roots[offset:offset + limit]]
 
+    @staticmethod
+    def resolve_content(text, sticker_asset_id, *, has_media=False):
+        normalized = (text or '').strip()
+        sticker = None
+        if sticker_asset_id is not None:
+            sticker = StickerAsset.objects.filter(id=sticker_asset_id).first()
+            if sticker is None:
+                raise SquareErrors.COMMENT_STICKER_INVALID
+        if not normalized and sticker is None and not has_media:
+            raise SquareErrors.COMMENT_REQUIRED
+        if normalized and sticker is not None:
+            raise SquareErrors.COMMENT_CONTENT_EXCLUSIVE
+        if len(normalized) > 140:
+            raise SquareErrors.COMMENT_TOO_LONG
+        return normalized, sticker
+
+    def record_mentions(self, author, text, mention_user_ids):
+        token_ids = {int(match.group(1)) for match in self.MENTION_TOKEN_RE.finditer(text)}
+        requested_ids = set(mention_user_ids or token_ids)
+        self.comment_mentions.exclude(user_id__in=token_ids & requested_ids).delete()
+        StatementCommentMention.record(self, author, token_ids & requested_ids)
+
+    def resolve_thread_root(self):
+        if self.parent_id is not None:
+            root = self.parent
+            while root.parent_id is not None:
+                root = root.parent
+            self.thread_root_id = root.id
+
     @classmethod
+    @transaction.atomic
     def create_comment(
         cls,
         user,
@@ -694,19 +726,11 @@ class StatementComment(models.Model):
         user.require_capability('square.interaction.reply' if parent_id is not None else 'square.interaction.comment')
         SquareMute.require_can_participate(user)
         _enforce_frequency(cls.objects.filter(statement__space=user.space, is_deleted=False), user, multiplier=5)
-        normalized_text = (text or '').strip()
-        sticker_asset = None
-        if sticker_asset_id is not None:
-            sticker_asset = StickerAsset.objects.filter(id=sticker_asset_id).first()
-            if sticker_asset is None:
-                raise SquareErrors.COMMENT_STICKER_INVALID
-        if not normalized_text and sticker_asset is None:
-            raise SquareErrors.COMMENT_REQUIRED
-        if normalized_text and sticker_asset is not None:
-            raise SquareErrors.COMMENT_CONTENT_EXCLUSIVE
-        if len(normalized_text) > 140:
-            raise SquareErrors.COMMENT_TOO_LONG
-        statement = cls.statement_for_user(user, statement_id)
+        normalized_text, sticker_asset = cls.resolve_content(text, sticker_asset_id)
+        cls.statement_for_user(user, statement_id)
+        statement = Statement.objects.select_for_update().filter(id=statement_id, is_deleted=False).first()
+        if statement is None:
+            raise SquareErrors.NOT_EXISTS
         is_anonymous = bool(is_anonymous)
         if is_anonymous and (not statement.is_anonymous or statement.user_id != user.id):
             raise SquareErrors.ANONYMOUS_COMMENT_FORBIDDEN
@@ -729,14 +753,8 @@ class StatementComment(models.Model):
             is_anonymous=is_anonymous,
             sticker_asset=sticker_asset,
         )
-        token_user_ids = set(int(match.group(1)) for match in cls.MENTION_TOKEN_RE.finditer(normalized_text))
-        requested_mention_ids = set(mention_user_ids or token_user_ids)
-        StatementCommentMention.record(comment, user, token_user_ids & requested_mention_ids)
-        if parent is not None:
-            root = parent
-            while root.parent_id is not None:
-                root = root.parent
-            comment.thread_root_id = root.id
+        comment.record_mentions(user, normalized_text, mention_user_ids)
+        comment.resolve_thread_root()
         comment.visible_like_count = 0
         comment.viewer_liked = False
         user.award_growth('explore:square_reply' if parent is not None else 'explore:square_comment')
@@ -745,6 +763,23 @@ class StatementComment(models.Model):
         from Activity.bgm import BgmService
         BgmService.record(user, 'comment', comment)
         return comment
+
+    def edit_for(self, user, text, sticker_asset_id, mention_user_ids, revision):
+        if user.id != self.user_id:
+            raise SquareErrors.COMMENT_EDIT_FORBIDDEN
+        if revision != self.edit_revision:
+            raise SquareErrors.COMMENT_EDIT_CONFLICT
+        user.require_capability('square.interaction.reply' if self.parent_id is not None else 'square.interaction.comment')
+        SquareMute.require_can_participate(user)
+        text, sticker = self.resolve_content(text, sticker_asset_id, has_media=self.media.exists())
+        if text != self.text or (sticker.id if sticker else None) != self.sticker_asset_id:
+            self.text = text
+            self.sticker_asset = sticker
+            self.edited_at = timezone.now()
+            self.edit_revision += 1
+            self.save(update_fields=['text', 'sticker_asset', 'edited_at', 'edit_revision'])
+            self.record_mentions(user, text, mention_user_ids)
+        self.resolve_thread_root()
 
     def jsonl(self, viewer=None, include_replies=False, request=None):
         like_count = self.visible_like_count if hasattr(self, 'visible_like_count') else self.likes.count()
@@ -779,6 +814,9 @@ class StatementComment(models.Model):
                 or viewer.id == self.statement.user_id
                 or viewer.is_official and viewer.space_id == self.statement.space_id
             )),
+            can_edit=bool(viewer and viewer.id == self.user_id),
+            edit_revision=self.edit_revision,
+            edited_at=self.edited_at.timestamp() if self.edited_at else None,
             created_at=self.created_at.timestamp(),
         )
         if include_replies:
@@ -804,8 +842,8 @@ class StatementComment(models.Model):
             if next_ids.issubset(delete_ids):
                 break
             delete_ids.update(next_ids)
-        deleted_count = type(self).objects.filter(id__in=delete_ids, is_deleted=False).update(is_deleted=True)
-        return deleted_count
+        type(self).objects.filter(id__in=delete_ids, is_deleted=False).update(is_deleted=True)
+        return sorted(delete_ids)
 
 
 class StatementCommentMention(models.Model):
