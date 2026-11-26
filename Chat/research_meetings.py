@@ -62,8 +62,17 @@ class ResearchMeetingView(View):
             if not set(payload['members'])<=set(active):raise BindingFailure('member_unavailable',403)
             check_user_text(request,'\n'.join(payload[k] for k in ('title','description','location')),ContentSafetyScene.PROFILE)
             base,_=authorization_site(request)
-            identities={uid:credentials(active[uid],base) for uid in payload['members']}
-            viewer=identities[request.user.pk]
+            viewer=credentials(request.user,base)
+            identities={request.user.pk:viewer}
+            for uid in payload['members']:
+                if uid == request.user.pk:
+                    continue
+                try:
+                    identities[uid]=credentials(active[uid],base)
+                except BindingFailure as error:
+                    if error.code == 'binding_required':
+                        raise BindingFailure('invitation_recipient_unavailable',400) from error
+                    raise
             subjects=[value['binding']['subject'] for uid,value in identities.items() if uid!=request.user.pk]
             if len(set(subjects))!=len(subjects) or viewer['binding']['subject'] in subjects:raise BindingFailure('duplicate_calendar_identity',400)
             authority={str(uid):value['binding']['subject'] for uid,value in identities.items()}

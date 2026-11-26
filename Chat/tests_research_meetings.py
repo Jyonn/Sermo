@@ -4,6 +4,7 @@ from User import tests_chronelle_account as fixtures
 from User.chronelle_account import BindingFailure
 from User.chronelle_account import store
 from Chat.models import ResearchMeeting
+from User.models import User
 
 
 class ResearchMeetingTests(fixtures.ChronelleAccountTests):
@@ -15,6 +16,30 @@ class ResearchMeetingTests(fixtures.ChronelleAccountTests):
         return {'command_id':str(uuid.uuid4()),'title':'Project review','description':'**Agenda**','location':'Room',
             'start':'2026-11-01T09:00:00+08:00','end':'2026-11-01T10:00:00+08:00','timezone':'Asia/Shanghai',
             'all_day':False,'members':[self.user.pk,self.other.pk],'group_id':7}
+
+    @patch('Chat.research_calendar.calendar', return_value=[{'id': 7, 'name': 'Research'}])
+    def test_only_active_project_members_with_ready_bindings_are_invitable(self, calendar):
+        self.bound()
+        stranger = User.create(self.space, 'Non-member', verified=True)
+        self.bound(stranger)
+        path = f'/research/{self.project.pk}/calendar/'
+        own_only = self.call(path=path).json()['body']
+        self.assertEqual(set(own_only['invitable_member_ids']), {self.user.pk})
+        self.assertIn(self.other.pk, {member['id'] for member in own_only['members']})
+        self.bound(self.other)
+        response = self.call(path=path)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(set(response.json()['body']['invitable_member_ids']), {self.user.pk, self.other.pk})
+        self.assertNotIn('cbr_test-secret', response.content.decode())
+
+    @patch('Chat.research_meetings.remote')
+    def test_unlinked_invitee_returns_editable_error_without_sending(self, remote):
+        self.bound()
+        result = self.call(self.meeting(), f'/research/{self.project.pk}/meetings/')
+        self.assertEqual(result.status_code, 400, result.content)
+        self.assertIn('invitation_recipient_unavailable', result.content.decode())
+        remote.assert_not_called()
+        self.assertFalse(ResearchMeeting.objects.exists())
 
     @patch('Chat.research_meetings.remote')
     def test_real_subject_mapping_and_idempotent_local_result(self,remote):

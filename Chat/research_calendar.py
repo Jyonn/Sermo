@@ -9,7 +9,7 @@ from django.views import View
 from Chat.models import ResearchProject, ResearchCalendarPreference, ChatMemberStatusChoice
 from Chat.research import fail
 from User.models import ChronelleAccount
-from User.chronelle_account import BindingFailure, calendar, config, credentials, remote, revocation_credentials, unpack
+from User.chronelle_account import BindingFailure, calendar, config, credentials, remote, resolve_binding, revocation_credentials, unpack
 from User.chronelle_origins import authorization_site, APP_ORIGINS
 from User.chronelle_events import project_events
 from utils import auth
@@ -32,6 +32,17 @@ def error_response(error):
 def shared_policy(user, project, group_ids, viewer=None):
     from Chat.calendar_policy import projection
     return projection(user, viewer, group_ids)
+
+
+def invitable_members(user_ids):
+    ready = []
+    for account in ChronelleAccount.objects.filter(user_id__in=user_ids):
+        try:
+            resolve_binding(unpack(account))
+        except BindingFailure:
+            continue
+        ready.append(account.user_id)
+    return ready
 
 
 def revoke_displays(project, base, tokens):
@@ -76,9 +87,13 @@ class ResearchCalendarView(View):
             policy = shared_policy(request.user, project, [g['id'] for g in groups])
             if configured is None:
                 policy = {'detail': [], 'busy': [g['id'] for g in groups]}
+            members = list(project.chat.chat_members.filter(
+                status=ChatMemberStatusChoice.ACTIVE, user__is_deleted=False
+            ).values('user_id', 'user__name'))
             return {'status':'active','groups':[{'id':g['id'],'name':g['name']} for g in groups],
                 'policy':policy, 'policy_configured':configured is not None, 'default_busy':configured.default_busy if configured else True,
-                'members':[{'id':m.user_id,'name':m.user.name} for m in project.chat.chat_members.filter(status=ChatMemberStatusChoice.ACTIVE,user__is_deleted=False).select_related('user')]}
+                'members':[{'id':m['user_id'],'name':m['user__name']} for m in members],
+                'invitable_member_ids':invitable_members([m['user_id'] for m in members])}
         except BindingFailure as error:
             if error.code in ('research_disabled','project_unavailable'):
                 return error_response(error)
