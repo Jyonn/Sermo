@@ -9,6 +9,12 @@ from utils.space_slug import is_reserved_space_slug
 class SpaceErrors:
     OAUTH_DEVELOPER_UNAVAILABLE = Error(message=_('OAuth application management is not enabled for this space'), code=Code.Forbidden)
     NOT_EXISTS = Error(message=_('Space ({attr}={value}) does not exist'), code=Code.NotFound)
+    JOIN_INVITE_REQUIRED = Error(message=_('Enter a valid invitation code for this space'), code=Code.Forbidden)
+    JOIN_APPROVAL_REQUIRED = Error(message=_('A new member must apply and be approved first'), code=Code.Forbidden)
+    JOIN_PASSWORD_REQUIRED = Error(message=_('Set a password for your new account'), code=Code.BadRequest)
+    JOIN_MODE_INVALID = Error(message=_('This space is not accepting join applications'), code=Code.BadRequest)
+    JOIN_APPLICATION_NOT_FOUND = Error(message=_('Join application not found'), code=Code.NotFound)
+    JOIN_APPLICATION_CONFLICT = Error(message=_('This application has already been reviewed'), code=Code.Conflict)
     NAME_EMPTY = Error(message=_('Space name cannot be empty'), code=Code.BadRequest)
     NAME_TOO_LONG = Error(message=_('Space name is too long'), code=Code.BadRequest)
     SLUG_TOO_SHORT = Error(message=_('Space slug should be at least {min_length} characters long'), code=Code.BadRequest)

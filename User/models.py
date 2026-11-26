@@ -465,7 +465,7 @@ class User(models.Model):
         return user
 
     @classmethod
-    def login(cls, space, name, password, language=None, new_user_intent=None):
+    def login(cls, space, name, password, language=None, new_user_intent=None, invite_code=None, join_receipt=None):
         name = (name or '').strip()
         lower_name = name.lower()
         normalized_language = cls.vldt.language(language)
@@ -477,25 +477,30 @@ class User(models.Model):
         ).first()
         if user is None:
             cls.vldt.nickname(name)
-            space.ensure_member_limit_available()
             if new_user_intent == 'check':
+                space.ensure_member_limit_available()
                 raise UserErrors.NEW_USER_CONFIRMATION_REQUIRED
-            deleted_user = cls.objects.filter(
-                space=space,
-                lower_name=lower_name,
-                is_deleted=True,
-                account_kind=UserAccountKindChoice.MEMBER,
-            ).first()
-            if deleted_user is not None:
-                deleted_user.release_deleted_identity()
-            user = cls.create(
-                space=space,
-                name=name,
-                password=password,
-                language=normalized_language,
-            )
-            transaction.on_commit(space.notify_capacity_if_needed)
-            return user
+            from Space.admission import mark_joined, require_admission
+
+            with transaction.atomic():
+                space = type(space).objects.select_for_update().get(pk=space.pk)
+                if cls.objects.filter(
+                    space=space, lower_name=lower_name, is_deleted=False,
+                    account_kind=UserAccountKindChoice.MEMBER,
+                ).exists():
+                    raise UserErrors.NEW_USER_NAME_TAKEN
+                space.ensure_member_limit_available()
+                application = require_admission(space, name, invite_code, join_receipt, password)
+                deleted_user = cls.objects.filter(
+                    space=space, lower_name=lower_name, is_deleted=True,
+                    account_kind=UserAccountKindChoice.MEMBER,
+                ).first()
+                if deleted_user is not None:
+                    deleted_user.release_deleted_identity()
+                user = cls.create(space=space, name=name, password=password, language=normalized_language)
+                mark_joined(application)
+                transaction.on_commit(space.notify_capacity_if_needed)
+                return user
 
         if new_user_intent == 'create':
             raise UserErrors.NEW_USER_NAME_TAKEN

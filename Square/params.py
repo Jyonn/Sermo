@@ -102,6 +102,8 @@ def validate_statement_ids(values):
 class SquareParams(metaclass=Params):
     statement_ids = Validator('statement_ids').to(validate_statement_ids)
     text = Validator('text').to(validate_text).null().default('')
+    edit_text = Validator('text').to(validate_text)
+    edit_revision = Validator('revision').to(int).bool(lambda value: 0 <= value <= 2**32 - 1)
     visibility = Validator('visibility').to(validate_visibility).default('public')
     media = Validator('media').to(validate_media).default([])
     external_media_url = Validator('external_media_url').to(str).bool(lambda value: len(value) <= 2048).null().default(None)

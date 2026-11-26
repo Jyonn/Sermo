@@ -112,6 +112,8 @@ class WeChatMiniProgramOnboardingParams(metaclass=Params):
         lambda value: value.strip() if value else None,
     )
     password = Validator('password').to(str).null().default(None)
+    invite_code = Validator('invite_code').to(str).null().default(None).bool(lambda value: value is None or len(value) <= 32)
+    join_receipt = Validator('join_receipt').to(str).null().default(None).bool(lambda value: value is None or len(value) == 64)
     language = Validator('language').to(str).null().default('zh-CN').to(User.normalizers.language).exception(
         User.validators.language,
     )

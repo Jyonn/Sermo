@@ -30,6 +30,8 @@ class SquareErrors:
     VIDEO_LEVEL_REQUIRED = Error(message=_('Video statements unlock at LV10'), code=Code.Forbidden)
     VIDEO_LIMIT_EXCEEDED = Error(message=_('A statement can contain only one video'), code=Code.BadRequest)
     DELETE_FORBIDDEN = Error(message=_('You cannot delete this statement'), code=Code.Forbidden)
+    EDIT_FORBIDDEN = Error(message=_('Only the author can edit this statement'), code=Code.Forbidden)
+    EDIT_CONFLICT = Error(message=_('This statement changed. Reopen the editor to see the latest version.'), code=Code.Conflict)
     COMMENT_DELETE_FORBIDDEN = Error(message=_('You cannot delete this comment'), code=Code.Forbidden)
     PIN_FORBIDDEN = Error(message=_('Only the official account can pin its own statement'), code=Code.Forbidden)
     CHAT_RECORD_FORBIDDEN = Error(message=_('Only the official account can publish chat records'), code=Code.Forbidden)

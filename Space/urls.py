@@ -28,6 +28,7 @@ from Space.views import (
     SpaceUserListView,
 )
 from AccessPolicy.views import SpaceGroupParticipationView, SpacePolicyDetailView, SpacePolicyListView, SpacePolicySimulateView
+from Space.views import SpaceAdminAdmissionView, SpaceAdminJoinApplicationsView, SpaceAdminJoinApplicationReviewView, SpaceJoinApplicationView, SpaceJoinApplicationStatusView
 
 urlpatterns = [
     path('annual-recap', AnnualRecapView.as_view(), name='space annual recap'),
@@ -35,6 +36,9 @@ urlpatterns = [
     path('email-code', SpaceEmailCodeRequestView.as_view(), name='space email verification code'),
     path('', SpaceView.as_view(), name='space create'),
     path('admin/dashboard', SpaceAdminDashboardView.as_view(), name='space admin dashboard'),
+    path('admin/admission', SpaceAdminAdmissionView.as_view()),
+    path('admin/admission/applications', SpaceAdminJoinApplicationsView.as_view()),
+    path('admin/admission/applications/<int:application_id>', SpaceAdminJoinApplicationReviewView.as_view()),
     path('admin/session', SpaceAdminSessionView.as_view(), name='space admin session'),
     path('admin/broadcast', SpaceAdminBroadcastView.as_view(), name='space admin broadcast'),
     path('admin/stickers', SpaceAdminStickerView.as_view(), name='space admin stickers'),
@@ -58,6 +62,8 @@ urlpatterns = [
     path('login', SpaceLoginView.as_view(), name='space email login'),
     path('official-login/exchange', SpaceOfficialLoginExchangeView.as_view(), name='space official login exchange'),
     path('join', SpaceJoinView.as_view(), name='space join'),
+    path('join/applications', SpaceJoinApplicationView.as_view()),
+    path('join/applications/status', SpaceJoinApplicationStatusView.as_view()),
     path('me', SpaceMeView.as_view(), name='space me'),
     path('users', SpaceUserListView.as_view(), name='space users'),
     path('users/online', SpaceUserListView.as_view(force_online=True), name='space online users'),

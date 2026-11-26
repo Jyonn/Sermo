@@ -84,6 +84,10 @@ class Space(models.Model):
     oauth_developer_enabled = models.BooleanField(default=False)
     unverified_group_policy = models.PositiveSmallIntegerField(default=2)
     member_limit = models.PositiveIntegerField(null=True, blank=True, default=None)
+    join_mode = models.CharField(max_length=8, default='open', db_default='open', choices=[
+        ('open', 'Open'), ('invite', 'Invitation code'), ('approval', 'Application review'),
+    ])
+    join_invite_code = models.CharField(max_length=19, blank=True, default='', db_default='')
     level_names = models.JSONField(default=default_level_names)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -471,6 +475,7 @@ class Space(models.Model):
             'oauth_developer_available',
             'unverified_group_policy',
             'member_limit',
+            'join_mode',
             'verification_tier',
             'tier_member_limit',
             'level_names',
@@ -506,6 +511,7 @@ class Space(models.Model):
             'oauth_developer_enabled',
             'unverified_group_policy',
             'member_limit',
+            'join_mode',
             'verification_tier',
             'tier_member_limit',
             'admin_phone',
@@ -515,6 +521,30 @@ class Space(models.Model):
             'level_names',
             'created_at',
         )
+
+
+class SpaceJoinApplication(models.Model):
+    space = models.ForeignKey(Space, on_delete=models.CASCADE, related_name='join_applications')
+    name = models.CharField(max_length=8)
+    note = models.CharField(max_length=240, blank=True, default='')
+    receipt_hash = models.CharField(max_length=64)
+    status = models.CharField(max_length=8, default='pending', choices=[
+        ('pending', 'Pending'), ('approved', 'Approved'), ('rejected', 'Rejected'), ('joined', 'Joined'),
+    ])
+    created_at = models.DateTimeField(auto_now_add=True)
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        indexes = [models.Index(fields=['space', 'status', 'id'], name='space_join_applications_idx')]
+        constraints = [models.UniqueConstraint(fields=['space', 'receipt_hash'], name='space_unique_join_receipt')]
+
+    def receipt_json(self):
+        return dict(name=self.name, status=self.status, created_at=self.created_at.timestamp())
+
+    def admin_json(self):
+        return dict(id=self.id, note=self.note,
+                    reviewed_at=self.reviewed_at.timestamp() if self.reviewed_at else None,
+                    **self.receipt_json())
 
 
 class SpaceFeatureGrant(models.Model):

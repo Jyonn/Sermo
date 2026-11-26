@@ -1,5 +1,5 @@
 from django.urls import path
-from Square.views import SquareMedalsView, StatementSyncView
+from Square.views import SquareMedalsView, StatementHistoryView, StatementSyncView
 
 from Square.views import AdminSquareMuteView, AdminStatementView, PinnedStatementView, SquareChatRecordStatementView, SquareQuotaView, SquareStatusView, StatementAuthorMuteView, StatementCalendarView, StatementCommentDetailView, StatementCommentLikeView, StatementCommentView, StatementDetailView, StatementEmoticonView, StatementLikeView, StatementLocationView, StatementMediaThumbnailView, StatementMediaView, StatementNearbyLocationView, StatementPinView, StatementUploadView, StatementView
 
@@ -27,6 +27,7 @@ urlpatterns = [
     path('statements/<int:statement_id>/mute-author', StatementAuthorMuteView.as_view(), name='square statement mute author'),
     path('statements/<int:statement_id>/comments', StatementCommentView.as_view(), name='square statement comments'),
     path('statements/<int:statement_id>', StatementDetailView.as_view(), name='square statement detail'),
+    path('statements/<int:statement_id>/history', StatementHistoryView.as_view(), name='square statement history'),
     path('statements/<int:statement_id>/like', StatementLikeView.as_view(), name='square statement like'),
     path('comments/<int:comment_id>/like', StatementCommentLikeView.as_view(), name='square comment like'),
     path('comments/<int:comment_id>', StatementCommentDetailView.as_view(), name='square comment detail'),

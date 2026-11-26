@@ -10,10 +10,12 @@ from django.db.models import Count, Q
 from notificator import NotificatorAPIError
 from smartdjango import analyse
 
-from Space.models import Space, SpaceOperator
+from Space.admission import application_for_receipt, invite_code, receipt_hash, review_application
+from Space.models import Space, SpaceJoinApplication, SpaceOperator
 from Space.models import SpaceEmailVerificationCode, SpaceEmailCodePurposeChoice, SpacePhoneVerificationCode
 from Space.params import (
     SpaceParams,
+    SpaceAdmissionParams,
     SpaceEmailVerificationCodeParams,
     SpaceLookupParams,
     SpaceAdminBroadcastParams,
@@ -218,6 +220,8 @@ class SpaceJoinView(View):
         SpaceParams.password,
         SpaceParams.language,
         SpaceParams.new_user_intent,
+        SpaceParams.invite_code,
+        SpaceParams.join_receipt,
     )
     def post(self, request: Request):
         space = Space.get_by_slug(request.json.slug)
@@ -227,12 +231,104 @@ class SpaceJoinView(View):
             password=request.json.password,
             language=request.json.language,
             new_user_intent=request.json.new_user_intent,
+            invite_code=request.json.invite_code,
+            join_receipt=request.json.join_receipt,
         )
         user.log_login(ip=_extract_client_ip(request))
         return dict(
             space=space.json(),
             auth=auth.get_login_token(user),
         )
+
+
+class SpaceJoinApplicationView(View):
+    @analyse.json(SpaceParams.slug, SpaceParams.name, SpaceAdmissionParams.note, SpaceAdmissionParams.receipt)
+    def post(self, request: Request):
+        name = request.json.name.strip()
+        User.vldt.nickname(name)
+        key = receipt_hash(request.json.receipt)
+        if not key:
+            raise SpaceErrors.JOIN_APPLICATION_NOT_FOUND
+        with transaction.atomic():
+            space = Space.objects.select_for_update().get(pk=Space.get_by_slug(request.json.slug).pk)
+            existing = space.join_applications.filter(receipt_hash=key).first()
+            if existing is not None:
+                if existing.name.lower() != name.lower():
+                    raise SpaceErrors.JOIN_APPLICATION_NOT_FOUND
+                return existing.receipt_json()
+            if space.join_mode != 'approval':
+                raise SpaceErrors.JOIN_MODE_INVALID
+            if User.objects.filter(space=space, lower_name=name.lower(), is_deleted=False).exists():
+                raise UserErrors.NEW_USER_NAME_TAKEN
+            space.ensure_member_limit_available()
+            return SpaceJoinApplication.objects.create(
+                space=space, name=name, note=request.json.note.strip(), receipt_hash=key,
+            ).receipt_json()
+
+
+class SpaceJoinApplicationStatusView(View):
+    @analyse.json(SpaceParams.slug, SpaceAdmissionParams.receipt)
+    def post(self, request: Request):
+        space = Space.get_by_slug(request.json.slug)
+        return application_for_receipt(space, request.json.receipt).receipt_json()
+
+
+def _admission_settings(space):
+    return dict(
+        mode=space.join_mode,
+        invite_code=space.join_invite_code if space.join_mode == 'invite' else None,
+    )
+
+
+class SpaceAdminAdmissionView(View):
+    @auth.require_space
+    def get(self, request: Request):
+        response = JsonResponse({'identifier': 'OK', 'body': _admission_settings(request.space)})
+        add_never_cache_headers(response)
+        return response
+
+    @auth.require_space
+    @analyse.json(SpaceAdmissionParams.mode, SpaceAdmissionParams.rotate)
+    def post(self, request: Request):
+        with transaction.atomic():
+            space = Space.objects.select_for_update().get(pk=request.space.pk)
+            mode = request.json.mode
+            if mode != 'invite':
+                space.join_invite_code = ''
+            elif space.join_mode != 'invite' or not space.join_invite_code or request.json.rotate:
+                space.join_invite_code = invite_code()
+            space.join_mode = mode
+            space.save(update_fields=['join_mode', 'join_invite_code'])
+        return _admission_settings(space)
+
+
+class SpaceAdminJoinApplicationsView(View):
+    @auth.require_space
+    @analyse.query(SpaceAdmissionParams.status, SpaceAdmissionParams.before)
+    def get(self, request: Request):
+        applications = request.space.join_applications.order_by('-id')
+        applications = applications.filter(status='pending') if request.query.status == 'pending' else applications.exclude(status='pending')
+        if request.query.before is not None:
+            applications = applications.filter(id__lt=request.query.before)
+        rows = list(applications[:31])
+        return dict(items=[row.admin_json() for row in rows[:30]], next_before=rows[29].pk if len(rows) > 30 else None)
+
+
+class SpaceAdminJoinApplicationReviewView(View):
+    @auth.require_space
+    @analyse.json(SpaceAdmissionParams.decision)
+    def post(self, request: Request, application_id: int):
+        with transaction.atomic():
+            space = Space.objects.select_for_update().get(pk=request.space.pk)
+            application = space.join_applications.filter(pk=application_id).first()
+            if application is None:
+                raise SpaceErrors.JOIN_APPLICATION_NOT_FOUND
+            if request.json.decision == 'approve' and application.status == 'pending':
+                if User.objects.filter(space=space, lower_name=application.name.lower(), is_deleted=False).exists():
+                    raise UserErrors.NEW_USER_NAME_TAKEN
+                space.ensure_member_limit_available()
+            review_application(application, request.json.decision)
+        return application.admin_json()
 
 
 class SpaceMeView(View):

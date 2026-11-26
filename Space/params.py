@@ -29,6 +29,8 @@ class SpaceParams(metaclass=Params):
     new_user_intent = Validator('new_user_intent').null().default(None).bool(
         lambda value: value is None or value in ('check', 'create'),
         message=_('new_user_intent should be check or create'))
+    invite_code = Validator('invite_code').to(str).null().default(None).bool(lambda value: value is None or len(value) <= 32)
+    join_receipt = Validator('join_receipt').to(str).null().default(None).bool(lambda value: value is None or len(value) == 64)
     group_square_enabled = Validator('group_square_enabled') \
         .to(int) \
         .null().default(None) \
@@ -51,6 +53,16 @@ class SpaceParams(metaclass=Params):
         lambda x: x is None or x in (0, 1), message=_('research_enabled should be 0 or 1'))
     unverified_group_policy = Validator('unverified_group_policy').to(int).null().default(None).to(
         lambda value: None if value is None else SpaceValidator.unverified_group_policy(value))
+
+
+class SpaceAdmissionParams(metaclass=Params):
+    mode = Validator('mode').to(str).bool(lambda value: value in ('open', 'invite', 'approval'))
+    rotate = Validator('rotate').to(int).default(0).bool(lambda value: value in (0, 1))
+    receipt = Validator('receipt').to(str).bool(lambda value: len(value) == 64)
+    note = Validator('note').to(str).default('').bool(lambda value: len(value) <= 240)
+    decision = Validator('decision').to(str).bool(lambda value: value in ('approve', 'reject'))
+    status = Validator('status').to(str).default('pending').bool(lambda value: value in ('pending', 'reviewed'))
+    before = Validator('before').to(int).null().default(None)
 
 
 class SpaceEmailVerificationCodeParams(metaclass=Params):

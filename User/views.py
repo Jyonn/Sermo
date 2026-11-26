@@ -124,6 +124,8 @@ class WeChatMiniProgramOnboardingView(View):
         WeChatMiniProgramOnboardingParams.nickname,
         WeChatMiniProgramOnboardingParams.password,
         WeChatMiniProgramOnboardingParams.language,
+        WeChatMiniProgramOnboardingParams.invite_code,
+        WeChatMiniProgramOnboardingParams.join_receipt,
     )
     def post(self, request: Request):
         from User.wechat_miniprogram import complete_wechat_onboarding
@@ -135,6 +137,8 @@ class WeChatMiniProgramOnboardingView(View):
             password=request.json.password,
             language=request.json.language,
             check_content=is_miniprogram_request(request),
+            invite_code=request.json.invite_code,
+            join_receipt=request.json.join_receipt,
         )
         user.log_login()
         return dict(created=created, user=user.json_me(), space=user.space.json(), auth=auth.get_login_token(user))

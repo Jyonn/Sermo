@@ -458,7 +458,9 @@ class StatementSyncView(View):
             sync_liked=Exists(StatementLike.objects.filter(statement_id=OuterRef('pk'), user=request.user)),
         )
         items = [dict(statement_id=row.id, comment_count=row.sync_comments, like_count=row.sync_likes,
-                      liked=row.sync_liked, is_pinned=bool(row.user.is_official and row.user.pinned_square_statement_id == row.id)) for row in rows]
+                      liked=row.sync_liked, is_pinned=bool(row.user.is_official and row.user.pinned_square_statement_id == row.id),
+                      can_edit=row.user_id == request.user.id, edit_revision=row.edit_revision,
+                      **(dict(text=row.text, edited_at=row.edited_at.timestamp()) if row.edited_at else {})) for row in rows]
         found = {item['statement_id'] for item in items}
         return dict(items=items, removed_ids=[item for item in ids if item not in found])
 
@@ -468,6 +470,27 @@ class StatementDetailView(View):
     def get(self, request: Request, statement_id: int):
         request.user.space.require_square_enabled()
         return Statement.detail(request.user, statement_id, request=request)
+
+    @auth.require_user
+    @analyse.json(SquareParams.edit_text, SquareParams.edit_revision)
+    def patch(self, request: Request, statement_id: int):
+        user = request.user
+        user.space.require_square_enabled()
+        user.require_capability('square.browse')
+        statement = Statement.visible_for(user).filter(id=statement_id).first()
+        if statement is None:
+            raise SquareErrors.NOT_EXISTS
+        if statement.user_id != user.id:
+            raise SquareErrors.EDIT_FORBIDDEN
+        user.require_capability('square.statement.publish')
+        SquareMute.require_can_participate(user)
+        check_user_text(request, request.json.text, ContentSafetyScene.SOCIAL)
+        with transaction.atomic():
+            statement = Statement.objects.select_for_update().filter(id=statement_id, user=user, space_id=user.space_id, is_deleted=False).first()
+            if statement is None:
+                raise SquareErrors.NOT_EXISTS
+            statement.edit_text(request.json.text, request.json.revision)
+        return Statement.detail(user, statement_id, request=request)
 
     @auth.require_user
     def delete(self, request: Request, statement_id: int):
@@ -489,6 +512,29 @@ class StatementDetailView(View):
                 payload=dict(statement_id=statement.id, statement_excerpt=excerpt, removed_by_admin=True),
             )
         return dict(statement_id=statement.id, deleted=True)
+
+
+class StatementHistoryView(View):
+    @auth.require_user
+    @analyse.query(SquareParams.before)
+    def get(self, request: Request, statement_id: int):
+        user = request.user
+        user.space.require_square_enabled()
+        user.require_capability('square.browse')
+        statement = Statement.visible_for(user).filter(id=statement_id).first()
+        if statement is None:
+            raise SquareErrors.NOT_EXISTS
+        before = request.query.before
+        if before is None:
+            current = dict(revision=statement.edit_revision, text=statement.text,
+                           published_at=(statement.edited_at or statement.created_at).timestamp())
+            versions = [current]
+            before = statement.edit_revision
+        else:
+            versions = []
+        rows = list(statement.revisions.filter(revision__lt=before).order_by('-revision')[:21])
+        versions.extend(row.jsonl() for row in rows[:20])
+        return dict(items=versions, next_before=rows[19].revision if len(rows) > 20 else None)
 
 
 class StatementLikeView(View):

@@ -110,13 +110,15 @@ def _load_onboarding_ticket(ticket):
     return payload
 
 
-def complete_wechat_onboarding(ticket, mode, nickname=None, password=None, language='zh-CN', check_content=False):
+def complete_wechat_onboarding(ticket, mode, nickname=None, password=None, language='zh-CN', check_content=False,
+                               invite_code=None, join_receipt=None):
     session = _load_onboarding_ticket(ticket)
     space = Space.objects.get(id=session['space_id'])
     if check_content and mode == 'new':
         from utils.content_safety import ContentSafetyScene, check_text
         check_text(nickname, session['open_id'], ContentSafetyScene.PROFILE, nickname=nickname)
     with transaction.atomic():
+        space = Space.objects.select_for_update().get(pk=space.pk)
         identity = WeChatMiniProgramIdentity.objects.select_for_update().select_related('user').filter(
             app_id=session['app_id'], open_id=session['open_id'], space=space,
         ).first()
@@ -145,12 +147,16 @@ def complete_wechat_onboarding(ticket, mode, nickname=None, password=None, langu
             })
             return user, False
         space.ensure_member_limit_available()
+        from Space.admission import mark_joined, require_admission
+        name = _available_name(space, nickname, session['open_id'])
+        application = require_admission(space, name, invite_code, join_receipt, wechat=True)
         user = User.create(
             space=space,
-            name=_available_name(space, nickname, session['open_id']),
+            name=name,
             language=language,
         )
         WeChatMiniProgramIdentity.objects.create(user=user, space=space, **session)
+        mark_joined(application)
         transaction.on_commit(space.notify_capacity_if_needed)
         return user, True
 

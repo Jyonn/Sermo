@@ -225,6 +225,8 @@ class Statement(models.Model):
     space = models.ForeignKey('Space.Space', on_delete=models.CASCADE, related_name='statements', db_index=True)
     user = models.ForeignKey('User.User', on_delete=models.CASCADE, related_name='statements')
     text = models.TextField(blank=True, default='')
+    edit_revision = models.PositiveIntegerField(default=0, db_default=0)
+    edited_at = models.DateTimeField(null=True, blank=True)
     visibility = models.IntegerField(
         choices=StatementVisibilityChoice.to_choices(),
         default=StatementVisibilityChoice.PUBLIC,
@@ -534,6 +536,9 @@ class Statement(models.Model):
             user=anonymous_user_json() if self.is_anonymous else self.user.tiny_json(),
             is_anonymous=self.is_anonymous,
             is_mine=bool(viewer and viewer.id == self.user_id),
+            can_edit=bool(viewer and viewer.id == self.user_id),
+            edit_revision=self.edit_revision,
+            edited_at=self.edited_at.timestamp() if self.edited_at else None,
             text=self.text,
             inline_emoticons=_qzone_inline_emoticons(self, request=request),
             visibility='friends' if self.visibility == StatementVisibilityChoice.FRIENDS else 'public',
@@ -559,11 +564,44 @@ class Statement(models.Model):
             created_at=self.created_at.timestamp(),
         )
 
+    def edit_text(self, text, revision):
+        if revision != self.edit_revision:
+            raise SquareErrors.EDIT_CONFLICT
+        if text == self.text:
+            return
+        if not text and not (self.forward_bundle_id or self.link_preview_id or self.media.exists()):
+            raise SquareErrors.CONTENT_REQUIRED
+        StatementRevision.objects.create(
+            statement=self,
+            revision=self.edit_revision,
+            text=self.text,
+            published_at=self.edited_at or self.created_at,
+        )
+        self.text = text
+        self.edit_revision += 1
+        self.edited_at = timezone.now()
+        self.save(update_fields=['text', 'edit_revision', 'edited_at'])
+
     def delete_for(self, user):
         if user.id != self.user_id and not (user.is_official and user.space_id == self.space_id):
             raise SquareErrors.DELETE_FORBIDDEN
         self.is_deleted = True
         self.save(update_fields=['is_deleted'])
+
+
+class StatementRevision(models.Model):
+    statement = models.ForeignKey(Statement, on_delete=models.CASCADE, related_name='revisions')
+    revision = models.PositiveIntegerField()
+    text = models.TextField()
+    published_at = models.DateTimeField()
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['statement', 'revision'], name='square_unique_statement_revision'),
+        ]
+
+    def jsonl(self):
+        return dict(revision=self.revision, text=self.text, published_at=self.published_at.timestamp())
 
 
 class StatementComment(models.Model):
