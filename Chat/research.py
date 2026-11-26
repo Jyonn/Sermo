@@ -34,12 +34,12 @@ def period(body):
 
 
 def members(project):
-    return project.chat.chat_members.filter(status=ChatMemberStatusChoice.ACTIVE, user__is_deleted=False).select_related('user')
+    return project.chat.active_members()
 
 
 def payload(project, viewer=None):
     from Chat.models import SubmissionInvite, SubmissionInviteStatusChoice
-    rows = list(members(project))
+    rows = project.chat.ordered_members()
     from Chat.research_workflow import serialize
     workflow = serialize(project, viewer) if viewer else {}
     return dict(id=project.pk, chat_id=project.chat_id, title=project.chat.title, description=project.description,

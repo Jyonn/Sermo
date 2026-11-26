@@ -3,7 +3,8 @@ import uuid
 from typing import List
 
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import OuterRef, Q, Subquery
+from django.db.models.functions import Coalesce
 from django.utils import timezone
 from django.utils.translation import gettext as _
 from smartdjango import models, Choice
@@ -115,16 +116,35 @@ class Chat(models.Model):
             return message.jsonl()
         return None
 
-    def _dictify_members(self):
-        members = ChatMember.objects.filter(
-            chat=self,
+    def active_members(self):
+        return self.chat_members.filter(
             status=ChatMemberStatusChoice.ACTIVE,
             user__is_deleted=False,
-        ).select_related('user').order_by('joined_at', 'created_at', 'id')
+        ).select_related('user')
+
+    def ordered_members(self):
+        members = self.active_members()
+        if not self.research:
+            return members.order_by('joined_at', 'created_at', 'id')
+
+        # Research memberships start at chat creation for history access.
+        # The latest accepted invitation records when the member actually joined.
+        accepted_at = SubmissionInvite.objects.filter(
+            chat_id=self.pk,
+            invitee_id=OuterRef('user_id'),
+            status=SubmissionInviteStatusChoice.ACCEPTED,
+            accepted_at__isnull=False,
+        ).order_by('-accepted_at').values('accepted_at')[:1]
+        return members.annotate(
+            roster_joined_at=Coalesce(Subquery(accepted_at), 'joined_at', 'created_at'),
+        ).order_by('roster_joined_at', 'user_id')
+
+    def _dictify_members(self):
         payload = []
-        for item in members:
+        for item in self.ordered_members():
             user = item.user.jsonl()
-            user['joined_at'] = item.joined_at.timestamp() if item.joined_at else None
+            joined_at = item.roster_joined_at if self.research else item.joined_at
+            user['joined_at'] = joined_at.timestamp() if joined_at else None
             user['submission_role'] = item.submission_role_name
             user['group_chat_mute'] = item.mute_payload()
             payload.append(user)

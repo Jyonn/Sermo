@@ -129,6 +129,68 @@ class ResearchTests(TestCase):
         self.assertIsNone(ChatMember.objects.get(chat_id=p['chat_id'],user=self.student).submission_role)
         self.assertEqual(SubmissionInvite.objects.get(pk=invite.pk).effective_status,'accepted')
 
+    def test_group_roster_uses_acceptance_order_in_both_details(self):
+        from Chat.models import SubmissionInvite, SubmissionMemberRoleChoice
+        from Chat.test_compact import decode
+
+        project = self.create()
+        chat = Chat.objects.get(pk=project['chat_id'])
+
+        def invite(user):
+            return SubmissionInvite.create_invitation(chat, self.owner, user, SubmissionMemberRoleChoice.AUTHOR)
+
+        student_invite = invite(self.student)
+        other_invite = invite(self.other)
+        other_invite.accept(self.other)
+        student_invite.accept(self.student)
+        headers = {'HTTP_AUTHORIZATION': 'Bearer ' + auth.get_login_token(self.owner)['auth']}
+
+        def assert_roster(expected):
+            for suffix in ('', '?format=compact-v1'):
+                rows = decode(self.client.get(f'/chats/{suffix}', **headers).json()['body'])
+                group_members = next(row['members'] for row in rows if row['chat_id'] == chat.id)
+                self.assertEqual([member['user_id'] for member in group_members], expected)
+            details = self.call(self.owner, id=project['id']).json()['body']
+            self.assertEqual([member['id'] for member in details['members']], expected)
+            return group_members
+
+        roster = assert_roster([self.owner.id, self.other.id, self.student.id])
+        self.assertEqual(roster[1]['joined_at'], other_invite.accepted_at.timestamp())
+        self.assertEqual(roster[2]['joined_at'], student_invite.accepted_at.timestamp())
+
+        project = self.call(self.owner, id=project['id']).json()['body']
+        response = self.update(project, {'action': 'remove', 'user_id': self.other.id})
+        self.assertEqual(response.status_code, 200, response.content)
+        assert_roster([self.owner.id, self.student.id])
+        invite(self.other).accept(self.other)
+        assert_roster([self.owner.id, self.student.id, self.other.id])
+
+    def test_group_history_includes_pre_join_messages_for_active_members(self):
+        from Chat.models import SubmissionInvite, SubmissionMemberRoleChoice
+        from Message.models import Message, MessageTypeChoice, MessageUserState
+
+        project = self.create()
+        chat = Chat.objects.get(pk=project['chat_id'])
+        before = Message.create(chat, self.owner, MessageTypeChoice.TEXT, 'Visible before joining')
+        hidden = Message.create(chat, self.owner, MessageTypeChoice.TEXT, 'Hidden by member')
+        recalled = Message.create(chat, self.owner, MessageTypeChoice.TEXT, 'Recalled by sender')
+        recalled.remove()
+        invitation = SubmissionInvite.create_invitation(chat, self.owner, self.student, SubmissionMemberRoleChoice.AUTHOR)
+        headers = {'HTTP_AUTHORIZATION': 'Bearer ' + auth.get_login_token(self.student)['auth']}
+        path = f'/messages/?chat_id={chat.id}&limit=50'
+
+        self.assertIsNone(self.client.get(path, **headers).json()['body'])
+        invitation.accept(self.student)
+        after = Message.create(chat, self.owner, MessageTypeChoice.TEXT, 'Visible after joining')
+        MessageUserState.objects.create(message=hidden, user=self.student)
+        history = self.client.get(path, **headers).json()['body']
+        self.assertEqual({row['message_id'] for row in history}, {before.id, after.id})
+
+        project = self.call(self.student, id=project['id']).json()['body']
+        response = self.update(project, {'action': 'leave'}, self.student)
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertIsNone(self.client.get(path, **headers).json()['body'])
+
     @patch.object(Chat, '_require_friendship')
     @patch.object(Chat, '_require_friend_of')
     def test_pending_invites_expire_on_owner_transfer(self,*unused):
