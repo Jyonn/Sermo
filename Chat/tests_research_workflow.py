@@ -45,6 +45,9 @@ class WorkflowTests(TestCase):
         p = self.update(edited, dict(action='progress', task_id=task_id, body='Mentor reply', reply_to=report['id'])).json()['body']
         removed = self.update(p, remove, self.student).json()['body']
         self.assertEqual([entry['body'] for entry in removed['tasks'][0]['progress']], ['Mentor reply'])
+        self.assertEqual(removed['tasks'][0]['removed_report_submissions'], [dict(
+            user_id=self.student.pk, report_kind='daily', period_start='2026-11-05',
+        )])
         self.assertEqual(len(removed['workflow']['ledger']), 1)
         self.assertEqual(self.report(removed).status_code, 400)
         self.assertTrue(reference_payload(17, dict(project_id=p['id'], task_id=task_id, progress_id=report['id']), self.owner)['unavailable'])

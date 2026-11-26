@@ -71,11 +71,14 @@ def visible_tasks(project, viewer):
     for task in project.tasks:
         entries = {entry['id']: entry for entry in task['progress']}
         progress = []
+        removed_reports = []
+        writable = project.status != 'archived' and task['status'] != 'archived'
         for entry in entries.values():
             if entry.get('deleted_at'):
+                if entry.get('report_kind') and entry.get('period_start'):
+                    removed_reports.append({key: entry[key] for key in ('user_id', 'report_kind', 'period_start')})
                 continue
             owned = bool(viewer and entry['user_id'] == viewer.pk)
-            writable = project.status != 'archived' and task['status'] != 'archived'
             parent = entry.get('reply_to')
             visited = set()
             while parent in entries and entries[parent].get('deleted_at') and parent not in visited:
@@ -84,7 +87,7 @@ def visible_tasks(project, viewer):
             # A reply with no surviving parent still has its original reference kind.
             progress.append(dict(entry, reply_to=parent or entry.get('reply_to'),
                                  can_edit=owned and writable, can_delete=owned and writable))
-        tasks.append(dict(task, progress=progress))
+        tasks.append(dict(task, progress=progress, removed_report_submissions=removed_reports))
     return tasks
 
 
