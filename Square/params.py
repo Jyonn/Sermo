@@ -99,11 +99,40 @@ def validate_statement_ids(values):
     return list(dict.fromkeys(values))
 
 
+def validate_known_revisions(value):
+    if not isinstance(value, dict) or len(value) > 100:
+        raise SquareErrors.MEDIA_INVALID
+    for key, revision in value.items():
+        if not key.isascii() or not key.isdigit() or len(key) > 16 or type(revision) is not int or not 0 <= revision <= 2**32 - 1:
+            raise SquareErrors.MEDIA_INVALID
+    return value
+
+
+def validate_edit_content(value):
+    if not isinstance(value, dict) or value.keys() - {'visibility', 'location', 'media', 'external_media_url', 'keep_chat_record'}:
+        raise SquareErrors.MEDIA_INVALID
+    content = value.copy()
+    if 'visibility' in value:
+        content['visibility'] = validate_visibility(value['visibility'])
+    if 'location' in value:
+        content['location'] = validate_location(value['location'])
+    if 'media' in value:
+        content['media'] = validate_media(value['media'])
+    url = value.get('external_media_url')
+    if url is not None and (not isinstance(url, str) or len(url) > 2048 or not url.strip()):
+        raise SquareErrors.EXTERNAL_MEDIA_INVALID
+    if 'keep_chat_record' in value and type(value['keep_chat_record']) is not bool:
+        raise SquareErrors.MEDIA_INVALID
+    return content
+
+
 class SquareParams(metaclass=Params):
     statement_ids = Validator('statement_ids').to(validate_statement_ids)
+    known_revisions = Validator('known_revisions').to(validate_known_revisions).null().default(None)
     text = Validator('text').to(validate_text).null().default('')
-    edit_text = Validator('text').to(validate_text)
+    edit_text = Validator('text').to(validate_text).null().default(None)
     edit_revision = Validator('revision').to(int).bool(lambda value: 0 <= value <= 2**32 - 1)
+    edit_content = Validator('content').to(validate_edit_content).default({})
     visibility = Validator('visibility').to(validate_visibility).default('public')
     media = Validator('media').to(validate_media).default([])
     external_media_url = Validator('external_media_url').to(str).bool(lambda value: len(value) <= 2048).null().default(None)

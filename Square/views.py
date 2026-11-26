@@ -8,11 +8,12 @@ from Square.models import SquareMute, SquareReadState, Statement, StatementComme
 from Activity.models import ActivityService
 from Chat.models import Chat
 from Friendship.models import Friendship, FriendshipStatusChoice
-from django.db.models import Q
+from django.db.models import Q, prefetch_related_objects
 from Message.models import ForwardBundle, MediaAsset, Message, MessageTypeChoice
 from QZone.models import QZoneEmoticon
 from Message.params import MessageParams
 from Square.params import SquareParams
+from Square.statement_edits import edit_statement, issue_edit_upload_grant
 from utils.content_safety import ContentSafetyScene, check_user_text
 from Square.quota import quota_for_user
 from Square.validators import SquareErrors
@@ -435,16 +436,18 @@ class StatementUploadView(View):
         if request.json.kind not in {'image', 'audio', 'video'}:
             raise SquareErrors.MEDIA_INVALID
         request.user.require_capability(f'square.statement.publish.{request.json.kind}')
-        return issue_message_upload(
+        upload = issue_message_upload(
             kind=request.json.kind,
             file_name=request.json.file_name,
             content_type=request.json.content_type,
         )
+        upload['edit_upload_grant'] = issue_edit_upload_grant(request.user, upload['key'], upload['kind'])
+        return upload
 
 
 class StatementSyncView(View):
     @auth.require_user
-    @analyse.json(SquareParams.statement_ids)
+    @analyse.json(SquareParams.statement_ids, SquareParams.known_revisions)
     def post(self, request: Request):
         request.user.space.require_square_enabled()
         request.user.require_capability('square.browse')
@@ -452,15 +455,31 @@ class StatementSyncView(View):
         # Share the same visibility policy as feed/detail; inaccessible IDs are
         # indistinguishable from deleted IDs, including IDs in other spaces.
         from django.db.models import Count, Exists, OuterRef
-        rows = Statement.visible_for(request.user).filter(id__in=ids).select_related('user').annotate(
+        rows = list(Statement.visible_for(request.user).filter(id__in=ids).select_related('user').annotate(
             sync_comments=Count('comments', filter=Q(comments__is_deleted=False), distinct=True),
             sync_likes=Count('likes', distinct=True),
             sync_liked=Exists(StatementLike.objects.filter(statement_id=OuterRef('pk'), user=request.user)),
-        )
-        items = [dict(statement_id=row.id, comment_count=row.sync_comments, like_count=row.sync_likes,
-                      liked=row.sync_liked, is_pinned=bool(row.user.is_official and row.user.pinned_square_statement_id == row.id),
-                      can_edit=row.user_id == request.user.id, edit_revision=row.edit_revision,
-                      **(dict(text=row.text, edited_at=row.edited_at.timestamp()) if row.edited_at else {})) for row in rows]
+        ))
+        known = raw(request.json.known_revisions)
+        revised = [
+            row for row in rows if known is not None and row.edit_revision > known.get(str(row.id), 0)
+        ]
+        if revised:
+            from Square.models import statement_forward_bundle_prefetch
+            prefetch_related_objects(
+                revised, 'link_preview', statement_media_prefetch(), statement_forward_bundle_prefetch(),
+                'qzone_source__emoticons__media_asset',
+            )
+        updated = {row.id: row.editable_payload(request) for row in revised}
+        items = []
+        for row in rows:
+            item = dict(statement_id=row.id, comment_count=row.sync_comments, like_count=row.sync_likes,
+                        liked=row.sync_liked, is_pinned=bool(row.user.is_official and row.user.pinned_square_statement_id == row.id),
+                        can_edit=row.user_id == request.user.id, edit_revision=row.edit_revision)
+            if known is None and row.edited_at:
+                item.update(text=row.text, edited_at=row.edited_at.timestamp())
+            item.update(updated.get(row.id, {}))
+            items.append(item)
         found = {item['statement_id'] for item in items}
         return dict(items=items, removed_ids=[item for item in ids if item not in found])
 
@@ -472,7 +491,7 @@ class StatementDetailView(View):
         return Statement.detail(request.user, statement_id, request=request)
 
     @auth.require_user
-    @analyse.json(SquareParams.edit_text, SquareParams.edit_revision)
+    @analyse.json(SquareParams.edit_text, SquareParams.edit_revision, SquareParams.edit_content)
     def patch(self, request: Request, statement_id: int):
         user = request.user
         user.space.require_square_enabled()
@@ -484,13 +503,14 @@ class StatementDetailView(View):
             raise SquareErrors.EDIT_FORBIDDEN
         user.require_capability('square.statement.publish')
         SquareMute.require_can_participate(user)
-        check_user_text(request, request.json.text, ContentSafetyScene.SOCIAL)
+        if request.json.text:
+            check_user_text(request, request.json.text, ContentSafetyScene.SOCIAL)
         with transaction.atomic():
             statement = Statement.objects.select_for_update().filter(id=statement_id, user=user, space_id=user.space_id, is_deleted=False).first()
             if statement is None:
                 raise SquareErrors.NOT_EXISTS
-            statement.edit_text(request.json.text, request.json.revision)
-        return Statement.detail(user, statement_id, request=request)
+            edit_statement(statement, user, request.json.text, request.json.revision, raw(request.json.content))
+            return Statement.detail(user, statement_id, request=request)
 
     @auth.require_user
     def delete(self, request: Request, statement_id: int):
@@ -532,7 +552,12 @@ class StatementHistoryView(View):
             before = statement.edit_revision
         else:
             versions = []
-        rows = list(statement.revisions.filter(revision__lt=before).order_by('-revision')[:21])
+        revisions = statement.revisions.filter(revision__lt=before)
+        if statement.user_id != user.id:
+            friendship = Friendship.between(user, statement.user)
+            if friendship is None or friendship.status != FriendshipStatusChoice.ACCEPTED:
+                revisions = revisions.exclude(snapshot__visibility='friends')
+        rows = list(revisions.order_by('-revision')[:21])
         versions.extend(row.jsonl() for row in rows[:20])
         return dict(items=versions, next_before=rows[19].revision if len(rows) > 20 else None)
 

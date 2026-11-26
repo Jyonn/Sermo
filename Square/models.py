@@ -527,6 +527,35 @@ class Statement(models.Model):
             statement_media_prefetch(), statement_forward_bundle_prefetch(),
         ).get(id=statement.id)
 
+    @property
+    def location_payload(self):
+        if self.latitude is None or self.longitude is None:
+            return None
+        return dict(
+            latitude=float(self.latitude), longitude=float(self.longitude),
+            address=self.address, geocoding_provider=self.geocoding_provider,
+        )
+
+    @property
+    def audience(self):
+        return 'friends' if self.visibility == StatementVisibilityChoice.FRIENDS else 'public'
+
+    def editable_payload(self, request=None):
+        return dict(
+            edit_revision=self.edit_revision,
+            edited_at=self.edited_at.timestamp() if self.edited_at else None,
+            text=self.text,
+            inline_emoticons=_qzone_inline_emoticons(self, request=request),
+            visibility=self.audience,
+            location=self.location_payload,
+            media=[item.jsonl(request=request) for item in self.media.all()],
+            chat_record=(
+                self.forward_bundle.jsonl(request=request, redact_identity=self.chat_record_redacted)
+                if self.forward_bundle_id else None
+            ),
+            external_media=self.link_preview.jsonl() if self.link_preview_id else None,
+        )
+
     def jsonl(self, request=None):
         viewer = getattr(request, 'user', None) if request else None
         if viewer is not None and not hasattr(viewer, 'space_id'):
@@ -537,23 +566,7 @@ class Statement(models.Model):
             is_anonymous=self.is_anonymous,
             is_mine=bool(viewer and viewer.id == self.user_id),
             can_edit=bool(viewer and viewer.id == self.user_id),
-            edit_revision=self.edit_revision,
-            edited_at=self.edited_at.timestamp() if self.edited_at else None,
-            text=self.text,
-            inline_emoticons=_qzone_inline_emoticons(self, request=request),
-            visibility='friends' if self.visibility == StatementVisibilityChoice.FRIENDS else 'public',
-            location=(dict(
-                latitude=float(self.latitude),
-                longitude=float(self.longitude),
-                address=self.address,
-                geocoding_provider=self.geocoding_provider,
-            ) if self.latitude is not None and self.longitude is not None else None),
-            media=[item.jsonl(request=request) for item in self.media.all()],
-            chat_record=(
-                self.forward_bundle.jsonl(request=request, redact_identity=self.chat_record_redacted)
-                if self.forward_bundle_id else None
-            ),
-            external_media=self.link_preview.jsonl() if self.link_preview_id else None,
+            **self.editable_payload(request),
             comment_count=getattr(self, 'visible_comment_count', self.comments.filter(is_deleted=False).count()),
             like_count=getattr(self, 'visible_like_count', self.likes.count()),
             liked=bool(getattr(self, 'viewer_liked', viewer and self.likes.filter(user=viewer).exists())),
@@ -563,24 +576,6 @@ class Statement(models.Model):
             is_pinned=bool(self.user.is_official and self.user.pinned_square_statement_id == self.id),
             created_at=self.created_at.timestamp(),
         )
-
-    def edit_text(self, text, revision):
-        if revision != self.edit_revision:
-            raise SquareErrors.EDIT_CONFLICT
-        if text == self.text:
-            return
-        if not text and not (self.forward_bundle_id or self.link_preview_id or self.media.exists()):
-            raise SquareErrors.CONTENT_REQUIRED
-        StatementRevision.objects.create(
-            statement=self,
-            revision=self.edit_revision,
-            text=self.text,
-            published_at=self.edited_at or self.created_at,
-        )
-        self.text = text
-        self.edit_revision += 1
-        self.edited_at = timezone.now()
-        self.save(update_fields=['text', 'edit_revision', 'edited_at'])
 
     def delete_for(self, user):
         if user.id != self.user_id and not (user.is_official and user.space_id == self.space_id):
@@ -594,6 +589,7 @@ class StatementRevision(models.Model):
     revision = models.PositiveIntegerField()
     text = models.TextField()
     published_at = models.DateTimeField()
+    snapshot = models.JSONField(null=True, blank=True)
 
     class Meta:
         constraints = [
@@ -601,7 +597,8 @@ class StatementRevision(models.Model):
         ]
 
     def jsonl(self):
-        return dict(revision=self.revision, text=self.text, published_at=self.published_at.timestamp())
+        return dict(revision=self.revision, text=self.text, published_at=self.published_at.timestamp(),
+                    changes=(self.snapshot or {}).get('changes', []))
 
 
 class StatementComment(models.Model):
