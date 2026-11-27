@@ -19,6 +19,7 @@ from Sticker.resources import ResourceCatalogView, ResourceFileView
 from Chat.research import ResearchView
 from Chat.research_resources import ResearchResourceView
 from Chat.research_calendar import ResearchCalendarView
+from Chat.research_chronelle import ResearchChronelleView
 from Chat.research_meetings import ResearchMeetingView
 from PlatformAdmin.frontend_releases import FrontendReleaseView, FrontendReleasePublishView
 from Message.live_transcription import VoiceStreamTicketView, AdminVoiceStreamTicketView
@@ -32,6 +33,8 @@ urlpatterns = [
     path('resources/assets/<int:asset_id>/<str:variant>/<str:digest>', ResourceFileView.as_view()),
     path('research/<int:project_id>/meetings/', ResearchMeetingView.as_view()),
     path('research/<int:project_id>/calendar/', ResearchCalendarView.as_view()),
+    path('research/<int:project_id>/chronelle/<slug:resource>/', ResearchChronelleView.as_view()),
+    path('research/<int:project_id>/chronelle/<slug:resource>/<str:identifier>/', ResearchChronelleView.as_view()),
     path('research/<int:project_id>/resources/', ResearchResourceView.as_view()),
     path('research/', ResearchView.as_view()),
     path('research/<int:project_id>/', ResearchView.as_view()),

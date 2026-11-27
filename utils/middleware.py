@@ -74,7 +74,10 @@ class APIPacker:
             '/users/me', '/users/me/chat-quick-actions', '/users/me/permissions-quotas',
             '/users/me/interface-preferences',
         }
-        if request.path.rstrip('/') in private_paths or request.path.startswith('/users/me/chronelle') or (request.path.startswith('/research/') and request.path.endswith('/calendar/')):
+        research_calendar = request.path.startswith('/research/') and (
+            request.path.endswith('/calendar/') or '/chronelle/' in request.path
+        )
+        if request.path.rstrip('/') in private_paths or request.path.startswith('/users/me/chronelle') or research_calendar:
             response['Cache-Control'] = 'no-store, private'
         return response
 

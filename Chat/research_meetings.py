@@ -37,6 +37,15 @@ def validate(body,user_id):
     group=body.get('group_id')
     if type(group) is not int:raise ValueError()
     payload.update(start=start.isoformat(),end=end.isoformat(),timezone=body['timezone'],all_day=body['all_day'],members=sorted(members),group_id=group)
+    if 'category_id' in body:
+        if type(body['category_id']) is not int or body['category_id'] < 1:
+            raise ValueError()
+        payload['category_id'] = body['category_id']
+    if 'recurrence' in body:
+        recurrence = body['recurrence']
+        if not isinstance(recurrence, dict) or len(json.dumps(recurrence)) > 2048:
+            raise ValueError()
+        payload['recurrence'] = recurrence
     return command,payload
 
 
@@ -80,7 +89,7 @@ class ResearchMeetingView(View):
                 ResearchProject.objects.select_for_update().get(pk=project.pk)
                 if ResearchMeeting.objects.filter(project=project,creator=request.user,status__in=['pending','unknown']).exclude(pk=command).exists():
                     raise BindingFailure('meeting_unresolved',409)
-                row,created=ResearchMeeting.objects.get_or_create(pk=command,defaults={'project':project,'creator':request.user,'payload':{**payload,'_authority':authority,'_oauth_client':config()[0],'_protocol':'oauth-v1'}})
+                row,created=ResearchMeeting.objects.get_or_create(pk=command,defaults={'project':project,'creator':request.user,'payload':{**payload,'_authority':authority,'_oauth_client':config()[0],'_protocol':'oauth-v1','_wire':2}})
                 row=ResearchMeeting.objects.select_for_update().get(pk=command)
                 original={key:value for key,value in row.payload.items() if not key.startswith('_')}
                 if row.project_id!=project.pk or row.creator_id!=request.user.pk or original!=payload:raise BindingFailure('meeting_command_conflict',409)
@@ -96,9 +105,14 @@ class ResearchMeetingView(View):
                     project=ResearchProject.objects.select_for_update().get(pk=project.pk)
                     project_for(request.user,project.pk)
                     current=set(project.chat.chat_members.filter(status=ChatMemberStatusChoice.ACTIVE).values_list('user_id',flat=True))
-                    if project.status=='completed' or not set(payload['members'])<=current:raise BindingFailure('member_unavailable',403)
+                    if project.status in ('completed','archived') or not set(payload['members'])<=current:raise BindingFailure('member_unavailable',403)
+                    proposal={key:payload[key] for key in ('title','description','location','start','end','timezone','all_day','group_id','category_id','recurrence') if key in payload}
+                    if payload['all_day'] and row.payload.get('_wire') == 2:
+                        zone = ZoneInfo(payload['timezone'])
+                        for field in ('start','end'):
+                            proposal[field] = parse_datetime(payload[field]).astimezone(zone).date().isoformat()
                     result=remote(base,'/api/oauth/calendar/invitations/',token=viewer['access_token'],key='research-'+str(command),body={
-                        **{key:payload[key] for key in ('title','description','location','start','end','timezone','all_day','group_id')},
+                        **proposal,
                         'subjects':subjects,'client_id':str(command)})
                     invitation=uuid.UUID(result['id'])
                     row=ResearchMeeting.objects.select_for_update().get(pk=command)

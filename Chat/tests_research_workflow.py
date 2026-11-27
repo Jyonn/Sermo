@@ -199,7 +199,7 @@ class WorkflowTests(TestCase):
         self.assertEqual(payment.recalculate_reference_count(),1)
         open_body=dict(action='reimbursement_open',id=row['id'],resource_id=payment.pk)
         self.assertEqual(self.update(p,open_body,self.other).status_code,400)
-        with patch('utils.qiniu.sign_private_download_url',return_value='https://signed.example/document'):
+        with patch('Chat.research_resources.sign_private_download_url',return_value='https://signed.example/document'):
             self.assertEqual(self.update(p,open_body,self.student).json()['body']['url'],'https://signed.example/document')
         self.assertEqual(self.update(p,dict(action='reimbursement_review',id=row['id'],status='reviewed'),self.student).status_code,403)
         p=self.update(p,dict(action='reimbursement_review',id=row['id'],status='needs_info',notes='Please explain the amount')).json()['body']
@@ -210,7 +210,7 @@ class WorkflowTests(TestCase):
         p=self.update(p,dict(action='reimbursement_review',id=row['id'],status='reviewed',notes='Checked')).json()['body']
         self.assertEqual(p['workflow']['reimbursements'][0]['status'],'reviewed')
         p=self.update(p,dict(action='settings',status='archived')).json()['body']
-        with patch('utils.qiniu.sign_private_download_url',return_value='https://signed.example/document'):
+        with patch('Chat.research_resources.sign_private_download_url',return_value='https://signed.example/document'):
             self.assertEqual(self.update(p,open_body,self.student).status_code,200)
 
     def test_multi_item_fx_calculation_precision_and_period_validation(self):

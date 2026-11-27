@@ -260,9 +260,9 @@ def mutate(project, actor, body, active, owner, clean_text):
         row = next((r for r in value['reimbursements'] if r['id'] == body.get('id')), None)
         if not row or (not owner and row['user_id'] != actor.pk) or body.get('resource_id') not in row['evidence']:
             raise ValueError('Document unavailable')
-        from utils.qiniu import sign_private_download_url
+        from Chat.research_resources import preview_file
         item = project.evidence.select_related('media__asset').get(reimbursement_id=row['id'], media_id=body['resource_id'])
-        return {'url': sign_private_download_url(item.media.asset.source_uri)}
+        return preview_file(item.media)
     else:
         raise ValueError('Unknown workflow action')
     if len(json.dumps(value)) > 2000000:

@@ -59,6 +59,19 @@ class ResearchMeetingTests(fixtures.ChronelleAccountTests):
         self.assertEqual(self.call(dict(body,title='Changed'),path).status_code,409)
 
     @patch('Chat.research_meetings.remote')
+    def test_all_day_recurring_invitation_sends_calendar_dates(self, remote):
+        self.bound();self.bound(self.other)
+        remote.return_value={'id':str(uuid.uuid4())}
+        recurrence={'frequency':'WEEKLY','weekdays':['MO'],'ending':'count','count':3}
+        body=dict(self.meeting(),all_day=True,start='2026-11-01T16:00:00Z',end='2026-11-02T16:00:00Z',category_id=4,recurrence=recurrence)
+        result=self.call(body,f'/research/{self.project.pk}/meetings/')
+        self.assertEqual(result.status_code,200,result.content)
+        sent=remote.call_args.kwargs['body']
+        self.assertEqual((sent['start'],sent['end']),('2026-11-02','2026-11-03'))
+        self.assertEqual(sent['recurrence'],recurrence)
+        self.assertEqual(sent['category_id'],4)
+
+    @patch('Chat.research_meetings.remote')
     def test_unknown_delivery_retries_same_command_not_new_meeting(self,remote):
         self.bound();self.bound(self.other)
         remote.side_effect=BindingFailure('chronelle_unavailable',503)

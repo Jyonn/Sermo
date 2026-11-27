@@ -96,7 +96,10 @@ def remote(base, path, *, method='POST', body=None, token=None, key=None, params
         code = value.get('code', 'chronelle_unavailable') if isinstance(value, dict) else 'chronelle_unavailable'
         # Only protocol codes, never upstream bodies, tokens or translated prose.
         # Upstream 401 means Chronelle authority expired, not Frienden login.
-        status=409 if response.status_code==401 else response.status_code if response.status_code in (400,403,409,410,429) else 503
+        accepted_statuses = (400, 403, 409, 410, 429)
+        if path.startswith('/api/oauth/calendar/'):
+            accepted_statuses += (404,)
+        status=409 if response.status_code==401 else response.status_code if response.status_code in accepted_statuses else 503
         raise BindingFailure(code if isinstance(code, str) and code.replace('_', '').isalnum() else 'chronelle_unavailable',status)
     if path.endswith(('/token/','/introspect/')) and not isinstance(value,dict):
         raise BindingFailure('chronelle_unavailable',503)

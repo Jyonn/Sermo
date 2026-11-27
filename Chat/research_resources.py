@@ -14,6 +14,11 @@ from utils.content_safety import check_user_text, ContentSafetyScene
 from utils.qiniu import sign_private_download_url
 
 
+def preview_file(media, display_name=None):
+    return dict(url=sign_private_download_url(media.asset.source_uri), name=display_name or media.file_name,
+                mime_type=media.asset.mime_type, size=media.asset.file_size)
+
+
 def scope(project, task_id):
     if not isinstance(task_id, str) or len(task_id) > 64:
         raise ValueError('Invalid task')
@@ -77,7 +82,7 @@ class ResearchResourceView(View):
                     row = rows.select_related('media__asset').filter(pk=body.get('id')).first()
                     if not row or row.kind == 'folder':
                         return fail('Resource unavailable', 404)
-                    return dict(url=row.url if row.kind == 'link' else sign_private_download_url(row.media.asset.source_uri))
+                    return dict(url=row.url, name=row.name) if row.kind == 'link' else preview_file(row.media, row.name)
                 if research_status(project.status) != 'active' or (task and research_status(task['status']) != 'active'):
                     return fail('Archived resources are read-only', 403)
                 if action == 'delete':
