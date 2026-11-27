@@ -925,9 +925,9 @@ class Message(models.Model):
                 elif reference.get('kind') == 'landlord_room':
                     from Activity.landlord import LandlordService
                     from Activity.models import LandlordTable
-                    if (not chat.group or not LandlordService.eligible(user) or not LandlordTable.objects.filter(
+                    if (not LandlordService.eligible(user) or not LandlordTable.objects.filter(
                             code=reference.get('room_code'), run__space=user.space, seats__user=user,
-                            run__campaign__key=reference.get('activity_key'), status=LandlordTable.Status.WAITING,
+                            run__campaign__key=reference.get('activity_key'), status__in=LandlordService.BETWEEN_ROUNDS,
                             updated_at__gt=timezone.now() - LandlordService.WAIT_LIMIT).exists()):
                         raise MessageErrors.PAYLOAD_INVALID
             if message_type in (15, 16, 17, 18):

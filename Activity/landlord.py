@@ -13,7 +13,7 @@ from smartdjango import Code, Error
 
 from Activity.card_game import advance_trick, automatic_play, card_rank, deal, next_position
 from Activity.landlord_rules import beats, classify, hint
-from Activity.models import LandlordSeat, LandlordTable, SpaceActivity
+from Activity.models import LandlordRoundResult, LandlordSeat, LandlordTable, SpaceActivity
 from Activity.presentation import presentation
 from User.models import User
 
@@ -34,7 +34,9 @@ class LandlordService:
     MODE = 'landlord'
     ZONE = ZoneInfo('Asia/Shanghai')
     STATUS = LandlordTable.Status
-    LIVE = (STATUS.WAITING, STATUS.BIDDING, STATUS.DOUBLING, STATUS.PLAYING)
+    BETWEEN_ROUNDS = (STATUS.WAITING, STATUS.FINISHED)
+    IN_ROUND = (STATUS.BIDDING, STATUS.DOUBLING, STATUS.PLAYING)
+    LIVE = (*BETWEEN_ROUNDS, *IN_ROUND)
     WAIT_LIMIT = timedelta(minutes=30)
     IDLE_LIMIT = timedelta(minutes=15)
     BID_TIME = timedelta(seconds=30)
@@ -87,16 +89,19 @@ class LandlordService:
         best_bid = max((bid for bid in table.bids if bid is not None), default=0)
         return dict(
             code=table.code, status=table.status, version=table.version, your_seat=own.position,
+            host=table.host_position, round=table.round_number,
             turn=table.turn, landlord=table.landlord, winner=table.winner, hand=own.hand,
             ready_count=len(seats), seats=[
                 dict(position=position, member=cls._public_user(seat.user), remaining=len(seat.hand), won=seat.won,
-                     doubled=seat.doubled, trustee=seat.trustee, score=seat.score)
+                     doubled=seat.doubled, trustee=seat.trustee, score=seat.score, ready=seat.ready)
                 for position, seat in seats.items()
             ],
             bottom_cards=table.bottom_cards if table.landlord is not None else [],
             bids=table.bids, moves=table.moves, last_player=table.last_player,
             deadline=table.deadline.timestamp() if table.deadline else None,
             server_now=now.timestamp(),
+            can_start=table.status == cls.STATUS.FINISHED and own.position == table.host_position
+            and len(seats) == 3 and all(seat.ready for seat in seats.values()),
             base=best_bid, multiplier=table.multiplier, spring=table.spring,
             bid_options=[0, *range(best_bid + 1, 4)] if your_turn and table.status == cls.STATUS.BIDDING else [],
             can_pass=your_turn and table.status == cls.STATUS.PLAYING and bool(table.last_cards),
@@ -114,16 +119,26 @@ class LandlordService:
         table.deadline = now + (cls.TRUSTEE_TIME if seats[position].trustee else duration)
 
     @classmethod
-    def _deal(cls, table, seats, first_bidder, now):
+    def _deal(cls, table, seats, first_bidder, now, *, rematch=False):
         hands, bottom = deal(players=3, cards_per_player=17)
         for position, seat in seats.items():
             seat.hand = hands[position]
-        LandlordSeat.objects.bulk_update(seats.values(), ['hand'])
+            seat.ready = seat.won = False
+            seat.doubled = None
+            seat.score = seat.plays = 0
+            if rematch:
+                seat.trustee = False
+        LandlordSeat.objects.bulk_update(seats.values(), ['hand', 'ready', 'won', 'doubled', 'score', 'plays', 'trustee'])
+        if rematch:
+            table.round_number += 1
         table.status = cls.STATUS.BIDDING
         table.first_bidder = first_bidder
         table.bottom_cards = bottom
         table.bids = [None, None, None]
         table.moves = [None, None, None]
+        table.last_cards = []
+        table.landlord = table.winner = table.last_player = table.finished_at = None
+        table.multiplier, table.spring = 1, False
         cls._set_turn(table, first_bidder, seats, now, cls.BID_TIME)
         cls._touch(table)
 
@@ -175,6 +190,11 @@ class LandlordService:
             farmer.score = base * (2 if landlord.doubled else 1) * (2 if farmer.doubled else 1) * (1 if farmer.won else -1)
         landlord.score = -sum(farmer.score for farmer in farmers)
         LandlordSeat.objects.bulk_update(seats.values(), ['won', 'score'])
+        LandlordRoundResult.objects.bulk_create([
+            LandlordRoundResult(table=table, user_id=seat.user_id, round_number=table.round_number,
+                                score=seat.score, won=seat.won, finished_at=now)
+            for seat in seats.values()
+        ])
 
     @staticmethod
     def _bomb(cards):
@@ -213,7 +233,7 @@ class LandlordService:
     def _advance(cls, table, seats, now):
         if table.status not in cls.LIVE:
             return
-        if table.status == cls.STATUS.WAITING:
+        if table.status in cls.BETWEEN_ROUNDS:
             if table.updated_at <= now - cls.WAIT_LIMIT:
                 cls._abandon(table, now)
             return
@@ -265,15 +285,16 @@ class LandlordService:
             seats = cls._seats(table)
             cls._advance(table, seats, now)
             current = cls._table_payload(table, seats, user, now)
-        waiting = LandlordTable.objects.filter(run=run, status=cls.STATUS.WAITING, updated_at__gt=now - cls.WAIT_LIMIT)
+        waiting = LandlordTable.objects.filter(run=run, status__in=cls.BETWEEN_ROUNDS, updated_at__gt=now - cls.WAIT_LIMIT)
         waiting = waiting.prefetch_related(Prefetch(
             'seats', queryset=LandlordSeat.objects.select_related('user').defer('hand').order_by('position'),
         )).order_by('-updated_at')[:30]
         rooms = []
         for room in waiting:
-            members = [seat.user for seat in room.seats.all() if cls.eligible(seat.user)]
-            if members:
-                rooms.append(dict(code=room.code, host=cls._public_user(members[0]), count=len(members)))
+            members = {seat.position: seat.user for seat in room.seats.all() if cls.eligible(seat.user)}
+            if 0 < len(members) < 3:
+                host = members.get(room.host_position, next(iter(members.values())))
+                rooms.append(dict(code=room.code, host=cls._public_user(host), count=len(members)))
         return dict(table=current, rooms=rooms)
 
     @classmethod
@@ -298,7 +319,7 @@ class LandlordService:
                     return dict(table=cls._table_payload(current, seats, user, now))
             table = (LandlordTable.objects.select_for_update().filter(run=run, code=code).first()
                      if code else cls._new_table(run))
-            if table is None or table.status != cls.STATUS.WAITING or table.updated_at <= now - cls.WAIT_LIMIT:
+            if table is None or table.status not in cls.BETWEEN_ROUNDS or table.updated_at <= now - cls.WAIT_LIMIT:
                 raise LandlordErrors.TABLE
             seats = cls._seats(table)
             for position in [index for index, seat in seats.items() if not cls.eligible(seat.user)]:
@@ -307,12 +328,14 @@ class LandlordService:
                 raise LandlordErrors.TABLE
             position = min(set(range(3)) - set(seats))
             seats[position] = LandlordSeat.objects.create(table=table, user=user, position=position)
-            if len(seats) == 3:
+            if table.host_position not in seats:
+                table.host_position = min(seats)
+            if len(seats) == 3 and table.status == cls.STATUS.WAITING:
                 cls._deal(table, seats, secrets.randbelow(3), now)
             else:
                 cls._touch(table)
             return dict(table=cls._table_payload(table, seats, user, now))
-        if action not in ('bid', 'double', 'trustee', 'play', 'pass', 'leave'):
+        if action not in ('bid', 'double', 'trustee', 'play', 'pass', 'leave', 'ready', 'start'):
             raise LandlordErrors.INVALID
         table = LandlordTable.objects.select_for_update().filter(run=run, seats__user=user, code=cls._code(data.get('code'))).first()
         if table is None:
@@ -321,8 +344,25 @@ class LandlordService:
         own = next(seat for seat in seats.values() if seat.user_id == user.pk)
         cls._advance(table, seats, now)
         if (type(data.get('version')) is not int or table.status not in cls.LIVE
-                or (action not in ('double', 'trustee') and table.version != data['version'])):
+                or (action not in ('double', 'trustee', 'ready') and table.version != data['version'])):
             return dict(table=cls._table_payload(table, seats, user, now), changed=True)
+        if action in ('ready', 'start'):
+            if table.status != cls.STATUS.FINISHED or data.get('round') != table.round_number:
+                return dict(table=cls._table_payload(table, seats, user, now), changed=True)
+            if action == 'ready':
+                value = data.get('value')
+                if type(value) is not bool:
+                    raise LandlordErrors.INVALID
+                if own.ready != value:
+                    own.ready = value
+                    own.save(update_fields=['ready'])
+                    cls._touch(table)
+            else:
+                if own.position != table.host_position or len(seats) != 3 or not all(
+                        seat.ready and cls.eligible(seat.user) for seat in seats.values()):
+                    raise LandlordErrors.INVALID
+                cls._deal(table, seats, next_position(table.first_bidder, 3), now, rematch=True)
+            return dict(table=cls._table_payload(table, seats, user, now))
         if action == 'double' and table.status == cls.STATUS.DOUBLING:
             value = data.get('value')
             if type(value) is not bool:
@@ -335,7 +375,7 @@ class LandlordService:
                 else:
                     cls._touch(table)
             return dict(table=cls._table_payload(table, seats, user, now))
-        if action == 'trustee' and table.status in (cls.STATUS.BIDDING, cls.STATUS.DOUBLING, cls.STATUS.PLAYING):
+        if action == 'trustee' and table.status in cls.IN_ROUND:
             value = data.get('value')
             if type(value) is not bool:
                 raise LandlordErrors.INVALID
@@ -347,11 +387,14 @@ class LandlordService:
                 cls._touch(table)
             return dict(table=cls._table_payload(table, seats, user, now))
         if action == 'leave':
-            if table.status == cls.STATUS.WAITING:
+            if table.status in cls.BETWEEN_ROUNDS:
                 own.delete()
-                if len(seats) == 1:
+                seats.pop(own.position)
+                if not seats:
                     cls._abandon(table, now)
                 else:
+                    if table.host_position == own.position:
+                        table.host_position = min(seats)
                     cls._touch(table)
             else:
                 cls._abandon(table, now)
@@ -387,10 +430,10 @@ class LandlordService:
             raise LandlordErrors.INVALID
         if not first_year <= year <= now_year or metric not in ('points', 'win_rate'):
             raise LandlordErrors.INVALID
-        rows = list(LandlordSeat.objects.filter(
-            table__run=run, table__status=cls.STATUS.FINISHED, user__is_deleted=False,
-            table__finished_at__gte=datetime(year, 1, 1, tzinfo=cls.ZONE),
-            table__finished_at__lt=datetime(year + 1, 1, 1, tzinfo=cls.ZONE),
+        rows = list(LandlordRoundResult.objects.filter(
+            table__run=run, user__is_deleted=False,
+            finished_at__gte=datetime(year, 1, 1, tzinfo=cls.ZONE),
+            finished_at__lt=datetime(year + 1, 1, 1, tzinfo=cls.ZONE),
         ).values('user_id').annotate(games=Count('pk'), wins=Count('pk', filter=Q(won=True)), points=Sum('score')))
         for row in rows:
             row['rate'] = Fraction(row['wins'], row['games'])

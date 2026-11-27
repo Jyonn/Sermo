@@ -9,8 +9,9 @@ from django.utils import timezone
 from Activity.landlord import LandlordService
 from Activity.card_game import card_rank, deal
 from Activity.landlord_rules import beats, classify, hint
-from Activity.models import ActivityCampaign, ActivityService, LandlordSeat, LandlordTable, SpaceActivity
+from Activity.models import ActivityCampaign, ActivityService, LandlordRoundResult, LandlordTable, SpaceActivity
 from Chat.models import Chat, ChatMember, ChatMemberRoleChoice, ChatMemberStatusChoice, ChatTypeChoice
+from Friendship.models import Friendship
 from Message.models import Message, MessageTypeChoice
 from Message.validators import MessageErrors
 from Space.models import Space
@@ -171,24 +172,41 @@ class LandlordActivityTests(TestCase):
         self.assertEqual([row['wins'] for row in rank['rows']], [1, 0, 0])
         ranked_by_rate = self.client.get(self.endpoint + '/leaderboard', {'metric': 'win_rate'}, **self.headers(members[0])).json()['body']
         self.assertEqual([row['rank'] for row in ranked_by_rate['rows']], [1, 2, 2])
+        self.assertEqual(self.snapshot(members[0])['table']['code'], code)
+        self.send_action(members[0], 400, action='start', code=code, version=current['version'], round=1)
+        for user in members:
+            ready = self.send_action(user, action='ready', code=code, version=current['version'], round=1, value=True)['table']
+        self.assertFalse(ready['can_start'])
+        self.send_action(members[2], 400, action='start', code=code, version=ready['version'], round=1)
+        host = self.snapshot(members[0])['table']
+        self.assertTrue(host['can_start'])
+        next_round = self.send_action(members[0], action='start', code=code, version=host['version'], round=1)['table']
+        self.assertEqual((next_round['code'], next_round['round'], next_round['status']), (code, 2, 'bidding'))
+        self.assertTrue(all(not seat['ready'] and seat['score'] == 0 for seat in next_round['seats']))
+        self.assertEqual(LandlordService.leaderboard('landlord', members[0], None)['mine']['points'], 36)
 
-    def test_group_invitation_has_a_room_reference_for_group_members(self):
+    def test_invitation_preserves_the_room_in_group_and_friend_chats(self):
         self.start_space()
         author, guest, outsider = self.users
-        chat = Chat.objects.create(space=self.space, chat_type=ChatTypeChoice.GROUP, created_by=author)
-        for user in self.users:
-            ChatMember.objects.create(chat=chat, user=user, role=ChatMemberRoleChoice.MEMBER,
-                                      status=ChatMemberStatusChoice.ACTIVE, joined_at=timezone.now())
         waiting = self.send_action(author, action='create')['table']
         reference = json.dumps({'kind': 'landlord_room', 'activity_key': 'landlord', 'room_code': waiting['code']})
-        message = Message.create(chat, author, MessageTypeChoice.ACTIVITY, reference)
         request = RequestFactory().get('/')
         request.user = guest
-        payload = message._payload_for_type(request)
-        self.assertEqual(payload['landlord_room_code'], waiting['code'])
+        Friendship.ensure_locked_friendship(author, guest)
+        for chat_type, participants in ((ChatTypeChoice.GROUP, self.users), (ChatTypeChoice.DIRECT, [author, guest])):
+            chat = Chat.objects.create(space=self.space, chat_type=chat_type, created_by=author)
+            for user in participants:
+                ChatMember.objects.create(chat=chat, user=user, role=ChatMemberRoleChoice.MEMBER,
+                                          status=ChatMemberStatusChoice.ACTIVE, joined_at=timezone.now())
+            message = Message.create(chat, author, MessageTypeChoice.ACTIVITY, reference)
+            payload = message._payload_for_type(request)
+            self.assertEqual(payload['landlord_room_code'], waiting['code'])
+            generic = Message.create(chat, author, MessageTypeChoice.ACTIVITY, json.dumps({'activity_key': 'landlord'}))
+            self.assertNotIn('landlord_room_code', generic._payload_for_type(request))
+            if chat.group:
+                with self.assertRaises(MessageErrors.PAYLOAD_INVALID.__class__):
+                    Message.create(chat, outsider, MessageTypeChoice.ACTIVITY, reference)
         self.send_action(guest, action='join', code=payload['landlord_room_code'])
-        with self.assertRaises(MessageErrors.PAYLOAD_INVALID.__class__):
-            Message.create(chat, outsider, MessageTypeChoice.ACTIVITY, reference)
 
     def test_doubling_timeout_and_manually_toggled_trustee(self):
         self.start_space()
@@ -231,7 +249,7 @@ class LandlordActivityTests(TestCase):
         for code, utc_hour in [('ABCDEFGH', 15), ('JKMNPQRS', 16)]:
             row = LandlordTable.objects.create(run=run, code=code, status='finished',
                                                finished_at=datetime(2025, 12, 31, utc_hour, 59, tzinfo=utc.utc))
-            LandlordSeat.objects.create(table=row, user=self.users[0], position=0, won=True)
+            LandlordRoundResult.objects.create(table=row, user=self.users[0], round_number=1, won=True, score=2, finished_at=row.finished_at)
         other = Space.objects.create(name='Other Club', slug='landlord-other', email='other@example.test')
         ActivityService.claim_for_space(self.campaign, other)
         outsider = User.create(other, 'Outsider', verified=True)
@@ -244,9 +262,9 @@ class LandlordActivityTests(TestCase):
         run = self.start_space()
         for index, scores in enumerate(((2, -1, -1), (2, -1, -1), (-8, 4, 4))):
             table = LandlordTable.objects.create(run=run, code=f'ABCDEFG{index + 2}', status='finished', finished_at=timezone.now())
-            LandlordSeat.objects.bulk_create([
-                LandlordSeat(table=table, user=user, position=position, won=score > 0, score=score)
-                for position, (user, score) in enumerate(zip(self.users, scores))
+            LandlordRoundResult.objects.bulk_create([
+                LandlordRoundResult(table=table, user=user, round_number=1, won=score > 0, score=score, finished_at=table.finished_at)
+                for user, score in zip(self.users, scores)
             ])
         points = LandlordService.leaderboard('landlord', self.users[0], None)
         rate = LandlordService.leaderboard('landlord', self.users[0], None, 'win_rate')

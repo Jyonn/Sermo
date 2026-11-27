@@ -105,6 +105,8 @@ class LandlordTable(models.Model):
     last_player = models.PositiveSmallIntegerField(null=True, blank=True)
     multiplier = models.PositiveIntegerField(default=1, db_default=1)
     spring = models.BooleanField(default=False, db_default=False)
+    round_number = models.PositiveIntegerField(default=1, db_default=1)
+    host_position = models.PositiveSmallIntegerField(default=0, db_default=0)
     finished_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -126,12 +128,25 @@ class LandlordSeat(models.Model):
     trustee = models.BooleanField(default=False, db_default=False)
     plays = models.PositiveSmallIntegerField(default=0, db_default=0)
     score = models.IntegerField(default=0, db_default=0)
+    ready = models.BooleanField(default=False, db_default=False)
 
     class Meta:
         constraints = [
             models.UniqueConstraint(fields=['table', 'position'], name='landlord_seat_position'),
             models.UniqueConstraint(fields=['table', 'user'], name='landlord_seat_user'),
         ]
+
+
+class LandlordRoundResult(models.Model):
+    table = models.ForeignKey(LandlordTable, on_delete=models.CASCADE, related_name='round_results')
+    user = models.ForeignKey('User.User', on_delete=models.CASCADE, related_name='landlord_results')
+    round_number = models.PositiveIntegerField()
+    score = models.IntegerField()
+    won = models.BooleanField()
+    finished_at = models.DateTimeField(db_index=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['table', 'round_number', 'user'], name='landlord_round_user')]
 
 
 class ActivityMilestone(models.Model):
