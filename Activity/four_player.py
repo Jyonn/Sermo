@@ -16,7 +16,7 @@ from Activity.table_activity import (BETWEEN_ROUNDS, FOUR_PLAYER_MODES, ROOM_WAI
 @Error.register
 class FourPlayerErrors:
     CLOSED = Error(_('This space has not opened this game'), code=Code.Forbidden)
-    ACCOUNT = Error(_('A verified personal account is required'), code=Code.Forbidden)
+    ACCOUNT = Error(_('A verified account is required'), code=Code.Forbidden)
     TABLE = Error(_('This table is full or no longer available'), code=Code.BadRequest)
     BUSY = Error(_('Finish or leave your current table first'), code=Code.BadRequest)
     TURN = Error(_('It is not your turn'), code=Code.BadRequest)

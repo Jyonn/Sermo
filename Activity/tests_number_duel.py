@@ -7,7 +7,7 @@ from django.utils import timezone
 from Activity.models import ActivityCampaign, ActivityService, NumberDuel, NumberDuelReward
 from Activity.number_duel import DuelErrors, NumberDuelService as Game, feedback, validate_digits
 from Space.models import Space
-from User.models import User
+from User.models import User, UserAccountLevelChoice
 
 
 class NumberDuelTests(TestCase):
@@ -166,14 +166,36 @@ class NumberDuelTests(TestCase):
         result = self.act(self.guest, action='guess', id=match, round=2, value='1111')
         self.assertEqual(result['outcome'], 'loss')
 
-    def test_only_explicit_email_or_phone_verification(self):
+    def test_verified_level_or_verified_contact_can_play(self):
         self.host.email_verified_at = None
-        self.host.save(update_fields=['email_verified_at'])
+        self.host.account_level = UserAccountLevelChoice.BASIC
+        self.host.save(update_fields=['email_verified_at', 'account_level'])
         with self.assertRaises(type(DuelErrors.ACCOUNT)):
             self.act(action='create')
         self.host.phone_verified_at = timezone.now()
         self.host.save(update_fields=['phone_verified_at'])
         self.assertEqual(self.act(action='create')['status'], 'waiting')
+
+    def test_official_account_can_host_and_join_free_rounds_without_growth_cost(self):
+        official = self.space.ensure_official_user()
+        official.email_verified_at = None
+        official.save(update_fields=['email_verified_at'])
+        self.assertTrue(Game.activity_payload(self.campaign, official, self.run)['verified'])
+        for host, guest in ((official, self.host), (self.host, official)):
+            with self.subTest(host=host.id):
+                room = self.act(host, action='create')
+                self.assertEqual(self.act(guest, action='preview', code=room['code'])['name'], host.name)
+                joined = self.act(guest, action='join', code=room['code'])
+                self.assertEqual((joined['status'], joined['practice_reason'], joined['funded']), ('secrets', 'official', False))
+                match = joined['id']
+                self.act(host, action='secret', id=match, value='1234')
+                self.act(guest, action='secret', id=match, value='5678')
+                self.act(host, action='guess', id=match, value='5678', round=1)
+                result = self.act(guest, action='guess', id=match, value='9999', round=1)
+                self.assertEqual((result['status'], result['outcome'], result['points']), ('finished', 'loss', 0))
+                self.assertFalse(NumberDuelReward.objects.filter(duel_id=match, counted=True).exists())
+        self.assertEqual(self.host.reconcile_growth(), 30)
+        self.assertFalse(official.growth_events.filter(event_key__startswith='activity:number_duel').exists())
 
     def test_server_tiers_and_join_agreement(self):
         match = self.act(action='create', stake=50)

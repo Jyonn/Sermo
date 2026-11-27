@@ -15,7 +15,7 @@ from Friendship.models import Friendship
 from Message.models import Message, MessageTypeChoice
 from Message.validators import MessageErrors
 from Space.models import Space
-from User.models import User
+from User.models import User, UserAccountLevelChoice
 from utils import auth
 
 
@@ -119,6 +119,10 @@ class LandlordActivityTests(TestCase):
         self.assertIsNone(row['ends_at'])
         self.assertEqual(row['assignment_mode'], 'manual')
         self.send_action(basic, 403, action='create')
+        official = self.space.ensure_official_user()
+        official.account_level = UserAccountLevelChoice.BASIC
+        official.save(update_fields=['account_level'])
+        self.send_action(official, 403, action='create')
         self.assertEqual(self.client.get(self.endpoint + '/leaderboard', **self.headers(basic)).status_code, 200)
         details = self.client.get('/activities/landlord', **self.headers(member)).json()['body']
         self.assertTrue(details['verified'])
@@ -199,13 +203,16 @@ class LandlordActivityTests(TestCase):
 
     def test_invitation_preserves_the_room_in_group_and_friend_chats(self):
         self.start_space()
-        author, guest, outsider = self.users
+        author = self.space.ensure_official_user()
+        guest, outsider = self.users[:2]
+        details = self.client.get('/activities/landlord', **self.headers(author)).json()['body']
+        self.assertTrue(details['verified'])
         waiting = self.send_action(author, action='create')['table']
         reference = json.dumps({'kind': 'landlord_room', 'activity_key': 'landlord', 'room_code': waiting['code']})
         request = RequestFactory().get('/')
         request.user = guest
         Friendship.ensure_locked_friendship(author, guest)
-        for chat_type, participants in ((ChatTypeChoice.GROUP, self.users), (ChatTypeChoice.DIRECT, [author, guest])):
+        for chat_type, participants in ((ChatTypeChoice.GROUP, [author, guest, outsider]), (ChatTypeChoice.DIRECT, [author, guest])):
             chat = Chat.objects.create(space=self.space, chat_type=chat_type, created_by=author)
             for user in participants:
                 ChatMember.objects.create(chat=chat, user=user, role=ChatMemberRoleChoice.MEMBER,

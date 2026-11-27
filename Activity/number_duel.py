@@ -17,6 +17,7 @@ from smartdjango import Code, Error
 
 from Activity.models import ActivityCampaign, NumberDuel, NumberDuelGuess, NumberDuelReward, SpaceActivity
 from Activity.presentation import presentation
+from Activity.table_activity import eligible
 from User.models import GrowthEvent, User
 from User.growth import resolve_event_rule
 
@@ -26,7 +27,7 @@ class DuelErrors:
     INVALID = Error(_('Use four digits from 0 to 9; repeats are allowed'), code=Code.BadRequest)
     CLOSED = Error(_('This duel is unavailable or the activity has ended'), code=Code.BadRequest)
     FORBIDDEN = Error(_('This duel does not belong to you'), code=Code.Forbidden)
-    ACCOUNT = Error(_('A verified personal account is required'), code=Code.Forbidden)
+    ACCOUNT = Error(_('A verified account is required'), code=Code.Forbidden)
     BUSY = Error(_('Finish or leave your current duel first'), code=Code.BadRequest)
     LOCKED = Error(_('Already submitted; wait for the next round'), code=Code.BadRequest)
     TIER = Error(_('This challenge tier is not available to both players'), code=Code.BadRequest)
@@ -96,7 +97,7 @@ class NumberDuelService:
 
     @staticmethod
     def eligible(user):
-        return bool((user.email_verified_at or user.phone_verified_at) and not user.is_official and not user.is_deleted)
+        return eligible(user, allow_verified_contact=True)
 
     @staticmethod
     def tiers(user, refresh=False):
@@ -114,7 +115,8 @@ class NumberDuelService:
         # Lock users in a deterministic order; both awards and quota checks share this transaction.
         people = list(User.objects.select_for_update().filter(id__in=[duel.host_id, duel.guest_id]).order_by('id'))
         # The entry date owns the quota, including matches that cross midnight.
-        paid_normal = duel.funded and reason == 'normal' and all(cls.eligible(person) for person in people)
+        paid_normal = duel.funded and reason == 'normal' and all(
+            cls.eligible(person) and not person.is_official for person in people)
         for person in people:
             opponent_id = duel.guest_id if person.id == duel.host_id else duel.host_id
             amount, reward_reason = 0, reason
@@ -137,6 +139,9 @@ class NumberDuelService:
         people = list(User.objects.select_for_update().filter(id__in=[duel.host_id, duel.guest_id]).order_by('id'))
         if len(people) != 2 or not all(cls.eligible(person) for person in people):
             raise DuelErrors.ACCOUNT
+        if any(person.is_official for person in people):
+            duel.practice_reason = 'official'
+            return
         # Freeze practice/paid status before taking any points from either account.
         pair = NumberDuelReward.objects.filter(duel__run=duel.run, date=cls.day(), counted=True,
                                               user_id__in=[duel.host_id, duel.guest_id],
@@ -313,8 +318,12 @@ class NumberDuelService:
                 return dict(code=duel.code, stake=duel.stake, name=duel.host.name)
             if data.get('room_flow') != 2:
                 raise DuelErrors.CLOSED
-            duel.guest, duel.status, duel.stake, duel.deadline = user, 'choosing', 0, cls.deadline(run, 90)
-            duel.save(update_fields=['guest', 'status', 'stake', 'deadline'])
+            official_match = user.is_official or duel.host.is_official
+            duel.guest, duel.stake = user, 0
+            duel.status = 'secrets' if official_match else 'choosing'
+            duel.practice_reason = 'official' if official_match else ''
+            duel.deadline = cls.deadline(run, 60 if official_match else 90)
+            duel.save(update_fields=['guest', 'status', 'stake', 'practice_reason', 'deadline'])
             return cls.serialize(duel, user)
         if not isinstance(data.get('id'), str):
             raise DuelErrors.CLOSED

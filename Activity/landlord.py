@@ -20,7 +20,7 @@ from User.models import User
 @Error.register
 class LandlordErrors:
     CLOSED = Error(_('This space has not opened Dou Dizhu'), code=Code.Forbidden)
-    ACCOUNT = Error(_('A verified personal account is required'), code=Code.Forbidden)
+    ACCOUNT = Error(_('A verified account is required'), code=Code.Forbidden)
     TABLE = Error(_('This table is full or no longer available'), code=Code.BadRequest)
     BUSY = Error(_('Finish or leave your current table first'), code=Code.BadRequest)
     TURN = Error(_('It is not your turn'), code=Code.BadRequest)

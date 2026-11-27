@@ -13,8 +13,10 @@ ROOM_WAIT = 30 * 60
 ROOM_CHARACTERS = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ'
 
 
-def eligible(user):
-    return user.verified and not user.is_official and not user.is_deleted and not user.is_imported_placeholder
+def eligible(user, *, allow_verified_contact=False):
+    if user.is_deleted or user.is_imported_placeholder:
+        return False
+    return user.verified or bool(allow_verified_contact and (user.email_verified_at or user.phone_verified_at))
 
 
 def forfeit_scores(positions, quitter, opponents, stake=1):

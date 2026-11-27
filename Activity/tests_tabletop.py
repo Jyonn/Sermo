@@ -103,6 +103,7 @@ class TabletopRoomTests(TestCase):
         return self.act(self.players[0], game, 'start', state)['table']
 
     def test_firefight_room_masks_cards_and_persists_game_results(self):
+        self.players[2] = self.space.ensure_official_user()
         self.act(self.players[0], 'shuangkou', 'create', expected=403)
         self.assertFalse(SpaceActivity.objects.filter(space=self.space).exists())
         state = self.setup_room('shuangkou', 'firefight')
@@ -126,7 +127,9 @@ class TabletopRoomTests(TestCase):
 
     def test_mahjong_keeps_the_wall_private_and_invites_keep_the_room(self):
         self.claim('mahjong')
-        host = self.players[0]
+        host = self.players[0] = self.space.ensure_official_user()
+        details = self.client.get('/activities/mahjong', **self.header(host)).json()['body']
+        self.assertTrue(details['verified'])
         state = self.act(host, 'mahjong', 'create')['table']
         group = Chat.objects.create(space=self.space, chat_type=ChatTypeChoice.GROUP, created_by=host)
         for user in self.players:
