@@ -5,6 +5,7 @@ from django.utils import timezone
 
 from Message.models import MediaAsset, LinkPreview
 from Square.models import StatementMedia, StatementMediaKindChoice, StatementRevision, StatementVisibilityChoice
+from Square.statement_history import statement_history_snapshot
 from Square.validators import SquareErrors
 
 
@@ -140,7 +141,7 @@ def edit_statement(statement, user, text, revision, content):
     StatementRevision.objects.create(
         statement=statement, revision=revision, text=statement.text,
         published_at=statement.edited_at or statement.created_at,
-        snapshot={'visibility': statement.audience, 'changes': changed},
+        snapshot={**statement_history_snapshot(statement, existing), 'changes': changed},
     )
     statement.text = text
     statement.visibility = StatementVisibilityChoice.FRIENDS if audience == 'friends' else StatementVisibilityChoice.PUBLIC

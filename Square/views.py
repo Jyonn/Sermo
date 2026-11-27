@@ -14,6 +14,7 @@ from QZone.models import QZoneEmoticon
 from Message.params import MessageParams
 from Square.params import SquareParams
 from Square.statement_edits import edit_statement, issue_edit_upload_grant
+from Square.statement_history import statement_history_payload
 from utils.content_safety import ContentSafetyScene, check_user_text
 from Square.quota import quota_for_user
 from Square.validators import SquareErrors
@@ -496,7 +497,9 @@ class StatementDetailView(View):
         user = request.user
         user.space.require_square_enabled()
         user.require_capability('square.browse')
-        statement = Statement.visible_for(user).filter(id=statement_id).first()
+        statement = Statement.visible_for(user).filter(id=statement_id).select_related('qzone_source').prefetch_related(
+            'qzone_source__emoticons__media_asset',
+        ).first()
         if statement is None:
             raise SquareErrors.NOT_EXISTS
         if statement.user_id != user.id:
@@ -545,20 +548,16 @@ class StatementHistoryView(View):
         if statement is None:
             raise SquareErrors.NOT_EXISTS
         before = request.query.before
-        if before is None:
-            current = dict(revision=statement.edit_revision, text=statement.text,
-                           published_at=(statement.edited_at or statement.created_at).timestamp())
-            versions = [current]
+        include_current = before is None
+        if include_current:
             before = statement.edit_revision
-        else:
-            versions = []
         revisions = statement.revisions.filter(revision__lt=before)
         if statement.user_id != user.id:
             friendship = Friendship.between(user, statement.user)
             if friendship is None or friendship.status != FriendshipStatusChoice.ACCEPTED:
                 revisions = revisions.exclude(snapshot__visibility='friends')
         rows = list(revisions.order_by('-revision')[:21])
-        versions.extend(row.jsonl() for row in rows[:20])
+        versions = statement_history_payload(statement, rows[:20], include_current=include_current, request=request)
         return dict(items=versions, next_before=rows[19].revision if len(rows) > 20 else None)
 
 

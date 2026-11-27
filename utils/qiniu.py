@@ -116,16 +116,16 @@ def sign_private_processed_url(url: str, fops: str, expire_seconds: int = AVATAR
     return sign_private_download_url(f'{normalized_url}{separator}{normalized_fops}', expire_seconds=expire_seconds)
 
 
-def build_message_image_thumbnail_uri(uri: str, width: int = 120):
+def build_message_image_thumbnail_uri(uri: str, width: int = 120, *, expire_seconds: int = AVATAR_DOWNLOAD_EXPIRE_SECONDS):
     normalized_width = max(48, min(int(width), 480))
-    return sign_private_processed_url(uri, f'imageView2/2/w/{normalized_width}/q/70')
+    return sign_private_processed_url(uri, f'imageView2/2/w/{normalized_width}/q/70', expire_seconds=expire_seconds)
 
 
-def build_message_image_display_uri(uri: str, mime_type: str = ''):
+def build_message_image_display_uri(uri: str, mime_type: str = '', *, expire_seconds: int = AVATAR_DOWNLOAD_EXPIRE_SECONDS):
     # Preserve animated formats; do not flatten GIF/WebP animations into a photo.
     if mime_type.lower().split(';')[0] in {'image/gif', 'image/webp'}:
-        return sign_private_download_url(uri)
-    return sign_private_processed_url(uri, 'imageView2/2/w/1920/h/1920/q/78/format/webp')
+        return sign_private_download_url(uri, expire_seconds=expire_seconds)
+    return sign_private_processed_url(uri, 'imageView2/2/w/1920/h/1920/q/78/format/webp', expire_seconds=expire_seconds)
 
 
 def build_sticker_display_uri(uri: str, width: int = 320):
@@ -133,9 +133,9 @@ def build_sticker_display_uri(uri: str, width: int = 320):
     return sign_private_processed_url(uri, f'imageView2/2/w/{normalized_width}/q/75')
 
 
-def build_message_video_thumbnail_uri(uri: str, width: int = 480):
+def build_message_video_thumbnail_uri(uri: str, width: int = 480, *, expire_seconds: int = AVATAR_DOWNLOAD_EXPIRE_SECONDS):
     normalized_width = max(120, min(int(width), 960))
-    return sign_private_processed_url(uri, f'vframe/jpg/offset/0.1/w/{normalized_width}')
+    return sign_private_processed_url(uri, f'vframe/jpg/offset/0.1/w/{normalized_width}', expire_seconds=expire_seconds)
 
 
 def build_avatar_display_uri(uri: str, size: int = 400, *, raster: bool = False,

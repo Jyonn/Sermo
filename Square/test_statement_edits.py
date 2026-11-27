@@ -32,8 +32,10 @@ class StatementEditTests(TestCase):
         return self.client.patch(self.url, data=body,
                                  content_type='application/json', **self.headers(user or self.author))
 
-    def history(self, user):
-        return self.client.get(self.url + '/history', **self.headers(user))
+    def history(self, user, before=None):
+        with patch('utils.qiniu._required_config', return_value='test-history-signing-key'):
+            return self.client.get(self.url + '/history', data={} if before is None else {'before': before},
+                                   **self.headers(user))
 
     def add_photo(self, post, suffix, position=0):
         asset = MediaAsset.objects.create(source_key=f'sermo/messages/image/{suffix * 32}.jpg',
@@ -94,6 +96,16 @@ class StatementEditTests(TestCase):
         self.assertEqual(Statement.objects.filter(user=self.author).count(), 1)
         self.assertEqual(set(self.history(self.author).json()['body']['items'][1]['changes']),
                          {'text', 'location', 'visibility', 'media'})
+        current_version, original_version = self.history(self.author).json()['body']['items']
+        self.assertEqual(current_version['location']['address'], 'Library')
+        self.assertEqual(current_version['visibility'], 'friends')
+        self.assertEqual(original_version['visibility'], 'public')
+        self.assertIsNone(original_version['location'])
+        self.assertEqual([row['media_id'] for row in original_version['media']], [removed.pk, kept.pk])
+        self.assertIn('https://cdn.example.test/a.jpg', original_version['media'][0]['uri'])
+        self.assertIn('&token=', original_version['media'][0]['uri'])
+        self.assertEqual(original_version['unavailable_fields'], [])
+        self.assertNotIn('https://', str(self.post.revisions.get(revision=0).snapshot))
 
         def sync(user, revision):
             return self.client.post(
@@ -124,6 +136,40 @@ class StatementEditTests(TestCase):
         self.assertEqual(len(self.history(self.author).json()['body']['items']), 3)
         Friendship.ensure_locked_friendship(self.reader, self.author)
         self.assertEqual(len(self.history(self.reader).json()['body']['items']), 3)
+
+    def test_legacy_history_recovers_unchanged_fields_across_pages(self):
+        photo = self.add_photo(self.post, 'e')
+        self.assertEqual(self.edit('Second').status_code, 200)
+        self.post.revisions.update(snapshot={'visibility': 'public', 'changes': ['text']})
+        self.assertEqual(self.edit('Third', 1).status_code, 200)
+        original, = self.history(self.author, before=1).json()['body']['items']
+        self.assertEqual(original['revision'], 0)
+        self.assertEqual([item['media_id'] for item in original['media']], [photo.pk])
+        self.assertEqual(original['unavailable_fields'], [])
+
+        self.assertEqual(self.edit('Fourth', 2, location={'latitude': 30.3, 'longitude': 120.1}).status_code, 200)
+        self.post.revisions.filter(revision=2).update(snapshot={'visibility': 'public', 'changes': ['text', 'location']})
+        original, = self.history(self.author, before=1).json()['body']['items']
+        # The full second snapshot still supplies the earlier location.
+        self.assertIsNone(original['location'])
+        self.assertEqual(original['unavailable_fields'], [])
+        self.post.revisions.filter(revision=1).update(snapshot={'visibility': 'public', 'changes': ['text']})
+        original, = self.history(self.author, before=1).json()['body']['items']
+        self.assertIsNone(original['location'])
+        self.assertEqual(original['unavailable_fields'], ['location'])
+        self.assertEqual([item['media_id'] for item in original['media']], [photo.pk])
+
+    def test_history_does_not_expose_attachments_from_friends_only_versions(self):
+        self.post.visibility = StatementVisibilityChoice.FRIENDS
+        self.post.save(update_fields=['visibility'])
+        photo = self.add_photo(self.post, 'f')
+        self.assertEqual(self.edit('Public', media=[], visibility='public').status_code, 200)
+        public, = self.history(self.reader).json()['body']['items']
+        self.assertEqual(public['media'], [])
+        self.assertEqual(public['revision'], 1)
+        Friendship.ensure_locked_friendship(self.reader, self.author)
+        original = self.history(self.reader).json()['body']['items'][1]
+        self.assertEqual([item['media_id'] for item in original['media']], [photo.pk])
 
     def test_new_media_requires_an_upload_bound_to_the_author(self):
         other_post = Statement.objects.create(space=self.space, user=self.reader, text='Someone else’s photo')
@@ -160,6 +206,11 @@ class StatementEditTests(TestCase):
             resolve.assert_called_once_with(url, requester=self.author, initial=True)
         self.assertEqual(self.edit('', 1, external_media_url=None).status_code, 400)
         self.assertEqual(self.edit('No link', 1, external_media_url=None).status_code, 200)
+        newest, shared_link, original = self.history(self.author).json()['body']['items']
+        self.assertIsNone(newest['external_media'])
+        self.assertEqual(shared_link['external_media']['url'], url)
+        self.assertTrue(original['chat_record']['redacted_identity'])
+        self.assertIsNotNone(original['chat_record']['bundle_id'])
         self.post.refresh_from_db()
         self.assertIsNone(self.post.link_preview_id)
         self.assertFalse(self.post.chat_record_redacted)
