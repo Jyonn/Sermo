@@ -497,9 +497,7 @@ class StatementDetailView(View):
         user = request.user
         user.space.require_square_enabled()
         user.require_capability('square.browse')
-        statement = Statement.visible_for(user).filter(id=statement_id).select_related('qzone_source').prefetch_related(
-            'qzone_source__emoticons__media_asset',
-        ).first()
+        statement = Statement.visible_for(user).filter(id=statement_id).first()
         if statement is None:
             raise SquareErrors.NOT_EXISTS
         if statement.user_id != user.id:
@@ -540,11 +538,16 @@ class StatementDetailView(View):
 class StatementHistoryView(View):
     @auth.require_user
     @analyse.query(SquareParams.before)
+    @transaction.atomic
     def get(self, request: Request, statement_id: int):
         user = request.user
         user.space.require_square_enabled()
         user.require_capability('square.browse')
-        statement = Statement.visible_for(user).filter(id=statement_id).first()
+        # An edit can update visibility and replace its media in the same
+        # transaction. Read them from one version by using the editor's row lock.
+        statement = Statement.visible_for(user).select_for_update().filter(id=statement_id).prefetch_related(
+            'qzone_source__emoticons__media_asset',
+        ).first()
         if statement is None:
             raise SquareErrors.NOT_EXISTS
         before = request.query.before
