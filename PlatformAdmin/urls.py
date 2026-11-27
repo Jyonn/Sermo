@@ -4,6 +4,7 @@ from Sticker.series import StickerPackReviewView
 from Sticker.resources import ResourceAdminView, ResourceAdminAssetView, ResourceAdminUploadView
 from User.oauth_application_views import OAuthAdminApplicationsView
 from PlatformAdmin.debug_reports import DebugReportDetailView, DebugReportListView, DebugReportUploadView
+from PlatformAdmin.activities import PlatformActivityView
 
 from PlatformAdmin.views import (
     FounderMedalView,
@@ -17,6 +18,8 @@ from AccessPolicy.views import (
 )
 
 urlpatterns = [
+    path('activities', PlatformActivityView.as_view()),
+    path('activities/<slug:key>/rerun', PlatformActivityView.as_view()),
     path('members/<int:user_id>/birthday-letter', PlatformBirthdayLetterView.as_view()),
     path('sticker-packs', StickerPackReviewView.as_view()),
     path('sticker-packs/<int:series_id>', StickerPackReviewView.as_view()),

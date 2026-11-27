@@ -246,6 +246,7 @@ def finish_listen(key, user, data):
 
 
 def progress_payload(progress, active):
+    from Activity.reruns import reward_growth
     preference = RecordShopPreference.objects.filter(progress=progress).first()
     singers = preference.singers if preference else []
     return dict(
@@ -255,6 +256,7 @@ def progress_payload(progress, active):
         albums={singer: [public_album(album) for album in albums] for singer, albums in
                 progress.campaign.config.get('albums', {}).items()},
         choices=max(0, sum(progress.earned_points >= threshold for threshold in THRESHOLDS) - len(singers)) if active else 0,
+        rerun_growth=reward_growth(progress.campaign, progress.user),
     )
 
 
@@ -317,6 +319,7 @@ def current_album_clip_path(album_id):
 
 @transaction.atomic
 def claim_singer(key, user, singer):
+    from Activity.reruns import record_reward
     from User.models import User
 
     run = record_shop_runs(user, active_only=False).filter(campaign__key=key, claimed_at__lte=timezone.now()).first()
@@ -332,6 +335,11 @@ def claim_singer(key, user, singer):
             raise RecordShopErrors.UNAVAILABLE
         if len(preference.singers) >= sum(progress.earned_points >= threshold for threshold in THRESHOLDS):
             raise RecordShopErrors.NO_SELECTION
+        if run.campaign.edition > 1:
+            owned = any(singer in singers for singers in _bubble_preferences(user).exclude(
+                pk=preference.pk,
+            ).values_list('singers', flat=True))
+            record_reward(run.campaign, user, f'record-shop:{singer}', owned)
         preference.singers.append(singer)
         preference.save(update_fields=['singers'])
     return progress_payload(progress, run.is_active())

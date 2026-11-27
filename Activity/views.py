@@ -145,8 +145,13 @@ class FourPlayerView(View):
 class ActivityDetailView(View):
     @auth.require_user
     def get(self, request: Request, key: str):
-        campaign = ActivityCampaign.objects.get(key=key, enabled=True)
+        from Activity.reruns import RerunErrors
+        campaign = ActivityCampaign.objects.filter(key=key, enabled=True).first()
+        if campaign is None:
+            raise RerunErrors.MISSING
         ActivityService.ensure_automatic_for_space(request.user.space)
+        if campaign.edition > 1 and not campaign.space_runs.filter(space_id=request.user.space_id).exists():
+            raise RerunErrors.SPACE_NOT_JOINED
         if campaign.config.get('mode') == 'landlord':
             from Activity.landlord import LandlordService
             space_activity = LandlordService.run(key, request.user)

@@ -30,6 +30,13 @@ class ActivityCampaign(models.Model):
     config = models.JSONField(default=dict, blank=True)
     enabled = models.BooleanField(default=True, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
+    original = models.ForeignKey('self', null=True, blank=True, on_delete=models.PROTECT, related_name='reruns')
+    edition = models.PositiveIntegerField(default=1, db_default=1)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['original', 'edition'], name='activity_edition_unique'),
+        ]
 
 class NumberDuel(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -362,6 +369,18 @@ class UserActivityReward(models.Model):
     claimed_at = models.DateTimeField(null=True, blank=True, db_index=True)
 
 
+class ActivityRewardReceipt(models.Model):
+    campaign = models.ForeignKey(ActivityCampaign, on_delete=models.CASCADE)
+    user = models.ForeignKey('User.User', on_delete=models.CASCADE)
+    reward_id = models.CharField(max_length=80)
+    growth_points = models.PositiveSmallIntegerField(default=0)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['campaign', 'user', 'reward_id'], name='activity_reward_receipt_unique'),
+        ]
+
+
 class BgmParticipation(models.Model):
     progress = models.OneToOneField(UserActivityProgress, on_delete=models.CASCADE, related_name='bgm_participation')
     style = models.CharField(max_length=8, default='blue')
@@ -403,9 +422,17 @@ class ActivityService:
     BEIJING_TIMEZONE = ZoneInfo('Asia/Shanghai')
 
     @staticmethod
+    @transaction.atomic
     def claim_for_space(campaign, space, claimed_at=None):
         from Activity.eligibility import ActivityEligibilityErrors, missing_activity_requirements
-        if not SpaceActivity.objects.filter(campaign=campaign, space=space).exists() and missing_activity_requirements(campaign, space):
+        from Activity.reruns import RerunErrors, edition_family, lock_original
+        existing = SpaceActivity.objects.filter(campaign=campaign, space=space).first()
+        if existing:
+            return existing
+        lock_original(campaign)
+        if edition_family(campaign).filter(edition__gt=campaign.edition).exists():
+            raise RerunErrors.SUPERSEDED
+        if missing_activity_requirements(campaign, space):
             raise ActivityEligibilityErrors.UNAVAILABLE
         claimed_at = claimed_at or timezone.now()
         ends_at = (
@@ -424,13 +451,15 @@ class ActivityService:
                 'attention_started_at': claimed_at,
             },
         )
-        if created and campaign.config.get('mode') == ActivityService.STARRY_NIGHT_MODE:
+        if created and campaign.edition == 1 and campaign.config.get('mode') == ActivityService.STARRY_NIGHT_MODE:
             ActivityService.backfill_starry_night_progress(space_activity, claimed_at)
         return space_activity
 
     @classmethod
     def backfill_starry_night_progress(cls, space_activity, claimed_at=None):
         """Seed the starry streak from ordinary chats in the five local dates before claim."""
+        if space_activity.campaign.edition > 1:
+            return {'eligible_users': 0, 'events_created': 0, 'rewards_created': 0}
         from Chat.models import ChatPurposeChoice
         from Message.models import Message
         from User.models import UserAccountLevelChoice
@@ -491,7 +520,7 @@ class ActivityService:
         for campaign in ActivityCampaign.objects.filter(
             enabled=True,
             assignment_mode=ActivityCampaign.AssignmentMode.AUTOMATIC,
-        ):
+        ).exclude(reruns__isnull=False):
             if not missing_activity_requirements(campaign, space):
                 cls.claim_for_space(campaign, space)
 
@@ -533,16 +562,24 @@ class ActivityService:
     @classmethod
     def admin_payloads(cls, space):
         from Activity.eligibility import missing_activity_requirements
+        from Activity.reruns import edition_fields
         cls.ensure_automatic_for_space(space)
         runs = {item.campaign_id: item for item in cls.space_activities(space)}
         payloads = []
-        for campaign in ActivityCampaign.objects.filter(enabled=True).order_by('created_at', 'id'):
+        campaigns = list(ActivityCampaign.objects.filter(enabled=True).select_related('original').order_by('-created_at', '-id'))
+        latest = {}
+        for item in campaigns:
+            latest.setdefault(item.original_id or item.id, item.id)
+        for campaign in campaigns:
             run = runs.get(campaign.id)
+            if run is None and latest[campaign.original_id or campaign.id] != campaign.id:
+                continue
             status = 'unclaimed'
             if run is not None:
                 status = 'active' if run.is_active() else 'ended'
             missing = missing_activity_requirements(campaign, space)
             payloads.append(dict(
+                **edition_fields(campaign),
                 eligible=not missing,
                 missing_requirements=missing,
                 key=campaign.key,
@@ -657,6 +694,8 @@ class ActivityService:
             campaign = space_activity.campaign
             if campaign.config.get('mode') != cls.STARRY_NIGHT_MODE:
                 continue
+            if campaign.edition > 1 and not space_activity.is_active(occurred_at):
+                continue
             with transaction.atomic():
                 _, progress = cls._progress(campaign, user, space_activity)
                 progress = UserActivityProgress.objects.select_for_update().get(id=progress.id)
@@ -694,16 +733,14 @@ class ActivityService:
         streak = max(progress.earned_points, cls._starry_streak(progress, timezone.localtime()))
         if streak < target or not reward:
             raise ValueError('activity reward is not ready')
-        from User.models import UserResourceInventory
-        item, _ = UserResourceInventory.grant_activity_resource(
-            user,
+        from Activity.reruns import grant_resource
+        return grant_resource(
+            campaign, user,
             reward.get('resource_type', 'background'),
             reward['reward_id'],
             reward['resource_key'],
-            campaign.key,
             metadata={'kind': 'consecutive_evening_chat', 'streak_days': target},
         )
-        return item
 
     @staticmethod
     def _consecutive_streak(progress, end_date):
@@ -717,22 +754,23 @@ class ActivityService:
 
     @classmethod
     def claim_milestone_reward(cls, campaign, user, reward_key):
-        from User.models import UserResourceInventory
+        from Activity.reruns import grant_resource
 
         reward = next((item for item in campaign.config.get('user_rewards', []) if item.get('key') == reward_key), None)
         if reward is None:
             raise ValueError('activity reward does not exist')
         with transaction.atomic():
-            _, progress = cls._progress(campaign, user)
+            run, progress = cls._progress(campaign, user)
+            if not run.is_active():
+                raise ValueError('activity is not active')
             progress = UserActivityProgress.objects.select_for_update().get(id=progress.id)
             if progress.earned_points < int(reward['threshold']):
                 raise ValueError('activity reward is not ready')
-            item, _ = UserResourceInventory.grant_activity_resource(
-                user,
+            item = grant_resource(
+                campaign, user,
                 reward['resource_type'],
                 reward['reward_id'],
                 reward['resource_key'],
-                campaign.key,
                 metadata={'kind': 'user_milestone', 'threshold': int(reward['threshold'])},
             )
         return item
@@ -782,7 +820,7 @@ class ActivityService:
 
     @classmethod
     def claim_personal_reward(cls, campaign, user):
-        from User.models import UserResourceInventory
+        from Activity.reruns import grant_resource
 
         with transaction.atomic():
             _, progress = cls._progress(campaign, user)
@@ -793,9 +831,9 @@ class ActivityService:
             reward = UserActivityReward.objects.select_for_update().get(id=reward.id)
             if reward.claimed_at is None:
                 target = int(campaign.config.get('personal_event_target', 0))
-                UserResourceInventory.grant_activity_resource(
-                    user, reward.resource_type, reward.reward_id, reward.resource_key,
-                    campaign.key, metadata={'kind': 'personal_task', 'target': target},
+                grant_resource(
+                    campaign, user, reward.resource_type, reward.reward_id, reward.resource_key,
+                    metadata={'kind': 'personal_task', 'target': target},
                 )
                 reward.claimed_at = timezone.now()
                 reward.save(update_fields=['claimed_at'])
@@ -803,16 +841,16 @@ class ActivityService:
 
     @staticmethod
     def _grant_reward_to_members(reward):
-        from User.models import User, UserResourceInventory
+        from Activity.reruns import grant_resource
+        from User.models import User
 
-        users = User.objects.filter(space=reward.space_activity.space, is_deleted=False)
+        users = User.objects.filter(space=reward.space_activity.space, is_deleted=False).order_by('pk')
         for user in users.iterator():
-            UserResourceInventory.grant_activity_resource(
-                user,
+            grant_resource(
+                reward.space_activity.campaign, user,
                 reward.resource_type,
                 reward.reward_id,
                 reward.resource_key,
-                reward.space_activity.campaign.key,
                 metadata={'threshold': reward.milestone.threshold},
             )
 
@@ -917,6 +955,13 @@ class ActivityService:
 
     @classmethod
     def payload(cls, campaign, user, space_activity=None):
+        from Activity.reruns import edition_fields, reward_growth
+        payload = cls._payload(campaign, user, space_activity)
+        return {**payload, **edition_fields(campaign), 'rerun_growth': reward_growth(campaign, user)}
+
+    @classmethod
+    def _payload(cls, campaign, user, space_activity=None):
+        from Activity.reruns import claimed_rewards
         if space_activity is None:
             space_activity = SpaceActivity.objects.get(campaign=campaign, space=user.space)
         if campaign.config.get('mode') == 'annual_explorer':
@@ -933,15 +978,16 @@ class ActivityService:
             return activity_payload(campaign, user, space_activity)
         if (
             campaign.config.get('mode') == cls.STARRY_NIGHT_MODE
-            and space_activity.history_backfilled_at is None
+            and campaign.edition == 1 and space_activity.history_backfilled_at is None
         ):
             cls.backfill_starry_night_progress(space_activity, space_activity.claimed_at)
         space_activity, progress = cls._progress(campaign, user, space_activity)
         personal_reward = cls._ensure_personal_reward(progress)
         cls._ensure_legacy_awakenings(space_activity)
         rewards = {item.milestone_id: item for item in space_activity.rewards.select_related('milestone')}
-        for reward in rewards.values():
-            cls._grant_reward_to_members(reward)
+        if campaign.edition == 1:
+            for reward in rewards.values():
+                cls._grant_reward_to_members(reward)
         claimable_space_milestone = cls._claimable_space_milestone(space_activity)
         milestones = []
         for item in campaign.milestones.all():
@@ -1005,7 +1051,7 @@ class ActivityService:
             daily_limit = int(campaign.config.get('daily_points_limit', 25))
             schedule = campaign.config.get('reply_points') or [20, 10, 5]
             next_nominal = int(schedule[min(reply_count, len(schedule) - 1)])
-            owned = set(user.resource_inventory.values_list('reward_id', flat=True))
+            owned = claimed_rewards(campaign, user)
             payload['friendly_neighbor'] = dict(
                 web_points=progress.earned_points,
                 today_points=today_points,
@@ -1018,13 +1064,13 @@ class ActivityService:
                     resource_type=item['resource_type'],
                     resource_key=item['resource_key'],
                     claimed=item['reward_id'] in owned,
-                    claimable=progress.earned_points >= int(item['threshold']) and item['reward_id'] not in owned,
+                    claimable=payload['active'] and progress.earned_points >= int(item['threshold']) and item['reward_id'] not in owned,
                 ) for item in campaign.config.get('user_rewards', [])],
             )
         if campaign.config.get('mode') == cls.STARRY_NIGHT_MODE:
             reward = campaign.config.get('reward') or {}
             target = int(campaign.config.get('streak_days', 5))
-            owned = bool(reward and user.resource_inventory.filter(reward_id=reward.get('reward_id', '')).exists())
+            owned = bool(reward and reward.get('reward_id') in claimed_rewards(campaign, user))
             achieved = progress.earned_points >= target
             payload['starry_night'] = dict(
                 streak_days=target if owned or achieved else min(target, cls._starry_streak(progress, timezone.localtime())),
@@ -1033,7 +1079,7 @@ class ActivityService:
                 window_end=campaign.config.get('window_end', '24:00'),
                 reward_key=reward.get('resource_key', ''),
                 reward_owned=owned,
-                reward_claimable=not owned and achieved,
+                reward_claimable=payload['active'] and not owned and achieved,
             )
         if campaign.config.get('mode') == 'record_shop':
             from Activity.record_shop import progress_payload

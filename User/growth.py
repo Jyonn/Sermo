@@ -66,6 +66,7 @@ EVENT_RULES = {
 }
 
 PERIODIC_EVENT_RULES = (
+    (re.compile(r'^activity:rerun:[1-9][0-9]*:[a-f0-9]{32}$'), GrowthEventRule('', 'activity', '返场奖励兑换', 10)),
     (re.compile(r'^daily:first_verified_communication:\d{4}-\d{2}-\d{2}$'), GrowthEventRule('', 'daily', '今日首次有效沟通', 5, 'daily')),
     (re.compile(r'^daily:verified_conversation:\d{4}-\d{2}-\d{2}:[^:]+$'), GrowthEventRule('', 'daily', '完成有效双向会话', 8, 'daily')),
     (re.compile(r'^daily:verified_group:\d{4}-\d{2}-\d{2}:[^:]+$'), GrowthEventRule('', 'daily', '参与有效群聊', 6, 'daily')),

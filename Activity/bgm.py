@@ -164,6 +164,7 @@ class BgmService:
 
     @classmethod
     def payload(cls, campaign, user, run):
+        from Activity.reruns import edition_fields
         _, progress = ActivityService._progress(campaign, user, run)
         participation = BgmParticipation.objects.filter(progress=progress).first()
         points, days, today = cls.stats(progress)
@@ -178,6 +179,7 @@ class BgmService:
                 uri=(asset.source_uri if asset.raw_metadata.get('bgm_public') else sign_private_download_url(asset.playback_uri or asset.source_uri)) if owned and available else None,
             ))
         return dict(
+            **edition_fields(campaign),
             key=campaign.key, title=campaign.title, title_en=campaign.title_en,
             summary=campaign.summary, summary_en=campaign.summary_en,
             starts_at=run.claimed_at.timestamp(), ends_at=run.ends_at.timestamp() if run.ends_at else None,
