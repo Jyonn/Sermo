@@ -83,12 +83,47 @@ class NumberDuelView(View):
         return NumberDuelService.act(key, request.user, data)
 
 
+class LandlordView(View):
+    @staticmethod
+    def _response(payload):
+        from utils.middleware import APIPacker
+        response = APIPacker.pack(payload)
+        response['Cache-Control'] = 'private, no-store'
+        return response
+
+    @auth.require_user
+    def get(self, request: Request, key: str):
+        from Activity.landlord import LandlordService
+        return self._response(LandlordService.lobby(key, request.user, request.GET.get('code')))
+
+    @auth.require_user
+    def post(self, request: Request, key: str):
+        import json
+        from Activity.landlord import LandlordErrors, LandlordService
+        try:
+            data = json.loads(request.body)
+        except (ValueError, UnicodeDecodeError):
+            raise LandlordErrors.INVALID
+        return self._response(LandlordService.act(key, request.user, data))
+
+
+class LandlordLeaderboardView(View):
+    @auth.require_user
+    def get(self, request: Request, key: str):
+        from Activity.landlord import LandlordService
+        return LandlordView._response(LandlordService.leaderboard(key, request.user, request.GET.get('year')))
+
+
 class ActivityDetailView(View):
     @auth.require_user
     def get(self, request: Request, key: str):
         campaign = ActivityCampaign.objects.get(key=key, enabled=True)
         ActivityService.ensure_automatic_for_space(request.user.space)
-        space_activity = ActivityService.space_activity_for(campaign, request.user.space)
+        if campaign.config.get('mode') == 'landlord':
+            from Activity.landlord import LandlordService
+            space_activity = LandlordService.run(key, request.user)
+        else:
+            space_activity = ActivityService.space_activity_for(campaign, request.user.space)
         from Activity.participation import activity_participation
         payload = ActivityService.payload(campaign, request.user, space_activity)
         payload['participation'] = activity_participation([space_activity], request.user.space_id)[space_activity.pk]

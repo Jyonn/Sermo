@@ -80,6 +80,53 @@ class NumberDuelReward(models.Model):
         constraints = [models.UniqueConstraint(fields=['duel', 'user'], name='number_duel_reward_unique')]
 
 
+class LandlordTable(models.Model):
+    class Status(models.TextChoices):
+        WAITING = 'waiting', 'Waiting'
+        BIDDING = 'bidding', 'Bidding'
+        PLAYING = 'playing', 'Playing'
+        FINISHED = 'finished', 'Finished'
+        ABANDONED = 'abandoned', 'Abandoned'
+
+    run = models.ForeignKey('SpaceActivity', on_delete=models.CASCADE, related_name='landlord_tables')
+    code = models.CharField(max_length=8, unique=True)
+    status = models.CharField(max_length=12, choices=Status.choices, default=Status.WAITING)
+    version = models.PositiveIntegerField(default=1)
+    first_bidder = models.PositiveSmallIntegerField(default=0)
+    turn = models.PositiveSmallIntegerField(null=True, blank=True)
+    landlord = models.PositiveSmallIntegerField(null=True, blank=True)
+    winner = models.PositiveSmallIntegerField(null=True, blank=True)
+    deadline = models.DateTimeField(null=True, blank=True)
+    bottom_cards = models.JSONField(default=list)
+    bids = models.JSONField(default=list)
+    moves = models.JSONField(default=list)
+    last_cards = models.JSONField(default=list)
+    last_player = models.PositiveSmallIntegerField(null=True, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['run', 'status', 'updated_at'], name='landlord_open_tables'),
+            models.Index(fields=['run', 'status', 'finished_at'], name='landlord_annual_results'),
+        ]
+
+
+class LandlordSeat(models.Model):
+    table = models.ForeignKey(LandlordTable, on_delete=models.CASCADE, related_name='seats')
+    user = models.ForeignKey('User.User', on_delete=models.CASCADE, related_name='landlord_seats')
+    position = models.PositiveSmallIntegerField()
+    hand = models.JSONField(default=list)
+    won = models.BooleanField(default=False)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['table', 'position'], name='landlord_seat_position'),
+            models.UniqueConstraint(fields=['table', 'user'], name='landlord_seat_user'),
+        ]
+
+
 class ActivityMilestone(models.Model):
     campaign = models.ForeignKey(ActivityCampaign, on_delete=models.CASCADE, related_name='milestones')
     threshold = models.PositiveIntegerField()
@@ -813,6 +860,9 @@ class ActivityService:
         if campaign.config.get('mode') == 'number_duel':
             from Activity.number_duel import NumberDuelService
             return NumberDuelService.activity_payload(campaign, user, space_activity)
+        if campaign.config.get('mode') == 'landlord':
+            from Activity.landlord import LandlordService
+            return LandlordService.activity_payload(campaign, user, space_activity)
         if (
             campaign.config.get('mode') == cls.STARRY_NIGHT_MODE
             and space_activity.history_backfilled_at is None

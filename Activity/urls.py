@@ -1,5 +1,5 @@
 from django.urls import path
-from Activity.views import NumberDuelView, RecordShopView
+from Activity.views import LandlordLeaderboardView, LandlordView, NumberDuelView, RecordShopView
 from Activity.views import ExplorerRewardClaimView
 from Activity.views import BgmEntranceView, BgmMeView, BgmSettingsView
 
@@ -9,6 +9,8 @@ from Activity.views import AdminActivityClaimView, AdminActivityListView, Active
 urlpatterns = [
     path('<slug:key>/explorer/rewards/<int:tier>/claim', ExplorerRewardClaimView.as_view(), name='annual explorer reward claim'),
     path('<slug:key>/duel', NumberDuelView.as_view(), name='number duel'),
+    path('<slug:key>/landlord', LandlordView.as_view(), name='landlord table'),
+    path('<slug:key>/landlord/leaderboard', LandlordLeaderboardView.as_view(), name='landlord leaderboard'),
     path('bgm/me', BgmMeView.as_view(), name='my activity bgm'),
     path('<slug:key>/bgm/enter', BgmEntranceView.as_view(), name='activity bgm entrance'),
     path('<slug:key>/bgm', BgmSettingsView.as_view(), name='activity bgm settings'),
