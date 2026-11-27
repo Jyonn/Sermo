@@ -13,7 +13,7 @@ from smartdjango import Code, Error
 from Activity.card_game import DECK_SIZE, advance_trick, automatic_play, card_rank, distribute, next_position
 from Activity.landlord_rules import beats, classify, hint
 from Activity.models import LandlordRoundResult, LandlordSeat, LandlordTable
-from Activity.table_activity import ROOM_WAIT, activity_payload, activity_run, eligible, new_room, public_user, room_code
+from Activity.table_activity import ROOM_WAIT, activity_payload, activity_run, eligible, forfeit_scores, new_room, public_user, room_code
 from User.models import User
 
 
@@ -70,6 +70,7 @@ class LandlordService:
             host=table.host_position, round=table.round_number,
             mode=table.mode,
             turn=table.turn, landlord=table.landlord, winner=table.winner, hand=own.hand,
+            forfeited_position=table.forfeited_position, last_cards=table.last_cards,
             ready_count=len(seats), seats=[
                 dict(position=position, member=cls._public_user(seat.user), remaining=len(seat.hand), won=seat.won,
                      doubled=seat.doubled, trustee=seat.trustee, score=seat.score, ready=seat.ready)
@@ -125,6 +126,7 @@ class LandlordService:
         table.moves = [None, None, None]
         table.last_cards = []
         table.landlord = table.winner = table.last_player = table.finished_at = None
+        table.forfeited_position = None
         table.multiplier, table.spring = 1, False
         cls._set_turn(table, first_bidder, seats, now, cls.BID_TIME)
         cls._touch(table)
@@ -176,12 +178,28 @@ class LandlordService:
             farmer.won = not landlord.won
             farmer.score = base * (2 if landlord.doubled else 1) * (2 if farmer.doubled else 1) * (1 if farmer.won else -1)
         landlord.score = -sum(farmer.score for farmer in farmers)
+        cls._record_result(table, seats, now)
+
+    @staticmethod
+    def _record_result(table, seats, now):
         LandlordSeat.objects.bulk_update(seats.values(), ['won', 'score'])
         LandlordRoundResult.objects.bulk_create([
             LandlordRoundResult(table=table, user_id=seat.user_id, round_number=table.round_number,
                                 score=seat.score, won=seat.won, finished_at=now)
-            for seat in seats.values()
+            for seat in seats.values() if table.forfeited_position is None or seat.score != 0
         ])
+
+    @classmethod
+    def _forfeit(cls, table, seats, quitter, now):
+        opponents = [position for position in seats if position != quitter and
+                     (table.landlord is None or table.landlord in (quitter, position))]
+        scores = forfeit_scores(seats, quitter, opponents)
+        table.status, table.finished_at = cls.STATUS.FINISHED, now
+        table.turn = table.deadline = None
+        table.winner, table.forfeited_position = opponents[0], quitter
+        for position, seat in seats.items():
+            seat.score, seat.won = scores[position], position in opponents
+        cls._record_result(table, seats, now)
 
     @staticmethod
     def _bomb(cards):
@@ -331,7 +349,8 @@ class LandlordService:
         own = next(seat for seat in seats.values() if seat.user_id == user.pk)
         cls._advance(table, seats, now)
         if (type(data.get('version')) is not int or table.status not in cls.LIVE
-                or (action not in ('double', 'trustee', 'ready') and table.version != data['version'])):
+                or (action == 'leave' and data.get('round', table.round_number) != table.round_number)
+                or (action not in ('double', 'trustee', 'ready', 'leave') and table.version != data['version'])):
             return dict(table=cls._table_payload(table, seats, user, now), changed=True)
         if action == 'mode':
             value = data.get('value')
@@ -386,17 +405,16 @@ class LandlordService:
                 cls._touch(table)
             return dict(table=cls._table_payload(table, seats, user, now))
         if action == 'leave':
-            if table.status in cls.BETWEEN_ROUNDS:
-                own.delete()
-                seats.pop(own.position)
-                if not seats:
-                    cls._abandon(table, now)
-                else:
-                    if table.host_position == own.position:
-                        table.host_position = min(seats)
-                    cls._touch(table)
-            else:
+            if table.status in cls.IN_ROUND:
+                cls._forfeit(table, seats, own.position, now)
+            own.delete()
+            seats.pop(own.position)
+            if not seats:
                 cls._abandon(table, now)
+            else:
+                if table.host_position == own.position:
+                    table.host_position = min(seats)
+                cls._touch(table)
             return dict(table=None)
         if table.turn != own.position or own.trustee:
             raise LandlordErrors.TURN

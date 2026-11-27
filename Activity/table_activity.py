@@ -17,6 +17,12 @@ def eligible(user):
     return user.verified and not user.is_official and not user.is_deleted and not user.is_imported_placeholder
 
 
+def forfeit_scores(positions, quitter, opponents, stake=1):
+    """The quitter pays each opponent. An uninvolved teammate keeps their score."""
+    return {position: -stake * len(opponents) if position == quitter
+            else stake if position in opponents else 0 for position in positions}
+
+
 def activity_run(key, user, modes, *, lock=False):
     rows = SpaceActivity.objects.select_for_update() if lock else SpaceActivity.objects
     run = rows.filter(space_id=user.space_id, campaign__key=key, campaign__enabled=True).select_related('campaign').first()

@@ -148,3 +148,15 @@ class TabletopRoomTests(TestCase):
         self.assertNotIn('wall', state['board'])
         self.assertNotIn('hands', state['board'])
         self.act(host, 'mahjong', 'discard', state, tile=state['board']['hand'][0])
+
+    def test_forfeit_charges_the_quitter_and_leaves_the_partner_neutral(self):
+        for game, scores in (('shuangkou', {0: -2, 1: 1, 3: 1}), ('mahjong', {0: -3, 1: 1, 2: 1, 3: 1})):
+            with self.subTest(game=game):
+                state = self.setup_room(game)
+                self.assertIsNone(self.act(self.players[0], game, 'leave', state)['table'])
+                table = FourPlayerTable.objects.get(code=state['code'])
+                self.assertEqual((table.status, table.host_position), ('finished', 1))
+                self.assertEqual(table.seats.count(), 3)
+                self.assertEqual(table.board['outcome'], 'forfeit')
+                self.assertEqual(dict(table.results.values_list('user_id','score')),
+                                 {self.players[position].pk: score for position, score in scores.items()})

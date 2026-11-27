@@ -239,7 +239,7 @@ class LandlordActivityTests(TestCase):
         self.assertFalse(current['seats'][0]['trustee'])
         self.assertEqual(current['turn'], 1)
 
-    def test_expired_turn_resolves_on_read_and_abandonment_does_not_rank(self):
+    def test_expired_turn_resolves_on_read_and_a_deliberate_exit_counts_as_loss(self):
         self.start_space()
         code = self.table()
         row = LandlordTable.objects.get(code=code)
@@ -250,9 +250,15 @@ class LandlordActivityTests(TestCase):
         self.assertEqual(current['turn'], 1)
         self.assertTrue(current['seats'][0]['trustee'])
         self.assertGreater(current['version'], old_version)
-        self.send_action(self.users[1], action='leave', code=code, version=current['version'])
-        self.assertEqual(self.snapshot(self.users[0], code)['table']['status'], 'abandoned')
-        self.assertEqual(LandlordService.leaderboard('landlord', self.users[0], None)['rows'], [])
+        response = self.send_action(self.users[1], action='leave', code=code, version=old_version, round=current['round'])
+        self.assertIsNone(response['table'])
+        result = self.snapshot(self.users[0], code)['table']
+        self.assertEqual(result['status'], 'finished')
+        self.assertEqual(result['forfeited_position'], 1)
+        self.assertEqual(result['ready_count'], 2)
+        self.assertCountEqual(LandlordRoundResult.objects.filter(table=row).values_list('score', 'won'),
+                              [(-2, False), (1, True), (1, True)])
+        self.assertEqual(LandlordService.leaderboard('landlord', self.users[1], None)['mine']['wins'], 0)
 
     def test_ranking_uses_beijing_year_and_excludes_other_spaces(self):
         run = self.start_space()

@@ -97,6 +97,7 @@ class LandlordTable(models.Model):
     turn = models.PositiveSmallIntegerField(null=True, blank=True)
     landlord = models.PositiveSmallIntegerField(null=True, blank=True)
     winner = models.PositiveSmallIntegerField(null=True, blank=True)
+    forfeited_position = models.PositiveSmallIntegerField(null=True, blank=True)
     deadline = models.DateTimeField(null=True, blank=True)
     bottom_cards = models.JSONField(default=list)
     bids = models.JSONField(default=list)

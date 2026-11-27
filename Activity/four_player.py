@@ -10,7 +10,7 @@ from smartdjango import Code, Error
 from Activity import mahjong, shuangkou
 from Activity.models import FourPlayerResult, FourPlayerSeat, FourPlayerTable
 from Activity.table_activity import (BETWEEN_ROUNDS, FOUR_PLAYER_MODES, ROOM_WAIT, activity_run, eligible,
-                                     new_room, public_user, room_code)
+                                     forfeit_scores, new_room, public_user, room_code)
 
 
 @Error.register
@@ -69,7 +69,8 @@ def _public_board(key, table, own):
     playing = table.status == 'playing'
     same_player = board['players'][own.position] == own.user_id
     hand = board['hands'][own.position] if same_player else []
-    common = dict(hand=hand, turn=board['turn'], winners=board['winners'], outcome=board['outcome'])
+    common = dict(hand=hand, turn=board['turn'], winners=board['winners'], outcome=board['outcome'],
+                  forfeited_position=board.get('forfeited_position'))
     if key == 'shuangkou':
         previous = shuangkou.classify(board['last'], table.mode) if playing else None
         can_play = playing and board['turn'] == own.position and not own.trustee
@@ -122,6 +123,7 @@ def _resolve_move(table, seats, now, previous_decision=None):
             FourPlayerResult(table=table, user_id=seat.user_id, round_number=table.round_number,
                              mode=table.mode, score=board['scores'][seat.position],
                              won=seat.position in board['winners'], finished_at=now) for seat in seats.values()
+            if board['outcome'] != 'forfeit' or board['scores'][seat.position] != 0
         ])
     elif not board.get('pending') or board['decision'] != previous_decision:
         _schedule(table, seats, now)
@@ -244,22 +246,25 @@ def act(key, user, data):
             or (action == 'ready' and data.get('mode', table.mode) != table.mode)
             or (action == 'claim' and (table.status != 'playing' or not table.board.get('pending')
                                       or data.get('decision') != table.board['decision']))
-            or (action not in ('claim', 'ready', 'trustee') and data['version'] != table.version)):
+            or (action not in ('claim', 'ready', 'trustee', 'leave') and data['version'] != table.version)):
         return dict(table=_snapshot(key, table, seats, user, now), changed=True)
     position = own.position
     value = data.get('value')
     if action == 'leave':
         if table.status == 'playing':
+            opponents = [seat for seat in seats if seat != position and (key == 'mahjong' or seat % 2 != position % 2)]
+            scores = forfeit_scores(seats, position, opponents)
+            table.board.update(outcome='forfeit', forfeited_position=position, turn=None, pending=None,
+                               winners=opponents, scores=[scores[seat] for seat in range(4)])
+            _resolve_move(table, seats, now)
+        own.delete()
+        seats.pop(position)
+        if not seats:
             _close(table)
         else:
-            own.delete()
-            seats.pop(position)
-            if seats:
-                if table.host_position == position:
-                    table.host_position = min(seats)
-                _touch(table)
-            else:
-                _close(table)
+            if table.host_position == position:
+                table.host_position = min(seats)
+            _touch(table)
         return dict(table=None)
     if table.status in BETWEEN_ROUNDS:
         if action == 'ready' and type(value) is bool:
