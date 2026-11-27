@@ -318,6 +318,7 @@ class User(models.Model):
     is_permanent_vip = models.BooleanField(default=False, db_index=True)
     chat_background_theme = models.CharField(max_length=16, default='default')
     chat_quick_actions = models.JSONField(default=dict, blank=True)
+    interface_preferences = models.JSONField(null=True, blank=True)
     chat_background_uri = models.CharField(max_length=255, default='')
     chat_bubble_style = models.CharField(max_length=16, default='default')
     avatar_frame_style = models.CharField(max_length=16, default='none')

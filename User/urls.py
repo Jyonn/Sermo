@@ -1,5 +1,6 @@
 from django.urls import path
 from User.quick_actions import ChatQuickActionsView
+from User.interface_preferences import InterfacePreferencesView
 from User.permission_quotas import PersonalPermissionQuotaView
 from User.birthday_views import BirthdayView, BirthdaySeenView, BirthdayLetterOpenView, BirthdayLetterArchiveView
 from User.web_push_receipts import WebPushReceiptView
@@ -196,5 +197,6 @@ urlpatterns = [
     path('me/chat-background', ChatBackgroundView.as_view(), name='chat background'),
     path('me/personalization', UserPersonalizationView.as_view(), name='user personalization'),
     path('me/chat-quick-actions', ChatQuickActionsView.as_view(), name='chat quick actions'),
+    path('me/interface-preferences', InterfacePreferencesView.as_view(), name='interface preferences'),
     path('me/language', UserLanguagePreferenceView.as_view(), name='user language preference'),
 ]
