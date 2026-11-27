@@ -43,7 +43,8 @@ class ChronelleProfileView(View):
             groups = {group['id'] for group in calendar(owner,base,'groups/')}
             personal_view = owner.pk == request.user.pk and not audience
             policy = {'detail':list(groups),'busy':[]} if personal_view else projection(
-                owner,request.user,groups,preview_tier={'friend':'friends','stranger':'strangers'}.get(audience))
+                owner,request.user,groups,preview_tier={'friend':'friends','stranger':'strangers'}.get(audience),
+                expected_subject=binding['subject'])
             if not policy['detail'] and not policy['busy']:
                 return {'status':'hidden','events':[],'availability':'unknown'}
             status = remote(base,'/api/oauth/introspect/',body={'subject':binding['subject']})

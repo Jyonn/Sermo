@@ -6,6 +6,8 @@ from Chat.calendar_policy import defaults, initialize, projection, review_requir
 from Chat.models import ResearchCalendarPreference
 from Friendship.models import Friendship, FriendshipStatusChoice
 from User.chronelle_account import BindingFailure
+from User.models import User
+from utils import auth
 
 
 class ChronellePermissionsTests(TestCase):
@@ -16,6 +18,93 @@ class ChronellePermissionsTests(TestCase):
 
     def permissions(self, policy=None):
         return self.call(None if policy is None else {'audiences': policy}, self.path)
+
+    def friend_settings(self, policy=None, friend=None):
+        return self.call(None if policy is None else {'policy': policy},
+                         f'{self.path}/friends/{(friend or self.other).pk}')
+
+    @patch('User.chronelle_permissions.calendar', return_value=[{'id': 7, 'name': 'Work'}, {'id': 8, 'name': 'Home'}])
+    def test_individual_settings_are_directional_inherited_and_resettable(self, _):
+        _, binding = self.bound()
+        another = User.create(self.space, 'Another friend', verified=True)
+        for friend in (self.other, another):
+            Friendship.objects.create(space=self.space, user_low=self.user, user_high=friend, status=FriendshipStatusChoice.ACCEPTED)
+        audiences = defaults()
+        audiences['friends']['overrides']['8'] = 'detail'
+        self.assertEqual(self.permissions(audiences).status_code, 200)
+        self.assertEqual(self.friend_settings().json()['body']['policy'], {'default': None, 'overrides': {}})
+        option = {'default': 'hidden', 'overrides': {'7': 'detail'}}
+        result = self.friend_settings(option)
+        self.assertEqual(result.status_code, 200)
+        self.assertEqual(set(result['Cache-Control'].split(', ')), {'private', 'no-store'})
+        self.assertEqual(projection(self.user, self.other, [7, 8, 9]), {'detail': [7], 'busy': []})
+        self.assertEqual(projection(self.user, another, [7, 8, 9]), {'detail': [8], 'busy': [7, 9]})
+        self.assertEqual(projection(self.user, self.user, [7, 8, 9], preview_tier='friends'), {'detail': [8], 'busy': [7, 9]})
+        self.assertEqual(projection(self.user, self.other, [7], expected_subject='other-binding'), {'detail': [], 'busy': []})
+
+        self.permissions(defaults('detail'))
+        initialize(self.user, binding['binding']['subject'])
+        snapshot = self.call(path=f'{self.path}/friends')
+        self.assertEqual(set(snapshot['Cache-Control'].split(', ')), {'private', 'no-store'})
+        rows = snapshot.json()['body']['friends']
+        self.assertEqual([(row['friend']['user_id'], row['policy']) for row in rows], [(self.other.pk, option)])
+        original_headers = self.headers.copy()
+        self.headers['HTTP_AUTHORIZATION'] = 'Bearer ' + auth.get_login_token(self.other)['auth']
+        self.assertEqual(self.call(path=f'{self.path}/friends').json()['body']['friends'], [])
+        self.headers = original_headers
+        self.assertEqual(self.friend_settings({'default': None, 'overrides': {}}).status_code, 200)
+        self.assertEqual(self.call(path=f'{self.path}/friends').json()['body']['friends'], [])
+        self.assertEqual(projection(self.user, self.other, [7, 8]), {'detail': [7, 8], 'busy': []})
+
+    @patch('User.chronelle_permissions.calendar', return_value=[{'id': 7, 'name': 'Work'}])
+    def test_friend_endpoint_rejects_nonfriends_deleted_friends_and_unknown_groups(self, _):
+        self.bound()
+        policy = {'default': 'detail', 'overrides': {}}
+        self.assertEqual(self.friend_settings(policy).status_code, 404)
+        self.assertEqual(self.friend_settings(friend=self.user).status_code, 404)
+        row = Friendship.objects.create(space=self.space, user_low=self.user, user_high=self.other, status=FriendshipStatusChoice.PENDING)
+        self.assertEqual(self.friend_settings(policy).status_code, 404)
+        row.status = FriendshipStatusChoice.ACCEPTED
+        row.save(update_fields=['status'])
+        for invalid in [{'default': True, 'overrides': {}}, {'default': None, 'overrides': {'200': 'detail'}}]:
+            self.assertEqual(self.friend_settings(invalid).status_code, 400)
+        self.assertEqual(self.friend_settings(policy).status_code, 200)
+        self.headers['HTTP_ORIGIN'] = 'https://evil.example'
+        self.assertEqual(self.friend_settings(policy).status_code, 403)
+        self.headers['HTTP_ORIGIN'] = 'https://frienden.jyonn.space'
+        row.remove(self.user)
+        self.assertEqual(self.call(path=f'{self.path}/friends').json()['body']['friends'], [])
+        row.status = FriendshipStatusChoice.ACCEPTED
+        row.save(update_fields=['status'])
+        self.assertEqual(self.friend_settings().json()['body']['policy'], {'default': None, 'overrides': {}})
+
+    @patch('User.chronelle_permissions.calendar', return_value=[{'id': 7, 'name': 'Work'}])
+    @patch('Chat.research_calendar.remote')
+    def test_reducing_privacy_only_revokes_when_target_has_live_calendar_access(self, remote, _):
+        self.bound()
+        another = User.create(self.space, 'Another friend', verified=True)
+        Friendship.objects.create(space=self.space, user_low=self.user, user_high=self.other, status=FriendshipStatusChoice.ACCEPTED)
+        until = timezone.now().timestamp() + 300
+        self.project.calendar_displays = [
+            {'owner': self.user.pk, 'viewer': another.pk, 'until': until, 'protocol': 'oauth-v1'},
+        ]
+        self.project.save(update_fields=['calendar_displays'])
+        hidden = {'default': 'hidden', 'overrides': {}}
+        self.assertFalse(self.friend_settings(hidden).json()['body']['rebind_required'])
+        remote.assert_not_called()
+        self.friend_settings({'default': 'detail', 'overrides': {}})
+        self.project.calendar_displays.append(
+            {'owner': self.user.pk, 'viewer': self.other.pk, 'until': until, 'protocol': 'oauth-v1',
+             'base': 'https://chronelle.6-79.cn'})
+        self.project.save(update_fields=['calendar_displays'])
+        remote.side_effect = BindingFailure('chronelle_unavailable', 503)
+        self.assertEqual(self.friend_settings(hidden).status_code, 503)
+        self.assertEqual(self.friend_settings().json()['body']['policy']['default'], 'detail')
+        remote.side_effect = None
+        self.assertTrue(self.friend_settings(hidden).json()['body']['rebind_required'])
+        self.assertEqual(remote.call_args.args[0], 'https://chronelle.6-79.cn')
+        self.project.refresh_from_db()
+        self.assertEqual([item['viewer'] for item in self.project.calendar_displays], [another.pk])
 
     def test_busy_default_for_friends_and_strangers_including_new_groups(self):
         _, value = self.bound()
@@ -169,3 +258,8 @@ class ChronellePermissionsTests(TestCase):
         response=self.call({'action':'display','members':[self.other.pk]},path)
         claims=jwt.decode(response.json()['body']['displays'][0]['token'],options={'verify_signature':False})
         self.assertEqual(claims['detail_group_ids'],[7]);self.assertEqual(claims['busy_group_ids'],[])
+        pref.overrides['friend_overrides'] = {str(self.user.pk): {'default': 'hidden', 'overrides': {}}}
+        pref.save(update_fields=['overrides'])
+        response = self.call({'action': 'display', 'members': [self.other.pk]}, path)
+        self.assertEqual(response.status_code, 403)
+        self.assertNotIn('displays', response.json().get('body') or {})

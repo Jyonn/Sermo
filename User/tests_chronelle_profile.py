@@ -67,6 +67,17 @@ class ChronelleProfileTests(TestCase):
 
     @patch('User.chronelle_profile.calendar',return_value=[{'id':7,'name':'Private'}])
     @patch('User.chronelle_profile.remote')
+    def test_hidden_friend_exception_stops_profile_event_fetch(self, remote, _):
+        _, value = self.bound()
+        Friendship.objects.create(space=self.space, user_low=self.user, user_high=self.other, status=1)
+        ResearchCalendarPreference.objects.create(user=self.user, binding_subject=value['binding']['subject'],
+            overrides={'version': 2, 'audiences': defaults('detail'),
+                       'friend_overrides': {str(self.other.pk): {'default': 'hidden', 'overrides': {}}}})
+        self.assertEqual(self.profile(self.other).json()['body'], {'status': 'hidden', 'events': [], 'availability': 'unknown'})
+        remote.assert_not_called()
+
+    @patch('User.chronelle_profile.calendar',return_value=[{'id':7,'name':'Private'}])
+    @patch('User.chronelle_profile.remote')
     def test_location_and_notes_are_independently_filtered_for_visitors_and_previews(self, remote, calendar):
         _, value = self.bound()
         pref = ResearchCalendarPreference.objects.create(user=self.user, binding_subject=value['binding']['subject'],

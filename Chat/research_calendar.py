@@ -29,9 +29,9 @@ def error_response(error):
     return fail(error.code,error.status)
 
 
-def shared_policy(user, project, group_ids, viewer=None):
+def shared_policy(user, project, group_ids, viewer=None, *, expected_subject=None):
     from Chat.calendar_policy import projection
-    return projection(user, viewer, group_ids)
+    return projection(user, viewer, group_ids, expected_subject=expected_subject)
 
 
 def invitable_members(user_ids):
@@ -183,7 +183,8 @@ class ResearchCalendarView(View):
                 fields = {}
                 from Chat.calendar_policy import detail_fields, shared_detail_fields
                 for uid in selected:
-                    policy={'detail':list(groups[uid]),'busy':[]} if uid==request.user.pk else shared_policy(active[uid],project,groups[uid],request.user)
+                    policy={'detail':list(groups[uid]),'busy':[]} if uid==request.user.pk else shared_policy(
+                        active[uid], project, groups[uid], request.user, expected_subject=tokens[uid]['binding']['subject'])
                     if uid!=request.user.pk and not (policy['detail'] or policy['busy']):
                         raise BindingFailure('member_calendar_not_shared',403)
                     policies[uid]=policy
