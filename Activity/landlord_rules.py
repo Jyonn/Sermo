@@ -1,6 +1,8 @@
 """Card identifiers and the classic three-player Dou Dizhu combinations."""
-from collections import Counter, defaultdict
+from collections import Counter
 from dataclasses import dataclass
+
+from Activity.card_game import card_rank, group_by_rank, valid_cards
 
 
 @dataclass(frozen=True)
@@ -11,15 +13,10 @@ class Combination:
     length: int = 1
 
 
-def rank(card):
-    return card // 4 if card < 52 else card - 39
-
-
 def classify(cards):
-    if (not cards or len(cards) > 20 or any(type(card) is not int or not 0 <= card < 54 for card in cards)
-            or len(set(cards)) != len(cards)):
+    if not valid_cards(cards, maximum=20):
         return None
-    counts = Counter(map(rank, cards))
+    counts = Counter(map(card_rank, cards))
     size = len(cards)
     ranks = sorted(counts)
     if ranks == [13, 14] and size == 2:
@@ -75,14 +72,22 @@ def beats(candidate, previous):
 
 
 def hint(hand, last_cards):
-    if not last_cards:
-        return [min(hand)] if hand else []
+    if not hand:
+        return []
     previous = classify(last_cards)
+    if beats(classify(hand), previous):
+        return hand
+    groups = group_by_rank(hand)
+    if not last_cards:
+        for kind in ('plane_pairs', 'plane_singles', 'plane', 'pairs', 'straight', 'triple_pair', 'triple_single', 'triple', 'pair'):
+            lengths = range(min(6, len(hand) // 2), 1, -1) if kind in ('plane_pairs', 'plane_singles', 'plane', 'pairs', 'straight') else (1,)
+            for length in lengths:
+                selection = next((cards for cards in _matching_cards(groups, kind, length) if (pattern := classify(cards)) and pattern.kind == kind), None)
+                if selection:
+                    return selection
+        return groups[min(groups)][:1]
     if not previous or previous.kind == 'rocket':
         return []
-    groups = defaultdict(list)
-    for card in sorted(hand):
-        groups[rank(card)].append(card)
 
     # First try the cheapest matching combination; keep bombs for last.
     for kind in (previous.kind, 'bomb', 'rocket'):

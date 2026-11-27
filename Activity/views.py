@@ -111,7 +111,9 @@ class LandlordLeaderboardView(View):
     @auth.require_user
     def get(self, request: Request, key: str):
         from Activity.landlord import LandlordService
-        return LandlordView._response(LandlordService.leaderboard(key, request.user, request.GET.get('year')))
+        return LandlordView._response(LandlordService.leaderboard(
+            key, request.user, request.GET.get('year'), request.GET.get('metric', 'points'),
+        ))
 
 
 class ActivityDetailView(View):

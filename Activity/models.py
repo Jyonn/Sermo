@@ -84,6 +84,7 @@ class LandlordTable(models.Model):
     class Status(models.TextChoices):
         WAITING = 'waiting', 'Waiting'
         BIDDING = 'bidding', 'Bidding'
+        DOUBLING = 'doubling', 'Doubling'
         PLAYING = 'playing', 'Playing'
         FINISHED = 'finished', 'Finished'
         ABANDONED = 'abandoned', 'Abandoned'
@@ -102,6 +103,8 @@ class LandlordTable(models.Model):
     moves = models.JSONField(default=list)
     last_cards = models.JSONField(default=list)
     last_player = models.PositiveSmallIntegerField(null=True, blank=True)
+    multiplier = models.PositiveIntegerField(default=1, db_default=1)
+    spring = models.BooleanField(default=False, db_default=False)
     finished_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -119,6 +122,10 @@ class LandlordSeat(models.Model):
     position = models.PositiveSmallIntegerField()
     hand = models.JSONField(default=list)
     won = models.BooleanField(default=False)
+    doubled = models.BooleanField(null=True, default=None)
+    trustee = models.BooleanField(default=False, db_default=False)
+    plays = models.PositiveSmallIntegerField(default=0, db_default=0)
+    score = models.IntegerField(default=0, db_default=0)
 
     class Meta:
         constraints = [

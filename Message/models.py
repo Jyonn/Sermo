@@ -922,6 +922,14 @@ class Message(models.Model):
                     if not NumberDuel.objects.filter(code=reference.get('room_code'), run__space=user.space,
                                                      run__campaign__key=reference.get('activity_key')).exists():
                         raise MessageErrors.PAYLOAD_INVALID
+                elif reference.get('kind') == 'landlord_room':
+                    from Activity.landlord import LandlordService
+                    from Activity.models import LandlordTable
+                    if (not chat.group or not LandlordService.eligible(user) or not LandlordTable.objects.filter(
+                            code=reference.get('room_code'), run__space=user.space, seats__user=user,
+                            run__campaign__key=reference.get('activity_key'), status=LandlordTable.Status.WAITING,
+                            updated_at__gt=timezone.now() - LandlordService.WAIT_LIMIT).exists()):
+                        raise MessageErrors.PAYLOAD_INVALID
             if message_type in (15, 16, 17, 18):
                 from Message.shared_references import payload
                 payload(message_type, cls._parse_payload(normalized_content), user, require_access=True)
@@ -1591,14 +1599,20 @@ class Message(models.Model):
             if campaign is None:
                 raise MessageErrors.PAYLOAD_INVALID
             room_code = None
-            if payload.get('kind') == 'number_duel_room':
+            kind = payload.get('kind')
+            if kind == 'number_duel_room':
                 from Activity.models import NumberDuel
                 room_code = str(payload.get('room_code') or '').upper()
                 if campaign.config.get('mode') != 'number_duel' or not NumberDuel.objects.filter(code=room_code, run__campaign=campaign).exists():
                     raise MessageErrors.PAYLOAD_INVALID
+            elif kind == 'landlord_room':
+                from Activity.landlord import LandlordService
+                if campaign.config.get('mode') != LandlordService.MODE:
+                    raise MessageErrors.PAYLOAD_INVALID
+                room_code = LandlordService._code(payload.get('room_code'))
             normalized = json.dumps(
                 dict(
-                    kind='number_duel_room' if room_code else 'activity',
+                    kind=kind if room_code else 'activity',
                     **({'room_code': room_code} if room_code else {}),
                     activity_key=campaign.key,
                     url=(str(payload.get('url') or '').strip())[:280],
@@ -1766,6 +1780,8 @@ class Message(models.Model):
             return dict(
                 kind='activity',
                 **({'room_code': room['code'], 'duel_room': room} if room else {}),
+                **({'landlord_room_code': reference['room_code']}
+                   if reference.get('kind') == 'landlord_room' and activity_run and reference.get('room_code') else {}),
                 activity_key=reference.get('activity_key') or '',
                 url=reference.get('url') or '',
                 title=reference.get('title') or '',
