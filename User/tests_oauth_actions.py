@@ -7,8 +7,8 @@ from Chat.models import Chat, ChatMember, ChatMemberStatusChoice, ChatTypeChoice
 from Friendship.models import Friendship
 from Message.models import Message, MessageTypeChoice
 from Space.models import Space
-from Square.models import Statement, StatementVisibilityChoice, SquareMute
-from User.models import OAuthGrant, User
+from Square.models import Statement, StatementComment, StatementVisibilityChoice, SquareMute
+from User.models import OAuthGrant, SquareCommentMode, User
 from User.oauth import OAuthError
 from User.oauth_requests import create
 from User.oauth_registry import DELEGATED_SCOPES, RegistryError, approved, configuration
@@ -137,6 +137,23 @@ class FiveDomainTests(TestCase):
         self.space.save(update_fields=['square_free_post_enabled'])
         SquareMute.objects.create(space=self.space,user=self.user,reason='fixture mute')
         self.assertEqual(self.call('post',f'square/statements/{own.id}/comments','square.write',{'text':'muted'}).status_code,403)
+
+    def test_square_friends_mode_filters_comments_and_redacts_hidden_parent(self):
+        self.peer.square_comment_mode = SquareCommentMode.FRIENDS
+        self.peer.save(update_fields=['square_comment_mode'])
+        statement = Statement.objects.create(space=self.space, user=self.peer, text='Friends mode')
+        hidden = StatementComment.objects.create(statement=statement, user=self.peer, text='Hidden')
+        reply = StatementComment.objects.create(statement=statement, user=self.user, parent=hidden, text='My reply')
+        endpoint = f'square/statements/{statement.id}/comments'
+        response = self.call('get', endpoint, 'square.read')
+        self.assertEqual(response.status_code, 200, response.content)
+        item, = response.json()['comments']
+        self.assertEqual(item['comment_id'], reply.id)
+        self.assertIsNone(item['parent_id'])
+        Friendship.ensure_locked_friendship(self.user, self.peer)
+        first, second = self.call('get', endpoint, 'square.read').json()['comments']
+        self.assertEqual(first['comment_id'], hidden.id)
+        self.assertEqual(second['parent_id'], hidden.id)
 
     def test_contacts_only_own_requests_and_same_space(self):
         result=self.call('post','contacts','contacts.write',{'peer_user_id':self.peer.id})

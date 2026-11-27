@@ -3,6 +3,7 @@ from smartdjango import Params, Validator
 
 from User.models import (
     User,
+    SquareCommentMode,
     UserNotificationChoice,
     NotificationPreference,
     NotificationAudienceChoice,
@@ -121,6 +122,13 @@ class WeChatMiniProgramOnboardingParams(metaclass=Params):
 
 class UserPrivateAccountParams(metaclass=Params):
     enabled = Validator('enabled').to(int).bool(lambda x: x in (0, 1), message=_('enabled should be 0 or 1'))
+
+
+class UserSquareCommentModeParams(metaclass=Params):
+    mode = Validator('mode').bool(
+        lambda value: isinstance(value, str) and value in SquareCommentMode.values,
+        message=_('Invalid Square comment mode'),
+    )
 
 
 class UserGrowthEventParams(metaclass=Params):

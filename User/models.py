@@ -12,7 +12,9 @@ from urllib.parse import urlparse
 from notificator import NotificatorAPIError
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, close_old_connections, transaction
-from django.db.models import F, Max, OuterRef, Q, Subquery
+from django.db.models import BigIntegerField, F, Max, OuterRef, Q, Subquery, TextChoices
+from django.db.models.fields.json import KeyTextTransform
+from django.db.models.functions import Cast
 from django.utils import timezone, translation
 from django.utils.crypto import get_random_string
 from django.utils.translation import gettext as _
@@ -141,6 +143,11 @@ class UserAccountKindChoice(Choice):
 class UserRoleChoice(Choice):
     OFFICIAL = 0
     MEMBER = 1
+
+
+class SquareCommentMode(TextChoices):
+    PUBLIC = 'public', _('Public')
+    FRIENDS = 'friends', _('Friends')
 
 
 class UserAvatarTypeChoice(Choice):
@@ -280,6 +287,9 @@ class User(models.Model):
     email_unbound_at = models.DateTimeField(null=True, blank=True)
     phone_unbound_at = models.DateTimeField(null=True, blank=True)
     is_private_account = models.BooleanField(default=False)
+    square_comment_mode = models.CharField(
+        max_length=7, choices=SquareCommentMode.choices, default=SquareCommentMode.PUBLIC,
+    )
     # Archived pre-template value, retained for data recovery and old migrations.
     # Runtime welcome messages live exclusively in WelcomeMessageTemplate.
     welcome_message = models.CharField(
@@ -1445,6 +1455,7 @@ class User(models.Model):
             'email_unbound_at',
             'phone_unbound_at',
             'is_private_account',
+            'square_comment_mode',
             'is_permanent_vip',
             'chat_background_theme',
             'chat_bubble_style',
@@ -2898,6 +2909,15 @@ class UserStateEvent(models.Model):
 
 
 class NotificationEvent(models.Model):
+    SQUARE_COMMENT_TYPES = (
+        NotificationEventTypeChoice.SQUARE_STATEMENT_COMMENT,
+        NotificationEventTypeChoice.SQUARE_COMMENT_LIKE,
+        NotificationEventTypeChoice.SQUARE_COMMENT_REPLY,
+        NotificationEventTypeChoice.SQUARE_COMMENT_MENTION,
+    )
+    SQUARE_TYPES = (*SQUARE_COMMENT_TYPES, NotificationEventTypeChoice.SQUARE_STATEMENT_LIKE,
+                    NotificationEventTypeChoice.SQUARE_STATEMENT_REMOVED)
+
     space = models.ForeignKey('Space.Space', on_delete=models.CASCADE, related_name='notification_events', db_index=True)
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notification_events', db_index=True)
     actor = models.ForeignKey(
@@ -2963,19 +2983,32 @@ class NotificationEvent(models.Model):
         )
 
     @classmethod
-    def mark_square_events_read(cls, user, statement_id=None):
-        square_types = (
-            NotificationEventTypeChoice.SQUARE_STATEMENT_LIKE,
-            NotificationEventTypeChoice.SQUARE_STATEMENT_COMMENT,
-            NotificationEventTypeChoice.SQUARE_COMMENT_LIKE,
-            NotificationEventTypeChoice.SQUARE_COMMENT_REPLY,
-            NotificationEventTypeChoice.SQUARE_STATEMENT_REMOVED,
-            NotificationEventTypeChoice.SQUARE_COMMENT_MENTION,
+    def visible_for(cls, user):
+        from Square.models import StatementComment
+
+        # Older events without a comment ID have no linked comment to open.
+        visible_ids = StatementComment.visible_for(user).order_by().values('pk')
+        return cls.objects.filter(user=user).alias(
+            linked_comment_id=Cast(KeyTextTransform('comment_id', 'payload'), BigIntegerField()),
+        ).filter(
+            ~Q(event_type__in=cls.SQUARE_COMMENT_TYPES)
+            | ~Q(payload__has_key='comment_id')
+            | Q(linked_comment_id__in=visible_ids)
         )
-        unread = cls.objects.filter(user=user, is_read=False, event_type__in=square_types)
+
+    @classmethod
+    def square_comment_available(cls, user, event_type, comment_id):
+        if event_type not in cls.SQUARE_COMMENT_TYPES or comment_id is None:
+            return True
+        from Square.models import StatementComment
+        return StatementComment.visible_for(user).filter(pk=comment_id).exists()
+
+    @classmethod
+    def mark_square_events_read(cls, user, statement_id=None):
+        unread = cls.visible_for(user).filter(is_read=False, event_type__in=cls.SQUARE_TYPES)
         target = unread.filter(payload__statement_id=statement_id) if statement_id is not None else unread
         updated = target.update(is_read=True)
-        return updated, cls.objects.filter(user=user, is_read=False, event_type__in=square_types).count()
+        return updated, unread.count()
 
     def render_delivery_message(
         self,
@@ -3181,7 +3214,7 @@ class NotificationEvent(models.Model):
 
     @classmethod
     def emit_square_event(cls, user, actor, event_type, statement_id, comment_id=None, anonymous_actor=False):
-        if user.id == actor.id:
+        if user.id == actor.id or not cls.square_comment_available(user, event_type, comment_id):
             return None
         event = cls.objects.create(
             space_id=user.space_id,
@@ -3578,12 +3611,25 @@ class NotificationDelivery(models.Model):
                 return str(title), str(body)
             return event.render_delivery_message()
 
+    def _skip_hidden_square_comment(self):
+        event = self.event
+        if NotificationEvent.square_comment_available(
+            event.user, event.event_type, (event.payload or {}).get('comment_id'),
+        ):
+            return False
+        self.status = NotificationDeliveryStatusChoice.SKIPPED
+        self.detail = 'square_comment_unavailable'
+        self.save(update_fields=['status', 'detail'])
+        return True
+
     def _attempt_send_web(self):
         from Chat.voice_notifications import invitation_expired
         if invitation_expired(self.event):
             self.status = NotificationDeliveryStatusChoice.SKIPPED
             self.detail = 'call_expired'
             self.save(update_fields=['status', 'detail'])
+            return self
+        if self._skip_hidden_square_comment():
             return self
         from utils.webpush import WebPushNotConfigured, is_expired_subscription_error, send_web_push
 
@@ -3946,6 +3992,8 @@ class NotificationDelivery(models.Model):
             self.status = NotificationDeliveryStatusChoice.SKIPPED
             self.detail = 'call_expired'
             self.save(update_fields=['status', 'detail'])
+            return self
+        if self._skip_hidden_square_comment():
             return self
         target = self.instant_endpoint.target if self.instant_endpoint_id else self._channel_target(self.event.user, self.channel)
         if not target:

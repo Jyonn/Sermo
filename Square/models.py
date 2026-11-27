@@ -14,12 +14,22 @@ from Friendship.models import Friendship, FriendshipStatusChoice
 from Message.models import ForwardBundle, ForwardBundleItem, LinkPreview, MessageValidator
 from Square.validators import SquareErrors
 from Sticker.models import StickerAsset
+from User.models import SquareCommentMode
 from utils.qiniu import avatar_uri_for_key, validate_message_media_key
 
 
 class StatementVisibilityChoice(Choice):
     PUBLIC = 0
     FRIENDS = 1
+
+
+def _square_circle(user):
+    if user is None:
+        return set()
+    friendships = Friendship.objects.filter(
+        space_id=user.space_id, status=FriendshipStatusChoice.ACCEPTED,
+    ).filter(Q(user_low=user) | Q(user_high=user)).values_list('user_low_id', 'user_high_id')
+    return {user.id, *(high if low == user.id else low for low, high in friendships)}
 
 
 class StatementMediaKindChoice(Choice):
@@ -266,17 +276,11 @@ class Statement(models.Model):
 
     @classmethod
     def visible_for(cls, user):
-        friend_ids = Friendship.objects.filter(
-            space=user.space,
-            status=FriendshipStatusChoice.ACCEPTED,
-        ).filter(Q(user_low=user) | Q(user_high=user)).values_list('user_low_id', 'user_high_id')
-        visible_author_ids = {user.id}
-        for low_id, high_id in friend_ids:
-            visible_author_ids.add(high_id if low_id == user.id else low_id)
-        return cls.objects.filter(space=user.space, is_deleted=False).filter(
-            Q(visibility=StatementVisibilityChoice.PUBLIC)
-            | Q(user_id__in=visible_author_ids)
-        )
+        return cls.objects.filter(space_id=user.space_id, is_deleted=False).filter(cls.audience_filter(_square_circle(user)))
+
+    @staticmethod
+    def audience_filter(circle, prefix=''):
+        return Q(**{prefix + 'visibility': StatementVisibilityChoice.PUBLIC}) | Q(**{prefix + 'user_id__in': circle})
 
     @classmethod
     def _apply_feed_scope(cls, queryset, user, scope='all', user_id=None):
@@ -343,7 +347,7 @@ class Statement(models.Model):
             statement_media_prefetch(), statement_forward_bundle_prefetch(),
             'qzone_source__emoticons__media_asset',
         ).annotate(
-            visible_comment_count=Count('comments', filter=Q(comments__is_deleted=False), distinct=True),
+            visible_comment_count=StatementComment.count_for(user),
             visible_like_count=Count('likes', distinct=True),
             viewer_liked=Exists(StatementLike.objects.filter(statement_id=OuterRef('pk'), user=user)),
         )
@@ -385,7 +389,7 @@ class Statement(models.Model):
             statement_media_prefetch(), statement_forward_bundle_prefetch(),
             'qzone_source__emoticons__media_asset',
         ).annotate(
-            visible_comment_count=Count('comments', filter=Q(comments__is_deleted=False), distinct=True),
+            visible_comment_count=StatementComment.count_for(viewer),
             visible_like_count=Count('likes', distinct=True),
             viewer_liked=Exists(StatementLike.objects.filter(statement_id=OuterRef('pk'), user=viewer)),
         )
@@ -402,7 +406,7 @@ class Statement(models.Model):
                 statement_media_prefetch(), statement_forward_bundle_prefetch(),
                 'qzone_source__emoticons__media_asset',
             ).annotate(
-                visible_comment_count=Count('comments', filter=Q(comments__is_deleted=False), distinct=True),
+                visible_comment_count=StatementComment.count_for(user),
                 visible_like_count=Count('likes', distinct=True),
                 viewer_liked=Exists(StatementLike.objects.filter(statement_id=OuterRef('pk'), user=user)),
             ).get(id=statement_id)
@@ -567,7 +571,10 @@ class Statement(models.Model):
             is_mine=bool(viewer and viewer.id == self.user_id),
             can_edit=bool(viewer and viewer.id == self.user_id),
             **self.editable_payload(request),
-            comment_count=getattr(self, 'visible_comment_count', self.comments.filter(is_deleted=False).count()),
+            comment_count=(
+                self.visible_comment_count if hasattr(self, 'visible_comment_count') else
+                self.comments.filter(StatementComment.audience_filter(_square_circle(viewer))).count()
+            ),
             like_count=getattr(self, 'visible_like_count', self.likes.count()),
             liked=bool(getattr(self, 'viewer_liked', viewer and self.likes.filter(user=viewer).exists())),
             can_delete=bool(viewer and (viewer.id == self.user_id or viewer.is_official and viewer.space_id == self.space_id)),
@@ -631,6 +638,33 @@ class StatementComment(models.Model):
     class Meta:
         ordering = ['-id']
 
+    @staticmethod
+    def audience_filter(circle, *, comment_prefix='', statement_prefix='statement__'):
+        return Q(**{comment_prefix + 'is_deleted': False}) & (
+            Q(**{statement_prefix + 'user__square_comment_mode': SquareCommentMode.PUBLIC})
+            | Q(**{comment_prefix + 'user_id__in': circle})
+        )
+
+    @classmethod
+    def count_for(cls, viewer):
+        return Count('comments', filter=cls.audience_filter(
+            _square_circle(viewer), comment_prefix='comments__', statement_prefix='',
+        ), distinct=True)
+
+    @classmethod
+    def visible_for(cls, viewer):
+        circle = _square_circle(viewer)
+        return cls.objects.filter(statement__space_id=viewer.space_id, statement__is_deleted=False).filter(
+            Statement.audience_filter(circle, 'statement__'), cls.audience_filter(circle),
+        )
+
+    @classmethod
+    def get_visible(cls, viewer, comment_id):
+        try:
+            return cls.visible_for(viewer).select_related('statement').get(pk=comment_id)
+        except cls.DoesNotExist:
+            raise SquareErrors.NOT_EXISTS
+
     @classmethod
     def statement_for_user(cls, user, statement_id):
         try:
@@ -642,7 +676,7 @@ class StatementComment(models.Model):
     def feed(cls, user, statement_id, offset=0, limit=30, sort='hot', request=None):
         user.require_capability('square.browse')
         statement = cls.statement_for_user(user, statement_id)
-        queryset = cls.objects.filter(statement=statement, is_deleted=False).select_related(
+        queryset = cls.visible_for(user).filter(statement=statement).select_related(
             'statement', 'user', 'user__qq_identity', 'parent__user', 'parent__user__qq_identity',
             'reply_to_user', 'reply_to_user__qq_identity', 'sticker_asset',
         ).prefetch_related(
@@ -654,22 +688,20 @@ class StatementComment(models.Model):
         )
         comments = list(queryset)
         comments_by_id = {comment.id: comment for comment in comments}
-        roots = [comment for comment in comments if comment.parent_id is None]
+        roots = [comment for comment in comments if comment.parent_id not in comments_by_id]
         replies_by_root = {comment.id: [] for comment in roots}
 
         for comment in comments:
-            if comment.parent_id is None:
+            comment.visible_parent = comments_by_id.get(comment.parent_id)
+            if comment.visible_parent is None:
+                comment.thread_root_id = None
                 continue
-            root = comment
+            root = comment.visible_parent
             visited = set()
-            while root.parent_id is not None and root.parent_id not in visited:
+            while root.parent_id in comments_by_id and root.id not in visited:
                 visited.add(root.id)
-                parent = comments_by_id.get(root.parent_id)
-                if parent is None:
-                    root = None
-                    break
-                root = parent
-            if root is not None and root.id in replies_by_root:
+                root = comments_by_id[root.parent_id]
+            if root.id in replies_by_root:
                 comment.thread_root_id = root.id
                 replies_by_root[root.id].append(comment)
 
@@ -704,12 +736,21 @@ class StatementComment(models.Model):
         self.comment_mentions.exclude(user_id__in=token_ids & requested_ids).delete()
         StatementCommentMention.record(self, author, token_ids & requested_ids)
 
-    def resolve_thread_root(self):
-        if self.parent_id is not None:
-            root = self.parent
-            while root.parent_id is not None:
-                root = root.parent
-            self.thread_root_id = root.id
+    def resolve_thread_for(self, viewer):
+        self.visible_parent = None
+        self.thread_root_id = None
+        if self.parent_id is None or viewer is None:
+            return
+        visible = type(self).visible_for(viewer).filter(statement_id=self.statement_id).select_related('user', 'user__qq_identity')
+        parent = visible.filter(pk=self.parent_id).first()
+        if parent is None:
+            return
+        self.visible_parent = parent
+        visited = {self.id}
+        while parent is not None and parent.id not in visited:
+            visited.add(parent.id)
+            self.thread_root_id = parent.id
+            parent = visible.filter(pk=parent.parent_id).first() if parent.parent_id else None
 
     @classmethod
     @transaction.atomic
@@ -737,10 +778,9 @@ class StatementComment(models.Model):
         parent = None
         if parent_id is not None:
             try:
-                parent = cls.objects.select_related('user', 'parent').get(
+                parent = cls.visible_for(user).select_related('user').get(
                     id=parent_id,
                     statement=statement,
-                    is_deleted=False,
                 )
             except cls.DoesNotExist:
                 raise SquareErrors.NOT_EXISTS
@@ -754,7 +794,6 @@ class StatementComment(models.Model):
             sticker_asset=sticker_asset,
         )
         comment.record_mentions(user, normalized_text, mention_user_ids)
-        comment.resolve_thread_root()
         comment.visible_like_count = 0
         comment.viewer_liked = False
         user.award_growth('explore:square_reply' if parent is not None else 'explore:square_comment')
@@ -779,22 +818,25 @@ class StatementComment(models.Model):
             self.edit_revision += 1
             self.save(update_fields=['text', 'sticker_asset', 'edited_at', 'edit_revision'])
             self.record_mentions(user, text, mention_user_ids)
-        self.resolve_thread_root()
 
     def jsonl(self, viewer=None, include_replies=False, request=None):
+        if not hasattr(self, 'visible_parent'):
+            self.resolve_thread_for(viewer)
+        parent = self.visible_parent
         like_count = self.visible_like_count if hasattr(self, 'visible_like_count') else self.likes.count()
-        reply_count = 0 if self.parent_id else (
-            self.visible_reply_count if hasattr(self, 'visible_reply_count') else self.replies.filter(is_deleted=False).count()
+        reply_count = 0 if parent else (
+            self.visible_reply_count if hasattr(self, 'visible_reply_count') else
+            self.replies.filter(type(self).audience_filter(_square_circle(viewer))).count()
         )
         payload = dict(
             comment_id=self.id,
             statement_id=self.statement_id,
-            parent_id=self.parent_id,
-            root_id=getattr(self, 'thread_root_id', self.parent_id),
+            parent_id=parent.id if parent else None,
+            root_id=self.thread_root_id,
             reply_to_user=(
-                anonymous_user_json()
-                if self.parent_id and self.parent.is_anonymous
-                else self.reply_to_user.tiny_json() if self.reply_to_user_id else None
+                None if parent is None else
+                anonymous_user_json() if parent.is_anonymous else
+                self.reply_to_user.tiny_json() if self.reply_to_user_id else None
             ),
             user=anonymous_user_json() if self.is_anonymous else self.user.tiny_json(),
             is_anonymous=self.is_anonymous,
@@ -842,8 +884,10 @@ class StatementComment(models.Model):
             if next_ids.issubset(delete_ids):
                 break
             delete_ids.update(next_ids)
+        visible_ids = type(self).visible_for(user).filter(id__in=delete_ids).order_by('id').values_list('id', flat=True)
+        visible_ids = list(visible_ids)
         type(self).objects.filter(id__in=delete_ids, is_deleted=False).update(is_deleted=True)
-        return sorted(delete_ids)
+        return visible_ids
 
 
 class StatementCommentMention(models.Model):

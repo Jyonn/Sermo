@@ -27,7 +27,6 @@ from User.models import (
     User,
     NotificationPreference,
     NotificationEvent,
-    NotificationEventTypeChoice,
     UserStateEvent,
     NotificationTopicPreference,
     WebPushSubscription,
@@ -65,6 +64,7 @@ from User.params import (
     UserGrowthAcknowledgementParams,
     UserFeatureDiscoveryParams,
     UserPrivateAccountParams,
+    UserSquareCommentModeParams,
     UserContactUnbindParams,
     QQIdentityParams,
     UserPasswordRecoveryParams,
@@ -329,6 +329,15 @@ class PrivateAccountView(View):
         return request.user.json_me()
 
 
+class SquareCommentModeView(View):
+    @auth.require_user
+    @analyse.json(UserSquareCommentModeParams.mode)
+    def post(self, request: Request):
+        request.user.square_comment_mode = request.json.mode
+        request.user.save(update_fields=['square_comment_mode'])
+        return dict(square_comment_mode=request.user.square_comment_mode)
+
+
 class NotificationPreferenceView(View):
     @auth.require_user
     def get(self, request: Request):
@@ -516,20 +525,12 @@ class NotificationTopicPreferenceView(View):
 
 
 class NotificationEventView(View):
-    SQUARE_TYPES = (
-        NotificationEventTypeChoice.SQUARE_STATEMENT_LIKE,
-        NotificationEventTypeChoice.SQUARE_STATEMENT_COMMENT,
-        NotificationEventTypeChoice.SQUARE_COMMENT_LIKE,
-        NotificationEventTypeChoice.SQUARE_COMMENT_REPLY,
-        NotificationEventTypeChoice.SQUARE_STATEMENT_REMOVED,
-        NotificationEventTypeChoice.SQUARE_COMMENT_MENTION,
-    )
-
     @auth.require_user
     def get(self, request: Request):
-        queryset = NotificationEvent.objects.filter(user=request.user).select_related('actor').order_by('-id')
+        visible_events = NotificationEvent.visible_for(request.user)
+        queryset = visible_events.select_related('actor').order_by('-id')
         if request.GET.get('category') == 'square':
-            queryset = queryset.filter(event_type__in=self.SQUARE_TYPES)
+            queryset = queryset.filter(event_type__in=NotificationEvent.SQUARE_TYPES)
         if request.GET.get('unread_only') == '1':
             queryset = queryset.filter(is_read=False)
         try:
@@ -545,7 +546,7 @@ class NotificationEventView(View):
         rows = list(queryset[:limit + 1])
         return dict(
             events=[event.json() for event in rows[:limit]],
-            unread_count=NotificationEvent.objects.filter(user=request.user, is_read=False, event_type__in=self.SQUARE_TYPES).count(),
+            unread_count=visible_events.filter(is_read=False, event_type__in=NotificationEvent.SQUARE_TYPES).count(),
             has_more=len(rows) > limit,
         )
 

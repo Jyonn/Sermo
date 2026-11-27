@@ -457,7 +457,7 @@ class StatementSyncView(View):
         # indistinguishable from deleted IDs, including IDs in other spaces.
         from django.db.models import Count, Exists, OuterRef
         rows = list(Statement.visible_for(request.user).filter(id__in=ids).select_related('user').annotate(
-            sync_comments=Count('comments', filter=Q(comments__is_deleted=False), distinct=True),
+            sync_comments=StatementComment.count_for(request.user),
             sync_likes=Count('likes', distinct=True),
             sync_liked=Exists(StatementLike.objects.filter(statement_id=OuterRef('pk'), user=request.user)),
         ))
@@ -599,11 +599,7 @@ class StatementCommentLikeView(View):
     def post(self, request: Request, comment_id: int):
         request.user.space.require_square_enabled()
         request.user.require_capability('square.interaction.like')
-        try:
-            comment = StatementComment.objects.select_related('statement').get(id=comment_id, is_deleted=False)
-        except StatementComment.DoesNotExist:
-            raise SquareErrors.NOT_EXISTS
-        StatementComment.statement_for_user(request.user, comment.statement_id)
+        comment = StatementComment.get_visible(request.user, comment_id)
         _like, created = StatementCommentLike.objects.get_or_create(comment=comment, user=request.user)
         if created:
             request.user.award_growth('explore:square_comment_like')
@@ -616,11 +612,7 @@ class StatementCommentLikeView(View):
     @auth.require_user
     def delete(self, request: Request, comment_id: int):
         request.user.space.require_square_enabled()
-        try:
-            comment = StatementComment.objects.select_related('statement').get(id=comment_id, is_deleted=False)
-        except StatementComment.DoesNotExist:
-            raise SquareErrors.NOT_EXISTS
-        StatementComment.statement_for_user(request.user, comment.statement_id)
+        comment = StatementComment.get_visible(request.user, comment_id)
         StatementCommentLike.objects.filter(comment=comment, user=request.user).delete()
         return dict(liked=False, like_count=comment.likes.count())
 
@@ -631,10 +623,9 @@ class StatementCommentDetailView(View):
         statement_id = StatementComment.objects.filter(id=comment_id, is_deleted=False, statement__space_id=user.space_id).values_list('statement_id', flat=True).first()
         if statement_id is None:
             raise SquareErrors.NOT_EXISTS
-        StatementComment.statement_for_user(user, statement_id)
         if not Statement.objects.select_for_update().filter(id=statement_id, is_deleted=False).first():
             raise SquareErrors.NOT_EXISTS
-        comment = StatementComment.objects.select_for_update().select_related('statement', 'user').filter(id=comment_id, is_deleted=False).first()
+        comment = StatementComment.visible_for(user).select_for_update().select_related('statement', 'user').filter(id=comment_id).first()
         if comment is None:
             raise SquareErrors.NOT_EXISTS
         return comment
@@ -658,13 +649,14 @@ class StatementCommentDetailView(View):
     def delete(self, request: Request, comment_id: int):
         request.user.space.require_square_enabled()
         comment = self.locked_comment(request.user, comment_id)
+        comment.resolve_thread_for(request.user)
         deleted_ids = comment.delete_for(request.user)
         return dict(
             comment_id=comment.id,
             statement_id=comment.statement_id,
             deleted_count=len(deleted_ids),
             deleted_ids=deleted_ids,
-            root_deleted=comment.parent_id is None,
+            root_deleted=comment.visible_parent is None,
         )
 
 

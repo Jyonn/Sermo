@@ -1,6 +1,6 @@
 """Text-only, field-allowlisted adapters. Never proxy an ordinary session API."""
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import Exists, OuterRef, Q
 from django.views import View
 
 from Chat.models import Chat, ChatPurposeChoice, Submission, SubmissionStatusChoice
@@ -48,7 +48,8 @@ def statement_payload(item):
 
 
 def comment_payload(item):
-    return dict(comment_id=item.id, statement_id=item.statement_id, parent_id=item.parent_id,
+    return dict(comment_id=item.id, statement_id=item.statement_id,
+                parent_id=item.parent_id if getattr(item, 'viewer_parent_visible', False) else None,
                 user=None if item.is_anonymous else account(item.user), is_anonymous=item.is_anonymous,
                 text=item.text if not item.sticker_asset_id else None, created_at=item.created_at.timestamp())
 
@@ -84,7 +85,10 @@ class OAuthSquareCommentsView(View):
     @require_scope('square.read')
     def get(self, request, statement_id):
         statement = StatementComment.statement_for_user(request.user, statement_id)
-        rows = StatementComment.objects.filter(statement=statement, is_deleted=False, id__gt=integer(request.GET, 'after'))
+        visible = StatementComment.visible_for(request.user).filter(statement=statement)
+        rows = visible.filter(id__gt=integer(request.GET, 'after')).annotate(
+            viewer_parent_visible=Exists(visible.filter(id=OuterRef('parent_id'))),
+        )
         limit = integer(request.GET, 'limit', 30, 100)
         rows = list(rows.select_related('user').order_by('id')[:limit+1])
         return dict(comments=[comment_payload(row) for row in rows[:limit]], has_more=len(rows)>limit,
