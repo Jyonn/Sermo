@@ -1,20 +1,18 @@
 """Verified, space-local tables. Hands and turn resolution stay on the server."""
 import secrets
-from datetime import datetime, timedelta
-from fractions import Fraction
-from zoneinfo import ZoneInfo
+from datetime import timedelta
 
 from django.db import transaction
-from django.db.models import Count, Prefetch, Q, Sum
+from django.db.models import Prefetch
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from smartdjango import Code, Error
 
 from Activity.card_game import DECK_SIZE, advance_trick, automatic_play, card_rank, distribute, next_position
+from Activity.game_leaderboard import annual_rankings
 from Activity.landlord_rules import beats, classify, hint
 from Activity.models import LandlordRoundResult, LandlordSeat, LandlordTable
 from Activity.table_activity import ROOM_WAIT, activity_payload, activity_run, eligible, forfeit_scores, new_room, public_user, room_code
-from User.models import User
 
 
 @Error.register
@@ -31,7 +29,6 @@ class LandlordErrors:
 class LandlordService:
     KEY = 'landlord'
     MODE = 'landlord'
-    ZONE = ZoneInfo('Asia/Shanghai')
     STATUS = LandlordTable.Status
     BETWEEN_ROUNDS = (STATUS.WAITING, STATUS.FINISHED)
     IN_ROUND = (STATUS.BIDDING, STATUS.DOUBLING, STATUS.PLAYING)
@@ -438,33 +435,4 @@ class LandlordService:
 
     @classmethod
     def leaderboard(cls, key, user, year, metric='points'):
-        run = cls.run(key, user)
-        now_year = timezone.now().astimezone(cls.ZONE).year
-        first_year = run.claimed_at.astimezone(cls.ZONE).year
-        try:
-            year = int(year) if year else now_year
-        except (TypeError, ValueError):
-            raise LandlordErrors.INVALID
-        if not first_year <= year <= now_year or metric not in ('points', 'win_rate'):
-            raise LandlordErrors.INVALID
-        rows = list(LandlordRoundResult.objects.filter(
-            table__run=run, user__is_deleted=False,
-            finished_at__gte=datetime(year, 1, 1, tzinfo=cls.ZONE),
-            finished_at__lt=datetime(year + 1, 1, 1, tzinfo=cls.ZONE),
-        ).values('user_id').annotate(games=Count('pk'), wins=Count('pk', filter=Q(won=True)), points=Sum('score')))
-        for row in rows:
-            row['rate'] = Fraction(row['wins'], row['games'])
-        rows.sort(key=lambda row: (-row['points'], row['user_id']) if metric == 'points'
-                  else (-row['rate'], -row['games'], row['user_id']))
-        members = User.objects.only('id', 'name', 'avatar_type', 'avatar_uri').in_bulk([row['user_id'] for row in rows[:50]])
-        top, mine, place, previous = [], None, 0, None
-        for position, row in enumerate(rows, 1):
-            score = row['points'] if metric == 'points' else row['rate']
-            if score != previous:
-                previous, place = score, position
-            result = dict(rank=place, wins=row['wins'], games=row['games'], points=row['points'], win_rate=float(row['rate']))
-            if row['user_id'] == user.pk:
-                mine = result
-            if row['user_id'] in members:
-                top.append(dict(**result, member=cls._public_user(members[row['user_id']])))
-        return dict(year=year, years=list(range(now_year, first_year - 1, -1)), metric=metric, rows=top, mine=mine)
+        return annual_rankings(cls.run(key, user), user, year, metric)

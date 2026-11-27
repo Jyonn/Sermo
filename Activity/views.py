@@ -116,6 +116,15 @@ class LandlordLeaderboardView(View):
         ))
 
 
+class GameLeaderboardView(View):
+    @auth.require_user
+    def get(self, request: Request, key: str):
+        from Activity.game_leaderboard import game_leaderboard
+        return LandlordView._response(game_leaderboard(
+            key, request.user, request.GET.get('year'), request.GET.get('metric', 'points'),
+        ))
+
+
 class FourPlayerView(View):
     @auth.require_user
     def get(self, request: Request, key: str):
