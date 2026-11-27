@@ -33,7 +33,7 @@ from User.models import (
     NotificationDelivery, NotificationDeliveryStatusChoice, NotificationEvent,
     NotificationEventTypeChoice, User, UserNotificationChoice, UserRoleChoice,
 )
-from Message.models import Message, MessageTypeChoice
+from Message.models import FlashImage, ForwardBundle, ForwardBundleItem, Message, MessageEvent, MessageTypeChoice
 from utils import auth
 from utils.notificator_integration import send_reviewable_mail
 
@@ -309,6 +309,62 @@ class PlatformAdminSecurityTests(TestCase):
         reply_payload = next(item for item in payload['messages'] if item['message_id'] == reply.id)
         self.assertEqual(reply_payload['reply_to']['message_id'], original.id)
         self.assertEqual(reply_payload['reply_to']['content'], 'original')
+
+    def test_audit_flash_image_preview_is_private_and_does_not_record_views(self):
+        space = Space.objects.create(name='Flash Audit', slug='flash-audit', email='owner@example.com')
+        sender = User.objects.create(space=space, name='Sender', role=UserRoleChoice.MEMBER)
+        recipient = User.objects.create(space=space, name='Recipient', lower_name='recipient', role=UserRoleChoice.MEMBER)
+        chat = Chat.objects.create(space=space, chat_type=ChatTypeChoice.GROUP, title='Private Chat', created_by=sender)
+        message = Message.objects.create(chat=chat, user=sender, type=MessageTypeChoice.FLASH_IMAGE, is_deleted=True)
+        photo = FlashImage.objects.create(
+            message=message, storage_key='private/flash.jpg', pixels=b'', thumbnail='Ymx1cnJlZA==',
+            pending_viewers=[recipient.id], viewed_users=[], expires_at=timezone.now() - datetime.timedelta(days=1),
+        )
+        admin_auth = {'HTTP_AUTHORIZATION': f'Bearer {auth.get_platform_admin_token("admin@example.com")["auth"]}'}
+        user_auth = {'HTTP_AUTHORIZATION': f'Bearer {auth.get_login_token(recipient)["auth"]}'}
+        url = f'/platform-admin/chats/{chat.id}/messages/{message.id}/flash-image'
+        self.assertGreaterEqual(self.client.post(url, {'reason': 'incident'}, content_type='application/json', **user_auth).status_code, 400)
+        self.assertEqual(self.client.post(url, {}, content_type='application/json', **admin_auth).status_code, 403)
+        wrong_chat = f'/platform-admin/chats/{chat.id + 1}/messages/{message.id}/flash-image'
+        self.assertEqual(self.client.post(wrong_chat, {'reason': 'incident'}, content_type='application/json', **admin_auth).status_code, 404)
+        listing = self.client.get(f'/platform-admin/chats/{chat.id}/messages?reason=incident', **admin_auth)
+        preview = listing.json()['body']['messages'][0]['payload']
+        self.assertTrue(preview['flash_audit_available'])
+        self.assertEqual(preview['flash_thumbnail'], photo.thumbnail)
+        self.assertNotIn(photo.storage_key, listing.content.decode())
+        events = MessageEvent.objects.filter(message=message).count()
+        with patch('PlatformAdmin.views.read_photo', return_value=b'\xff\xd8\xfffixture') as read:
+            for _ in range(2):
+                response = self.client.post(url, {'reason': 'incident'}, content_type='application/json', **admin_auth)
+                self.assertEqual(response.status_code, 200, response.content)
+                self.assertEqual(response['Content-Type'], 'image/jpeg')
+                self.assertIn('no-store', response['Cache-Control'])
+                self.assertEqual(response.content, b'\xff\xd8\xfffixture')
+            self.assertEqual(read.call_count, 2)
+        photo.refresh_from_db()
+        self.assertEqual(photo.pending_viewers, [recipient.id])
+        self.assertEqual(photo.viewed_users, [])
+        self.assertEqual(MessageEvent.objects.filter(message=message).count(), events)
+        self.assertEqual(PlatformAuditLog.objects.filter(action='message.flash_image_viewed', target_id=message.id, summary='incident').count(), 2)
+
+    def test_audit_flash_image_uses_the_forwarded_delivery_position(self):
+        space = Space.objects.create(name='Forward Audit', slug='forward-audit', email='owner@example.com')
+        sender = User.objects.create(space=space, name='Sender', role=UserRoleChoice.MEMBER)
+        chat = Chat.objects.create(space=space, chat_type=ChatTypeChoice.GROUP, title='Forwarded Chat', created_by=sender)
+        bundle = ForwardBundle.objects.create(created_by=sender)
+        message = Message.objects.create(chat=chat, user=sender, type=MessageTypeChoice.FORWARD_BUNDLE, forward_bundle=bundle)
+        ForwardBundleItem.objects.create(bundle=bundle, position=1, author={'user_id': sender.id, 'name': sender.name},
+                                         message_type=MessageTypeChoice.FLASH_IMAGE, sent_at=timezone.now())
+        photo = FlashImage.objects.create(message=message, position=1, pixels=b'\xff\xd8\xffforwarded', expires_at=timezone.now())
+        headers = {'HTTP_AUTHORIZATION': f'Bearer {auth.get_platform_admin_token("admin@example.com")["auth"]}'}
+        listing = self.client.get(f'/platform-admin/chats/{chat.id}/messages?reason=incident', **headers).json()['body']
+        item = listing['messages'][0]['payload']['items'][0]['payload']
+        self.assertEqual((item['flash_message_id'], item['flash_position']), (message.id, 1))
+        url = f'/platform-admin/chats/{chat.id}/messages/{message.id}/flash-image'
+        self.assertEqual(self.client.post(url, {'reason': 'incident'}, content_type='application/json', **headers).status_code, 404)
+        response = self.client.post(url, {'reason': 'incident', 'position': 1}, content_type='application/json', **headers)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.content, photo.pixels)
 
     def test_message_delivery_audit_is_read_only_and_logged(self):
         space = Space.objects.create(name='Delivery Space', slug='delivery-space', email='owner@example.com')

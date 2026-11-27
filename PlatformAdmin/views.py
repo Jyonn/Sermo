@@ -3,8 +3,9 @@ import json
 import secrets
 from urllib.parse import quote
 
+import requests
 from django.db import transaction
-from django.db.models import Count, Q
+from django.db.models import Count, Prefetch, Q
 from django.utils import timezone
 from django.views import View
 from smartdjango import OK
@@ -12,7 +13,8 @@ from smartdjango import OK
 from Chat.models import Chat, ChatMember, ChatMemberStatusChoice
 from Config.models import CI, Config
 from Friendship.models import Friendship, FriendshipStatusChoice
-from Message.models import Message
+from Message.flash_images import private_response, read_photo
+from Message.models import FlashImage, Message, MessageTypeChoice
 from PlatformAdmin.models import (
     PlatformAdminEmailCode,
     PlatformAdminEmailReviewRecord,
@@ -324,7 +326,11 @@ class ChatMessageView(View):
         _audit(request, 'chat.messages_viewed', 'chat', chat.id, request.GET.get('reason', '')[:255])
         queryset = Message.objects.filter(chat=chat).select_related(
             'user', 'reply_to', 'reply_to__user', 'media_resource', 'media_resource__asset',
-        ).prefetch_related('chat_mentions__user')
+        ).prefetch_related(
+            'chat_mentions__user',
+            Prefetch('flash_images', queryset=FlashImage.objects.only('message_id', 'position', 'thumbnail'),
+                     to_attr='audit_flash_images'),
+        )
         if before:
             queryset = queryset.filter(id__lt=int(before))
         messages = list(queryset.order_by('-id')[:limit + 1])
@@ -332,11 +338,66 @@ class ChatMessageView(View):
         messages = messages[:limit]
         return dict(
             chat=chat.jsonl(),
-            messages=[item.jsonl(request=request, include_deleted=True) for item in messages],
+            messages=[_audit_message_payload(item, request) for item in messages],
             has_more=has_more,
             next_before=messages[-1].id if has_more and messages else None,
             first_person_user_id=int(perspective_user_id) if perspective_user_id else None,
         )
+
+
+def _audit_message_payload(message, request):
+    result = message.jsonl(request=request, include_deleted=True)
+    photos = {photo.position: photo for photo in message.audit_flash_images}
+
+    def preview(position):
+        photo = photos.get(position)
+        return dict(
+            kind='flash_image',
+            flash_audit_available=photo is not None,
+            flash_thumbnail=photo.thumbnail if photo else None,
+            flash_message_id=message.id,
+            flash_position=position,
+        )
+
+    if message.type == MessageTypeChoice.FLASH_IMAGE:
+        result['payload'] = preview(-1)
+    elif message.type == MessageTypeChoice.FORWARD_BUNDLE:
+        for item in (result['payload'] or {}).get('items', []):
+            if item['type'] == MessageTypeChoice.FLASH_IMAGE:
+                item['payload'] = preview(item['position'])
+    elif message.is_deleted and message.media_resource_id and message.type in Message.MEDIA_KIND_BY_TYPE:
+        # The normal media endpoint only serves assets with a live reference.
+        asset = message.media_resource.asset
+        result['payload']['uri'] = asset.delivery_uri()
+        result['payload'].pop('thumbnail_uri', None)
+    return result
+
+
+class ChatFlashImageView(View):
+    @auth.require_platform_admin
+    def post(self, request, chat_id, message_id):
+        data = _body(request)
+        reason = _value(data, 'reason')
+        if not isinstance(reason, str) or not reason.strip():
+            raise PlatformAdminErrors.ACCESS_DENIED
+        position = _value(data, 'position', -1)
+        if type(position) is not int or not -1 <= position <= 32767:
+            return private_response(status=404)
+        message_type = MessageTypeChoice.FLASH_IMAGE if position == -1 else MessageTypeChoice.FORWARD_BUNDLE
+        photo = FlashImage.objects.filter(
+            message_id=message_id, message__chat_id=chat_id, message__type=message_type, position=position,
+        ).first()
+        if photo is None:
+            return private_response(status=404)
+        try:
+            pixels = read_photo(photo.storage_key) if photo.storage_key else bytes(photo.pixels)
+        except (ValueError, requests.RequestException):
+            return private_response(status=503)
+        if not pixels:
+            return private_response(status=404)
+        _audit(request, 'message.flash_image_viewed', 'message', message_id, reason.strip(),
+               metadata={'chat_id': chat_id, 'position': position})
+        return private_response(pixels)
 
 
 def _delivery_status(value):

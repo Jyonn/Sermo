@@ -7,7 +7,7 @@ from PlatformAdmin.debug_reports import DebugReportDetailView, DebugReportListVi
 
 from PlatformAdmin.views import (
     FounderMedalView,
-    AuditLogView, ChatListView, ChatMessageView, DashboardView, EmailCodeView, EmailDeliveryListView,
+    AuditLogView, ChatFlashImageView, ChatListView, ChatMessageView, DashboardView, EmailCodeView, EmailDeliveryListView,
     EmailReviewDetailView, EmailReviewView,
     IdentityDocumentView, IdentityReviewView, LoginView, MemberListView, MessageDeliveryView,
     MfaDisableView, MfaSetupView, MfaVerifyView, SpaceFeatureGrantView, SpaceListView,
@@ -37,6 +37,7 @@ urlpatterns = [
     path('members/<int:user_id>/chats', ChatListView.as_view()),
     path('members/<int:user_id>/founder-medal', FounderMedalView.as_view()),
     path('chats/<int:chat_id>/messages', ChatMessageView.as_view()),
+    path('chats/<int:chat_id>/messages/<int:message_id>/flash-image', ChatFlashImageView.as_view()),
     path('messages/<int:message_id>/deliveries', MessageDeliveryView.as_view()),
     path('email-deliveries', EmailDeliveryListView.as_view()),
     path('email-review', EmailReviewView.as_view()),
