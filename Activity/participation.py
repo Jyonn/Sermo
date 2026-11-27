@@ -3,7 +3,8 @@ from django.db.models import Q
 
 
 def activity_participation(runs, space_id):
-    from Activity.models import LandlordSeat, LandlordTable, NumberDuel, UserActivityProgress
+    from Activity.models import FourPlayerResult, LandlordRoundResult, NumberDuel, UserActivityProgress
+    from Activity.table_activity import FOUR_PLAYER_MODES
     from User.models import User, UserResourceInventory
 
     groups = {run.pk: set() for run in runs if run.space_id == space_id}
@@ -19,12 +20,11 @@ def activity_participation(runs, space_id):
     if games:
         for run_id, host_id, guest_id in NumberDuel.objects.filter(run_id__in=games).values_list('run_id', 'host_id', 'guest_id'):
             groups[run_id].update(user_id for user_id in (host_id, guest_id) if user_id)
-    tables = [run.pk for run in runs if run.pk in groups and run.campaign.config.get('mode') == 'landlord']
-    if tables:
-        for run_id, user_id in LandlordSeat.objects.filter(
-            table__run_id__in=tables, table__status=LandlordTable.Status.FINISHED,
-        ).order_by().values_list('table__run_id', 'user_id').distinct():
-            groups[run_id].add(user_id)
+    for model, modes in ((LandlordRoundResult, ('landlord',)), (FourPlayerResult, FOUR_PLAYER_MODES)):
+        tables = [run.pk for run in runs if run.pk in groups and run.campaign.config.get('mode') in modes]
+        if tables:
+            for run_id, user_id in model.objects.filter(table__run_id__in=tables).order_by().values_list('table__run_id', 'user_id').distinct():
+                groups[run_id].add(user_id)
     for run in runs:
         if run.pk in groups and run.campaign.config.get('theme') == 'permanent-vip':
             groups[run.pk].update(UserResourceInventory.objects.filter(user__space_id=space_id, reward_id='vip.permanent').values_list('user_id', flat=True))

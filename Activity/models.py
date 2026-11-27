@@ -107,6 +107,8 @@ class LandlordTable(models.Model):
     spring = models.BooleanField(default=False, db_default=False)
     round_number = models.PositiveIntegerField(default=1, db_default=1)
     host_position = models.PositiveSmallIntegerField(default=0, db_default=0)
+    mode = models.CharField(max_length=16, default='classic', db_default='classic')
+    deck_order = models.JSONField(default=list, null=True)
     finished_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -147,6 +149,49 @@ class LandlordRoundResult(models.Model):
 
     class Meta:
         constraints = [models.UniqueConstraint(fields=['table', 'round_number', 'user'], name='landlord_round_user')]
+
+
+class FourPlayerTable(models.Model):
+    run = models.ForeignKey('SpaceActivity', on_delete=models.CASCADE, related_name='four_player_tables')
+    code = models.CharField(max_length=8, unique=True)
+    status = models.CharField(max_length=12, default='waiting')
+    mode = models.CharField(max_length=16)
+    version = models.PositiveIntegerField(default=1)
+    host_position = models.PositiveSmallIntegerField(default=0)
+    round_number = models.PositiveIntegerField(default=0)
+    deadline = models.DateTimeField(null=True, blank=True)
+    board = models.JSONField(default=dict)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [models.Index(fields=['run', 'status', 'updated_at'], name='four_player_open_tables')]
+
+
+class FourPlayerSeat(models.Model):
+    table = models.ForeignKey(FourPlayerTable, on_delete=models.CASCADE, related_name='seats')
+    user = models.ForeignKey('User.User', on_delete=models.CASCADE, related_name='four_player_seats')
+    position = models.PositiveSmallIntegerField()
+    ready = models.BooleanField(default=False)
+    trustee = models.BooleanField(default=False)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['table', 'position'], name='four_player_seat_position'),
+            models.UniqueConstraint(fields=['table', 'user'], name='four_player_seat_user'),
+        ]
+
+
+class FourPlayerResult(models.Model):
+    table = models.ForeignKey(FourPlayerTable, on_delete=models.CASCADE, related_name='results')
+    user = models.ForeignKey('User.User', on_delete=models.CASCADE, related_name='four_player_results')
+    round_number = models.PositiveIntegerField()
+    mode = models.CharField(max_length=16)
+    score = models.IntegerField()
+    won = models.BooleanField(default=False)
+    finished_at = models.DateTimeField(db_index=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['table', 'round_number', 'user'], name='four_player_round_user')]
 
 
 class ActivityMilestone(models.Model):
@@ -882,9 +927,9 @@ class ActivityService:
         if campaign.config.get('mode') == 'number_duel':
             from Activity.number_duel import NumberDuelService
             return NumberDuelService.activity_payload(campaign, user, space_activity)
-        if campaign.config.get('mode') == 'landlord':
-            from Activity.landlord import LandlordService
-            return LandlordService.activity_payload(campaign, user, space_activity)
+        from Activity.table_activity import TABLE_MODES, activity_payload
+        if campaign.config.get('mode') in TABLE_MODES:
+            return activity_payload(campaign, user, space_activity)
         if (
             campaign.config.get('mode') == cls.STARRY_NIGHT_MODE
             and space_activity.history_backfilled_at is None

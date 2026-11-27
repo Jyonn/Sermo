@@ -26,12 +26,20 @@ def group_by_rank(hand):
 
 def deal(*, players, cards_per_player, decks=1):
     deck = list(range(DECK_SIZE * decks))
+    SystemRandom().shuffle(deck)
+    return distribute(deck, players, cards_per_player)
+
+
+def distribute(deck, players, cards_per_player):
     if players * cards_per_player > len(deck):
         raise ValueError('Not enough cards for the deal')
-    SystemRandom().shuffle(deck)
     hands = [sorted(deck[start:start + cards_per_player], key=card_rank)
              for start in range(0, players * cards_per_player, cards_per_player)]
     return hands, sorted(deck[players * cards_per_player:], key=card_rank)
+
+
+def consecutive(ranks, minimum, *, final_rank=11):
+    return len(ranks) >= minimum and ranks[-1] <= final_rank and ranks[-1] - ranks[0] + 1 == len(ranks)
 
 
 def next_position(position, players):

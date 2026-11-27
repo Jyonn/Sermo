@@ -116,6 +116,23 @@ class LandlordLeaderboardView(View):
         ))
 
 
+class FourPlayerView(View):
+    @auth.require_user
+    def get(self, request: Request, key: str):
+        from Activity.four_player import lobby
+        return LandlordView._response(lobby(key, request.user, request.GET.get('code')))
+
+    @auth.require_user
+    def post(self, request: Request, key: str):
+        import json
+        from Activity.four_player import FourPlayerErrors, act
+        try:
+            data = json.loads(request.body)
+        except (ValueError, UnicodeDecodeError):
+            raise FourPlayerErrors.INVALID
+        return LandlordView._response(act(key, request.user, data))
+
+
 class ActivityDetailView(View):
     @auth.require_user
     def get(self, request: Request, key: str):
@@ -125,7 +142,14 @@ class ActivityDetailView(View):
             from Activity.landlord import LandlordService
             space_activity = LandlordService.run(key, request.user)
         else:
-            space_activity = ActivityService.space_activity_for(campaign, request.user.space)
+            from Activity.table_activity import FOUR_PLAYER_MODES, activity_run
+            if campaign.config.get('mode') in FOUR_PLAYER_MODES:
+                from Activity.four_player import FourPlayerErrors
+                space_activity = activity_run(key, request.user, FOUR_PLAYER_MODES)
+                if not space_activity:
+                    raise FourPlayerErrors.CLOSED
+            else:
+                space_activity = ActivityService.space_activity_for(campaign, request.user.space)
         from Activity.participation import activity_participation
         payload = ActivityService.payload(campaign, request.user, space_activity)
         payload['participation'] = activity_participation([space_activity], request.user.space_id)[space_activity.pk]

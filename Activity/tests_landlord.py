@@ -177,11 +177,23 @@ class LandlordActivityTests(TestCase):
         for user in members:
             ready = self.send_action(user, action='ready', code=code, version=current['version'], round=1, value=True)['table']
         self.assertFalse(ready['can_start'])
+        self.send_action(members[2], 400, action='mode', code=code, version=ready['version'], value='no_shuffle')
+        deck = LandlordTable.objects.get(code=code).deck_order
+        mode = self.send_action(members[0], action='mode', code=code, version=ready['version'], value='no_shuffle')['table']
+        self.assertEqual(mode['mode'], 'no_shuffle')
+        self.assertFalse(any(seat['ready'] for seat in mode['seats']))
+        for user in members:
+            ready = self.send_action(user, action='ready', code=code, version=mode['version'], round=1, value=True)['table']
         self.send_action(members[2], 400, action='start', code=code, version=ready['version'], round=1)
         host = self.snapshot(members[0])['table']
         self.assertTrue(host['can_start'])
         next_round = self.send_action(members[0], action='start', code=code, version=host['version'], round=1)['table']
         self.assertEqual((next_round['code'], next_round['round'], next_round['status']), (code, 2, 'bidding'))
+        next_deck = LandlordTable.objects.get(code=code).deck_order
+        cut = deck.index(next_deck[0])
+        self.assertNotEqual(cut, 0)
+        self.assertEqual(next_deck, deck[cut:] + deck[:cut])
+        self.assertNotIn('deck_order', next_round)
         self.assertTrue(all(not seat['ready'] and seat['score'] == 0 for seat in next_round['seats']))
         self.assertEqual(LandlordService.leaderboard('landlord', members[0], None)['mine']['points'], 36)
 

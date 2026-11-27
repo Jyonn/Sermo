@@ -2,7 +2,7 @@
 from collections import Counter
 from dataclasses import dataclass
 
-from Activity.card_game import card_rank, group_by_rank, valid_cards
+from Activity.card_game import card_rank, consecutive, group_by_rank, valid_cards
 
 
 @dataclass(frozen=True)
@@ -25,7 +25,7 @@ def classify(cards):
         return Combination({1: 'single', 2: 'pair', 3: 'triple', 4: 'bomb'}[size], ranks[0], size)
 
     for copies, minimum, kind in ((1, 5, 'straight'), (2, 3, 'pairs'), (3, 2, 'plane')):
-        if len(ranks) >= minimum and ranks[-1] < 12 and ranks[-1] - ranks[0] + 1 == len(ranks):
+        if consecutive(ranks, minimum):
             if all(counts[item] == copies for item in ranks):
                 return Combination(kind, ranks[-1], size, len(ranks))
 

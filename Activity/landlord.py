@@ -1,5 +1,4 @@
 """Verified, space-local tables. Hands and turn resolution stay on the server."""
-import re
 import secrets
 from datetime import datetime, timedelta
 from fractions import Fraction
@@ -11,10 +10,10 @@ from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from smartdjango import Code, Error
 
-from Activity.card_game import advance_trick, automatic_play, card_rank, deal, next_position
+from Activity.card_game import DECK_SIZE, advance_trick, automatic_play, card_rank, distribute, next_position
 from Activity.landlord_rules import beats, classify, hint
-from Activity.models import LandlordRoundResult, LandlordSeat, LandlordTable, SpaceActivity
-from Activity.presentation import presentation
+from Activity.models import LandlordRoundResult, LandlordSeat, LandlordTable
+from Activity.table_activity import ROOM_WAIT, activity_payload, activity_run, eligible, new_room, public_user, room_code
 from User.models import User
 
 
@@ -37,50 +36,29 @@ class LandlordService:
     BETWEEN_ROUNDS = (STATUS.WAITING, STATUS.FINISHED)
     IN_ROUND = (STATUS.BIDDING, STATUS.DOUBLING, STATUS.PLAYING)
     LIVE = (*BETWEEN_ROUNDS, *IN_ROUND)
-    WAIT_LIMIT = timedelta(minutes=30)
+    WAIT_LIMIT = timedelta(seconds=ROOM_WAIT)
     IDLE_LIMIT = timedelta(minutes=15)
     BID_TIME = timedelta(seconds=30)
     DOUBLE_TIME = timedelta(seconds=12)
     PLAY_TIME = timedelta(seconds=45)
     TRUSTEE_TIME = timedelta(seconds=2)
-    CODE_CHARSET = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ'
+    MODES = ('classic', 'no_shuffle')
 
-    @staticmethod
-    def eligible(user):
-        return user.verified and not user.is_official and not user.is_deleted and not user.is_imported_placeholder
+    eligible = staticmethod(eligible)
+    activity_payload = staticmethod(activity_payload)
 
     @classmethod
     def run(cls, key, user, lock=False):
-        rows = SpaceActivity.objects
-        if lock:
-            rows = rows.select_for_update()
-        run = rows.filter(space_id=user.space_id, campaign__key=key, campaign__enabled=True,
-                          campaign__config__mode=cls.MODE).first()
-        if run is None or not run.is_active():
+        run = activity_run(key, user, (cls.MODE,), lock=lock)
+        if run is None:
             raise LandlordErrors.CLOSED
         return run
-
-    @classmethod
-    def activity_payload(cls, campaign, user, run):
-        return dict(
-            key=campaign.key, title=campaign.title, title_en=campaign.title_en, summary=campaign.summary,
-            summary_en=campaign.summary_en, theme=cls.MODE, starts_at=run.claimed_at.timestamp(),
-            ends_at=run.ends_at.timestamp() if run.ends_at else None,
-            active=run.is_active(), assignment_mode=campaign.assignment_mode, duration_seconds=campaign.duration_seconds,
-            presentation=presentation(campaign.config), newly_claimed=not run.user_views.filter(user=user).exists(),
-            verified=cls.eligible(user), today_earned=False, claimable_points=0, available_points=0,
-            contributed_points=0, personal_event_count=0, personal_event_target=0, personal_reward_claimable=False,
-            personal_reward=None, space_reward_claimable=None, official_user=None, space_total=0, target=0,
-            milestones=[], awakenings=[],
-        )
 
     @staticmethod
     def _seats(table):
         return {seat.position: seat for seat in table.seats.select_related('user').order_by('position')}
 
-    @staticmethod
-    def _public_user(user):
-        return user.dictify('user_id', 'name', 'avatar_uri')
+    _public_user = staticmethod(public_user)
 
     @classmethod
     def _table_payload(cls, table, seats, user, now):
@@ -90,6 +68,7 @@ class LandlordService:
         return dict(
             code=table.code, status=table.status, version=table.version, your_seat=own.position,
             host=table.host_position, round=table.round_number,
+            mode=table.mode,
             turn=table.turn, landlord=table.landlord, winner=table.winner, hand=own.hand,
             ready_count=len(seats), seats=[
                 dict(position=position, member=cls._public_user(seat.user), remaining=len(seat.hand), won=seat.won,
@@ -120,7 +99,15 @@ class LandlordService:
 
     @classmethod
     def _deal(cls, table, seats, first_bidder, now, *, rematch=False):
-        hands, bottom = deal(players=3, cards_per_player=17)
+        previous = table.deck_order or []
+        if table.mode == 'no_shuffle' and len(previous) == DECK_SIZE:
+            cut = 1 + secrets.SystemRandom().randrange(DECK_SIZE - 1)
+            deck = previous[cut:] + previous[:cut]
+        else:
+            deck = list(range(DECK_SIZE))
+            secrets.SystemRandom().shuffle(deck)
+        table.deck_order = deck
+        hands, bottom = distribute(deck, 3, 17)
         for position, seat in seats.items():
             seat.hand = hands[position]
             seat.ready = seat.won = False
@@ -206,6 +193,8 @@ class LandlordService:
         seat = seats[table.turn]
         if cards:
             chosen = set(cards)
+            if table.deck_order:
+                table.deck_order = [card for card in table.deck_order if card not in chosen] + cards
             seat.hand = [card for card in seat.hand if card not in chosen]
             seat.plays += 1
             seat.save(update_fields=['hand', 'plays'])
@@ -260,16 +249,14 @@ class LandlordService:
 
     @classmethod
     def _code(cls, value):
-        if not isinstance(value, str) or not re.fullmatch('[' + cls.CODE_CHARSET + ']{8}', value.strip().upper()):
+        code = room_code(value)
+        if not code:
             raise LandlordErrors.TABLE
-        return value.strip().upper()
+        return code
 
     @classmethod
     def _new_table(cls, run):
-        while True:
-            code = ''.join(secrets.choice(cls.CODE_CHARSET) for _ in range(8))
-            if not LandlordTable.objects.filter(code=code).exists():
-                return LandlordTable.objects.create(run=run, code=code)
+        return new_room(LandlordTable, run=run)
 
     @classmethod
     @transaction.atomic
@@ -335,7 +322,7 @@ class LandlordService:
             else:
                 cls._touch(table)
             return dict(table=cls._table_payload(table, seats, user, now))
-        if action not in ('bid', 'double', 'trustee', 'play', 'pass', 'leave', 'ready', 'start'):
+        if action not in ('bid', 'double', 'trustee', 'play', 'pass', 'leave', 'ready', 'start', 'mode'):
             raise LandlordErrors.INVALID
         table = LandlordTable.objects.select_for_update().filter(run=run, seats__user=user, code=cls._code(data.get('code'))).first()
         if table is None:
@@ -346,8 +333,20 @@ class LandlordService:
         if (type(data.get('version')) is not int or table.status not in cls.LIVE
                 or (action not in ('double', 'trustee', 'ready') and table.version != data['version'])):
             return dict(table=cls._table_payload(table, seats, user, now), changed=True)
+        if action == 'mode':
+            value = data.get('value')
+            if (value not in cls.MODES or own.position != table.host_position or table.status not in cls.BETWEEN_ROUNDS):
+                raise LandlordErrors.INVALID
+            if table.mode != value:
+                table.mode = value
+                table.seats.filter(ready=True).update(ready=False)
+                for seat in seats.values():
+                    seat.ready = False
+                cls._touch(table)
+            return dict(table=cls._table_payload(table, seats, user, now))
         if action in ('ready', 'start'):
-            if table.status != cls.STATUS.FINISHED or data.get('round') != table.round_number:
+            if (table.status != cls.STATUS.FINISHED or data.get('round') != table.round_number
+                    or (action == 'ready' and data.get('mode', table.mode) != table.mode)):
                 return dict(table=cls._table_payload(table, seats, user, now), changed=True)
             if action == 'ready':
                 value = data.get('value')
