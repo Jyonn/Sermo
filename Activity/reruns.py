@@ -1,6 +1,8 @@
 """Each edition keeps its own space claims, progress and reward receipts."""
-from datetime import timedelta
+from calendar import monthrange
+from datetime import datetime, time
 from hashlib import sha256
+from zoneinfo import ZoneInfo
 
 from django.db import transaction
 from django.db.models import Q, Sum
@@ -8,14 +10,18 @@ from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from smartdjango import Code, Error
 
-from Activity.models import ActivityCampaign, ActivityMilestone, ActivityRewardReceipt, SpaceActivity
+from Activity.models import ActivityCampaign, ActivityMilestone, ActivityRerunRequest, ActivityRewardReceipt, ActivityService, SpaceActivity
+
+
+SHANGHAI = ZoneInfo('Asia/Shanghai')
 
 
 @Error.register
 class RerunErrors:
     UNAVAILABLE = Error(_('This activity cannot be brought back right now'), code=Code.Forbidden)
-    SUPERSEDED = Error(_('A later edition is available. Refresh the activity list.'), code=Code.Conflict)
+    SUPERSEDED = Error(_('This application is no longer pending. Refresh the list.'), code=Code.Conflict)
     MISSING = Error(_('Activity not found'), code=Code.NotFound)
+    INVALID = Error(_('Invalid activity rerun request'), code=Code.BadRequest)
     SPACE_NOT_JOINED = Error(_('The space administrator has not activated this edition'), code=Code.Forbidden)
 
 
@@ -35,80 +41,136 @@ def edition_fields(campaign):
     }
 
 
-def rerun_status(campaign, run_count, running_count):
+def anniversary(end, months):
+    day = end.astimezone(SHANGHAI).date()
+    year, month_index = divmod(day.year * 12 + day.month - 1 + months, 12)
+    month = month_index + 1
+    number = min(day.day, monthrange(year, month)[1])
+    return datetime.combine(day.replace(year=year, month=month, day=number), time.min, tzinfo=SHANGHAI)
+
+
+def rerun_info(run, now=None):
+    campaign = run.campaign
+    now = now or timezone.now()
+    if not campaign.enabled or not campaign.duration_seconds or not run.ends_at or run.ends_at > now:
+        return None
     if campaign.config.get('mode') == 'annual_explorer':
-        return 'one_time_tasks'
-    if not campaign.duration_seconds:
-        return 'permanent'
-    if running_count:
-        return 'still_running'
-    if not run_count:
-        return 'awaiting_spaces' if campaign.edition > 1 else 'never_started'
-    return 'available'
+        return None
+    can_apply = anniversary(run.ends_at, 3)
+    automatic = anniversary(run.ends_at, 6)
+    request = getattr(run, 'rerun_request', None)
+    if now >= automatic:
+        status = 'ready'
+    elif request and request.status == ActivityRerunRequest.Status.APPROVED:
+        status = 'ready'
+    elif now < can_apply:
+        status = 'waiting'
+    else:
+        status = request.status if request else 'eligible'
+    return dict(status=status, next_edition=campaign.edition + 1,
+                apply_at=can_apply.timestamp(), auto_at=automatic.timestamp())
 
 
-def platform_campaigns():
-    from django.db.models import Count, Max
-    now = timezone.now()
-    rows = ActivityCampaign.objects.select_related('original').annotate(
-        spaces=Count('space_runs'),
-        running_spaces=Count('space_runs', filter=Q(space_runs__isnull=False) &
-                             (Q(space_runs__ends_at__isnull=True) | Q(space_runs__ends_at__gt=now))),
-        last_end=Max('space_runs__ends_at'),
-    ).order_by('-created_at', '-pk')
-    latest = {}
-    for campaign in rows:
-        latest.setdefault(campaign.original_id or campaign.pk, []).append(campaign)
-    return [
-        dict(
-            key=campaign.key, title=campaign.title, title_en=campaign.title_en,
-            summary=campaign.summary, summary_en=campaign.summary_en,
-            theme=campaign.config.get('theme', ''),
-            duration_seconds=campaign.duration_seconds,
-            joined_spaces=campaign.spaces, active_spaces=campaign.running_spaces,
-            last_end=campaign.last_end.timestamp() if campaign.last_end else None,
-            status=rerun_status(campaign, campaign.spaces, campaign.running_spaces),
-            previous_editions=[dict(key=prior.key, edition=prior.edition, joined_spaces=prior.spaces,
-                                    last_end=prior.last_end.timestamp() if prior.last_end else None)
-                               for prior in previous],
-            **edition_fields(campaign),
-        )
-        for campaign, *previous in latest.values()
-    ]
-
-
-@transaction.atomic
-def publish_rerun(key):
-    source = ActivityCampaign.objects.filter(key=key).first()
+def _previous_for_update(key, space):
+    source = ActivityCampaign.objects.filter(key=key, enabled=True).first()
     if source is None:
         raise RerunErrors.MISSING
     original = lock_original(source)
-    family = edition_family(original)
-    latest = family.order_by('-edition').first()
-    if source.pk != latest.pk:
-        raise RerunErrors.SUPERSEDED
-    now = timezone.now()
-    runs = SpaceActivity.objects.filter(campaign=latest)
-    running = SpaceActivity.objects.filter(campaign_id__in=family.values('pk')).filter(
-        Q(ends_at__isnull=True) | Q(ends_at__gt=now)
-    ).exists()
-    if rerun_status(latest, runs.exists(), running) != 'available':
+    runs = SpaceActivity.objects.filter(space=space, campaign_id__in=edition_family(original).values('pk'))
+    previous = runs.select_for_update().order_by('-campaign__edition').first()
+    if previous is None:
         raise RerunErrors.UNAVAILABLE
-    edition = latest.edition + 1
+    return original, previous
+
+
+@transaction.atomic
+def apply_for_rerun(key, space):
+    from Activity.eligibility import ActivityEligibilityErrors, missing_activity_requirements
+    _, previous = _previous_for_update(key, space)
+    if previous.campaign.key != key:
+        raise RerunErrors.SUPERSEDED
+    info = rerun_info(previous)
+    if info is None or info['status'] not in ('eligible', 'pending', 'rejected'):
+        raise RerunErrors.UNAVAILABLE
+    if missing_activity_requirements(previous.campaign, space):
+        raise ActivityEligibilityErrors.UNAVAILABLE
+    if info['status'] != 'pending':
+        ActivityRerunRequest.objects.update_or_create(previous_run=previous, defaults={
+            'status': ActivityRerunRequest.Status.PENDING, 'submitted_at': timezone.now(), 'reviewed_at': None,
+        })
+
+
+def _edition_for(original, source):
+    edition = source.edition + 1
+    existing = original.reruns.filter(edition=edition).first()
+    if existing:
+        return existing
     new = ActivityCampaign.objects.create(
         key=f'{original.key[:55]}-edition-{edition}-{original.pk}',
-        original=original, edition=edition, title=latest.title, title_en=latest.title_en,
-        summary=latest.summary, summary_en=latest.summary_en,
+        original=original, edition=edition, title=source.title, title_en=source.title_en,
+        summary=source.summary, summary_en=source.summary_en,
         assignment_mode=ActivityCampaign.AssignmentMode.MANUAL,
-        duration_seconds=latest.duration_seconds, event_key=latest.event_key,
-        daily_user_limit=latest.daily_user_limit, config=latest.config, enabled=True,
+        duration_seconds=source.duration_seconds, event_key=source.event_key,
+        daily_user_limit=source.daily_user_limit, config=source.config, enabled=True,
     )
     ActivityMilestone.objects.bulk_create([
         ActivityMilestone(campaign=new, threshold=row.threshold, resource_type=row.resource_type,
                           reward_pool=row.reward_pool, reward_label=row.reward_label)
-        for row in latest.milestones.all()
+        for row in source.milestones.all()
     ])
     return new
+
+
+@transaction.atomic
+def activate_rerun(key, space):
+    original, previous = _previous_for_update(key, space)
+    if previous.campaign.key != key:
+        source = edition_family(original).get(key=key)
+        if previous.campaign.edition == source.edition + 1:
+            return previous  # A retried activation must preserve the original start.
+        raise RerunErrors.SUPERSEDED
+    info = rerun_info(previous)
+    if info is None or info['status'] != 'ready':
+        raise RerunErrors.UNAVAILABLE
+    return ActivityService.claim_for_space(_edition_for(original, previous.campaign), space, rerun_authorized=True)
+
+
+def request_payload(item, now=None):
+    previous = item.previous_run
+    campaign = previous.campaign
+    info = rerun_info(previous, now)
+    effective_status = item.status
+    if info is None or (item.status == ActivityRerunRequest.Status.PENDING and info['status'] == 'ready'):
+        effective_status = 'closed'
+    return dict(id=item.pk, status=effective_status, space_name=previous.space.name,
+                title=campaign.title, title_en=campaign.title_en,
+                next_edition=campaign.edition + 1, ended_at=previous.ends_at.timestamp() if previous.ends_at else None,
+                submitted_at=item.submitted_at.timestamp(), reviewed_at=item.reviewed_at.timestamp() if item.reviewed_at else None,
+                auto_at=info['auto_at'] if info else None, revision=item.submitted_at.isoformat())
+
+
+def review_requests():
+    now = timezone.now()
+    rows = ActivityRerunRequest.objects.select_related('previous_run__space', 'previous_run__campaign').order_by('-submitted_at', '-pk')
+    return [request_payload(item, now) for item in rows]
+
+
+@transaction.atomic
+def review_rerun(identifier, approved, revision):
+    item = ActivityRerunRequest.objects.select_for_update().filter(pk=identifier).first()
+    if item is None:
+        raise RerunErrors.MISSING
+    if item.submitted_at.isoformat() != revision:
+        raise RerunErrors.SUPERSEDED
+    status = ActivityRerunRequest.Status.APPROVED if approved else ActivityRerunRequest.Status.REJECTED
+    if item.status == status:
+        return item, False
+    if request_payload(item)['status'] != ActivityRerunRequest.Status.PENDING:
+        raise RerunErrors.SUPERSEDED
+    item.status = status
+    item.reviewed_at = timezone.now()
+    item.save(update_fields=['status', 'reviewed_at'])
+    return item, True
 
 
 def claimed_rewards(campaign, user):

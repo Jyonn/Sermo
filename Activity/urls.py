@@ -1,6 +1,6 @@
 from django.urls import path
 from Activity.views import FourPlayerView, GameLeaderboardView, LandlordLeaderboardView, LandlordView, NumberDuelView, RecordShopView
-from Activity.views import ExplorerRewardClaimView
+from Activity.views import AdminActivityRerunView, ExplorerRewardClaimView
 from Activity.views import BgmEntranceView, BgmMeView, BgmSettingsView
 
 from Activity.views import AdminActivityClaimView, AdminActivityListView, ActiveActivityView, ActivityClaimView, ActivityContributionView, ActivityDetailView, ActivityMilestoneRewardClaimView, ActivityPersonalRewardClaimView, ActivitySeenView, ActivitySpaceRewardClaimView, ActivityStarryNightRewardClaimView
@@ -19,6 +19,7 @@ urlpatterns = [
     path('active', ActiveActivityView.as_view(), name='active activities'),
     path('admin', AdminActivityListView.as_view(), name='admin activities'),
     path('admin/<slug:key>/claim', AdminActivityClaimView.as_view(), name='admin activity claim'),
+    path('admin/<slug:key>/rerun/<slug:action>', AdminActivityRerunView.as_view(), name='admin activity rerun'),
     path('<slug:key>/record-shop/<slug:action>', RecordShopView.as_view(), name='record shop action'),
     path('<slug:key>', ActivityDetailView.as_view(), name='activity detail'),
     path('<slug:key>/seen', ActivitySeenView.as_view(), name='activity seen'),

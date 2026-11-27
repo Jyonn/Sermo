@@ -18,8 +18,8 @@ from AccessPolicy.views import (
 )
 
 urlpatterns = [
-    path('activities', PlatformActivityView.as_view()),
-    path('activities/<slug:key>/rerun', PlatformActivityView.as_view()),
+    path('activity-reruns', PlatformActivityView.as_view()),
+    path('activity-reruns/<int:request_id>', PlatformActivityView.as_view()),
     path('members/<int:user_id>/birthday-letter', PlatformBirthdayLetterView.as_view()),
     path('sticker-packs', StickerPackReviewView.as_view()),
     path('sticker-packs/<int:series_id>', StickerPackReviewView.as_view()),

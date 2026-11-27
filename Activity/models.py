@@ -381,6 +381,18 @@ class ActivityRewardReceipt(models.Model):
         ]
 
 
+class ActivityRerunRequest(models.Model):
+    class Status(models.TextChoices):
+        PENDING = 'pending', 'Pending'
+        APPROVED = 'approved', 'Approved'
+        REJECTED = 'rejected', 'Rejected'
+
+    previous_run = models.OneToOneField(SpaceActivity, on_delete=models.CASCADE, related_name='rerun_request')
+    status = models.CharField(max_length=10, choices=Status.choices, default=Status.PENDING, db_index=True)
+    submitted_at = models.DateTimeField(default=timezone.now)
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+
+
 class BgmParticipation(models.Model):
     progress = models.OneToOneField(UserActivityProgress, on_delete=models.CASCADE, related_name='bgm_participation')
     style = models.CharField(max_length=8, default='blue')
@@ -423,15 +435,14 @@ class ActivityService:
 
     @staticmethod
     @transaction.atomic
-    def claim_for_space(campaign, space, claimed_at=None):
+    def claim_for_space(campaign, space, claimed_at=None, *, rerun_authorized=False):
         from Activity.eligibility import ActivityEligibilityErrors, missing_activity_requirements
-        from Activity.reruns import RerunErrors, edition_family, lock_original
+        from Activity.reruns import RerunErrors
         existing = SpaceActivity.objects.filter(campaign=campaign, space=space).first()
         if existing:
             return existing
-        lock_original(campaign)
-        if edition_family(campaign).filter(edition__gt=campaign.edition).exists():
-            raise RerunErrors.SUPERSEDED
+        if campaign.edition > 1 and not rerun_authorized:
+            raise RerunErrors.UNAVAILABLE
         if missing_activity_requirements(campaign, space):
             raise ActivityEligibilityErrors.UNAVAILABLE
         claimed_at = claimed_at or timezone.now()
@@ -520,7 +531,7 @@ class ActivityService:
         for campaign in ActivityCampaign.objects.filter(
             enabled=True,
             assignment_mode=ActivityCampaign.AssignmentMode.AUTOMATIC,
-        ).exclude(reruns__isnull=False):
+        ):
             if not missing_activity_requirements(campaign, space):
                 cls.claim_for_space(campaign, space)
 
@@ -562,17 +573,18 @@ class ActivityService:
     @classmethod
     def admin_payloads(cls, space):
         from Activity.eligibility import missing_activity_requirements
-        from Activity.reruns import edition_fields
+        from Activity.reruns import edition_fields, rerun_info
         cls.ensure_automatic_for_space(space)
-        runs = {item.campaign_id: item for item in cls.space_activities(space)}
+        runs = {item.campaign_id: item for item in cls.space_activities(space).select_related('rerun_request')}
+        latest_runs = {}
+        for run in runs.values():
+            series = run.campaign.original_id or run.campaign_id
+            latest_runs[series] = max(run.campaign.edition, latest_runs.get(series, 0))
         payloads = []
         campaigns = list(ActivityCampaign.objects.filter(enabled=True).select_related('original').order_by('-created_at', '-id'))
-        latest = {}
-        for item in campaigns:
-            latest.setdefault(item.original_id or item.id, item.id)
         for campaign in campaigns:
             run = runs.get(campaign.id)
-            if run is None and latest[campaign.original_id or campaign.id] != campaign.id:
+            if run is None and campaign.edition > 1:
                 continue
             status = 'unclaimed'
             if run is not None:
@@ -580,6 +592,7 @@ class ActivityService:
             missing = missing_activity_requirements(campaign, space)
             payloads.append(dict(
                 **edition_fields(campaign),
+                rerun=rerun_info(run) if run and campaign.edition == latest_runs[campaign.original_id or campaign.id] else None,
                 eligible=not missing,
                 missing_requirements=missing,
                 key=campaign.key,

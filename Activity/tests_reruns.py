@@ -1,15 +1,16 @@
-from datetime import timedelta
+from datetime import datetime, timedelta
 from unittest.mock import patch
+from zoneinfo import ZoneInfo
 
 from django.test import TestCase
 from django.utils import timezone
 from smartdjango import Error
 
 from Activity.models import (
-    ActivityCampaign, ActivityMilestone, ActivityRewardReceipt, ActivityService, SpaceActivity, UserActivityProgress,
+    ActivityCampaign, ActivityMilestone, ActivityRerunRequest, ActivityRewardReceipt, ActivityService, SpaceActivity, UserActivityProgress,
 )
 from Activity.record_shop import claim_singer
-from Activity.reruns import RerunErrors, platform_campaigns, publish_rerun
+from Activity.reruns import RerunErrors, activate_rerun, anniversary, apply_for_rerun, review_requests, rerun_info
 from PlatformAdmin.models import PlatformAuditLog
 from Space.models import Space
 from User.models import User, UserResourceInventory
@@ -32,65 +33,99 @@ class ActivityRerunTests(TestCase):
                 {'reward_id': 'example.bubble', 'resource_key': 'test-bubble', 'resource_type': 'bubble'},
             ]},
         )
-        self.run = ActivityService.claim_for_space(self.campaign, self.space, timezone.now() - timedelta(days=5))
+        self.run = ActivityService.claim_for_space(self.campaign, self.space, timezone.now() - timedelta(days=210))
 
-    def test_release_requires_platform_admin_and_space_activation(self):
+    def test_application_approval_and_activation_are_isolated_to_one_space(self):
+        SpaceActivity.objects.filter(pk=self.run.pk).update(ends_at=timezone.now() - timedelta(days=120))
+        other_run = ActivityService.claim_for_space(self.campaign, self.other)
         reader = bearer(auth.get_login_token(self.member))
         platform = bearer(auth.get_platform_admin_token('admin@example.test'))
         space = bearer(auth.get_space_login_token(self.space))
-        path = f'/platform-admin/activities/{self.campaign.key}/rerun'
+        path = f'/activities/admin/{self.campaign.key}/rerun'
+        self.assertGreaterEqual(self.client.post(path + '/apply', **reader).status_code, 400)
+        self.assertEqual(self.client.post(path + '/claim', **space).status_code, 403)
+        self.assertEqual(self.client.post(path + '/apply', **space).status_code, 200)
+        self.assertEqual(self.client.post(path + '/apply', **space).status_code, 200)
+        request = ActivityRerunRequest.objects.get(previous_run=self.run)
+        review_path = f'/platform-admin/activity-reruns/{request.pk}'
+        data = {'approved': True, 'revision': request.submitted_at.isoformat()}
         for credentials in (reader, space, {}):
-            self.assertGreaterEqual(self.client.post(path, **credentials).status_code, 400)
-        self.assertEqual(self.campaign.reruns.count(), 0)
-        result = self.client.post(path, **platform)
+            self.assertGreaterEqual(self.client.post(review_path, data, content_type='application/json', **credentials).status_code, 400)
+        result = self.client.post(review_path, data, content_type='application/json', **platform)
         self.assertEqual(result.status_code, 200, result.content.decode())
+        self.assertEqual(PlatformAuditLog.objects.get(action='activity.rerun.review').metadata['space_id'], self.space.pk)
+        self.assertFalse(self.campaign.reruns.exists())
+        claim = self.client.post(path + '/claim', **space)
+        self.assertEqual(claim.status_code, 200, claim.content.decode())
         new = self.campaign.reruns.get()
         self.assertEqual((new.edition, new.assignment_mode, new.duration_seconds), (2, 'manual', 86400))
-        self.assertEqual(new.space_runs.count(), 0)
-        self.assertEqual(PlatformAuditLog.objects.get(action='activity.rerun').target_id, new.pk)
-        self.assertEqual(self.client.post(path, **platform).status_code, 409)
-        self.assertEqual(self.client.get(f'/activities/{new.key}', **reader).status_code, 403)
-        self.assertGreaterEqual(self.client.post(f'/activities/admin/{new.key}/claim', **reader).status_code, 400)
-        claim = self.client.post(f'/activities/admin/{new.key}/claim', **space)
-        self.assertEqual(claim.status_code, 200, claim.content.decode())
         catalog = self.client.get('/activities/active', **reader).json()['body']
         self.assertTrue(any(item['edition'] == 2 and item['original_key'] == self.campaign.key for item in catalog))
         active = new.space_runs.get()
-        self.assertEqual(ActivityService.claim_for_space(new, self.space).pk, active.pk)
+        self.assertEqual(activate_rerun(self.campaign.key, self.space).pk, active.pk)
         self.assertEqual(active.ends_at - active.claimed_at, timedelta(days=1))
-        self.assertNotIn(self.campaign.key, [item['key'] for item in ActivityService.admin_payloads(self.other)])
-        with self.assertRaises(Error) as superseded:
-            ActivityService.claim_for_space(self.campaign, self.other)
-        self.assertIs(superseded.exception, RerunErrors.SUPERSEDED)
+        self.assertEqual(self.client.post(f'/activities/admin/{new.key}/claim', **bearer(auth.get_space_login_token(self.other))).status_code, 403)
+        self.assertTrue(other_run.is_active())
+        self.assertFalse(new.space_runs.filter(space=self.other).exists())
 
-    def test_rejects_permanent_or_unfinished_and_numbers_next_edition(self):
+    def test_anniversaries_clamp_to_end_of_month_and_auto_open_at_midnight(self):
+        zone = ZoneInfo('Asia/Shanghai')
+        end = datetime(2026, 8, 31, 18, 35, tzinfo=zone)
+        self.run.ends_at = end
+        apply = datetime(2026, 11, 30, tzinfo=zone)
+        auto = datetime(2027, 2, 28, tzinfo=zone)
+        self.assertEqual(anniversary(end, 3), apply)
+        self.assertEqual(anniversary(end, 6), auto)
+        self.assertEqual(rerun_info(self.run, apply - timedelta(seconds=1))['status'], 'waiting')
+        self.assertEqual(rerun_info(self.run, apply)['status'], 'eligible')
+        self.assertEqual(rerun_info(self.run, auto - timedelta(seconds=1))['status'], 'eligible')
+        self.assertEqual(rerun_info(self.run, auto)['status'], 'ready')
+
+    def test_rejects_permanent_or_unfinished_and_uses_own_edition_number(self):
         for key, config in (('permanent-fixture', {}), ('one-off-fixture', {'mode': 'annual_explorer'})):
-            campaign = ActivityCampaign.objects.create(key=key, title=key, event_key='test.only', config=config)
+            campaign = ActivityCampaign.objects.create(key=key, title=key, event_key='test.only',
+                                                       duration_seconds=86400 if config else None, config=config)
+            SpaceActivity.objects.create(
+                campaign=campaign, space=self.other, claimed_at=timezone.now() - timedelta(days=230),
+                ends_at=timezone.now() - timedelta(days=229) if config else None,
+            )
             with self.assertRaises(Error) as blocked:
-                publish_rerun(campaign.key)
+                activate_rerun(campaign.key, self.other)
             self.assertIs(blocked.exception, RerunErrors.UNAVAILABLE)
         other_run = ActivityService.claim_for_space(self.campaign, self.other)
         with self.assertRaises(Error) as blocked:
-            publish_rerun(self.campaign.key)
+            activate_rerun(self.campaign.key, self.other)
         self.assertIs(blocked.exception, RerunErrors.UNAVAILABLE)
-        SpaceActivity.objects.filter(pk=other_run.pk).update(ends_at=timezone.now())
-        edition = publish_rerun(self.campaign.key)
-        with self.assertRaises(Error) as blocked:
-            publish_rerun(edition.key)
-        self.assertIs(blocked.exception, RerunErrors.UNAVAILABLE)
-        ActivityService.claim_for_space(edition, self.space, timezone.now() - timedelta(days=2))
-        third = publish_rerun(edition.key)
+        second = activate_rerun(self.campaign.key, self.space)
+        self.assertFalse(ActivityRerunRequest.objects.exists())
+        SpaceActivity.objects.filter(pk=second.pk).update(ends_at=timezone.now() - timedelta(days=220))
+        third = activate_rerun(second.campaign.key, self.space).campaign
         self.assertEqual((third.original_id, third.edition), (self.campaign.pk, 3))
-        item = next(item for item in platform_campaigns() if item['key'] == third.key)
-        self.assertEqual([row['edition'] for row in item['previous_editions']], [2, 1])
+        SpaceActivity.objects.filter(pk=other_run.pk).update(ends_at=timezone.now() - timedelta(days=210))
+        self.assertEqual(activate_rerun(self.campaign.key, self.other).campaign_id, second.campaign_id)
+
+    def test_rejected_or_pending_approval_does_not_prevent_automatic_opening(self):
+        SpaceActivity.objects.filter(pk=self.run.pk).update(ends_at=timezone.now() - timedelta(days=120))
+        apply_for_rerun(self.campaign.key, self.space)
+        platform = bearer(auth.get_platform_admin_token('admin@example.test'))
+        request = ActivityRerunRequest.objects.get(previous_run=self.run)
+        path = f'/platform-admin/activity-reruns/{request.pk}'
+        stale = request.submitted_at.isoformat()
+        self.assertEqual(self.client.post(path, {'approved': False, 'revision': stale},
+                                          content_type='application/json', **platform).status_code, 200)
+        apply_for_rerun(self.campaign.key, self.space)
+        self.assertEqual(self.client.post(path, {'approved': True, 'revision': stale},
+                                          content_type='application/json', **platform).status_code, 409)
+        SpaceActivity.objects.filter(pk=self.run.pk).update(ends_at=timezone.now() - timedelta(days=220))
+        self.assertEqual(review_requests()[0]['status'], 'closed')
+        self.assertTrue(activate_rerun(self.campaign.key, self.space).is_active())
 
     def test_progress_restarts_and_duplicate_reward_credits_once(self):
         old_progress = UserActivityProgress.objects.create(
             campaign=self.campaign, space_activity=self.run, user=self.member, earned_points=77,
         )
         UserResourceInventory.grant_activity_resource(self.member, 'bubble', 'prior.alias', 'test-bubble', self.campaign.key)
-        new = publish_rerun(self.campaign.key)
-        ActivityService.claim_for_space(new, self.space)
+        new = activate_rerun(self.campaign.key, self.space).campaign
         payload = ActivityService.payload(new, self.member)
         self.assertEqual(payload['personal_event_count'], 0)
         self.assertFalse(payload['personal_reward_claimable'])
@@ -114,8 +149,8 @@ class ActivityRerunTests(TestCase):
             reward_pool=[{'reward_id': 'test.frame', 'resource_key': 'rerun-frame'}],
         )
         UserResourceInventory.grant_activity_resource(self.member, 'frame', 'test.frame', 'rerun-frame', self.campaign.key)
-        next_campaign = publish_rerun(self.campaign.key)
-        run = ActivityService.claim_for_space(next_campaign, self.space)
+        run = activate_rerun(self.campaign.key, self.space)
+        next_campaign = run.campaign
         run.total_points = 1
         run.save(update_fields=['total_points'])
         ActivityService.claim_space_reward(next_campaign, self.newcomer)
@@ -127,9 +162,9 @@ class ActivityRerunTests(TestCase):
         past = ActivityService.claim_for_space(music, self.space, timezone.now() - timedelta(hours=1))
         UserActivityProgress.objects.create(campaign=music, user=self.member, space_activity=past, earned_points=30)
         claim_singer(music.key, self.member, 'jay')
-        SpaceActivity.objects.filter(pk=past.pk).update(ends_at=timezone.now())
-        music_next = publish_rerun(music.key)
-        current = ActivityService.claim_for_space(music_next, self.space)
+        SpaceActivity.objects.filter(pk=past.pk).update(ends_at=timezone.now() - timedelta(days=220))
+        current = activate_rerun(music.key, self.space)
+        music_next = current.campaign
         UserActivityProgress.objects.create(campaign=music_next, user=self.member, space_activity=current, earned_points=30)
         for _ in range(2):
             self.assertEqual(claim_singer(music_next.key, self.member, 'jay')['rerun_growth'], 10)
@@ -138,9 +173,8 @@ class ActivityRerunTests(TestCase):
     def test_starry_night_rerun_does_not_backfill_messages(self):
         self.campaign.config = {'mode': ActivityService.STARRY_NIGHT_MODE}
         self.campaign.save(update_fields=['config'])
-        new = publish_rerun(self.campaign.key)
         with patch.object(ActivityService, 'backfill_starry_night_progress') as backfill:
-            run = ActivityService.claim_for_space(new, self.space)
-            payload = ActivityService.payload(new, self.member, run)
+            run = activate_rerun(self.campaign.key, self.space)
+            payload = ActivityService.payload(run.campaign, self.member, run)
             backfill.assert_not_called()
         self.assertEqual(payload['starry_night']['streak_days'], 0)

@@ -282,3 +282,16 @@ class AdminActivityClaimView(View):
         campaign = ActivityCampaign.objects.get(key=key, enabled=True)
         ActivityService.claim_for_space(campaign, request.space)
         return ActivityService.admin_payloads(request.space)
+
+
+class AdminActivityRerunView(View):
+    @auth.require_space
+    def post(self, request: Request, key: str, action: str):
+        from Activity.reruns import activate_rerun, apply_for_rerun, RerunErrors
+        if action == 'apply':
+            apply_for_rerun(key, request.space)
+        elif action == 'claim':
+            activate_rerun(key, request.space)
+        else:
+            raise RerunErrors.MISSING
+        return ActivityService.admin_payloads(request.space)
