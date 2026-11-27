@@ -5,7 +5,8 @@ from django.test import TestCase
 from AccessPolicy.models import PlatformCapabilityPolicy
 from Space.models import Space
 from User.growth import GROWTH_THRESHOLDS, SINGER_AVATAR_FRAMES
-from User.models import User, UserResourceInventory
+from User.models import User, UserFeatureDiscovery, UserResourceInventory
+from utils.auth import get_login_token
 
 
 class SingerAvatarFrameTests(TestCase):
@@ -46,3 +47,32 @@ class SingerAvatarFrameTests(TestCase):
         key = 'menu.personalization.frame.use.gem'
         PlatformCapabilityPolicy.objects.create(capability_key=key, enabled=False)
         self.assertFalse(self.user.has_capability(key, {'growth_level': 18}))
+
+    def test_discovery_marks_only_unlocked_appearances_and_persists_per_account(self):
+        url = '/users/me/feature-discoveries'
+        other = User.create(space=self.user.space, name='Another listener')
+        headers = {'HTTP_AUTHORIZATION': 'Bearer ' + get_login_token(self.user)['auth']}
+        other_headers = {'HTTP_AUTHORIZATION': 'Bearer ' + get_login_token(other)['auth']}
+
+        def styles(account):
+            response = self.client.get(url, **account)
+            self.assertEqual(response.status_code, 200)
+            return {item['reward_id']: item['is_new'] for item in response.json()['body']['features']
+                    if item['capability_key'].startswith('appearance.')}
+
+        unlocked = {'frame.joker-xue', 'frame.khalil-fong', 'profile.accusefive',
+                    'profile.landlords-cat', 'profile.she', 'profile.mayday'}
+        with patch.object(User, 'effective_growth_level', return_value=16):
+            self.assertEqual(styles(headers), dict.fromkeys(unlocked, True))
+            locked = self.client.post(url, {'reward_id': 'frame.gem'}, content_type='application/json', **headers)
+            self.assertEqual(locked.status_code, 400)
+            for reward_id in ('frame.joker-xue', 'profile.mayday', 'frame.joker-xue'):
+                response = self.client.post(url, {'reward_id': reward_id}, content_type='application/json', **headers)
+                self.assertEqual(response.status_code, 200)
+            self.assertEqual(styles(headers), dict.fromkeys(unlocked, True) | {
+                'frame.joker-xue': False, 'profile.mayday': False,
+            })
+            self.assertEqual(styles(other_headers), dict.fromkeys(unlocked, True))
+        with patch.object(User, 'effective_growth_level', return_value=17):
+            self.assertTrue(styles(headers)['frame.gem'])
+        self.assertEqual(UserFeatureDiscovery.objects.filter(user=self.user).count(), 2)

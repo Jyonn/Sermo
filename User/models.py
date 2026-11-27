@@ -41,6 +41,7 @@ from User.growth import (
     MUSIC_PROFILE_UNLOCK_LEVELS,
     PERMANENT_VIP_RESOURCES,
     RESOURCE_REWARD_CATEGORIES,
+    SINGER_AVATAR_FRAMES,
     WEEKLY_GROWTH_LIMIT,
     level_unlock_titles,
     resolve_event_rule,
@@ -1606,13 +1607,26 @@ class UserFeatureDiscovery(models.Model):
         ]
 
     @classmethod
+    def appearance_rewards(cls, user):
+        level = user.effective_growth_level()
+        owned_music_profiles = set(user.resource_inventory.filter(
+            resource_type='profile', resource_key__in=MUSIC_PROFILE_UNLOCK_LEVELS,
+        ).values_list('resource_key', flat=True))
+        return [
+            reward for unlock_level, rewards in LEVEL_REWARDS.items() for reward in rewards
+            if (reward['category'] == 'frame' and reward['asset_key'] in SINGER_AVATAR_FRAMES and unlock_level <= level)
+            or (reward['category'] == 'profile' and reward['asset_key'] in MUSIC_PROFILE_UNLOCK_LEVELS
+                and (unlock_level <= level or reward['asset_key'] in owned_music_profiles))
+        ]
+
+    @classmethod
     def status_for(cls, user):
         discovered = set(cls.objects.filter(user=user).values_list('reward_id', flat=True))
-        features = cls.feature_rewards(user)
+        features = cls.feature_rewards(user) + cls.appearance_rewards(user)
         return dict(
             features=[dict(
                 reward_id=reward['id'],
-                capability_key=reward['capability_key'],
+                capability_key=reward['capability_key'] or f"appearance.{reward['category']}",
                 required_level=reward['level'],
                 title=reward['title'],
                 destination=reward['destination'],
@@ -1623,7 +1637,7 @@ class UserFeatureDiscovery(models.Model):
 
     @classmethod
     def discover(cls, user, reward_id):
-        available = {reward['id'] for reward in cls.feature_rewards(user)}
+        available = {reward['id'] for reward in cls.feature_rewards(user) + cls.appearance_rewards(user)}
         if reward_id not in available:
             raise UserErrors.FEATURE_DISCOVERY_INVALID
         cls.objects.get_or_create(user=user, reward_id=reward_id)
