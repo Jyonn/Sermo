@@ -1702,7 +1702,8 @@ class Message(models.Model):
         if self.type == MessageTypeChoice.CHRONELLE_INVITE:
             content = self._parse_payload(self.content)
             return {'kind': 'chronelle_invite', 'calendar_invitation': {
-                key: content.get(key) for key in ('title', 'start', 'end', 'timezone', 'status')
+                key: content[key] for key in ('title', 'start', 'end', 'timezone', 'status', 'all_day', 'response_to')
+                if content.get(key) is not None
             }}
         if self.type == MessageTypeChoice.VOICE_CALL:
             return self._parse_payload(self.content)
@@ -1873,6 +1874,8 @@ class Message(models.Model):
             return self.system_message_text()
         if self.type == MessageTypeChoice.SUBMISSION_INVITE and self._parse_payload(self.content).get('research'):
             return '[课题邀请]'
+        if self.type == MessageTypeChoice.CHRONELLE_INVITE and self._parse_payload(self.content).get('response_to'):
+            return '[邀约回应]'
         return self.PREVIEW_TEXT_BY_TYPE.get(self.type, self.content)
 
     def _dictify_user(self):

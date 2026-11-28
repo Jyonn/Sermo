@@ -161,7 +161,7 @@ def chat_invitation(user, message_id):
     if not message or not message.is_visible_to(user):
         raise BindingFailure('invitation_unavailable', 404)
     payload = Message._parse_payload(message.content)
-    if user.pk not in (message.user_id, payload['recipient_id']):
+    if payload.get('response_to') or user.pk not in (message.user_id, payload.get('recipient_id')):
         raise BindingFailure('invitation_unavailable', 404)
     return message, payload
 
@@ -222,16 +222,36 @@ class ChronelleChatInvitationView(PrivateInvitationView):
                             key=f'frienden-chat-response-{command}', body=response)
             try:
                 detail = invitation_detail(result)
+                expected_status = 'accepted' if action == 'accept' else 'declined'
+                if detail['status'] != expected_status or detail['proposal_version'] != version:
+                    raise ValueError()
             except (ValueError, TypeError, KeyError, AttributeError):
                 raise BindingFailure('chronelle_unavailable', 503)
             with transaction.atomic():
                 message = Message.objects.select_for_update().get(pk=message.pk)
                 current = Message._parse_payload(message.content)
-                updates = {key: detail[key] for key in ('title', 'start', 'end', 'timezone', 'status') if detail[key] is not None}
-                if any(current.get(key) != value for key, value in updates.items()):
+                updates = {
+                    key: detail[key] for key in ('title', 'start', 'end', 'timezone', 'all_day', 'status')
+                    if detail[key] is not None
+                }
+                updates['response_version'] = version
+                if version >= current.get('response_version', 0) and any(
+                    current.get(key) != value for key, value in updates.items()
+                ):
                     message.content = json.dumps({**current, **updates}, ensure_ascii=False)
                     message.save(update_fields=['content'])
                     MessageEvent.objects.create(message=message, chat=message.chat, actor=request.user, type=MessageEventTypeChoice.UPDATED)
+                snapshot = {
+                    'kind': 'chronelle_invite', 'response_to': message.pk, 'status': detail['status'],
+                    **{key: updates.get(key, payload.get(key)) for key in ('title', 'start', 'end', 'timezone', 'all_day')},
+                }
+                reply, created = Message.objects.get_or_create(
+                    chat=message.chat, user=request.user, client_message_id=f'chronelle-response-{message.pk}-{version}',
+                    defaults={'type': MessageTypeChoice.CHRONELLE_INVITE, 'content': json.dumps(snapshot, ensure_ascii=False)},
+                )
+                if created:
+                    MessageEvent.record_created(reply)
+                    NotificationEvent.emit_message_notifications(reply, actor=request.user)
             return detail
         except BindingFailure as error:
             return fail(error.code, error.status)

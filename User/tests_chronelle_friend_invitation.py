@@ -4,7 +4,7 @@ from unittest.mock import patch
 from django.test import TestCase
 
 from Friendship.models import Friendship, FriendshipStatusChoice
-from Message.models import Message, MessageEventTypeChoice, MessageTypeChoice
+from Message.models import Message, MessageEvent, MessageEventTypeChoice, MessageTypeChoice
 from User import tests_chronelle_account as fixtures
 from User.chronelle_account import BindingFailure, store
 from User.models import NotificationEvent, User
@@ -84,7 +84,15 @@ class ChronelleFriendInvitationTests(TestCase):
 
     @patch('User.chronelle_friend_invitation.check_user_text')
     @patch('User.chronelle_friend_invitation.remote')
-    def test_recipient_can_respond_in_chat_and_sender_sees_updated_card(self, remote, _):
+    def test_acceptance_updates_invitation_and_sends_one_reply_card(self, remote, _):
+        self.check_response(remote, 'accept', 'accepted')
+
+    @patch('User.chronelle_friend_invitation.check_user_text')
+    @patch('User.chronelle_friend_invitation.remote')
+    def test_decline_updates_invitation_and_sends_one_reply_card(self, remote, _):
+        self.check_response(remote, 'decline', 'declined')
+
+    def check_response(self, remote, action, status):
         self.make_friends()
         self.bound()
         self.bound(self.other)
@@ -95,7 +103,10 @@ class ChronelleFriendInvitationTests(TestCase):
         created = self.call(self.draft(context), self.path_for_friend()).json()['body']
         message = Message.objects.get(pk=created['message_id'])
         path = f'/users/chronelle/invitations/{message.pk}'
-        response = {'action': 'accept', 'group_id': 8, 'request_key': str(uuid4()), 'proposal_version': 2}
+        command = {'action': action, 'proposal_version': 2}
+        if action == 'accept':
+            command['group_id'] = 8
+        response = {**command, 'request_key': str(uuid4())}
         self.assertEqual(self.call(response, path).status_code, 403)
 
         outsider = User.create(self.space, 'Other user', verified=True)
@@ -115,15 +126,26 @@ class ChronelleFriendInvitationTests(TestCase):
         self.assertNotIn('private', str(detail))
 
         remote.side_effect = None
-        remote.return_value = {**result, 'can_respond': False, 'participants': [{'status': 'accepted'}]}
+        remote.return_value = {**result, 'can_respond': False, 'participants': [{'status': status}]}
         for _attempt in range(2):
-            self.assertEqual(self.call(response, path).json()['body']['status'], 'accepted')
+            self.assertEqual(self.call(response, path).json()['body']['status'], status)
         self.assertEqual(remote.call_args.args[1], f'/api/oauth/calendar/respond/{invitation}/')
         self.assertEqual(remote.call_args.kwargs['key'], f"frienden-chat-response-{response['request_key']}")
-        self.assertEqual(remote.call_args.kwargs['body'], {'action': 'accept', 'proposal_version': 2, 'group_id': 8})
+        self.assertEqual(remote.call_args.kwargs['body'], command)
         message.refresh_from_db()
-        self.assertEqual(message.jsonl()['payload']['calendar_invitation']['status'], 'accepted')
+        self.assertEqual(message.jsonl()['payload']['calendar_invitation']['status'], status)
         self.assertEqual(message.sync_events.filter(type=MessageEventTypeChoice.UPDATED).count(), 1)
+        reply = Message.objects.get(chat=message.chat, user=self.other, type=MessageTypeChoice.CHRONELLE_INVITE)
+        self.assertTrue(MessageEvent.visible_for_user(self.user).filter(message=reply).exists())
+        self.assertFalse(MessageEvent.visible_for_user(outsider).filter(message=reply).exists())
+        card = reply.jsonl()['payload']['calendar_invitation']
+        self.assertEqual(card, {
+            **{key: result[key] for key in ('title', 'start', 'end', 'timezone')},
+            'status': status, 'response_to': message.pk,
+        })
+        self.assertEqual(reply.sync_events.filter(type=MessageEventTypeChoice.CREATED).count(), 1)
+        self.assertEqual(NotificationEvent.objects.filter(user=self.user, payload__message_id=reply.pk).count(), 1)
+        self.assertEqual(self.call(path=f'/users/chronelle/invitations/{reply.pk}').status_code, 404)
 
     @patch('User.chronelle_friend_invitation.check_user_text')
     @patch('User.chronelle_friend_invitation.remote')
