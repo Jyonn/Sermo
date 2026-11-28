@@ -194,14 +194,14 @@ msgstr "锁定的消息无法撤回"
 msgid "You cannot manage locked messages in this chat"
 msgstr "你没有权限管理这个聊天的锁定消息"
 
-msgid "This chat has reached the locked message limit"
-msgstr "这个聊天最多锁定20条消息"
+msgid "This chat allows up to {limit} locked messages"
+msgstr "这个聊天最多可锁定 {limit} 条消息"
 
 msgid "You can lock up to 3 messages in this group"
 msgstr "你在本群最多可锁定 3 条消息"
 
-msgid "Group owners can lock up to 20 messages in this group"
-msgstr "群主在本群最多可锁定 20 条消息"
+msgid "Group owners can lock up to {limit} messages in this group"
+msgstr "群主在本群最多可锁定 {limit} 条消息"
 
 #| msgid "enabled should be 0 or 1"
 msgid "group_square_enabled should be 0 or 1"

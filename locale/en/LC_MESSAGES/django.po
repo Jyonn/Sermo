@@ -194,8 +194,8 @@ msgstr "Locked messages cannot be recalled"
 msgid "You cannot manage locked messages in this chat"
 msgstr "You cannot manage locked messages in this chat"
 
-msgid "This chat has reached the locked message limit"
-msgstr "This chat has reached the locked message limit"
+msgid "This chat allows up to {limit} locked messages"
+msgstr "This chat allows up to {limit} locked messages"
 
 #| msgid "enabled should be 0 or 1"
 msgid "group_square_enabled should be 0 or 1"

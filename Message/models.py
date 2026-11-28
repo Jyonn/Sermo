@@ -21,7 +21,7 @@ from django.utils.translation import gettext as _, override
 
 from smartdjango import models, Choice
 
-from Chat.models import Chat, ChatMember, ChatMemberStatusChoice, ChatPurposeChoice, SubmissionMemberRoleChoice, SubmissionStatusChoice
+from Chat.models import Chat, ChatMember, ChatMemberRoleChoice, ChatMemberStatusChoice, ChatPurposeChoice, SubmissionMemberRoleChoice, SubmissionStatusChoice
 from Message.providers.douyin import DouyinProvider
 from Message.providers.xiaohongshu import XiaohongshuProvider
 from Message.providers.music import MusicProvider
@@ -2381,6 +2381,7 @@ class PinnedMessage(models.Model):
     MAX_PER_CHAT = 20
     GROUP_MEMBER_LIMIT = 3
     GROUP_OWNER_LIMIT = 20
+    VIP_LIMIT = 100
 
     chat = models.ForeignKey(Chat, on_delete=models.CASCADE, related_name='pinned_messages')
     message = models.ForeignKey(Message, on_delete=models.CASCADE, related_name='pins')
@@ -2402,28 +2403,43 @@ class PinnedMessage(models.Model):
     def pin(cls, message, user):
         if message.type in (MessageTypeChoice.SYSTEM, MessageTypeChoice.OFFICIAL_NOTICE, MessageTypeChoice.SUBMISSION_INVITE):
             raise MessageErrors.SYSTEM_MESSAGE_FORBIDDEN
-        cls.require_manage_permission(message.chat, user)
+        chat = message.chat
         with transaction.atomic():
-            # Serialize a member's quota checks so simultaneous pins cannot exceed it.
-            ChatMember.objects.select_for_update().get(
-                chat=message.chat, user=user, status=ChatMemberStatusChoice.ACTIVE,
-            )
+            if chat.group:
+                member = ChatMember.objects.select_for_update().filter(
+                    chat=chat, user=user, status=ChatMemberStatusChoice.ACTIVE,
+                ).first()
+                if member is None:
+                    raise MessageErrors.NOT_A_MEMBER
+            else:
+                # Both participants count against the same quota.
+                Chat.objects.select_for_update().only('id').get(pk=chat.pk)
+                cls.require_manage_permission(chat, user)
+
             existing = cls.objects.filter(message=message, pinned_by=user).first()
             if existing is not None:
                 return existing
-            if message.chat.group:
-                limit = cls.GROUP_OWNER_LIMIT if message.chat.is_owner(user) else cls.GROUP_MEMBER_LIMIT
+            if chat.group:
+                owner = member.role == ChatMemberRoleChoice.OWNER
+                owner_limit = cls.VIP_LIMIT if user.is_permanent_vip else cls.GROUP_OWNER_LIMIT
+                limit = owner_limit if owner else cls.GROUP_MEMBER_LIMIT
                 count = cls.objects.filter(
-                    chat=message.chat, pinned_by=user, message__is_deleted=False,
+                    chat=chat, pinned_by=user, message__is_deleted=False,
                 ).count()
                 if count >= limit:
-                    raise MessageErrors.PIN_OWNER_LIMIT_REACHED if message.chat.is_owner(user) else MessageErrors.PIN_MEMBER_LIMIT_REACHED
+                    if owner:
+                        raise MessageErrors.PIN_OWNER_LIMIT_REACHED(limit=limit)
+                    raise MessageErrors.PIN_MEMBER_LIMIT_REACHED
             else:
+                has_vip = chat.chat_members.filter(
+                    status=ChatMemberStatusChoice.ACTIVE, user__is_permanent_vip=True, user__is_deleted=False,
+                ).exists()
+                limit = cls.VIP_LIMIT if has_vip else cls.MAX_PER_CHAT
                 count = cls.objects.filter(
-                    chat=message.chat, message__is_deleted=False,
+                    chat=chat, message__is_deleted=False,
                 ).values('message_id').distinct().count()
-                if count >= cls.MAX_PER_CHAT and not cls.objects.filter(message=message).exists():
-                    raise MessageErrors.PIN_LIMIT_REACHED
+                if count >= limit and not cls.objects.filter(message=message).exists():
+                    raise MessageErrors.PIN_LIMIT_REACHED(limit=limit)
             pin, created = cls.objects.get_or_create(
                 message=message,
                 pinned_by=user,
@@ -2465,7 +2481,7 @@ class PinnedMessage(models.Model):
         if user is not None:
             visible_message_ids = Message.visible_for_user(chat, user).values_list('id', flat=True)
             rows = rows.filter(message_id__in=visible_message_ids)
-        return cls.aggregate_rows(rows, limit=None if chat.group else cls.MAX_PER_CHAT)
+        return cls.aggregate_rows(rows, limit=None)
 
     @classmethod
     def aggregate_for_message(cls, message):

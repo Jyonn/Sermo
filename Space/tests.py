@@ -1369,6 +1369,79 @@ class SpaceAdminApiTests(TestCase):
         self.assertEqual(response.status_code, 200, response.content)
         self.assertFalse(PinnedMessage.objects.filter(message=messages[0]).exists())
 
+    def test_either_direct_chat_participant_grants_a_shared_vip_pin_limit(self):
+        chat = Chat.get_or_create_direct(self.official, self.member)
+        messages = Message.objects.bulk_create([
+            Message(chat=chat, user=self.member, type=MessageTypeChoice.TEXT, content=f'Note {index}')
+            for index in range(101)
+        ])
+        self.official.set_language_preference('zh-CN')
+        self.member.set_language_preference('zh-CN')
+
+        def pin(index, user):
+            return self.client.post(f'/messages/pins?message_id={messages[index].id}', **self.user_authorization(user))
+
+        for vip, peer in ((self.official, self.member), (self.member, self.official)):
+            with self.subTest(vip=vip.id):
+                PinnedMessage.objects.filter(chat=chat).delete()
+                PinnedMessage.objects.bulk_create([
+                    PinnedMessage(chat=chat, message=message, pinned_by=vip) for message in messages[:99]
+                ])
+                PinnedMessage.objects.create(chat=chat, message=messages[0], pinned_by=peer)
+                response = pin(99, peer)
+                self.assertEqual(response.status_code, 400, response.content)
+                self.assertIn('20 条', response.json()['message'])
+
+                vip.is_permanent_vip = True
+                vip.save(update_fields=['is_permanent_vip'])
+                response = pin(99, peer)
+                self.assertEqual(response.status_code, 200, response.content)
+                response = pin(100, vip)
+                self.assertEqual(response.status_code, 400, response.content)
+                self.assertEqual(response.json()['identifier'], 'MESSAGE@PIN_LIMIT_REACHED')
+                self.assertIn('100 条', response.json()['message'])
+                duplicate = pin(1, peer)
+                self.assertEqual(duplicate.status_code, 200, duplicate.content)
+                self.assertEqual(len(duplicate.json()['body']['pinned_by_users']), 2)
+
+                vip.is_permanent_vip = False
+                vip.save(update_fields=['is_permanent_vip'])
+                response = self.client.get(f'/messages/pins?chat_id={chat.id}', **self.user_authorization(peer))
+                self.assertEqual(response.status_code, 200, response.content)
+                self.assertEqual(len(response.json()['body']), 100)
+
+    def test_group_pin_limit_follows_the_current_vip_owner(self):
+        chat = Chat.objects.create(space=self.space, chat_type=ChatTypeChoice.GROUP, title='Group', created_by=self.official)
+        for user, role in ((self.official, ChatMemberRoleChoice.OWNER), (self.member, ChatMemberRoleChoice.MEMBER)):
+            ChatMember.objects.create(chat=chat, user=user, role=role, status=ChatMemberStatusChoice.ACTIVE)
+        self.member.is_permanent_vip = True
+        self.member.save(update_fields=['is_permanent_vip'])
+        self.member.set_language_preference('zh-CN')
+        messages = Message.objects.bulk_create([
+            Message(chat=chat, user=self.member, type=MessageTypeChoice.TEXT, content=f'Note {index}')
+            for index in range(101)
+        ])
+        headers = self.user_authorization(self.member)
+        PinnedMessage.objects.bulk_create([
+            PinnedMessage(chat=chat, message=message, pinned_by=self.member) for message in messages[:3]
+        ])
+        response = self.client.post(f'/messages/pins?message_id={messages[3].id}', **headers)
+        self.assertEqual(response.json()['identifier'], 'MESSAGE@PIN_MEMBER_LIMIT_REACHED')
+
+        chat.transfer_ownership(self.official, self.member)
+        PinnedMessage.objects.bulk_create([
+            PinnedMessage(chat=chat, message=message, pinned_by=self.member) for message in messages[3:99]
+        ])
+        response = self.client.post(f'/messages/pins?message_id={messages[99].id}', **headers)
+        self.assertEqual(response.status_code, 200, response.content)
+        response = self.client.post(f'/messages/pins?message_id={messages[100].id}', **headers)
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertEqual(response.json()['identifier'], 'MESSAGE@PIN_OWNER_LIMIT_REACHED')
+        self.assertIn('100 条', response.json()['message'])
+        response = self.client.get(f'/messages/pins?chat_id={chat.id}', **headers)
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(len(response.json()['body']), 100)
+
     def test_space_admin_email_does_not_bypass_contact_matching(self):
         self.member.email = self.space.email
         self.member.email_verified_at = timezone.now()
