@@ -1,5 +1,4 @@
 from importlib import import_module
-from types import SimpleNamespace
 from unittest.mock import patch
 from django.apps import apps
 from django.test import TestCase
@@ -68,13 +67,13 @@ class NotificationCategoryTests(TestCase):
         self.assertFalse(NotificationEvent.objects.filter(payload__kind='research_task').exists())
 
     def test_submission_notices_and_research_invites_are_not_classified_as_regular_chat(self):
-        from Message.models import MessageTypeChoice
+        from Message.models import Message, MessageTypeChoice
         from Chat.models import Chat
         from Friendship.models import Friendship
         Friendship.ensure_locked_friendship(self.owner,self.student)
         chat=Chat.get_or_create_direct(self.owner,self.student)
         for kind,content,topic in [(MessageTypeChoice.OFFICIAL_NOTICE,'{"event":"submission_ready"}',7),(MessageTypeChoice.SUBMISSION_INVITE,'{"research":true}',10),(MessageTypeChoice.SUBMISSION_INVITE,'{}',7)]:
-            message=SimpleNamespace(type=kind,chat=chat,chat_id=chat.pk,id=1,content=content,preview_text=lambda:'Preview')
+            message=Message(id=1, type=kind, chat=chat, user=self.owner, content=content)
             events=NotificationEvent.emit_message_notifications(message,self.owner,enqueue=False)
             self.assertEqual(events[0].topic(),topic)
 
