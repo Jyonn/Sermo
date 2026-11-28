@@ -7,6 +7,7 @@ from django.http import JsonResponse
 from django.utils.crypto import constant_time_compare, salted_hmac
 from django.views import View
 
+from Activity.record_shop import decorate_message
 from Chat.calendar_policy import friend_relation
 from Chat.models import Chat, ChatPurposeChoice, ChatTypeChoice
 from Chat.research import fail
@@ -47,6 +48,12 @@ def calendar_groups(base, token):
     return [{'id': group['id'], 'name': group['name']} for group in groups]
 
 
+def publish_invitation_message(message):
+    decorate_message(message)
+    MessageEvent.record_created(message)
+    NotificationEvent.emit_message_notifications(message, actor=message.user)
+
+
 def deliver_invitation(chat, sender, friend_id, command, invitation_id, proposal):
     content = {
         'kind': 'chronelle_invite',
@@ -62,8 +69,7 @@ def deliver_invitation(chat, sender, friend_id, command, invitation_id, proposal
     if message.type != MessageTypeChoice.CHRONELLE_INVITE or Message._parse_payload(message.content).get('invitation_id') != invitation_id:
         raise BindingFailure('invitation_command_conflict', 409)
     if created:
-        MessageEvent.record_created(message)
-        NotificationEvent.emit_message_notifications(message, actor=sender)
+        publish_invitation_message(message)
     return message.pk
 
 
@@ -250,8 +256,7 @@ class ChronelleChatInvitationView(PrivateInvitationView):
                     defaults={'type': MessageTypeChoice.CHRONELLE_INVITE, 'content': json.dumps(snapshot, ensure_ascii=False)},
                 )
                 if created:
-                    MessageEvent.record_created(reply)
-                    NotificationEvent.emit_message_notifications(reply, actor=request.user)
+                    publish_invitation_message(reply)
             return detail
         except BindingFailure as error:
             return fail(error.code, error.status)

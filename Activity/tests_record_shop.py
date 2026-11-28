@@ -16,6 +16,7 @@ from Activity.models import ActivityCampaign, ActivityEvent, ActivityService, Re
 from Activity.record_shop import ROSTERS, SINGERS, award, bubble_preferences_payload, claim_singer, current_album_clip_path, decorate_message, finish_listen, played_complete, register_share, resolve_shares, set_equipped_singer, space_first_album_medals, start_listen, track_identity
 from Activity.record_shop_studio_catalog import STUDIO_ALBUMS
 from Chat.models import Chat, ChatTypeChoice
+from Friendship.models import Friendship, FriendshipStatusChoice
 from Message.models import LinkPreview, LinkPreviewStatusChoice, Message, MessageTypeChoice
 from Space.models import Space
 from Square.models import Statement
@@ -184,6 +185,24 @@ class RecordShopTests(TestCase):
                 self.assertEqual(finish_listen(key, self.other, packet), {'points': 0})
                 self.assertEqual(finish_listen(key, self.user, packet), {'points': 3})
                 self.assertEqual(finish_listen(key, self.user, packet), {'points': 0})
+
+    def test_calendar_card_keeps_equipped_portrait_and_starts_a_new_bubble_group(self):
+        portrait = 'https://example.test/test.webp'
+        self.campaign.config.update(
+            albums={'jay': [dict(id='rare-album', probability=1)]},
+            portraits={'jay': portrait},
+        )
+        self.campaign.save(update_fields=['config'])
+        award(self.run, self.user, 'share', 'jay:testing', 30)
+        claim_singer(self.campaign.key, self.user, 'jay')
+        set_equipped_singer(self.user, 'jay')
+        Friendship.objects.create(space=self.space, user_low=self.user, user_high=self.other, status=FriendshipStatusChoice.ACCEPTED)
+        chat = Chat.get_or_create_direct(self.user, self.other)
+        for kind in (MessageTypeChoice.TEXT, MessageTypeChoice.CHRONELLE_INVITE, MessageTypeChoice.TEXT):
+            message = Message.objects.create(chat=chat, user=self.user, type=kind, content='{}')
+            decorate_message(message)
+            self.assertEqual(message.appearance['record_shop'], {'artist': 'jay', 'portrait': portrait})
+        self.assertFalse(RecordShopDiscovery.objects.exists())
 
     def test_first_cover_creates_one_medal_without_an_official_post(self):
         self.space.admin_phone_verified_at = timezone.now()

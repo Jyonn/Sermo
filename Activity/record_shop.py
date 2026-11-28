@@ -395,17 +395,17 @@ def decorate_message(message):
     portrait = run.campaign.config.get('portraits', {}).get(artist)
     if not portrait:
         return
-    albums = run.campaign.config.get('albums', {}).get(artist, [])
-    active = run.is_active(message.created_at)
-    if not active:
-        owned = set(RecordShopDiscovery.objects.filter(progress=progress).values_list('album_id', flat=True))
-        albums = [album for album in albums if album['id'] in owned]
-    previous = Message.visible_in_chat(message.chat).filter(id__lt=message.id).order_by('-id').only(
-        'id', 'type', 'user_id', 'created_at', 'appearance',
-    ).first()
+    previous = None
+    if message.type != MessageTypeChoice.CHRONELLE_INVITE:
+        previous = Message.visible_in_chat(message.chat).filter(id__lt=message.id).order_by('-id').only(
+            'id', 'type', 'user_id', 'created_at', 'appearance',
+        ).first()
     groupable = (
         previous is not None and previous.user_id == message.user_id
-        and previous.type not in {MessageTypeChoice.SYSTEM, MessageTypeChoice.OFFICIAL_NOTICE, MessageTypeChoice.SUBMISSION_INVITE}
+        and previous.type not in {
+            MessageTypeChoice.SYSTEM, MessageTypeChoice.OFFICIAL_NOTICE,
+            MessageTypeChoice.SUBMISSION_INVITE, MessageTypeChoice.CHRONELLE_INVITE,
+        }
         and previous.appearance.get('record_shop', {}).get('artist') == artist
         and previous.appearance.get('chat_bubble_style') == message.appearance.get('chat_bubble_style')
         and abs((message.created_at - previous.created_at).total_seconds()) < 300
@@ -413,7 +413,12 @@ def decorate_message(message):
         == timezone.localdate(previous.created_at, ActivityService.BEIJING_TIMEZONE)
     )
     decoration = {'artist': artist, 'portrait': portrait}
-    if albums and groupable:
+    albums = run.campaign.config.get('albums', {}).get(artist, []) if groupable else []
+    active = run.is_active(message.created_at)
+    if albums and not active:
+        owned = set(RecordShopDiscovery.objects.filter(progress=progress).values_list('album_id', flat=True))
+        albums = [album for album in albums if album['id'] in owned]
+    if albums:
         album, = random.choices(albums, weights=[row['probability'] for row in albums])
         decoration['album'] = public_album(album)
         if active:
