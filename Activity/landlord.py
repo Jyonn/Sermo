@@ -12,6 +12,7 @@ from Activity.card_game import DECK_SIZE, advance_trick, automatic_play, card_ra
 from Activity.game_leaderboard import annual_rankings
 from Activity.landlord_rules import beats, classify, hint
 from Activity.models import LandlordRoundResult, LandlordSeat, LandlordTable
+from Activity.quick_voice import visible_voice
 from Activity.table_activity import ROOM_WAIT, activity_payload, activity_run, eligible, forfeit_scores, new_room, public_user, room_code
 
 
@@ -77,6 +78,7 @@ class LandlordService:
             bids=table.bids, moves=table.moves, last_player=table.last_player,
             deadline=table.deadline.timestamp() if table.deadline else None,
             server_now=now.timestamp(),
+            quick_voice=visible_voice(table, [seat.user_id for seat in seats.values() if cls.eligible(seat.user)], user.pk, now),
             can_start=table.status == cls.STATUS.FINISHED and own.position == table.host_position
             and len(seats) == 3 and all(seat.ready for seat in seats.values()),
             base=best_bid, multiplier=table.multiplier, spring=table.spring,

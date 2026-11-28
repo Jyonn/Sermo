@@ -70,7 +70,9 @@ class NumberDuelView(View):
     @auth.require_user
     def get(self, request: Request, key: str):
         from Activity.number_duel import NumberDuelService
-        return NumberDuelService.lobby(key, request.user, request.GET.get('match_id'), request.GET.get('room_code'))
+        return LandlordView._response(NumberDuelService.lobby(
+            key, request.user, request.GET.get('match_id'), request.GET.get('room_code'),
+        ))
 
     @auth.require_user
     def post(self, request: Request, key: str):
@@ -80,7 +82,7 @@ class NumberDuelView(View):
             data = json.loads(request.body)
         except (ValueError, UnicodeDecodeError):
             raise DuelErrors.INVALID
-        return NumberDuelService.act(key, request.user, data)
+        return LandlordView._response(NumberDuelService.act(key, request.user, data))
 
 
 class LandlordView(View):
@@ -140,6 +142,18 @@ class FourPlayerView(View):
         except (ValueError, UnicodeDecodeError):
             raise FourPlayerErrors.INVALID
         return LandlordView._response(act(key, request.user, data))
+
+
+class GameQuickVoiceView(View):
+    @auth.require_user
+    def post(self, request: Request, key: str):
+        import json
+        from Activity.quick_voice import QuickVoiceErrors, send_voice
+        try:
+            data = json.loads(request.body)
+        except (ValueError, UnicodeDecodeError):
+            raise QuickVoiceErrors.INVALID
+        return LandlordView._response(send_voice(key, request.user, data))
 
 
 class ActivityDetailView(View):

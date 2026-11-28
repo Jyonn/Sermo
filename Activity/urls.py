@@ -2,6 +2,7 @@ from django.urls import path
 from Activity.views import FourPlayerView, GameLeaderboardView, LandlordLeaderboardView, LandlordView, NumberDuelView, RecordShopView
 from Activity.views import AdminActivityRerunView, ExplorerRewardClaimView
 from Activity.views import BgmEntranceView, BgmMeView, BgmSettingsView
+from Activity.views import GameQuickVoiceView
 
 from Activity.views import AdminActivityClaimView, AdminActivityListView, ActiveActivityView, ActivityClaimView, ActivityContributionView, ActivityDetailView, ActivityMilestoneRewardClaimView, ActivityPersonalRewardClaimView, ActivitySeenView, ActivitySpaceRewardClaimView, ActivityStarryNightRewardClaimView
 
@@ -9,6 +10,7 @@ from Activity.views import AdminActivityClaimView, AdminActivityListView, Active
 urlpatterns = [
     path('<slug:key>/explorer/rewards/<int:tier>/claim', ExplorerRewardClaimView.as_view(), name='annual explorer reward claim'),
     path('<slug:key>/duel', NumberDuelView.as_view(), name='number duel'),
+    path('<slug:key>/quick-voice', GameQuickVoiceView.as_view(), name='game room quick voice'),
     path('<slug:key>/landlord', LandlordView.as_view(), name='landlord table'),
     path('<slug:key>/landlord/leaderboard', LandlordLeaderboardView.as_view(), name='landlord leaderboard'),
     path('<slug:key>/leaderboard', GameLeaderboardView.as_view(), name='game leaderboard'),

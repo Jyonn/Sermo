@@ -94,10 +94,12 @@ def _public_board(key, table, own):
 
 
 def _snapshot(key, table, seats, user, now):
+    from Activity.quick_voice import visible_voice
     own = next(seat for seat in seats.values() if seat.user_id == user.pk)
     board = table.board
     return dict(code=table.code, status=table.status, mode=table.mode, version=table.version, round=table.round_number,
                 host=table.host_position, your_seat=own.position, server_now=now.timestamp(),
+                quick_voice=visible_voice(table, [seat.user_id for seat in seats.values() if eligible(seat.user)], user.pk, now),
                 deadline=table.deadline.timestamp() if table.deadline else None,
                 can_start=table.status in BETWEEN_ROUNDS and own.position == table.host_position and _can_start(seats),
                 seats=[dict(position=seat.position, member=public_user(seat.user), ready=seat.ready, trustee=seat.trustee,

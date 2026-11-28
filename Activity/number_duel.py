@@ -207,12 +207,14 @@ class NumberDuelService:
 
     @classmethod
     def serialize(cls, duel, user):
+        from Activity.quick_voice import visible_voice
         if user.id not in (duel.host_id, duel.guest_id):
             raise DuelErrors.FORBIDDEN
         mine_host = user.id == duel.host_id
         own_secret = duel.host_secret if mine_host else duel.guest_secret
         other_secret = duel.guest_secret if mine_host else duel.host_secret
         other = duel.guest if mine_host else duel.host
+        room_members = [person.pk for person in (user, other) if person and cls.eligible(person)]
         done = duel.status == 'finished'
         guesses = []
         for row in duel.guesses.order_by('round', 'id'):
@@ -230,6 +232,7 @@ class NumberDuelService:
                     own_tier=duel.host_stake if mine_host else duel.guest_stake,
                     opponent_tier=duel.guest_stake if mine_host else duel.host_stake,
                     deadline=duel.deadline.timestamp(), host=mine_host,
+                    quick_voice=visible_voice(duel, room_members, user.pk, timezone.now()),
                     opponent=dict(user_id=other.id, name=other.name, **other.dictify('avatar_uri', 'avatar_cache_key')) if other else None,
                     own_secret=cls.read_secret(own_secret), opponent_locked=bool(other_secret),
                     opponent_secret=cls.read_secret(other_secret) if done else None,

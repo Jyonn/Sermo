@@ -44,6 +44,7 @@ class NumberDuel(models.Model):
     host = models.ForeignKey('User.User', on_delete=models.CASCADE, related_name='hosted_number_duels')
     guest = models.ForeignKey('User.User', null=True, blank=True, on_delete=models.CASCADE, related_name='joined_number_duels')
     code = models.CharField(max_length=8, unique=True)
+    quick_voice_events = models.JSONField(null=True, blank=True)
     status = models.CharField(max_length=12, default='waiting', db_index=True)
     stake = models.PositiveSmallIntegerField(default=0)
     host_stake = models.PositiveSmallIntegerField(null=True, blank=True)
@@ -98,6 +99,7 @@ class LandlordTable(models.Model):
 
     run = models.ForeignKey('SpaceActivity', on_delete=models.CASCADE, related_name='landlord_tables')
     code = models.CharField(max_length=8, unique=True)
+    quick_voice_events = models.JSONField(null=True, blank=True)
     status = models.CharField(max_length=12, choices=Status.choices, default=Status.WAITING)
     version = models.PositiveIntegerField(default=1)
     first_bidder = models.PositiveSmallIntegerField(default=0)
@@ -162,6 +164,7 @@ class LandlordRoundResult(models.Model):
 class FourPlayerTable(models.Model):
     run = models.ForeignKey('SpaceActivity', on_delete=models.CASCADE, related_name='four_player_tables')
     code = models.CharField(max_length=8, unique=True)
+    quick_voice_events = models.JSONField(null=True, blank=True)
     status = models.CharField(max_length=12, default='waiting')
     mode = models.CharField(max_length=16)
     version = models.PositiveIntegerField(default=1)
