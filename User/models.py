@@ -4367,3 +4367,19 @@ class DropConnection(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE)
     sealed = models.TextField(blank=True)
     pending = models.TextField(blank=True)
+
+
+class AnonymousPersona(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    scope = models.CharField(max_length=8)
+    target_id = models.PositiveBigIntegerField()
+    slot = models.PositiveSmallIntegerField()
+    token = models.CharField(max_length=40, unique=True)
+    expires_at = models.DateTimeField(db_index=True)
+    active = models.BooleanField(default=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['user', 'scope', 'target_id'], name='unique_anonymous_persona_owner'),
+        ]
+        indexes = [models.Index(fields=['scope', 'target_id', 'expires_at'], name='anonymous_persona_active')]

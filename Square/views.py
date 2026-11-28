@@ -18,6 +18,7 @@ from Square.statement_history import statement_history_payload
 from utils.content_safety import ContentSafetyScene, check_user_text
 from Square.quota import quota_for_user
 from Square.validators import SquareErrors
+from User.anonymous_persona import persona_token
 from User.models import NotificationEvent, NotificationEventTypeChoice, PermanentVipCampaign, User
 from utils import auth
 from utils.auth import Request
@@ -681,6 +682,7 @@ class StatementCommentView(View):
         SquareParams.anonymous,
         SquareParams.comment_sticker_asset_id,
         SquareParams.comment_mention_user_ids,
+        persona_token,
     )
     def post(self, request: Request, statement_id: int):
         request.user.space.require_square_enabled()
@@ -693,6 +695,7 @@ class StatementCommentView(View):
             is_anonymous=request.json.anonymous,
             sticker_asset_id=request.json.sticker_asset_id,
             mention_user_ids=request.json.mention_user_ids,
+            anonymous_token=request.json.anonymous_token,
         )
         if comment.parent_id:
             NotificationEvent.emit_square_event(

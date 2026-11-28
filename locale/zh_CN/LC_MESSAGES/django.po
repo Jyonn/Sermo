@@ -997,6 +997,15 @@ msgstr "匿名发言只能发布到探索"
 msgid "Anonymous sending is available for text in group chats"
 msgstr "群聊中仅支持匿名发送文字"
 
+msgid "Choose a group chat or statement"
+msgstr "请选择一个群聊或发言"
+
+msgid "The anonymous identity has expired"
+msgstr "匿名昵称已过期，请重新开启匿名"
+
+msgid "All anonymous identities are currently in use"
+msgstr "临时昵称已用完，请稍后再试"
+
 msgid "Anonymous user"
 msgstr "匿名用户"
 msgid "Owner cannot transfer the group to themselves"

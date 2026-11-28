@@ -9,6 +9,9 @@ from utils.space_slug import is_reserved_space_slug
 
 @Error.register
 class UserErrors:
+    ANONYMOUS_PERSONA_SCOPE_INVALID = Error(message=_('Choose a group chat or statement'), code=Code.BadRequest)
+    ANONYMOUS_PERSONA_EXPIRED = Error(message=_('The anonymous identity has expired'), code=Code.Forbidden)
+    ANONYMOUS_PERSONA_UNAVAILABLE = Error(message=_('All anonymous identities are currently in use'), code=Code.Forbidden)
     NOT_EXISTS = Error(message=_('User ({attr}={value}) does not exist'), code=Code.NotFound)
     EXISTS = Error(message=_('User already exists'), code=Code.BadRequest)
     EMPTY_NAME = Error(message=_('Name cannot be empty'), code=Code.BadRequest)

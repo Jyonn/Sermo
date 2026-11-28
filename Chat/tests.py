@@ -493,7 +493,7 @@ class ChatNotificationPreferenceTests(TestCase):
 
         message = Message.objects.get(pk=sent_message['message_id'])
         self.assertEqual(message.user, self.sender)
-        self.assertFalse(message.appearance)
+        self.assertEqual(list(message.appearance), ['anonymous_persona'])
         repeated = self.client.post(url, data=request_body, content_type='application/json', **self.authorization(self.sender))
         self.assertEqual(repeated.json()['body']['message_id'], message.id)
         visible = self.client.get(f'{url}&limit=10', **self.authorization(self.recipient))
@@ -533,6 +533,36 @@ class ChatNotificationPreferenceTests(TestCase):
         )
         self.assertEqual(response.status_code, 403, response.content)
         self.assertEqual(response.json()['identifier'], 'MESSAGE@ANONYMOUS_GROUP_TEXT_ONLY')
+
+    def test_temporary_personas_are_unique_scoped_and_discardable(self):
+        endpoint = '/users/me/anonymous-identity'
+        send_url = f'/messages/?chat_id={self.chat.id}'
+
+        def issue(user):
+            response = self.client.post(endpoint, {'chat_id': self.chat.id}, content_type='application/json',
+                                        **self.authorization(user))
+            self.assertEqual(response.status_code, 200, response.content)
+            return response.json()['body']
+
+        sender = issue(self.sender)
+        recipient = issue(self.recipient)
+        self.assertNotEqual(sender['persona']['id'], recipient['persona']['id'])
+        self.assertNotEqual(sender['persona']['hue'], recipient['persona']['hue'])
+        body = dict(type=MessageTypeChoice.TEXT, content='A message', anonymous=1, anonymous_token=sender['token'])
+        stranger_send = self.client.post(send_url, body, content_type='application/json', **self.authorization(self.recipient))
+        self.assertEqual(stranger_send.status_code, 403)
+        sent = self.client.post(send_url, body, content_type='application/json', **self.authorization(self.sender))
+        self.assertEqual(sent.status_code, 200, sent.content)
+        author = sent.json()['body']['user']
+        self.assertEqual(author['anonymous_persona'], sender['persona'])
+        self.assertNotIn(sender['token'], sent.content.decode())
+        self.assertEqual(author['user_id'], 0)
+        discarded = self.client.delete(endpoint, {'anonymous_token': sender['token']}, content_type='application/json',
+                                       **self.authorization(self.sender))
+        self.assertEqual(discarded.status_code, 200, discarded.content)
+        late = self.client.post(send_url, body, content_type='application/json', **self.authorization(self.sender))
+        self.assertEqual(late.status_code, 403)
+        self.assertNotEqual(issue(self.sender)['persona']['id'], sender['persona']['id'])
 
     def test_muted_group_suppresses_external_notification_but_keeps_unread(self):
         preference_response = self.client.post(

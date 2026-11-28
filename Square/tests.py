@@ -853,6 +853,8 @@ class StatementApiTests(TestCase):
         self.assertTrue(payload['is_anonymous'])
         self.assertFalse(payload['is_author'])
         self.assertEqual(payload['user']['user_id'], 0)
+        self.assertNotEqual(payload['user']['anonymous_persona']['id'], payload['reply_to_user']['anonymous_persona']['id'])
+        self.assertEqual(payload['reply_to_user']['anonymous_persona'], root.anonymous_persona)
 
     def test_comment_mentions_only_record_friends_and_notify_them(self):
         statement = Statement.create_statement(self.author, '艾特好友', 'public', [])

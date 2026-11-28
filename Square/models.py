@@ -641,6 +641,7 @@ class StatementComment(models.Model):
     edit_revision = models.PositiveIntegerField(default=0)
     is_deleted = models.BooleanField(default=False, db_index=True)
     is_anonymous = models.BooleanField(default=False, db_index=True)
+    anonymous_persona = models.JSONField(null=True, blank=True)
 
     class Meta:
         ordering = ['-id']
@@ -770,6 +771,7 @@ class StatementComment(models.Model):
         is_anonymous=False,
         sticker_asset_id=None,
         mention_user_ids=None,
+        anonymous_token='',
     ):
         user.require_capability('square.interaction.reply' if parent_id is not None else 'square.interaction.comment')
         SquareMute.require_can_participate(user)
@@ -799,6 +801,7 @@ class StatementComment(models.Model):
             parent=parent,
             reply_to_user=parent.user if parent is not None else None,
             is_anonymous=is_anonymous,
+            anonymous_persona=cls._resolve_persona(user, statement_id, anonymous_token) if is_anonymous else None,
             sticker_asset=sticker_asset,
         )
         comment.record_mentions(user, normalized_text, mention_user_ids)
@@ -810,6 +813,19 @@ class StatementComment(models.Model):
         from Activity.bgm import BgmService
         BgmService.record(user, 'comment', comment)
         return comment
+
+    @staticmethod
+    def _resolve_persona(user, statement_id, token):
+        from User.anonymous_persona import resolve_persona
+        return resolve_persona(user, 'square', statement_id, token)
+
+    def public_author(self):
+        if not self.is_anonymous:
+            return self.user.tiny_json()
+        author = anonymous_user_json()
+        if self.anonymous_persona:
+            author['anonymous_persona'] = self.anonymous_persona
+        return author
 
     def edit_for(self, user, text, sticker_asset_id, mention_user_ids, revision):
         if user.id != self.user_id:
@@ -843,10 +859,10 @@ class StatementComment(models.Model):
             root_id=self.thread_root_id,
             reply_to_user=(
                 None if parent is None else
-                anonymous_user_json() if parent.is_anonymous else
+                parent.public_author() if parent.is_anonymous else
                 self.reply_to_user.tiny_json() if self.reply_to_user_id else None
             ),
-            user=anonymous_user_json() if self.is_anonymous else self.user.tiny_json(),
+            user=self.public_author(),
             is_anonymous=self.is_anonymous,
             # The author badge is safe only when the post and comment use the same identity.
             is_author=self.user_id == self.statement.user_id and self.statement.is_anonymous == self.is_anonymous,

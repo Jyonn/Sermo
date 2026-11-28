@@ -856,7 +856,7 @@ class Message(models.Model):
         return self.visible_for_user(self.chat, user).filter(id=self.id).exists()
 
     @classmethod
-    def create(cls, chat: Chat, user: User, message_type, content, reply_to=None, client_message_id=None, mention_user_ids=None, media_resource=None, *, flash_image=False, is_anonymous=False):
+    def create(cls, chat: Chat, user: User, message_type, content, reply_to=None, client_message_id=None, mention_user_ids=None, media_resource=None, *, flash_image=False, is_anonymous=False, anonymous_token=''):
         if message_type in (MessageTypeChoice.SYSTEM, MessageTypeChoice.FORWARD_BUNDLE, MessageTypeChoice.OFFICIAL_NOTICE, MessageTypeChoice.SUBMISSION_INVITE, MessageTypeChoice.VOICE_CALL):
             raise MessageErrors.SYSTEM_MESSAGE_FORBIDDEN
         if message_type == MessageTypeChoice.FLASH_IMAGE and (not flash_image or media_resource is not None):
@@ -980,11 +980,16 @@ class Message(models.Model):
                         raise MessageErrors.MAP_ACCESS_TARGET_INVALID
             try:
                 with transaction.atomic():
+                    appearance = {}
+                    if is_anonymous:
+                        from User.anonymous_persona import resolve_persona
+                        appearance['anonymous_persona'] = resolve_persona(user, 'chat', chat.id, anonymous_token)
                     message = cls.objects.create(
                         chat=chat,
                         user=user,
                         type=message_type,
                         is_anonymous=bool(is_anonymous),
+                        appearance=appearance,
                         content=normalized_content,
                         media_resource=media_resource,
                         reply_to=reply_to,
@@ -1864,8 +1869,12 @@ class Message(models.Model):
 
     def _dictify_user(self):
         if self.is_anonymous:
-            return dict(user_id=0, name=str(_('Anonymous user')), anonymous=True, official=False,
-                        avatar_type='preset', avatar_uri='')
+            speaker = dict(user_id=0, name=str(_('Anonymous user')), anonymous=True, official=False,
+                           avatar_type='preset', avatar_uri='')
+            persona = (self.appearance or {}).get('anonymous_persona')
+            if persona:
+                speaker['anonymous_persona'] = persona
+            return speaker
         payload = self.user.tiny_json()
         payload.update(self.appearance or {})
         return payload

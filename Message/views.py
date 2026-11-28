@@ -20,6 +20,7 @@ from utils import auth
 from utils.auth import Request
 from utils.compact import compact_response
 from User.models import NotificationEvent, User
+from User.anonymous_persona import persona_token
 
 
 def _require_message_feature(chat, user):
@@ -88,6 +89,7 @@ class MessageView(View):
         MessageParams.resource_id,
         MessageParams.live_transcript_receipt,
         MessageParams.anonymous,
+        persona_token,
     )
     def post(self, request: Request):
         _require_message_feature(request.query.chat, request.user)
@@ -111,7 +113,8 @@ class MessageView(View):
                 client_message_id=request.json.client_message_id,
                 mention_user_ids=request.json.mention_user_ids,
                 media_resource=media_resource,
-                is_anonymous=request.json.anonymous)
+                is_anonymous=request.json.anonymous,
+                anonymous_token=request.json.anonymous_token)
             attach_recording_transcript(message, request.user, request.json.live_transcript_receipt)
             if getattr(message, '_was_created', True) and not message.chat.submission:
                 NotificationEvent.emit_message_notifications(message, actor=request.user)
