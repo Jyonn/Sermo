@@ -2986,12 +2986,15 @@ class NotificationEvent(models.Model):
 
     def json(self):
         anonymous_actor = bool((self.payload or {}).get('anonymous_actor'))
+        actor = self.actor.tiny_json() if self.actor_id and not anonymous_actor else None
+        if anonymous_actor:
+            actor = dict(user_id=0, name='', anonymous=True)
         return dict(
             notification_event_id=self.id,
             event_type=self.event_type,
             topic=self.topic(),
             audience=self.audience(),
-            actor=(dict(user_id=0, name='', anonymous=True) if anonymous_actor else self.actor.tiny_json()) if self.actor_id else None,
+            actor=actor,
             payload=self.payload or {},
             is_read=self.is_read,
             created_at=self.created_at.timestamp(),
@@ -3153,6 +3156,8 @@ class NotificationEvent(models.Model):
             message_type=message.type,
             content=message.preview_text(),
         )
+        if message.is_anonymous:
+            payload['anonymous_actor'] = True
         from User.notification_routing import message_category
         payload['notification_category']=message_category(message)
         created_events = []
@@ -3168,7 +3173,7 @@ class NotificationEvent(models.Model):
             event = cls.objects.create(
                 space_id=user.space_id,
                 user=user,
-                actor=actor,
+                actor=None if message.is_anonymous else actor,
                 event_type=event_type,
                 payload=payload,
             )
@@ -3234,7 +3239,7 @@ class NotificationEvent(models.Model):
         event = cls.objects.create(
             space_id=user.space_id,
             user=user,
-            actor=actor,
+            actor=None if anonymous_actor else actor,
             event_type=event_type,
             payload=dict(statement_id=statement_id, comment_id=comment_id, anonymous_actor=bool(anonymous_actor)),
         )
@@ -3603,7 +3608,7 @@ class NotificationDelivery(models.Model):
         payload = event.payload or {}
         language = event.user.language if event.user_id else translation.get_language()
         with translation.override(language):
-            actor_name = event.actor.name if event.actor_id else ''
+            actor_name = str(_('Anonymous user')) if payload.get('anonymous_actor') else event.actor.name if event.actor_id else ''
             message_type = payload.get('message_type')
             natural_bodies = {
                 MessageTypeChoice.IMAGE: _('Sent a photo.'),
@@ -3906,8 +3911,10 @@ class NotificationDelivery(models.Model):
             rows = []
             for delivery in group['selected']:
                 _title, body = delivery.event.render_delivery_message(hide_message_content=False)
-                actor = delivery.event.actor
-                rows.append(email_message_row(actor.name if actor else str(_('System notification')),
+                anonymous = (delivery.event.payload or {}).get('anonymous_actor')
+                actor = None if anonymous else delivery.event.actor
+                sender = _('Anonymous user') if anonymous else actor.name if actor else _('System notification')
+                rows.append(email_message_row(str(sender),
                                               cls._truncate_email_line(body, limit=240), email_avatar_url(actor)))
             blocks.append(conversation_block(group['name'], _('{count} messages').format(count=group['total_count']), rows))
         if omitted > 0:
@@ -3936,8 +3943,10 @@ class NotificationDelivery(models.Model):
                     _title, body = delivery.event.render_delivery_message(
                         hide_message_content=False,
                     )
-                    actor = delivery.event.actor
-                    prefix = f'{actor.name}: ' if actor and group['chat'].group else ''
+                    anonymous = (delivery.event.payload or {}).get('anonymous_actor')
+                    actor = None if anonymous else delivery.event.actor
+                    sender = _('Anonymous user') if anonymous else actor.name if actor else ''
+                    prefix = f'{sender}: ' if sender and group['chat'].group else ''
                     lines.append(cls._truncate_email_line(f'{prefix}{body}', limit=72))
         if omitted > 0:
             lines.append(str(_('And {count} more messages.')).format(count=omitted))

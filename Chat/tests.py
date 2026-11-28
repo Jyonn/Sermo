@@ -7,7 +7,7 @@ from django.test import TestCase
 from django.utils import timezone
 
 from Chat.models import Chat, ChatMember, ChatMemberRoleChoice, ChatMemberStatusChoice, ChatPurposeChoice, ChatReadState, ChatTypeChoice, ChatUserPreference, SubmissionInvite, SubmissionInviteStatusChoice, SubmissionMemberRoleChoice, SubmissionStatusChoice
-from Message.models import Message, MessageEvent, MessageTypeChoice, PinnedMessage
+from Message.models import ForwardBundle, Message, MessageEvent, MessageTypeChoice, PinnedMessage
 from Space.models import Space, SpaceOperator
 from User.models import NotificationEvent, User, UserStateEvent, UserStateEventKindChoice
 from utils import auth
@@ -476,6 +476,63 @@ class ChatNotificationPreferenceTests(TestCase):
 
     def authorization(self, user):
         return {'HTTP_AUTHORIZATION': f"Bearer {auth.get_login_token(user)['auth']}"}
+
+    def test_anonymous_group_message_keeps_ownership_and_masks_author(self):
+        from User.oauth_chat import serialize_message
+
+        request_body = dict(type=MessageTypeChoice.TEXT, content='A quiet idea', anonymous=1,
+                            client_message_id='sender-private-key')
+        url = f'/messages/?chat_id={self.chat.id}'
+        sent = self.client.post(url, data=request_body, content_type='application/json', **self.authorization(self.sender))
+        self.assertEqual(sent.status_code, 200, sent.content)
+        sent_message = sent.json()['body']
+        self.assertTrue(sent_message['is_mine'])
+        self.assertEqual(sent_message['client_message_id'], 'sender-private-key')
+        self.assertEqual(sent_message['user']['user_id'], 0)
+        self.assertTrue(sent_message['user']['anonymous'])
+
+        message = Message.objects.get(pk=sent_message['message_id'])
+        self.assertEqual(message.user, self.sender)
+        self.assertFalse(message.appearance)
+        repeated = self.client.post(url, data=request_body, content_type='application/json', **self.authorization(self.sender))
+        self.assertEqual(repeated.json()['body']['message_id'], message.id)
+        visible = self.client.get(f'{url}&limit=10', **self.authorization(self.recipient))
+        self.assertEqual(visible.status_code, 200, visible.content)
+        visible_message = next(row for row in visible.json()['body'] if row['message_id'] == message.id)
+        self.assertFalse(visible_message['is_mine'])
+        self.assertIsNone(visible_message['client_message_id'])
+        self.assertEqual(visible_message['user'], sent_message['user'])
+
+        request = SimpleNamespace(user=self.recipient)
+        reply = Message.create(self.chat, self.recipient, MessageTypeChoice.TEXT, 'Agreed', reply_to=message)
+        self.assertEqual(reply.jsonl(request=request)['reply_to']['user'], visible_message['user'])
+        bundle = ForwardBundle.create_from_messages([message], self.recipient, request=request)
+        self.assertEqual(bundle.items.get().author, visible_message['user'])
+        self.assertEqual(serialize_message(message, self.recipient)['user'], visible_message['user'])
+        sync = MessageEvent.sync_for_user(self.recipient, after=0, limit=50, request=request)
+        event_message = next(row['message'] for row in sync['events'] if row['message_id'] == message.id)
+        self.assertEqual(event_message['user'], visible_message['user'])
+
+        event = NotificationEvent.objects.get(user=self.recipient, payload__message_id=message.id)
+        self.assertIsNone(event.actor_id)
+        self.assertTrue(event.json()['actor']['anonymous'])
+        self.assertNotIn(self.sender.name, ' '.join(event.render_delivery_message()))
+
+        recalled = self.client.delete(f'/messages/?message_id={message.id}&scope=everyone', **self.authorization(self.sender))
+        self.assertEqual(recalled.status_code, 200, recalled.content)
+        message.refresh_from_db()
+        self.assertTrue(message.is_deleted)
+        self.assertFalse(Message.objects.filter(chat=self.chat, type=MessageTypeChoice.SYSTEM).exists())
+
+    def test_anonymous_group_message_rejects_media(self):
+        response = self.client.post(
+            f'/messages/?chat_id={self.chat.id}',
+            data=dict(type=MessageTypeChoice.IMAGE, content='some-image', anonymous=1),
+            content_type='application/json',
+            **self.authorization(self.sender),
+        )
+        self.assertEqual(response.status_code, 403, response.content)
+        self.assertEqual(response.json()['identifier'], 'MESSAGE@ANONYMOUS_GROUP_TEXT_ONLY')
 
     def test_muted_group_suppresses_external_notification_but_keeps_unread(self):
         preference_response = self.client.post(

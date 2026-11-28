@@ -25,7 +25,6 @@ class SquareErrors:
     ANONYMOUS_WEEKLY_LIMIT_REACHED = Error(message=_('Weekly anonymous statement limit reached'), code=Code.Forbidden)
     ANONYMOUS_REQUIRES_EXPLORE = Error(message=_('Anonymous statements require Explore to be enabled'), code=Code.Forbidden)
     ANONYMOUS_VISIBILITY_INVALID = Error(message=_('Anonymous statements must be visible in Explore'), code=Code.BadRequest)
-    ANONYMOUS_COMMENT_FORBIDDEN = Error(message=_('Only the anonymous statement author can comment anonymously'), code=Code.Forbidden)
     AUDIO_LEVEL_REQUIRED = Error(message=_('Voice statements unlock at LV6'), code=Code.Forbidden)
     VIDEO_LEVEL_REQUIRED = Error(message=_('Video statements unlock at LV10'), code=Code.Forbidden)
     VIDEO_LIMIT_EXCEEDED = Error(message=_('A statement can contain only one video'), code=Code.BadRequest)

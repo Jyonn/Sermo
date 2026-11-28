@@ -797,7 +797,7 @@ class StatementApiTests(TestCase):
         self.assertEqual(quota['statements']['anonymous_weekly_limit'], 2)
         self.assertEqual(quota['statements']['anonymous_weekly_used'], 2)
 
-    def test_only_anonymous_statement_author_can_comment_anonymously(self):
+    def test_anonymous_author_and_other_commenters_can_reply_anonymously(self):
         statement = Statement.create_statement(self.author, '匿名主题', 'public', [], is_anonymous=True)
         author_comment = self.client.post(
             f'/square/statements/{statement.id}/comments',
@@ -827,19 +827,32 @@ class StatementApiTests(TestCase):
             event_type=NotificationEventTypeChoice.SQUARE_COMMENT_REPLY,
         )
         self.assertTrue(event.payload['anonymous_actor'])
+        self.assertIsNone(event.actor_id)
         self.assertEqual(event.json()['actor'], {'user_id': 0, 'name': '', 'anonymous': True})
         title, body = event.render_delivery_message()
         self.assertNotIn(self.author.name, title)
         self.assertNotIn(self.author.name, body)
 
-        denied = self.client.post(
+        visitor_reply = self.client.post(
             f'/square/statements/{statement.id}/comments',
             data=json.dumps({'text': '访客匿名回复', 'anonymous': 1}),
             content_type='application/json',
             **self.authorization(self.friend),
         )
-        self.assertEqual(denied.status_code, 403, denied.content)
-        self.assertEqual(denied.json()['identifier'], 'SQUARE@ANONYMOUS_COMMENT_FORBIDDEN')
+        self.assertEqual(visitor_reply.status_code, 200, visitor_reply.content)
+        comment = visitor_reply.json()['body']
+        self.assertTrue(comment['is_anonymous'])
+        self.assertFalse(comment['is_author'])
+        self.assertEqual(comment['user']['user_id'], 0)
+
+    def test_named_statement_author_can_comment_anonymously_without_author_badge(self):
+        statement = Statement.create_statement(self.author, '公开主题', 'public', [])
+        root = StatementComment.create_comment(self.friend, statement.id, '匿名评论', is_anonymous=True)
+        reply = StatementComment.create_comment(self.author, statement.id, '匿名回复', parent_id=root.id, is_anonymous=True)
+        payload = reply.jsonl(viewer=self.friend)
+        self.assertTrue(payload['is_anonymous'])
+        self.assertFalse(payload['is_author'])
+        self.assertEqual(payload['user']['user_id'], 0)
 
     def test_comment_mentions_only_record_friends_and_notify_them(self):
         statement = Statement.create_statement(self.author, '艾特好友', 'public', [])

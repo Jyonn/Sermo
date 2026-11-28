@@ -19,7 +19,7 @@ def copy_suggestions(chat, user):
         copied=Exists(MessageCopy.objects.filter(message_id=OuterRef('pk'), user=user)),
     ).filter(copy_count__gt=0).select_related('user').order_by('-copy_count', '-created_at', '-id')[:3])
     messages.sort(key=lambda message: message.user_id == user.id)
-    return [dict(message_id=message.id, content=message.content, author=message.user.name,
+    return [dict(message_id=message.id, content=message.content, author=message._dictify_user()['name'],
                  created_at=message.created_at.timestamp(), copied=message.copied,
                  own=message.user_id == user.id) for message in messages]
 

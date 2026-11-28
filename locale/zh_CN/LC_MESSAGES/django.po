@@ -994,8 +994,8 @@ msgstr "空间开启探索后才可匿名发言"
 msgid "Anonymous statements must be visible in Explore"
 msgstr "匿名发言只能发布到探索"
 
-msgid "Only the anonymous statement author can comment anonymously"
-msgstr "只有匿名发言的作者可以匿名评论"
+msgid "Anonymous sending is available for text in group chats"
+msgstr "群聊中仅支持匿名发送文字"
 
 msgid "Anonymous user"
 msgstr "匿名用户"

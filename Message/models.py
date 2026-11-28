@@ -781,6 +781,7 @@ class Message(models.Model):
     submission_visible_at = models.DateTimeField(null=True, blank=True, db_index=True)
 
     type = models.IntegerField(choices=MessageTypeChoice.to_choices())
+    is_anonymous = models.BooleanField(default=False, db_default=False)
     content = models.CharField(max_length=vldt.MAX_CONTENT_LENGTH, blank=True, default='')
     appearance = models.JSONField(default=dict, blank=True)
     media_resource = models.ForeignKey(
@@ -803,7 +804,7 @@ class Message(models.Model):
         ]
 
     def save(self, *args, **kwargs):
-        if not self.appearance and self.user_id:
+        if not self.appearance and self.user_id and not self.is_anonymous:
             self.appearance = {
                 key: value for key, value in self.user.tiny_json().items()
                 if key in {'chat_bubble_style', 'avatar_frame_style', 'is_permanent_vip'}
@@ -855,20 +856,24 @@ class Message(models.Model):
         return self.visible_for_user(self.chat, user).filter(id=self.id).exists()
 
     @classmethod
-    def create(cls, chat: Chat, user: User, message_type, content, reply_to=None, client_message_id=None, mention_user_ids=None, media_resource=None, *, flash_image=False):
+    def create(cls, chat: Chat, user: User, message_type, content, reply_to=None, client_message_id=None, mention_user_ids=None, media_resource=None, *, flash_image=False, is_anonymous=False):
         if message_type in (MessageTypeChoice.SYSTEM, MessageTypeChoice.FORWARD_BUNDLE, MessageTypeChoice.OFFICIAL_NOTICE, MessageTypeChoice.SUBMISSION_INVITE, MessageTypeChoice.VOICE_CALL):
             raise MessageErrors.SYSTEM_MESSAGE_FORBIDDEN
         if message_type == MessageTypeChoice.FLASH_IMAGE and (not flash_image or media_resource is not None):
             raise MessageErrors.PAYLOAD_INVALID
         if chat.has_active_member(user):
             chat.require_user_message_allowed(user)
+            if is_anonymous and (
+                not chat.group or chat.purpose != ChatPurposeChoice.NORMAL or message_type != MessageTypeChoice.TEXT
+            ):
+                raise MessageErrors.ANONYMOUS_GROUP_TEXT_ONLY
             if chat.submission:
                 chat.submission_record.require_send_allowed(user)
             if reply_to is not None and message_type != MessageTypeChoice.TEXT:
                 raise MessageErrors.REPLY_TEXT_ONLY
             if message_type == MessageTypeChoice.TEXT:
                 user.require_capability('chat.message.send.text')
-                reference = cls.site_reference_from_text(content, user) if reply_to is None else None
+                reference = cls.site_reference_from_text(content, user) if reply_to is None and not is_anonymous else None
                 if reference is not None:
                     message_type = MessageTypeChoice.STATEMENT if reference['kind'] == 'statement' else MessageTypeChoice.ACTIVITY
                     content = json.dumps(reference, separators=(',', ':'), ensure_ascii=False)
@@ -979,6 +984,7 @@ class Message(models.Model):
                         chat=chat,
                         user=user,
                         type=message_type,
+                        is_anonymous=bool(is_anonymous),
                         content=normalized_content,
                         media_resource=media_resource,
                         reply_to=reply_to,
@@ -1022,7 +1028,7 @@ class Message(models.Model):
                 UserEmojiUsage.record_text(user, message.content)
                 if link_preview is not None:
                     user.award_growth('explore:link')
-                    if not chat.submission:
+                    if not chat.submission and not message.is_anonymous:
                         from Activity.record_shop import register_share
                         register_share(message, 'chat', link_preview)
             elif message.type == MessageTypeChoice.STICKER:
@@ -1857,6 +1863,9 @@ class Message(models.Model):
         return self.PREVIEW_TEXT_BY_TYPE.get(self.type, self.content)
 
     def _dictify_user(self):
+        if self.is_anonymous:
+            return dict(user_id=0, name=str(_('Anonymous user')), anonymous=True, official=False,
+                        avatar_type='preset', avatar_uri='')
         payload = self.user.tiny_json()
         payload.update(self.appearance or {})
         return payload
@@ -1882,7 +1891,7 @@ class Message(models.Model):
             )
         return dict(
             message_id=reply_to.id,
-            user=reply_to.user.tiny_json(),
+            user=reply_to._dictify_user() if reply_to.is_anonymous else reply_to.user.tiny_json(),
             type=reply_to.type,
             content='消息已删除' if reply_to.is_deleted else reply_to.preview_text(),
             is_deleted=reply_to.is_deleted,
@@ -1906,10 +1915,11 @@ class Message(models.Model):
 
     def jsonl(self, request: HttpRequest = None, include_deleted: bool = False):
         viewer = self._viewer_from_request(request)
+        is_mine = bool(viewer and viewer.pk == self.user_id)
         content = self.system_message_text(viewer) if self.type in (MessageTypeChoice.SYSTEM, MessageTypeChoice.OFFICIAL_NOTICE) else self.preview_text()
         payload = dict(
             message_id=self.id,
-            client_message_id=self.client_message_id,
+            client_message_id=self.client_message_id if not self.is_anonymous or is_mine else None,
             user=self._dictify_user(),
             type=self.type,
             content=content,
@@ -1921,9 +1931,11 @@ class Message(models.Model):
             submission_visible=bool(self.submission_visible_at or self.submission_round is None),
             min_client_version=self.MIN_CLIENT_VERSION_BY_TYPE.get(self.type),
         )
+        if self.is_anonymous:
+            payload['is_mine'] = is_mine
         if include_deleted:
             payload['is_deleted'] = self.is_deleted
-        if not self.is_deleted and self.appearance.get('record_shop'):
+        if not self.is_deleted and not self.is_anonymous and self.appearance.get('record_shop'):
             payload['record_shop'] = self.appearance['record_shop']
         return payload
 

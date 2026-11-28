@@ -87,6 +87,7 @@ class MessageView(View):
         MessageParams.mention_user_ids,
         MessageParams.resource_id,
         MessageParams.live_transcript_receipt,
+        MessageParams.anonymous,
     )
     def post(self, request: Request):
         _require_message_feature(request.query.chat, request.user)
@@ -109,7 +110,8 @@ class MessageView(View):
                 reply_to=request.json.reply_to,
                 client_message_id=request.json.client_message_id,
                 mention_user_ids=request.json.mention_user_ids,
-                media_resource=media_resource)
+                media_resource=media_resource,
+                is_anonymous=request.json.anonymous)
             attach_recording_transcript(message, request.user, request.json.live_transcript_receipt)
             if getattr(message, '_was_created', True) and not message.chat.submission:
                 NotificationEvent.emit_message_notifications(message, actor=request.user)
@@ -150,7 +152,8 @@ class MessageView(View):
                 raise MessageErrors.RECALL_WINDOW_EXPIRED
             with transaction.atomic():
                 message.remove()
-                Message.create_system(message.chat, request.user, 'message_recalled')
+                if not message.is_anonymous:
+                    Message.create_system(message.chat, request.user, 'message_recalled')
         return OK
 
 

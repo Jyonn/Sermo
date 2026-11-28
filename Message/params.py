@@ -58,6 +58,7 @@ class MessageParams(metaclass=Params):
     )
     reply_to_message_id = Validator('reply_to_message_id', final_name='reply_to').to(int).to(Message.index).null().default(None)
     client_message_id = Validator('client_message_id').to(str).null().default(None)
+    anonymous = Validator('anonymous').to(int).bool(lambda value: value in (0, 1)).default(0)
     mention_user_ids = ListValidator('mention_user_ids').element(Validator().to(int)).default([])
     preview_text = Validator('text', final_name='preview_text').to(str).bool(lambda value: len(value) <= 4096)
     preview_id = Validator('preview_id').to(int).bool(lambda value: value > 0)

@@ -38,10 +38,16 @@ def chat_for_user(request, chat_id):
     return chat
 
 
-def serialize_message(message):
+def serialize_message(message, viewer):
     # No media payloads, signed downloads, reply bodies, contact details or submission data.
-    return dict(message_id=message.id, client_message_id=message.client_message_id,
-        user=dict(user_id=message.user_id, name=message.user.name), type=message.type,
+    if message.is_anonymous:
+        author = message._dictify_user()
+    else:
+        author = dict(user_id=message.user_id, name=message.user.name)
+    is_mine = viewer.pk == message.user_id
+    return dict(message_id=message.id,
+        client_message_id=message.client_message_id if not message.is_anonymous or is_mine else None,
+        user=author, is_mine=is_mine, type=message.type,
         content=message.content if message.type == MessageTypeChoice.TEXT else None,
         created_at=message.created_at.timestamp())
 
@@ -71,7 +77,7 @@ class OAuthChatMessagesView(View):
         rows = Message.visible_for_user(chat, request.user).select_related('user').order_by('-id')
         if before: rows = rows.filter(id__lt=before)
         rows = list(rows[:limit+1])
-        return dict(messages=[serialize_message(m) for m in rows[:limit]], has_more=len(rows)>limit,
+        return dict(messages=[serialize_message(m, request.user) for m in rows[:limit]], has_more=len(rows)>limit,
             next_before=rows[min(limit,len(rows))-1].id if rows else None)
 
     @require_chat_scope('chat.write')
@@ -91,7 +97,7 @@ class OAuthChatMessagesView(View):
             message = Message.create(chat, request.user, MessageTypeChoice.TEXT, content, client_message_id=key)
             if getattr(message, '_was_created', True):
                 NotificationEvent.emit_message_notifications(message, actor=request.user)
-        return dict(message=serialize_message(message))
+        return dict(message=serialize_message(message, request.user))
 
 
 class OAuthChatEventsView(View):
@@ -112,7 +118,7 @@ class OAuthChatEventsView(View):
             MessageEventTypeChoice.RELEASED: 'message.created'}
         for row in rows[:limit]:
             event = dict(event_id=row.id, message_id=row.message_id, type=event_names[row.type])
-            if row.message_id in visible: event['message'] = serialize_message(row.message)
+            if row.message_id in visible: event['message'] = serialize_message(row.message, request.user)
             events.append(event)
         return dict(events=events, has_more=len(rows)>limit, next_after=rows[min(limit,len(rows))-1].id if rows else after)
 

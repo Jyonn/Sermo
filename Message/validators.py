@@ -5,6 +5,7 @@ from smartdjango import Error, Code
 
 @Error.register
 class MessageErrors:
+    ANONYMOUS_GROUP_TEXT_ONLY = Error(message=_('Anonymous sending is available for text in group chats'), code=Code.Forbidden)
     NOT_A_MEMBER = Error(message=_('You are not a member of this chat'), code=Code.Forbidden)
     NOT_EXISTS = Error(message=_('Message does not exist'), code=Code.NotFound)
     NOT_OWNER = Error(message=_('You are not the owner of this message'), code=Code.Forbidden)

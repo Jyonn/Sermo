@@ -783,8 +783,6 @@ class StatementComment(models.Model):
         if statement is None:
             raise SquareErrors.NOT_EXISTS
         is_anonymous = bool(is_anonymous)
-        if is_anonymous and (not statement.is_anonymous or statement.user_id != user.id):
-            raise SquareErrors.ANONYMOUS_COMMENT_FORBIDDEN
         parent = None
         if parent_id is not None:
             try:
@@ -850,8 +848,8 @@ class StatementComment(models.Model):
             ),
             user=anonymous_user_json() if self.is_anonymous else self.user.tiny_json(),
             is_anonymous=self.is_anonymous,
-            # A public reply must not reveal that it came from an anonymous statement's author.
-            is_author=self.user_id == self.statement.user_id and (not self.statement.is_anonymous or self.is_anonymous),
+            # The author badge is safe only when the post and comment use the same identity.
+            is_author=self.user_id == self.statement.user_id and self.statement.is_anonymous == self.is_anonymous,
             kind='sticker' if self.sticker_asset_id else 'text',
             text=self.text,
             inline_emoticons=_qzone_inline_emoticons(self, request=request),
