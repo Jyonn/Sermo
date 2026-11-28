@@ -16,7 +16,7 @@ from Chat.voice_models import VoiceCall, VoiceIdentity, VoiceWeeklyQuota
 from Friendship.models import Friendship, FriendshipStatusChoice
 from Message.models import Message, MessageEvent, MessageEventTypeChoice, MessageTypeChoice
 from Space.models import Space
-from User.models import NotificationEvent, NotificationDelivery, NotificationTopicPreference, NotificationEventTypeChoice, User
+from User.models import NotificationEvent, NotificationDelivery, NotificationTopicPreference, NotificationEventTypeChoice, User, WebPushSubscription
 from utils import auth
 
 
@@ -238,6 +238,20 @@ class VoiceCallTests(TestCase):
         with patch.object(NotificationDelivery, 'enqueue_web_for_event') as web:
             self.assertEqual(NotificationDelivery.enqueue_voice_call(event), [])
             web.assert_not_called()
+
+    @patch('utils.webpush.send_web_push')
+    def test_live_call_push_is_delivered_to_an_online_recipient(self, send):
+        self.create()
+        event = NotificationEvent.objects.get(event_type=NotificationEventTypeChoice.VOICE_CALL)
+        self.assertTrue(self.callee.is_alive)
+        subscription = WebPushSubscription.register(
+            self.callee, 'https://push.example.test/ringing-call', 'key', 'auth', 'https://frienden.jyonn.space',
+        )
+        delivery, _created = NotificationDelivery.get_or_create_for_route(event, 0, web_subscription=subscription)
+
+        delivery._attempt_send_web()
+
+        send.assert_called_once()
 
     def webhook(self, call, event='track_published'):
         body=json.dumps({'room':{'name':f'frienden-{call.id}'},'event':event}).encode()

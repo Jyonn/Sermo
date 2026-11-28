@@ -14,7 +14,7 @@ Below is a list of all available API endpoints with their HTTP methods and a bri
   - GET /users/host/guests – **List Host Guests.** List guests for the authenticated host (with filters).
   - GET /users/host/subdomain – **Check Subdomain Availability.** Check whether a subdomain is available.
   - POST /users/host/subdomain – **Set Subdomain.** Update the authenticated host's subdomain.
-  - GET /users/heartbeat – **User Heartbeat.** Keeps the authenticated user marked as online (updates last active timestamp).
+  - GET or POST /users/heartbeat – **User Heartbeat.** Keeps the authenticated user marked as online (updates last active timestamp).
 - **Chat Management**
   - GET /chats/ – **List Chats.** Retrieve all chats (both single and group chats) that the authenticated user is involved in.
   - POST /chats/group – **Create Group Chat.** (Host only) Create a new group chat with multiple guests.
@@ -246,11 +246,11 @@ Below are details of each API view (endpoint), including functionality, required
 
 **Response:** Returns updated host info.
 
-### HeartbeatView – GET /users/heartbeat
+### HeartbeatView – GET or POST /users/heartbeat
 
 **Functionality:** Keeps the currently authenticated user marked as online. Updates the user’s last heartbeat timestamp to indicate they are active. This endpoint requires a valid Authorization token and works for both host and guest users.
 
-**Request:** No request body is required. Just send a GET request with the `Authorization` header (JWT token).
+**Request:** Send a GET or POST request with the `Authorization` header (JWT token). No request body is required.
 
 **Response:** Returns a success status with no additional data in the body. This confirms the heartbeat was received.
 

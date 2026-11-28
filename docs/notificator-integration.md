@@ -34,7 +34,7 @@ When a `NotificationEvent` is created:
 
 1. One `NotificationDelivery` row is created per event and concrete delivery route. The database constraint makes enqueueing idempotent.
 2. Disabled/unavailable channels are marked `SKIPPED`.
-3. Web Push and instant-notification routes are sent immediately. Email is always handed to the scheduled worker so request threads cannot create bursts.
+3. Web Push and instant-notification routes check the latest account heartbeat before sending. Ordinary notifications stay in the app while the recipient is online. Ringing call invitations can still be pushed. Email is handed to the scheduled worker so request threads cannot create bursts.
 4. Email message deliveries for the same user are batched into one mail when multiple pending direct/group messages are ready. At most one email per user is selected in each worker pass.
 5. Bark message notifications include `url=https://sermo.jyonn.space/<space>/app/chats/<chat_id>` when `open_chat_on_tap` is enabled.
 6. If the offline threshold or per-user email cooldown is not reached, delivery stays `PENDING`.

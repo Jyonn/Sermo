@@ -253,6 +253,17 @@ class CityBubbleUnlockTests(TestCase):
 
 
 class UserHeartbeatTests(TestCase):
+    def test_web_and_native_heartbeat_update_presence(self):
+        space = Space.objects.create(name='Heartbeat API', slug='heartbeat-api', email='heartbeat@example.com')
+        user = User.create(space, 'Recipient')
+        headers = {'HTTP_AUTHORIZATION': f"Bearer {auth.get_login_token(user)['auth']}"}
+        for heartbeat in (self.client.get, self.client.post):
+            with self.subTest(method=heartbeat.__name__):
+                User.objects.filter(pk=user.pk).update(last_heartbeat=timezone.now() - timedelta(minutes=10))
+                self.assertEqual(heartbeat('/users/heartbeat', **headers).status_code, 200)
+                user.refresh_from_db()
+                self.assertTrue(user.is_alive)
+
     def test_two_minute_presence_cutoff_also_drives_online_reminders(self):
         space = Space.objects.create(name='Presence Space', slug='presence-space', email='presence@example.com')
         user = User.create(space=space, name='Presence Test')

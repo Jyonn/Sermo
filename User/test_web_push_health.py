@@ -1,12 +1,17 @@
 import json
+from datetime import timedelta
 from unittest.mock import patch
 from django.core import signing
 from django.test import TestCase
 from django.utils import timezone
 from requests import Response
 from pywebpush import WebPushException
+from Message.models import MessageTypeChoice
 from Space.models import Space
-from User.models import User, WebPushSubscription, NotificationEvent, NotificationDelivery
+from User.models import (
+    NotificationDelivery, NotificationDeliveryStatusChoice, NotificationEvent,
+    NotificationEventTypeChoice, User, WebPushSubscription,
+)
 from User.web_push_receipts import receipt_token, record_receipt, SALT, MAX_AGE
 
 
@@ -14,6 +19,8 @@ class WebPushHealthTests(TestCase):
     def setUp(self):
         self.space=Space.objects.create(name='Push Health',slug='push-health',email='push-health@example.com')
         self.user=User.create(self.space,'Recipient')
+        self.user.last_heartbeat = timezone.now() - timedelta(minutes=10)
+        self.user.save(update_fields=['last_heartbeat'])
         self.other=User.create(self.space,'Other')
         self.subscription=self.bind(self.user)
         self.event=NotificationEvent.objects.create(user=self.user,actor=self.other,space=self.space,event_type=1,payload={'content':'hello'})
@@ -24,6 +31,41 @@ class WebPushHealthTests(TestCase):
 
     def post_receipt(self,token,phase='received',**extra):
         return self.client.post('/users/web-push/receipt',json.dumps({'token':token,'phase':phase,**extra}),content_type='application/json')
+
+    @patch('utils.webpush.send_web_push')
+    def test_new_heartbeat_suppresses_queued_system_and_official_notice_pushes(self, send):
+        events = [
+            NotificationEvent.emit_system_event(self.user, self.other, {'kind': 'friend_request'}),
+            self.event,
+        ]
+        self.event.payload = {'message_type': MessageTypeChoice.OFFICIAL_NOTICE, 'content': 'Official notice'}
+        self.event.save(update_fields=['payload'])
+        for event in events:
+            with self.subTest(event_type=event.event_type):
+                User.objects.filter(pk=self.user.pk).update(last_heartbeat=self.user.last_heartbeat)
+                delivery, _created = NotificationDelivery.get_or_create_for_route(
+                    event, 0, web_subscription=self.subscription,
+                )
+                self.assertFalse(delivery.event.user.is_alive)
+                User.objects.filter(pk=self.user.pk).update(last_heartbeat=timezone.now())
+                delivery._attempt_send_web()
+                delivery.refresh_from_db()
+                self.assertEqual(delivery.status, NotificationDeliveryStatusChoice.SKIPPED)
+                self.assertEqual(delivery.detail, 'recipient_online')
+                self.assertTrue(NotificationEvent.objects.filter(pk=event.pk).exists())
+        send.assert_not_called()
+
+    @patch('utils.webpush.send_web_push')
+    def test_offline_system_notification_still_reaches_web_push(self, send):
+        self.event.event_type = NotificationEventTypeChoice.SYSTEM
+        self.event.payload = {'kind': 'friend_request'}
+        self.event.save(update_fields=['event_type', 'payload'])
+
+        self.delivery._attempt_send_web()
+
+        self.delivery.refresh_from_db()
+        self.assertEqual(self.delivery.status, NotificationDeliveryStatusChoice.SENT)
+        send.assert_called_once()
 
     def test_terminal_failure_invalidates_all_accounts_for_the_endpoint_only(self):
         shared=self.bind(self.other);different=self.bind(self.other,'https://push.example.test/other')

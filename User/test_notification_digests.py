@@ -420,6 +420,23 @@ class NotificationDigestTests(TestCase):
         bark.assert_not_called()
         self.assertFalse(NotificationDelivery.objects.filter(channel=UserNotificationChoice.BARK).exists())
 
+    @patch('User.models.notificator.bark')
+    def test_bark_skips_if_the_recipient_comes_online_after_enqueueing(self, bark):
+        pref = self.enable_bark()
+        event = NotificationEvent.emit_system_event(self.recipient, self.sender, {'kind': 'friend_request'})
+        endpoint = InstantNotificationEndpoint.active_for_user(self.recipient).get()
+        delivery, _created = NotificationDelivery.get_or_create_for_route(
+            event, UserNotificationChoice.BARK, instant_endpoint=endpoint,
+        )
+        User.objects.filter(pk=self.recipient.pk).update(last_heartbeat=timezone.now())
+
+        delivery._attempt_send(pref)
+
+        delivery.refresh_from_db()
+        self.assertEqual(delivery.status, NotificationDeliveryStatusChoice.SKIPPED)
+        self.assertEqual(delivery.detail, 'recipient_online')
+        bark.assert_not_called()
+
     @patch('User.models.notificator.pushdeer', create=True)
     @patch('User.models.notificator.gotify', create=True)
     @patch('User.models.notificator.ntfy', create=True)

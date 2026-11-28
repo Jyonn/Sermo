@@ -170,6 +170,8 @@ class HeartbeatView(View):
         request.user.heartbeat()
         return OK
 
+    post = get
+
 
 class UserMeView(View):
     @auth.require_user

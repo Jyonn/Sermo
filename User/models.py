@@ -3637,6 +3637,24 @@ class NotificationDelivery(models.Model):
         self.save(update_fields=['status', 'detail'])
         return True
 
+    @staticmethod
+    def _recipient_online_for_push(event):
+        if (event.payload or {}).get('kind') == 'voice_call':
+            return False
+        # A queued event can carry a user snapshot from before the latest heartbeat.
+        return User.objects.filter(
+            pk=event.user_id,
+            last_heartbeat__gt=User.online_heartbeat_cutoff(timezone.now()),
+        ).exists()
+
+    def _skip_online_push(self):
+        if not self._recipient_online_for_push(self.event):
+            return False
+        self.status = NotificationDeliveryStatusChoice.SKIPPED
+        self.detail = 'recipient_online'
+        self.save(update_fields=['status', 'detail'])
+        return True
+
     def _attempt_send_web(self):
         from Chat.voice_notifications import invitation_expired
         if invitation_expired(self.event):
@@ -3644,7 +3662,7 @@ class NotificationDelivery(models.Model):
             self.detail = 'call_expired'
             self.save(update_fields=['status', 'detail'])
             return self
-        if self._skip_hidden_square_comment():
+        if self._skip_hidden_square_comment() or self._skip_online_push():
             return self
         from utils.webpush import WebPushNotConfigured, is_expired_subscription_error, send_web_push
 
@@ -3698,10 +3716,10 @@ class NotificationDelivery(models.Model):
         ), None)
         if (
             pref is None
-            or (event.user.is_alive and (event.payload or {}).get('kind') != 'voice_call')
             or not pref.enabled
             or not cls._channel_available(event.user, UserNotificationChoice.BARK)
             or not NotificationTopicPreference.is_enabled_for_event(event, UserNotificationChoice.BARK)
+            or cls._recipient_online_for_push(event)
         ):
             return []
         deliveries = []
@@ -4010,6 +4028,8 @@ class NotificationDelivery(models.Model):
             return self
         if self._skip_hidden_square_comment():
             return self
+        if self.channel == UserNotificationChoice.BARK and self._skip_online_push():
+            return self
         target = self.instant_endpoint.target if self.instant_endpoint_id else self._channel_target(self.event.user, self.channel)
         if not target:
             self.status = NotificationDeliveryStatusChoice.SKIPPED
@@ -4103,8 +4123,7 @@ class NotificationDelivery(models.Model):
         if (event.payload or {}).get('kind') == 'voice_call':
             return cls.enqueue_voice_call(event)
         deliveries = []
-        # Web Push and instant receivers are time-sensitive routes. Instant
-        # notifications are sent per event while offline, never via digest.
+        # Push routes send per event while offline, never via digest.
         prefs = NotificationPreference.ensure_defaults(event.user)
         deliveries.extend(cls.enqueue_web_for_event(event))
         deliveries.extend(cls.enqueue_instant_for_event(event, preferences=prefs))
