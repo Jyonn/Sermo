@@ -8,6 +8,7 @@ from django.utils.translation import gettext_lazy as _
 from smartdjango import Code, Error
 
 from Activity import mahjong, shuangkou
+from Activity.card_game import FORCED_PASS_TIME
 from Activity.models import FourPlayerResult, FourPlayerSeat, FourPlayerTable
 from Activity.table_activity import (BETWEEN_ROUNDS, FOUR_PLAYER_MODES, ROOM_WAIT, activity_run, eligible,
                                      forfeit_scores, new_room, public_user, room_code)
@@ -73,10 +74,13 @@ def _public_board(key, table, own):
                   forfeited_position=board.get('forfeited_position'))
     if key == 'shuangkou':
         previous = shuangkou.classify(board['last'], table.mode) if playing else None
-        can_play = playing and board['turn'] == own.position and not own.trustee
+        your_turn = playing and board['turn'] == own.position
+        can_play = your_turn and not own.trustee
+        suggested = shuangkou.hint(hand, previous, table.mode) if your_turn else []
         return dict(**common, last=board['last'], last_player=board['last_player'], last_pattern=board['last_pattern'],
                     can_pass=can_play and bool(board['last']), passed=board['passed'],
-                    suggested=shuangkou.hint(hand, previous, table.mode) if can_play else [],
+                    must_pass=your_turn and previous is not None and not suggested,
+                    suggested=suggested if can_play else [],
                     placements=board['placements'], opening=board['opening'], contributions=board['contributions'])
     pending = board['pending']
     own_key = str(own.position)
@@ -109,15 +113,28 @@ def _snapshot(key, table, seats, user, now):
                 board=_public_board(key, table, own))
 
 
-def _schedule(table, seats, now):
+def _must_pass(key, table):
+    if key != 'shuangkou' or not table.board['last']:
+        return False
+    board = table.board
+    previous = shuangkou.classify(board['last'], table.mode)
+    return not shuangkou.hint(board['hands'][board['turn']], previous, table.mode)
+
+
+def _schedule(key, table, seats, now):
     board = table.board
     if board.get('pending'):
-        table.deadline = now + CALL
+        duration = CALL
+    elif seats[board['turn']].trustee:
+        duration = AUTOMATIC
+    elif _must_pass(key, table):
+        duration = FORCED_PASS_TIME
     else:
-        table.deadline = now + (AUTOMATIC if seats[board['turn']].trustee else TURN)
+        duration = TURN
+    table.deadline = now + duration
 
 
-def _resolve_move(table, seats, now, previous_decision=None):
+def _resolve_move(key, table, seats, now, previous_decision=None):
     board = table.board
     if board['scores'] is not None:
         table.status, table.deadline = 'finished', None
@@ -128,7 +145,7 @@ def _resolve_move(table, seats, now, previous_decision=None):
             if board['outcome'] != 'forfeit' or board['scores'][seat.position] != 0
         ])
     elif not board.get('pending') or board['decision'] != previous_decision:
-        _schedule(table, seats, now)
+        _schedule(key, table, seats, now)
     _touch(table)
 
 
@@ -146,6 +163,10 @@ def _tick(key, table, seats, now):
         _close(table)
     elif table.deadline and table.deadline <= now:
         turn = table.board['turn']
+        if _must_pass(key, table):
+            shuangkou.play(table.board, turn, [], table.mode)
+            _resolve_move(key, table, seats, now)
+            return
         if turn is not None and not seats[turn].trustee:
             seats[turn].trustee = True
             seats[turn].save(update_fields=['trustee'])
@@ -153,7 +174,7 @@ def _tick(key, table, seats, now):
             shuangkou.automatic(table.board, table.mode)
         else:
             mahjong.automatic(table.board)
-        _resolve_move(table, seats, now)
+        _resolve_move(key, table, seats, now)
 
 
 def _active(run, user):
@@ -223,7 +244,7 @@ def _start(key, table, seats, now):
     for seat in seats.values():
         seat.ready = seat.trustee = False
     FourPlayerSeat.objects.bulk_update(seats.values(), ['ready', 'trustee'])
-    _schedule(table, seats, now)
+    _schedule(key, table, seats, now)
     _touch(table)
 
 
@@ -258,7 +279,7 @@ def act(key, user, data):
             scores = forfeit_scores(seats, position, opponents)
             table.board.update(outcome='forfeit', forfeited_position=position, turn=None, pending=None,
                                winners=opponents, scores=[scores[seat] for seat in range(4)])
-            _resolve_move(table, seats, now)
+            _resolve_move(key, table, seats, now)
         own.delete()
         seats.pop(position)
         if not seats:
@@ -288,7 +309,7 @@ def act(key, user, data):
         own.trustee = value
         own.save(update_fields=['trustee'])
         if table.board['turn'] == position:
-            _schedule(table, seats, now)
+            _schedule(key, table, seats, now)
         _touch(table)
     elif own.trustee:
         raise FourPlayerErrors.TURN
@@ -316,4 +337,4 @@ def _game_action(key, table, seats, position, action, data, now):
             raise FourPlayerErrors.INVALID
     except ValueError as error:
         raise FourPlayerErrors.TURN if str(error) == 'turn' else FourPlayerErrors.CARDS
-    _resolve_move(table, seats, now, previous_decision)
+    _resolve_move(key, table, seats, now, previous_decision)

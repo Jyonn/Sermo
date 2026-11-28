@@ -1,9 +1,11 @@
 """Shared primitives for shedding games using one or more French-suited decks."""
 from collections import defaultdict
+from datetime import timedelta
 from secrets import SystemRandom
 
 
 DECK_SIZE = 54
+FORCED_PASS_TIME = timedelta(seconds=5)
 
 
 def card_rank(card):

@@ -10,9 +10,9 @@ from smartdjango import Code, Error
 from Activity.table_activity import TABLE_MODES, activity_run, room_code
 
 
-PHRASES = ('hello', 'wait', 'good_play', 'close', 'thanks', 'next_round', 'good_hand', 'your_call')
-COMMON_PHRASES = PHRASES[:6]
-EXTRA_PHRASES = {'landlord': 'good_hand', 'shuangkou': 'good_hand', 'mahjong': 'good_hand', 'number_duel': 'your_call'}
+COMMON_PHRASES = ('hello', 'wait', 'good_play', 'close', 'thanks', 'next_round')
+CARD_PHRASES = ('good_hand', 'your_turn')
+EXTRA_PHRASES = {**dict.fromkeys(TABLE_MODES, CARD_PHRASES), 'number_duel': ('your_call', 'your_guess')}
 LIFETIME = 8
 COOLDOWN = 3
 EVENT_LIMIT = 12
@@ -82,7 +82,7 @@ def send_voice(key, user, data):
     if not isinstance(data, dict):
         raise QuickVoiceErrors.INVALID
     phrase = data.get('phrase')
-    if phrase not in PHRASES:
+    if not isinstance(phrase, str):
         raise QuickVoiceErrors.INVALID
 
     code = room_code(data.get('code'))
@@ -90,7 +90,7 @@ def send_voice(key, user, data):
     if not run or not code:
         raise QuickVoiceErrors.UNAVAILABLE
     mode = run.campaign.config['mode']
-    if phrase not in (*COMMON_PHRASES, EXTRA_PHRASES[mode]):
+    if phrase not in (*COMMON_PHRASES, *EXTRA_PHRASES[mode]):
         raise QuickVoiceErrors.INVALID
 
     room, members = room_members(mode, run, code, user)

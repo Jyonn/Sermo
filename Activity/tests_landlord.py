@@ -267,6 +267,30 @@ class LandlordActivityTests(TestCase):
                               [(-2, False), (1, True), (1, True)])
         self.assertEqual(LandlordService.leaderboard('landlord', self.users[1], None)['mine']['wins'], 0)
 
+    def test_forced_pass_uses_short_clock_without_enabling_trustee(self):
+        self.start_space()
+        code = self.table()
+        table = LandlordTable.objects.get(code=code)
+        table.status, table.turn, table.landlord = LandlordTable.Status.PLAYING, 0, 0
+        table.deadline = timezone.now() + timedelta(seconds=45)
+        table.save(update_fields=['status', 'turn', 'landlord', 'deadline'])
+        for position, hand in enumerate(([53, 20], [8, 13], [0, 1, 2, 3, 4])):
+            table.seats.filter(position=position).update(hand=hand)
+        state = self.send_action(self.users[0], action='play', code=code,
+                                 version=table.version, cards=[53])['table']
+        self.assertFalse(state['must_pass'])
+        waiting = self.snapshot(self.users[1], code)['table']
+        self.assertTrue(waiting['must_pass'])
+        self.assertTrue(waiting['can_pass'])
+        self.assertAlmostEqual(waiting['deadline'] - waiting['server_now'], 5, delta=.25)
+        with patch('Activity.landlord.timezone.now', return_value=timezone.now() + timedelta(seconds=6)):
+            following = self.snapshot(self.users[2], code)['table']
+            self.assertEqual(following['turn'], 2)
+            self.assertFalse(following['seats'][1]['trustee'])
+            self.assertFalse(following['must_pass'])
+            self.assertEqual(following['suggested_cards'], [0, 1, 2, 3])
+            self.assertEqual(following['deadline'] - following['server_now'], 45)
+
     def test_ranking_uses_beijing_year_and_excludes_other_spaces(self):
         run = self.start_space()
         run.claimed_at = datetime(2025, 1, 1, tzinfo=utc.utc)

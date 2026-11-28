@@ -8,7 +8,7 @@ from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from smartdjango import Code, Error
 
-from Activity.card_game import DECK_SIZE, advance_trick, automatic_play, card_rank, distribute, next_position
+from Activity.card_game import DECK_SIZE, FORCED_PASS_TIME, advance_trick, automatic_play, card_rank, distribute, next_position
 from Activity.game_leaderboard import annual_rankings
 from Activity.landlord_rules import beats, classify, hint
 from Activity.models import LandlordRoundResult, LandlordSeat, LandlordTable
@@ -62,6 +62,8 @@ class LandlordService:
     def _table_payload(cls, table, seats, user, now):
         own = next(seat for seat in seats.values() if seat.user_id == user.pk)
         your_turn = own.position == table.turn
+        your_play = your_turn and table.status == cls.STATUS.PLAYING
+        suggested = hint(own.hand, table.last_cards) if your_play else []
         best_bid = max((bid for bid in table.bids if bid is not None), default=0)
         return dict(
             code=table.code, status=table.status, version=table.version, your_seat=own.position,
@@ -83,8 +85,9 @@ class LandlordService:
             and len(seats) == 3 and all(seat.ready for seat in seats.values()),
             base=best_bid, multiplier=table.multiplier, spring=table.spring,
             bid_options=[0, *range(best_bid + 1, 4)] if your_turn and table.status == cls.STATUS.BIDDING else [],
-            can_pass=your_turn and table.status == cls.STATUS.PLAYING and bool(table.last_cards),
-            suggested_cards=hint(own.hand, table.last_cards) if your_turn and table.status == cls.STATUS.PLAYING else [],
+            can_pass=your_play and bool(table.last_cards),
+            must_pass=your_play and bool(table.last_cards) and not suggested,
+            suggested_cards=suggested,
         )
 
     @classmethod
@@ -95,7 +98,16 @@ class LandlordService:
     @classmethod
     def _set_turn(cls, table, position, seats, now, duration):
         table.turn = position
-        table.deadline = now + (cls.TRUSTEE_TIME if seats[position].trustee else duration)
+        seat = seats[position]
+        if seat.trustee:
+            duration = cls.TRUSTEE_TIME
+        elif cls._must_pass(table, seat):
+            duration = FORCED_PASS_TIME
+        table.deadline = now + duration
+
+    @classmethod
+    def _must_pass(cls, table, seat):
+        return table.status == cls.STATUS.PLAYING and bool(table.last_cards) and not hint(seat.hand, table.last_cards)
 
     @classmethod
     def _deal(cls, table, seats, first_bidder, now, *, rematch=False):
@@ -250,6 +262,9 @@ class LandlordService:
                 cls._finish_doubling(table, seats, now)
                 return
             seat = seats[table.turn]
+            if cls._must_pass(table, seat):
+                cls._play(table, seats, [], now, automatic=True)
+                return
             if not seat.trustee:
                 seat.trustee = True
                 seat.save(update_fields=['trustee'])

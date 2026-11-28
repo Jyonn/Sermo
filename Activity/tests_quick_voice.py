@@ -52,6 +52,14 @@ class GameQuickVoiceTests(TestCase):
         self.assertEqual(guest['deadline'], table['deadline'])
         self.assertIsNone(LandlordService.lobby('landlord', self.observer, table['code'])['table'])
 
+    def test_turn_reminder_is_a_room_preset(self):
+        table = self.table()
+        original = {'code': table['code'], 'phrase': 'your_turn'}
+        sent = send_voice('landlord', self.host, original)
+        self.assertEqual(sent['messages'][0]['phrase'], 'your_turn')
+        with self.assertRaises(type(QuickVoiceErrors.INVALID)):
+            send_voice('landlord', self.host, {**original, 'phrase': 'your_guess'})
+
     def test_table_and_campaign_membership_presets_and_rate_limits(self):
         table = self.table()
         data = {'code': table['code'], 'phrase': 'wait'}

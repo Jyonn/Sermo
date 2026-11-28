@@ -125,6 +125,30 @@ class TabletopRoomTests(TestCase):
         state = self.act(self.players[0], 'shuangkou', 'mode', state, value='classic')['table']
         self.assertFalse(state['seats'][0]['ready'])
 
+    def test_firefight_short_clock_only_without_a_legal_response(self):
+        from datetime import timedelta
+        from unittest.mock import patch
+        from Activity.four_player import lobby
+
+        game = 'shuangkou'
+        state = self.setup_room(game, 'firefight')
+        table = FourPlayerTable.objects.get(code=state['code'])
+        table.board.update(hands=[[107, 20], [8, 13], [4, 5, 6, 53, 11], [10, 14]], turn=0)
+        table.save(update_fields=['board'])
+        self.act(self.players[0], game, 'play', state, cards=[107])
+        waiting = lobby(game, self.players[1], table.code)['table']
+        self.assertTrue(waiting['board']['must_pass'])
+        self.assertTrue(waiting['board']['can_pass'])
+        self.assertAlmostEqual(waiting['deadline'] - waiting['server_now'], 5, delta=.25)
+        with patch('Activity.four_player.timezone.now', return_value=timezone.now() + timedelta(seconds=6)):
+            following = lobby(game, self.players[2], table.code)['table']
+            self.assertEqual(following['board']['turn'], 2)
+            self.assertIn(1, following['board']['passed'])
+            self.assertFalse(following['seats'][1]['trustee'])
+            self.assertFalse(following['board']['must_pass'])
+            self.assertEqual(set(following['board']['suggested']), {4, 5, 6, 53})
+            self.assertEqual(following['deadline'] - following['server_now'], 35)
+
     def test_mahjong_keeps_the_wall_private_and_invites_keep_the_room(self):
         self.claim('mahjong')
         host = self.players[0] = self.space.ensure_official_user()
