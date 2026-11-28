@@ -8,11 +8,13 @@ from django.utils.crypto import constant_time_compare, salted_hmac
 from django.views import View
 
 from Chat.calendar_policy import friend_relation
+from Chat.models import Chat, ChatPurposeChoice, ChatTypeChoice
 from Chat.research import fail
 from Chat.research_meetings import validate as validate_meeting
+from Message.models import Message, MessageEvent, MessageEventTypeChoice, MessageTypeChoice
 from User.chronelle_account import BindingFailure, credentials, remote, resolve_binding, unpack
 from User.chronelle_origins import APP_ORIGINS, authorization_site
-from User.models import ChronelleAccount
+from User.models import ChronelleAccount, NotificationEvent, User
 from utils import auth
 from utils.content_safety import ContentSafetyScene, check_user_text
 
@@ -40,7 +42,32 @@ def invitation_context(sender_id, friend_id, bindings):
     return salted_hmac('chronelle-friend-invitation', json.dumps(claims), algorithm='sha256').hexdigest()
 
 
-class ChronelleFriendInvitationView(View):
+def calendar_groups(base, token):
+    groups = remote(base, '/api/oauth/calendar/groups/', method='GET', token=token)
+    return [{'id': group['id'], 'name': group['name']} for group in groups]
+
+
+def deliver_invitation(chat, sender, friend_id, command, invitation_id, proposal):
+    content = {
+        'kind': 'chronelle_invite',
+        'invitation_id': invitation_id,
+        'recipient_id': friend_id,
+        'status': 'pending',
+        **{key: proposal[key] for key in ('title', 'start', 'end', 'timezone')},
+    }
+    message, created = Message.objects.get_or_create(
+        chat=chat, user=sender, client_message_id=f'chronelle-invite-{command}',
+        defaults={'type': MessageTypeChoice.CHRONELLE_INVITE, 'content': json.dumps(content, ensure_ascii=False)},
+    )
+    if message.type != MessageTypeChoice.CHRONELLE_INVITE or Message._parse_payload(message.content).get('invitation_id') != invitation_id:
+        raise BindingFailure('invitation_command_conflict', 409)
+    if created:
+        MessageEvent.record_created(message)
+        NotificationEvent.emit_message_notifications(message, actor=sender)
+    return message.pk
+
+
+class PrivateInvitationView(View):
     def dispatch(self, request, *args, **kwargs):
         response = super().dispatch(request, *args, **kwargs)
         if isinstance(response, dict):
@@ -48,6 +75,8 @@ class ChronelleFriendInvitationView(View):
         response['Cache-Control'] = 'private, no-store'
         return response
 
+
+class ChronelleFriendInvitationView(PrivateInvitationView):
     @auth.require_user
     def get(self, request, user_id):
         try:
@@ -60,11 +89,10 @@ class ChronelleFriendInvitationView(View):
             organizer = credentials(request.user, base)
             if organizer['binding'] != bindings[0]:
                 raise BindingFailure('binding_superseded')
-            groups = remote(base, '/api/oauth/calendar/groups/', method='GET', token=organizer['access_token'])
             return {
                 'available': True,
                 'context': invitation_context(request.user.pk, user_id, bindings),
-                'groups': [{'id': group['id'], 'name': group['name']} for group in groups],
+                'groups': calendar_groups(base, organizer['access_token']),
             }
         except BindingFailure as error:
             if request.GET.get('options') != '1' and error.code in (
@@ -105,6 +133,9 @@ class ChronelleFriendInvitationView(View):
                 current = invitation_bindings(sender_id, user_id)
                 if current != bindings or organizer['binding'] != bindings[0]:
                     raise BindingFailure('binding_superseded')
+                friend = User.objects.get(pk=user_id, space_id=request.user.space_id, is_deleted=False)
+                chat = Chat.get_or_create_direct(request.user, friend)
+                chat.require_user_message_allowed(request.user)
                 result = remote(
                     base, '/api/oauth/calendar/invitations/', token=organizer['access_token'],
                     key=f'frienden-chat-{command}', body={**proposal, 'subjects': [bindings[1]['subject']], 'client_id': str(command)},
@@ -113,8 +144,96 @@ class ChronelleFriendInvitationView(View):
                     invitation_id = str(UUID(result['id']))
                 except (KeyError, TypeError, ValueError, AttributeError):
                     raise BindingFailure('chronelle_unavailable', 503)
-            return {'id': invitation_id}
+                message_id = deliver_invitation(chat, request.user, user_id, command, invitation_id, proposal)
+            return {'id': invitation_id, 'message_id': message_id}
         except BindingFailure as error:
             return fail(error.code, error.status)
         except (ValueError, TypeError, KeyError, AttributeError, ZoneInfoNotFoundError):
             return fail('invalid_meeting_request', 400)
+
+
+def chat_invitation(user, message_id):
+    message = Message.objects.select_related('chat').filter(
+        pk=message_id, type=MessageTypeChoice.CHRONELLE_INVITE, is_deleted=False,
+        chat__space_id=user.space_id, chat__chat_type=ChatTypeChoice.DIRECT,
+        chat__purpose=ChatPurposeChoice.NORMAL, chat__is_deleted=False,
+    ).first()
+    if not message or not message.is_visible_to(user):
+        raise BindingFailure('invitation_unavailable', 404)
+    payload = Message._parse_payload(message.content)
+    if user.pk not in (message.user_id, payload['recipient_id']):
+        raise BindingFailure('invitation_unavailable', 404)
+    return message, payload
+
+
+def invitation_detail(event):
+    recipient = next((item for item in event['participants'] if not item.get('organizer')), {})
+    status = 'cancelled' if event['status'] == 'cancelled' else recipient.get('status', 'unavailable')
+    return {
+        **{key: event.get(key) for key in ('title', 'start', 'end', 'timezone', 'all_day', 'location', 'description')},
+        'status': status,
+        'can_respond': event.get('can_respond') is True,
+        'proposal_version': event['proposal_version'],
+    }
+
+
+class ChronelleChatInvitationView(PrivateInvitationView):
+    @auth.require_user
+    def get(self, request, message_id):
+        try:
+            _, payload = chat_invitation(request.user, message_id)
+            base, _ = authorization_site(request)
+            token = credentials(request.user, base)['access_token']
+            result = remote(base, f"/api/oauth/calendar/invitation/{payload['invitation_id']}/", method='GET', token=token)
+            detail = invitation_detail(result)
+            if detail['can_respond']:
+                detail['groups'] = calendar_groups(base, token)
+            return detail
+        except BindingFailure as error:
+            return fail(error.code, error.status)
+        except (ValueError, TypeError, KeyError, AttributeError):
+            return fail('chronelle_unavailable', 503)
+
+    @auth.require_user
+    def post(self, request, message_id):
+        try:
+            if request.headers.get('Origin') not in APP_ORIGINS:
+                raise BindingFailure('origin_not_allowed', 403)
+            if len(request.body) > 4096:
+                raise BindingFailure('invalid_request', 413)
+            body = json.loads(request.body)
+            if not isinstance(body, dict) or set(body) - {'action', 'proposal_version', 'request_key', 'group_id'}:
+                raise ValueError()
+            command = UUID(body['request_key'])
+            action, version = body['action'], body['proposal_version']
+            if command.version != 4 or action not in ('accept', 'decline') or type(version) is not int or version < 1:
+                raise ValueError()
+            response = {'action': action, 'proposal_version': version}
+            if action == 'accept':
+                if type(body.get('group_id')) is not int or body['group_id'] < 1:
+                    raise ValueError()
+                response['group_id'] = body['group_id']
+            message, payload = chat_invitation(request.user, message_id)
+            if request.user.pk != payload['recipient_id']:
+                raise BindingFailure('invitation_unavailable', 403)
+            base, _ = authorization_site(request)
+            token = credentials(request.user, base)['access_token']
+            result = remote(base, f"/api/oauth/calendar/respond/{payload['invitation_id']}/", token=token,
+                            key=f'frienden-chat-response-{command}', body=response)
+            try:
+                detail = invitation_detail(result)
+            except (ValueError, TypeError, KeyError, AttributeError):
+                raise BindingFailure('chronelle_unavailable', 503)
+            with transaction.atomic():
+                message = Message.objects.select_for_update().get(pk=message.pk)
+                current = Message._parse_payload(message.content)
+                updates = {key: detail[key] for key in ('title', 'start', 'end', 'timezone', 'status') if detail[key] is not None}
+                if any(current.get(key) != value for key, value in updates.items()):
+                    message.content = json.dumps({**current, **updates}, ensure_ascii=False)
+                    message.save(update_fields=['content'])
+                    MessageEvent.objects.create(message=message, chat=message.chat, actor=request.user, type=MessageEventTypeChoice.UPDATED)
+            return detail
+        except BindingFailure as error:
+            return fail(error.code, error.status)
+        except (ValueError, TypeError, KeyError, AttributeError):
+            return fail('invalid_request', 400)

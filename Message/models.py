@@ -63,6 +63,7 @@ class MessageTypeChoice(Choice):
     RESEARCH_COMMENT = 17
     RESEARCH_REPLY = 18
     FLASH_IMAGE = 19
+    CHRONELLE_INVITE = 20
 
 
 class MessageEventTypeChoice(Choice):
@@ -742,6 +743,7 @@ class Message(models.Model):
     vldt = MessageValidator
     MIN_CLIENT_VERSION_BY_TYPE = {value: '2026.11.19.6' for value in (15, 16, 17, 18)}
     MIN_CLIENT_VERSION_BY_TYPE[MessageTypeChoice.FLASH_IMAGE] = '2026.11.21.1'
+    MIN_CLIENT_VERSION_BY_TYPE[MessageTypeChoice.CHRONELLE_INVITE] = '2026.11.28.22'
     MEDIA_KIND_BY_TYPE = {
         MessageTypeChoice.IMAGE: 'image',
         MessageTypeChoice.FILE: 'file',
@@ -761,6 +763,7 @@ class Message(models.Model):
         MessageTypeChoice.FORWARD_BUNDLE: '[聊天记录]',
         MessageTypeChoice.ACTIVITY: '[活动]',
         MessageTypeChoice.SUBMISSION_INVITE: '[投稿邀请]',
+        MessageTypeChoice.CHRONELLE_INVITE: '[日程邀约]',
         MessageTypeChoice.PROFILE: '[个人名片]',
         MessageTypeChoice.RESEARCH_TASK: '[科研任务]',
         MessageTypeChoice.RESEARCH_COMMENT: '[科研评论]',
@@ -857,7 +860,7 @@ class Message(models.Model):
 
     @classmethod
     def create(cls, chat: Chat, user: User, message_type, content, reply_to=None, client_message_id=None, mention_user_ids=None, media_resource=None, *, flash_image=False, is_anonymous=False, anonymous_token=''):
-        if message_type in (MessageTypeChoice.SYSTEM, MessageTypeChoice.FORWARD_BUNDLE, MessageTypeChoice.OFFICIAL_NOTICE, MessageTypeChoice.SUBMISSION_INVITE, MessageTypeChoice.VOICE_CALL):
+        if message_type in (MessageTypeChoice.SYSTEM, MessageTypeChoice.FORWARD_BUNDLE, MessageTypeChoice.OFFICIAL_NOTICE, MessageTypeChoice.SUBMISSION_INVITE, MessageTypeChoice.VOICE_CALL, MessageTypeChoice.CHRONELLE_INVITE):
             raise MessageErrors.SYSTEM_MESSAGE_FORBIDDEN
         if message_type == MessageTypeChoice.FLASH_IMAGE and (not flash_image or media_resource is not None):
             raise MessageErrors.PAYLOAD_INVALID
@@ -1141,7 +1144,7 @@ class Message(models.Model):
         chat.require_user_message_allowed(user)
         if source.type == MessageTypeChoice.AUDIO and source.user_id != user.pk:
             raise MessageErrors.FORWARD_AUDIO_BUNDLE_ONLY
-        if source.type in (MessageTypeChoice.SYSTEM, MessageTypeChoice.OFFICIAL_NOTICE, MessageTypeChoice.SUBMISSION_INVITE, MessageTypeChoice.MAP_ACCESS, MessageTypeChoice.FORWARD_BUNDLE, MessageTypeChoice.VOICE_CALL):
+        if source.type in (MessageTypeChoice.SYSTEM, MessageTypeChoice.OFFICIAL_NOTICE, MessageTypeChoice.SUBMISSION_INVITE, MessageTypeChoice.MAP_ACCESS, MessageTypeChoice.FORWARD_BUNDLE, MessageTypeChoice.VOICE_CALL, MessageTypeChoice.CHRONELLE_INVITE):
             raise MessageErrors.FORWARD_UNSUPPORTED
         if not chat.has_active_member(user):
             raise MessageErrors.NOT_A_MEMBER
@@ -1696,6 +1699,11 @@ class Message(models.Model):
         if self.type in (15, 16, 17, 18):
             from Message.shared_references import payload
             return payload(self.type, self._parse_payload(self.content), self._viewer_from_request(request))
+        if self.type == MessageTypeChoice.CHRONELLE_INVITE:
+            content = self._parse_payload(self.content)
+            return {'kind': 'chronelle_invite', 'calendar_invitation': {
+                key: content.get(key) for key in ('title', 'start', 'end', 'timezone', 'status')
+            }}
         if self.type == MessageTypeChoice.VOICE_CALL:
             return self._parse_payload(self.content)
         if self.type == MessageTypeChoice.TEXT:
@@ -2025,7 +2033,7 @@ class Message(models.Model):
         )
 
     def remove(self):
-        if self.type in (MessageTypeChoice.SYSTEM, MessageTypeChoice.OFFICIAL_NOTICE, MessageTypeChoice.SUBMISSION_INVITE):
+        if self.type in (MessageTypeChoice.SYSTEM, MessageTypeChoice.OFFICIAL_NOTICE, MessageTypeChoice.SUBMISSION_INVITE, MessageTypeChoice.CHRONELLE_INVITE):
             raise MessageErrors.SYSTEM_MESSAGE_FORBIDDEN
         if self.is_deleted:
             return
@@ -3191,7 +3199,7 @@ class ForwardBundle(models.Model):
     @classmethod
     def create_from_messages(cls, messages, user, request=None, *, allow_flash=False):
         for message in messages:
-            if message.type == MessageTypeChoice.VOICE_CALL or (
+            if message.type in (MessageTypeChoice.VOICE_CALL, MessageTypeChoice.CHRONELLE_INVITE) or (
                 message.type == MessageTypeChoice.FLASH_IMAGE and (not allow_flash or message.user_id != user.pk)
             ):
                 raise MessageErrors.FORWARD_UNSUPPORTED

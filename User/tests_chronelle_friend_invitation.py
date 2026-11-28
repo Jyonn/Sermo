@@ -4,8 +4,11 @@ from unittest.mock import patch
 from django.test import TestCase
 
 from Friendship.models import Friendship, FriendshipStatusChoice
+from Message.models import Message, MessageEventTypeChoice, MessageTypeChoice
 from User import tests_chronelle_account as fixtures
 from User.chronelle_account import BindingFailure, store
+from User.models import NotificationEvent, User
+from utils import auth
 
 
 class ChronelleFriendInvitationTests(TestCase):
@@ -61,7 +64,8 @@ class ChronelleFriendInvitationTests(TestCase):
         for _attempt in range(2):
             response = self.call(draft, self.path_for_friend())
             self.assertEqual(response.status_code, 200)
-            self.assertEqual(response.json()['body'], {'id': invitation})
+            message_id = response.json()['body']['message_id']
+            self.assertEqual(response.json()['body'], {'id': invitation, 'message_id': message_id})
             self.assertEqual(remote.call_args.args, (
                 'https://chronelle.6-79.cn', '/api/oauth/calendar/invitations/',
             ))
@@ -70,6 +74,56 @@ class ChronelleFriendInvitationTests(TestCase):
             self.assertEqual(submitted['token'], sender['access_token'])
             self.assertEqual(submitted['body']['subjects'], [recipient['binding']['subject']])
             self.assertNotIn('context', submitted['body'])
+        message = Message.objects.get(type=MessageTypeChoice.CHRONELLE_INVITE)
+        self.assertEqual(message.pk, message_id)
+        self.assertTrue(message.is_visible_to(self.other))
+        self.assertEqual(message.jsonl()['payload']['calendar_invitation']['title'], 'Coffee')
+        self.assertNotIn(invitation, str(message.jsonl()['payload']))
+        self.assertEqual(message.sync_events.filter(type=MessageEventTypeChoice.CREATED).count(), 1)
+        self.assertEqual(NotificationEvent.objects.filter(user=self.other, payload__message_id=message.pk).count(), 1)
+
+    @patch('User.chronelle_friend_invitation.check_user_text')
+    @patch('User.chronelle_friend_invitation.remote')
+    def test_recipient_can_respond_in_chat_and_sender_sees_updated_card(self, remote, _):
+        self.make_friends()
+        self.bound()
+        self.bound(self.other)
+        remote.return_value = [{'id': 7, 'name': 'Personal'}]
+        context = self.call(path=self.path_for_friend(options=True)).json()['body']['context']
+        invitation = str(uuid4())
+        remote.return_value = {'id': invitation}
+        created = self.call(self.draft(context), self.path_for_friend()).json()['body']
+        message = Message.objects.get(pk=created['message_id'])
+        path = f'/users/chronelle/invitations/{message.pk}'
+        response = {'action': 'accept', 'group_id': 8, 'request_key': str(uuid4()), 'proposal_version': 2}
+        self.assertEqual(self.call(response, path).status_code, 403)
+
+        outsider = User.create(self.space, 'Other user', verified=True)
+        self.headers['HTTP_AUTHORIZATION'] = 'Bearer ' + auth.get_login_token(outsider)['auth']
+        self.assertEqual(self.call(path=path).status_code, 404)
+
+        self.headers['HTTP_AUTHORIZATION'] = 'Bearer ' + auth.get_login_token(self.other)['auth']
+        result = {
+            'title': 'Coffee', 'start': '2026-12-01T10:00:00+08:00', 'end': '2026-12-01T10:30:00+08:00',
+            'timezone': 'Asia/Shanghai', 'location': 'Coffee shop', 'status': 'pending', 'proposal_version': 2,
+            'can_respond': True, 'participants': [{'status': 'pending', 'share': 'private'}],
+        }
+        remote.side_effect = [result, [{'id': 8, 'name': 'Home'}]]
+        detail = self.call(path=path).json()['body']
+        self.assertTrue(detail['can_respond'])
+        self.assertEqual(detail['groups'], [{'id': 8, 'name': 'Home'}])
+        self.assertNotIn('private', str(detail))
+
+        remote.side_effect = None
+        remote.return_value = {**result, 'can_respond': False, 'participants': [{'status': 'accepted'}]}
+        for _attempt in range(2):
+            self.assertEqual(self.call(response, path).json()['body']['status'], 'accepted')
+        self.assertEqual(remote.call_args.args[1], f'/api/oauth/calendar/respond/{invitation}/')
+        self.assertEqual(remote.call_args.kwargs['key'], f"frienden-chat-response-{response['request_key']}")
+        self.assertEqual(remote.call_args.kwargs['body'], {'action': 'accept', 'proposal_version': 2, 'group_id': 8})
+        message.refresh_from_db()
+        self.assertEqual(message.jsonl()['payload']['calendar_invitation']['status'], 'accepted')
+        self.assertEqual(message.sync_events.filter(type=MessageEventTypeChoice.UPDATED).count(), 1)
 
     @patch('User.chronelle_friend_invitation.check_user_text')
     @patch('User.chronelle_friend_invitation.remote')

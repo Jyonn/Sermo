@@ -8,7 +8,7 @@ from User.web_push_receipts import WebPushReceiptView
 from User.chronelle_account import ChronelleCallbackView, FullChronelleView
 from User.chronelle_permissions import ChronelleFriendExceptionsView, ChronelleFriendPermissionsView, ChronellePermissionsView
 from User.chronelle_profile import ChronelleProfileView
-from User.chronelle_friend_invitation import ChronelleFriendInvitationView
+from User.chronelle_friend_invitation import ChronelleChatInvitationView, ChronelleFriendInvitationView
 from User.pocklo import PockloCallbackView, PockloConnectionView, PockloFilesView, PockloShareView, PockloShareDownloadView, PockloShareThumbnailView, PockloSongView, PockloSongPlaybackView
 from User.stillfolio import StillfolioCallbackView, StillfolioConnectionView, StillfolioAlbumsView, StillfolioShareView
 from User.drop import DropCallbackView, DropConnectionView, DropEntriesView, DropShareView, DropPreviewView, DropDiaryView, DropAudioView
@@ -103,6 +103,7 @@ urlpatterns = [
     path('drop/audio', DropAudioView.as_view()),
     path('<int:user_id>/chronelle/calendar', ChronelleProfileView.as_view()),
     path('<int:user_id>/chronelle/invitations', ChronelleFriendInvitationView.as_view()),
+    path('chronelle/invitations/<int:message_id>', ChronelleChatInvitationView.as_view()),
     path('me/chronelle/permissions', ChronellePermissionsView.as_view()),
     path('me/chronelle/permissions/friends', ChronelleFriendExceptionsView.as_view()),
     path('me/chronelle/permissions/friends/<int:friend_id>', ChronelleFriendPermissionsView.as_view()),
