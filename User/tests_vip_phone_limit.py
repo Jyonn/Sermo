@@ -6,6 +6,7 @@ from django.utils import timezone
 from Space.models import Space
 from User.models import PermanentVipCampaign, User, UserResourceInventory
 from User.validators import UserErrors
+from utils import auth
 
 
 class PermanentVipPhoneLimitTests(TestCase):
@@ -77,6 +78,29 @@ class PermanentVipPhoneLimitTests(TestCase):
     def test_different_phone_can_claim(self):
         self.vip(phone='+8613800138001')
         self.assertTrue(PermanentVipCampaign.claim_for(self.user)['claimed_by_user'])
+
+    def test_activity_lists_the_same_allowances_before_and_after_claiming(self):
+        headers = {'HTTP_AUTHORIZATION': f"Bearer {auth.get_login_token(self.user)['auth']}"}
+        path = '/users/me/permanent-vip'
+        response = self.client.get(path, **headers)
+        self.assertEqual(response.status_code, 200)
+        before = response.json()['body']
+        self.assertFalse(before['claimed_by_user'])
+        self.assertEqual(before['privileges'], {
+            'recall_days': 7, 'pinned_messages': 100, 'history_recoveries': 6,
+            'welcome_messages': 10, 'voice_seconds': 300, 'social_parses': 7,
+            'square': {
+                'statement_daily': 5, 'statement_weekly': 35, 'anonymous_weekly': 14,
+                'comment_daily': 25, 'comment_weekly': 175,
+            },
+            'growth_points': 500,
+        })
+
+        response = self.client.post(path, **headers)
+        self.assertEqual(response.status_code, 200)
+        claimed = response.json()['body']
+        self.assertTrue(claimed['claimed_by_user'])
+        self.assertEqual(claimed['privileges'], before['privileges'])
 
     def test_lv1_can_claim_at_every_former_slot_boundary(self):
         self.levels[self.user.pk] = 1

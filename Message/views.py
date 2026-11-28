@@ -145,7 +145,7 @@ class MessageView(View):
         else:
             if message.user_id != request.user.id:
                 raise MessageErrors.NOT_OWNER
-            recall_window = timedelta(days=7) if request.user.is_permanent_vip else timedelta(minutes=2)
+            recall_window = Message.VIP_RECALL_WINDOW if request.user.is_permanent_vip else timedelta(minutes=2)
             if timezone.now() - message.created_at > recall_window:
                 raise MessageErrors.RECALL_WINDOW_EXPIRED
             with transaction.atomic():

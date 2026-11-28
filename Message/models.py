@@ -735,6 +735,8 @@ class LinkPreview(models.Model):
 
 
 class Message(models.Model):
+    VIP_RECALL_WINDOW = datetime.timedelta(days=7)
+
     MENTION_TOKEN_RE = re.compile(r'<@(\d+)>')
     validators = MessageValidator
     vldt = MessageValidator
@@ -2198,6 +2200,8 @@ class MessageRetention(models.Model):
 
 
 class MessageHistoryRecovery(models.Model):
+    VIP_LIMIT = 6
+
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='message_history_recoveries')
     chat = models.ForeignKey(Chat, on_delete=models.CASCADE, related_name='message_history_recoveries')
     restored_count = models.PositiveIntegerField(default=0)
@@ -2207,7 +2211,7 @@ class MessageHistoryRecovery(models.Model):
     def allowance_for(cls, user):
         if not user.verified:
             return 0
-        return 6 if user.is_permanent_vip else 1
+        return cls.VIP_LIMIT if user.is_permanent_vip else 1
 
     @classmethod
     def status_for(cls, chat, user):

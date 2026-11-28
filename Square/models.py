@@ -169,6 +169,9 @@ def _qzone_inline_emoticons(instance, request=None):
     ]
 
 
+COMMENT_FREQUENCY_MULTIPLIER = 5
+
+
 def _frequency_limits(level):
     if level <= 5:
         return 1, 5
@@ -193,11 +196,15 @@ def frequency_limits_for_user(user):
     )
 
 
+def anonymous_statement_limit(weekly_limit):
+    return int(weekly_limit * 0.4)
+
+
 def anonymous_weekly_limit_for_user(user):
     if user.can_operate_square:
         return None
     _daily, weekly = frequency_limits_for_user(user)
-    return int(weekly * 0.4)
+    return anonymous_statement_limit(weekly)
 
 
 def anonymous_user_json():
@@ -766,7 +773,10 @@ class StatementComment(models.Model):
     ):
         user.require_capability('square.interaction.reply' if parent_id is not None else 'square.interaction.comment')
         SquareMute.require_can_participate(user)
-        _enforce_frequency(cls.objects.filter(statement__space=user.space, is_deleted=False), user, multiplier=5)
+        _enforce_frequency(
+            cls.objects.filter(statement__space=user.space, is_deleted=False), user,
+            multiplier=COMMENT_FREQUENCY_MULTIPLIER,
+        )
         normalized_text, sticker_asset = cls.resolve_content(text, sticker_asset_id)
         cls.statement_for_user(user, statement_id)
         statement = Statement.objects.select_for_update().filter(id=statement_id, is_deleted=False).first()

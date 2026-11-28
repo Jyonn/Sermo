@@ -3,6 +3,7 @@ from datetime import timedelta
 from django.utils import timezone
 
 from Square.models import (
+    COMMENT_FREQUENCY_MULTIPLIER,
     Statement,
     StatementComment,
     StatementCommentLike,
@@ -42,9 +43,9 @@ def quota_for_user(user):
         ),
         comments=dict(
             daily_used=comments.filter(created_at__gte=day_start).count(),
-            daily_limit=None if unlimited else daily_limit * 5,
+            daily_limit=None if unlimited else daily_limit * COMMENT_FREQUENCY_MULTIPLIER,
             weekly_used=comments.filter(created_at__gte=week_start).count(),
-            weekly_limit=None if unlimited else weekly_limit * 5,
+            weekly_limit=None if unlimited else weekly_limit * COMMENT_FREQUENCY_MULTIPLIER,
         ),
         likes=dict(
             daily_used=(

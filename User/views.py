@@ -269,12 +269,17 @@ class UserFeatureDiscoveryView(View):
 class PermanentVipCampaignView(View):
     @auth.require_user
     def get(self, request: Request):
-        return PermanentVipCampaign.status_for(request.user)
+        from User.vip_privileges import permanent_vip_privileges
+
+        return dict(PermanentVipCampaign.status_for(request.user), privileges=permanent_vip_privileges())
 
     @auth.require_user
     def post(self, request: Request):
+        from User.vip_privileges import permanent_vip_privileges
+
         payload = PermanentVipCampaign.claim_for(request.user)
         payload['resource_inventory'] = UserResourceInventory.payload_for(request.user)
+        payload['privileges'] = permanent_vip_privileges()
         return payload
 
 
